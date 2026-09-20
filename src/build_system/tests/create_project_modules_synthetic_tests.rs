@@ -283,7 +283,6 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let preparation_context = super::module_preparation::ModulePreparationContext {
         source_files,
         style_directives: &style_directives,
-        project_path_resolver: Some(resolver),
     };
     let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
         StablePackageIdentity::project_local("synthetic-exactly-once"),
@@ -416,8 +415,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     };
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
-    let mut path_fork =
-        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),

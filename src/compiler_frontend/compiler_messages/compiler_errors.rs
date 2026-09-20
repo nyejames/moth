@@ -182,7 +182,6 @@ pub(crate) struct RenderPathContext {
     pub(crate) path_table: Arc<PathTable>,
 }
 
-
 impl CompilerMessages {
     pub fn empty(string_table: StringTable) -> Self {
         Self {
@@ -252,11 +251,9 @@ impl CompilerMessages {
             return Ok(());
         }
 
-        if let Some(index) = unpaired_path_table_component_index(
-            &path_table,
-            &self.string_table,
-            &required_paths,
-        ) {
+        if let Some(index) =
+            unpaired_path_table_component_index(&path_table, &self.string_table, &required_paths)
+        {
             return Err(CompilerError::compiler_error(format!(
                 "diagnostic path table is not pairable with this string table: path node \
                  {index} is unaddressable or carries a component StringId the string table \
@@ -959,10 +956,7 @@ impl CompilerMessages {
             .find(|source_context| source_context.diagnostic_range.contains(&diagnostic_index))
             .map(|source_context| source_context.source_database.as_ref())
     }
-    pub(crate) fn path_table_for_diagnostic(
-        &self,
-        diagnostic_index: usize,
-    ) -> Option<&PathTable> {
+    pub(crate) fn path_table_for_diagnostic(&self, diagnostic_index: usize) -> Option<&PathTable> {
         self.render_path_contexts
             .as_deref()
             .and_then(|contexts| {
@@ -1104,9 +1098,9 @@ pub(crate) fn unpaired_path_table_component_index(
     let unpaired_path = required_paths
         .iter()
         .copied()
-        .flat_map(|path| std::iter::successors(Some(path), |&current| {
-            path_table.try_parent(current)
-        }))
+        .flat_map(|path| {
+            std::iter::successors(Some(path), |&current| path_table.try_parent(current))
+        })
         .find(|&path| {
             path != PathId::ROOT
                 && path_table

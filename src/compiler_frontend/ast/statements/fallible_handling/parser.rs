@@ -34,9 +34,10 @@ use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_com
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -174,7 +175,7 @@ impl HandledFallibleCall {
     reason = "fallible suffix parsing keeps the token stream, scope, mutable interner/string/path state, the parsed expression, and the value/catch policy flags as separate borrows"
 )]
 pub(crate) fn parse_fallible_handling_suffix_for_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: Expression,
@@ -194,10 +195,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     else {
         let operand_is_optional = type_environment.is_option(expression_type_id);
         return Err(CompilerDiagnostic::invalid_fallible_handling(
-            super::non_fallible_handler_reason(
-                token_stream.current_token_kind(),
-                operand_is_optional,
-            ),
+            super::non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
         .into());
@@ -218,7 +216,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     let success_type_diagnostic_spelling =
         diagnostic_type_spelling(handled_type_id, type_interner.environment());
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     if let Some(handling) = parse_fallible_handling_suffix(
@@ -285,7 +283,7 @@ pub(crate) fn fallible_catch_allowed_in_context(context: &ScopeContext) -> bool 
 }
 
 fn parse_fallible_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -293,12 +291,12 @@ fn parse_fallible_handling_suffix(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<FallibleHandling>, ExpressionParseError> {
-    match token_stream.current_token_kind() {
-        TokenKind::Bang => {
+    match token_stream.current_tag() {
+        TokenTag::BANG => {
             parse_postfix_propagation(token_stream, context, site, type_interner.environment())
                 .map(Some)
         }
-        TokenKind::Catch => parse_catch_handling_suffix(
+        TokenTag::CATCH => parse_catch_handling_suffix(
             token_stream,
             context,
             type_interner,
@@ -313,7 +311,7 @@ fn parse_fallible_handling_suffix(
 }
 
 fn parse_postfix_propagation(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: FallibleHandlingSite<'_>,
     type_environment: &TypeEnvironment,
@@ -379,7 +377,7 @@ pub(crate) fn wrap_catch_expression(
 }
 
 fn parse_catch_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -398,9 +396,9 @@ fn parse_catch_handling_suffix(
     token_stream.advance();
     let catch_context = context.activate_pending_catch_assignment_targets();
 
-    match token_stream.current_token_kind() {
+    match token_stream.current_tag() {
         // `catch then ...` — inline value-producing fallback with no error binding.
-        TokenKind::Then => parse_inline_catch_without_error_binding(
+        TokenTag::THEN => parse_inline_catch_without_error_binding(
             token_stream,
             &catch_context,
             type_interner,
@@ -410,7 +408,7 @@ fn parse_catch_handling_suffix(
         ),
 
         // `catch:` — no error binding, just a fallback body.
-        TokenKind::Colon => parse_catch_without_error_binding(
+        TokenTag::COLON => parse_catch_without_error_binding(
             token_stream,
             &catch_context,
             type_interner,
@@ -421,15 +419,15 @@ fn parse_catch_handling_suffix(
         ),
 
         // `catch |err|:` or `catch |err| then ...` — bind the error value before recovery.
-        TokenKind::TypeParameterBracket => parse_catch_handler(
+        TokenTag::TYPE_PARAMETER_BRACKET => parse_catch_handler(
             token_stream,
             &catch_context,
             type_interner,
             site,
             warnings,
-        string_table,
-        path_fork,
-    ),
+            string_table,
+            path_fork,
+        ),
 
         _ => Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
@@ -440,7 +438,7 @@ fn parse_catch_handling_suffix(
 }
 
 fn parse_inline_catch_without_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -467,7 +465,7 @@ fn parse_inline_catch_without_error_binding(
 
 /// Delegates to `parse_catch_without_error_binding_typed` for `catch:` (no error binding).
 fn parse_catch_without_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -496,7 +494,7 @@ fn parse_catch_without_error_binding(
 
 /// Delegates to the block or inline binding parser for `catch |err|`.
 fn parse_catch_handler(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: FallibleHandlingSite<'_>,
@@ -537,26 +535,38 @@ fn parse_catch_handler(
     Ok(FallibleHandling::Handler { error, body })
 }
 
-fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
-    let mut index = token_stream.index + 1;
-
-    while index < token_stream.length {
-        match &token_stream.tokens[index].kind {
-            TokenKind::TypeParameterBracket => {
-                return token_stream
-                    .tokens
-                    .iter()
-                    .skip(index + 1)
-                    .find(|token| token.kind != TokenKind::Newline)
-                    .is_some_and(|token| token.kind == TokenKind::Then);
+fn next_catch_binding_is_inline(token_stream: &AstCursor) -> bool {
+    let mut index = token_stream.position().checked_add(1);
+    while let Some(probe) = index {
+        if probe >= token_stream.length() {
+            return false;
+        }
+        let Some(token) = token_stream.token_ref_at(probe) else {
+            return false;
+        };
+        match token.tag() {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
+                let mut lookahead = probe.checked_add(1);
+                while let Some(next) = lookahead {
+                    if next >= token_stream.length() {
+                        return false;
+                    }
+                    let Some(token) = token_stream.token_ref_at(next) else {
+                        return false;
+                    };
+                    match token.tag() {
+                        TokenTag::NEWLINE => lookahead = next.checked_add(1),
+                        tag => return tag == TokenTag::THEN,
+                    }
+                }
+                return false;
             }
 
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => return false,
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => return false,
 
-            _ => index += 1,
+            _ => index = probe.checked_add(1),
         }
     }
-
     false
 }
 
@@ -565,7 +575,7 @@ fn next_catch_binding_is_inline(token_stream: &FileTokens) -> bool {
 // --------------------------
 
 pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleCallSite,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
@@ -580,7 +590,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(
@@ -616,7 +626,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
 }
 
 pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     handler_call: FallibleHostCallSite,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
@@ -630,7 +640,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+    let propagation_span = (token_stream.current_tag() == TokenTag::BANG)
         .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(
@@ -684,7 +694,7 @@ pub(crate) struct CastCatchSite {
 /// WHY: cast recovery uses the same surface syntax as fallible calls, but the error value is
 ///      supplied by the selected cast evidence rather than a Result carrier.
 pub(crate) fn parse_cast_catch_handling_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CastCatchSite,

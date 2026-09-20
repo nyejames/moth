@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
@@ -21,7 +22,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::collection_builtin::parse_collection_builtin_member_typed;
@@ -29,6 +30,34 @@ use super::field_member::{parse_field_member_access_typed, parse_member_name_typ
 use super::map_builtin::parse_map_builtin_member_typed;
 use super::receiver_calls::parse_receiver_method_call_typed;
 use super::{MemberStepContext, PostfixChainAccess, ReceiverAccessMode};
+
+/// Read-only previous-token span through the AST cursor.
+///
+/// WHAT: reports the span of the token immediately before the stream position.
+/// WHY: missing-member and receiver base-span diagnostics need the owning dot or
+/// base token without retaining a borrowed view.
+fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
+    token_stream.previous_span().or_else(|| {
+        token_stream.position().checked_sub(1).and_then(|previous| {
+            token_stream
+                .token_ref_at(previous)
+                .map(|token| token.source_span())
+        })
+    })
+}
+
+fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
+}
+
+fn next_token_tag(token_stream: &AstCursor<'_>) -> Option<TokenTag> {
+    token_stream.token_ref_at_offset(1).map(|token| token.tag())
+}
+/// Narrow tag boundary: classifies the already-read lookahead tag without re-reading
+/// the cursor, preserving the exact single-lookahead semantics.
+fn next_token_is_assignment_operator(next_token: Option<TokenTag>) -> bool {
+    next_token.is_some_and(TokenTag::is_assignment_operator)
+}
 
 /// Builds the expression payload for a declaration reference without choosing an AST node shape.
 ///
@@ -133,7 +162,7 @@ fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> 
     reason = "postfix chain parsing keeps the token stream, receiver expression and span, chain access, scope, and mutable interner/string/path state as separate borrows"
 )]
 pub(crate) fn parse_postfix_chain_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     receiver_expression: Expression,
     receiver_span: Option<SourceSpan>,
     chain_access: PostfixChainAccess,
@@ -175,7 +204,7 @@ pub(crate) fn expression_from_postfix_node(
 }
 
 fn parse_postfix_chain_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     mut receiver_node: AstNode,
     chain_access: PostfixChainAccess,
     context: &ScopeContext,
@@ -190,8 +219,8 @@ fn parse_postfix_chain_typed(
     // ----------------------------
     //  Walk postfix member-access chain
     // ----------------------------
-    while token_stream.index < token_stream.length
-        && token_stream.current_token_kind() == &TokenKind::Dot
+    while token_stream.position() < token_stream.length()
+        && token_stream.current_tag() == TokenTag::DOT
     {
         token_stream.advance();
 
@@ -200,13 +229,10 @@ fn parse_postfix_chain_typed(
         // with no trailing Eof token) never falls back to the receiver start or a default span.
         // Non-EOF missing-member boundaries keep their offending-token span through
         // `parse_member_name_typed` below.
-        if token_stream.index >= token_stream.length
-            || matches!(token_stream.current_token_kind(), TokenKind::Eof)
+        if token_stream.position() >= token_stream.length()
+            || token_stream.current_tag() == TokenTag::EOF
         {
-            let dot_span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.tokens[token_stream.index - 1].span,
-            ));
+            let dot_span = previous_token_span(token_stream);
             return Err(CompilerDiagnostic::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
@@ -217,12 +243,9 @@ fn parse_postfix_chain_typed(
             .into());
         }
 
-        let member_name = parse_member_name_typed(token_stream, string_table)?;
+        let member_name = parse_member_name_typed(token_stream, &mut *string_table)?;
         let receiver_type_id = receiver_node_type_id(&receiver_node)?;
-        let member_span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
+        let member_span = current_token_span(token_stream);
         let member_context = MemberStepContext {
             receiver_node: &receiver_node,
             receiver_type_id,
@@ -281,18 +304,14 @@ fn parse_postfix_chain_typed(
 
         // No handler matched. Preserve the user-facing distinction between
         // deferred choice payload access, opaque externals, and ordinary
-        // missing members while routing all cases through one typed diagnostic.
+        let next_token = next_token_tag(token_stream);
         let reason = if type_interner
             .environment()
             .variants_for(receiver_type_id)
             .is_some()
-            && token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis)
+            && next_token != Some(TokenTag::OPEN_PARENTHESIS)
         {
-            let next_token = token_stream.peek_next_token();
-            if next_token
-                .map(|t| t.is_assignment_operator())
-                .unwrap_or(false)
-            {
+            if next_token_is_assignment_operator(next_token) {
                 InvalidFieldAccessReason::ChoicePayloadMutation
             } else {
                 InvalidFieldAccessReason::ChoicePayloadDeferred
@@ -317,7 +336,7 @@ fn parse_postfix_chain_typed(
     // ----------------------------
     //  Validate assignment receiver is a place
     // ----------------------------
-    if token_stream.current_token_kind().is_assignment_operator() {
+    if token_stream.current_tag().is_assignment_operator() {
         let receiver_expression = expression_from_postfix_node(&receiver_node)?;
         if place_expression_from_expression(&receiver_expression).is_none() {
             let diagnostic = CompilerDiagnostic::invalid_assignment_target(
@@ -340,7 +359,7 @@ fn parse_postfix_chain_typed(
         let marker_span = authored_marker_span.or(receiver_node.span);
         // When the chain is followed by an assignment operator, the author wrote `~place = ...`
         // and intended an assignment target, not a receiver call.
-        if token_stream.current_token_kind().is_assignment_operator() {
+        if token_stream.current_tag().is_assignment_operator() {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
                 None,
@@ -367,7 +386,7 @@ fn parse_postfix_chain_typed(
 }
 
 pub fn parse_field_access(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -388,7 +407,7 @@ pub fn parse_field_access(
 }
 
 fn parse_field_access_with_receiver_access(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     chain_access: PostfixChainAccess,
@@ -396,14 +415,7 @@ fn parse_field_access_with_receiver_access(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
-    let base_span = if token_stream.index > 0 {
-        Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.tokens[token_stream.index - 1].span,
-        ))
-    } else {
-        Some(token_stream.current_span())
-    };
+    let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
 
     parse_postfix_chain_typed(
         token_stream,
@@ -417,7 +429,7 @@ fn parse_field_access_with_receiver_access(
 }
 
 pub(crate) fn parse_field_access_expression_with_receiver_access(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     chain_access: PostfixChainAccess,
@@ -425,14 +437,7 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    let base_span = if token_stream.index > 0 {
-        Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.tokens[token_stream.index - 1].span,
-        ))
-    } else {
-        Some(token_stream.current_span())
-    };
+    let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
 
     let receiver_expression =
         reference_expression_from_declaration(base_arg, context, type_interner, base_span);

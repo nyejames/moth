@@ -24,9 +24,7 @@ use crate::compiler_frontend::hir::reactivity::{
 };
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathIdRemap, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::FxHashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -280,8 +278,7 @@ impl HirSideTable {
 
         self.reactive_source_by_path.clear();
         for (source_id, source) in &self.reactive_sources {
-            self.reactive_source_by_path
-                .insert(source.path, *source_id);
+            self.reactive_source_by_path.insert(source.path, *source_id);
         }
 
         for template in self.reactive_templates.values_mut() {

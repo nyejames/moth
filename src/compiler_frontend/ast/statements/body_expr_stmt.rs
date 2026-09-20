@@ -6,6 +6,7 @@
 //! statement-position filtering and targeted diagnostics.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -13,14 +14,13 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::value_mode::ValueMode;
 /// Returns `true` if the given expression is valid in statement position.
 ///
 /// Direct calls and handled fallible calls are always valid statements.
@@ -97,7 +97,7 @@ fn rejects_discarded_fallible_success(expression: &Expression) -> Option<Compile
 /// Rejects expressions whose success value would be silently discarded,
 /// and rejects non-call expressions that have no side effects as statements.
 fn parse_and_validate_statement_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -119,8 +119,17 @@ fn parse_and_validate_statement_expression(
     }
 
     if !is_expression_statement(&expression) {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "statement expression diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            found,
             Some(token_stream.current_span()),
         )
         .into());
@@ -130,16 +139,22 @@ fn parse_and_validate_statement_expression(
 }
 
 pub(crate) fn parse_expression_statement_candidate(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    parse_and_validate_statement_expression(token_stream, context, type_interner, string_table, path_fork)
+    parse_and_validate_statement_expression(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )
 }
 pub(crate) fn parse_symbol_expression_statement_candidate(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     _symbol_id: StringId,
     type_interner: &mut AstTypeInterner<'_>,

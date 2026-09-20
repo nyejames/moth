@@ -18,7 +18,10 @@ an explicit dependency clause.
 ```text
 STATUS: activated early for existing-ABI work; the accepted scalar expansion is delivered
 CURRENT_SLICE: none - the expansion, its published numerical contract and its coverage are complete
-BLOCKERS: compile-time folding waits for the Core const-eval prerequisite; the inherited data-layout base fails `just validate`, so code-bearing slices report focused evidence instead of a closed gate
+BLOCKERS: compile-time folding waits for the Core const-eval prerequisite; the package lane remains
+paused under the roadmap order until the post-Phase-3 compiler cleanup, MON syntax, MON Rust tooling,
+Wiring V1 and native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeout
+`4cfd9d492` is accepted.
 NEXT_ACTION: none required; a Wasm lowering set and const-eval folding are the next candidates, each needing its own accepted contract
 ```
 
@@ -223,10 +226,12 @@ deterministic pass or fail; exact rendered output is reserved for the three grou
 Every function needs at least one sample that no plausible mis-registration survives, which means a
 fixed point such as `asinh(0)` or `cosh(0)` is never the only sample for its function.
 
-The expansion could not close the mandatory `just validate` gate either. After this branch merged
-the published data-layout work the inherited failure is narrower: library tests pass, six of eight
-feature lanes pass, and `ci-clippy-native` plus the `timers-counters` and `dev-output` lanes stay red
-on data-layout files. The programme plan owns that record. Focused evidence for the expansion is
+Historical slice validation record (not current-state evidence): the expansion could not close the
+mandatory `just validate` gate at that checkpoint. After that branch merged the published
+data-layout work, the inherited failure was narrower: library tests passed, six of eight feature
+lanes passed, and `ci-clippy-native` plus the `timers-counters` and `dev-output` lanes stayed red on
+data-layout files. The programme plan owns that historical record. Focused evidence for the
+expansion is
 `cargo run -- tests --tag math` (14/14), `--tag core-packages` (42/42),
 `cargo run -- check docs --terse`, `cargo check -p moth --lib` and `rustfmt --check` on `math.rs`.
 Both slices are mutation-proved: the hardening slice proved every registered function, constant,

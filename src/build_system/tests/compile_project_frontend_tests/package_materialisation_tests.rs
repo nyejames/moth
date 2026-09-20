@@ -1044,7 +1044,10 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     .expect("generated Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
                 assert_eq!(
-                    sidecar.module.executable.path_table
+                    sidecar
+                        .module
+                        .executable
+                        .path_table
                         .component(fields[0].name)
                         .map(|id| string_table.resolve(id)),
                     Some("value")
@@ -1064,7 +1067,10 @@ same_private_box PrivateBox of Bool = forward(private_box)
                 };
                 assert_eq!(fields.len(), 1);
                 assert_eq!(
-                    sidecar.module.executable.path_table
+                    sidecar
+                        .module
+                        .executable
+                        .path_table
                         .component(fields[0].name)
                         .map(|id| string_table.resolve(id)),
                     Some("value")
@@ -1082,7 +1088,10 @@ same_private_box PrivateBox of Bool = forward(private_box)
                     .expect("generated private Box instance should expose substituted fields");
                 assert_eq!(fields.len(), 1);
                 assert_eq!(
-                    sidecar.module.executable.path_table
+                    sidecar
+                        .module
+                        .executable
+                        .path_table
                         .component(fields[0].name)
                         .map(|id| string_table.resolve(id)),
                     Some("value")
@@ -1168,8 +1177,7 @@ result String = outer(LocalMarker(1), "trigger")
                     let Some(type_id) = environment.type_id_for_nominal_id(nominal_id) else {
                         return false;
                     };
-                    display_type(type_id, environment, &string_table, path_table)
-                        == "RemoteMarker"
+                    display_type(type_id, environment, &string_table, path_table) == "RemoteMarker"
                 })
         })
         .expect("requester path table should contain the imported marker path");
@@ -1220,7 +1228,10 @@ result String = outer(LocalMarker(1), "trigger")
             .expect("sidecar should retain inherited Marker fields");
         assert_eq!(fields.len(), 1);
         assert_eq!(
-            sidecar.module.executable.path_table
+            sidecar
+                .module
+                .executable
+                .path_table
                 .component(fields[0].name)
                 .map(|id| string_table.resolve(id)),
             Some("value")

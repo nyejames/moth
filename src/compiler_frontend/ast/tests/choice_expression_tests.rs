@@ -16,7 +16,8 @@ use crate::compiler_frontend::tests::parse_support::{
 
 #[test]
 fn resolves_choice_variant_expressions_with_choice_types() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Status :: Ready, Busy;\n\
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "Status :: Ready, Busy;\n\
      echo_status |status Status| -> Status:\n\
          return status\n\
      ;\n\
@@ -25,7 +26,8 @@ fn resolves_choice_variant_expressions_with_choice_types() {
          return echo_status(selected)\n\
      ;\n\
      current Status = Status::Ready\n\
-     next = make_status()\n");
+     next = make_status()\n",
+    );
 
     let start_body = start_function_body(&ast, &path_fork, &string_table);
     let current_declaration = start_body

@@ -174,29 +174,46 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         "unreachable speculative token strings must not enter the retained module table"
     );
 
-    let reachable_path =
-        fs::canonicalize(src.join("reachable.moth")).expect("reachable source should canonicalize");
-    let reachable_header = module
-        .prepared
-        .semantic
-        .prepared_header_syntax
+    let prepared_header_syntax = &module.prepared.semantic.prepared_header_syntax;
+    let module_symbols = &prepared_header_syntax.module_symbols;
+    let reachable_header = prepared_header_syntax
         .headers
         .iter()
-        .find(|header| header.tokens.canonical_os_path.as_deref() == Some(reachable_path.as_path()))
+        .find(|header| {
+            let source_path = module_symbols
+                .source_paths_by_source_id
+                .get(&header.tokens.source())
+                .copied()
+                .map(|path| {
+                    module.prepared.semantic.path_fork.render_portable(
+                        path,
+                        &module.prepared.semantic.string_table,
+                        &mut Vec::new(),
+                    )
+                });
+            source_path
+                .as_deref()
+                .and_then(|path| Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                == Some("reachable.moth")
+        })
         .expect("reachable source should retain one header stream");
+    let reachable_owner = prepared_header_syntax
+        .source_token_owners
+        .get(&reachable_header.tokens.source())
+        .expect("reachable source should retain its token owner");
+    let reachable_table = reachable_owner
+        .tokens_ref()
+        .path_syntax_arc()
+        .expect("reachable source should retain its path table");
     assert!(
-        reachable_header
-            .tokens
-            .path_syntax
-            .paths()
-            .iter()
-            .any(|path| {
-                module.prepared.semantic.path_fork.render_portable(
-                    path.root,
-                    &module.prepared.semantic.string_table,
-                    &mut Vec::new(),
-                ) == "leaf"
-            }),
+        reachable_table.paths().iter().any(|path| {
+            module.prepared.semantic.path_fork.render_portable(
+                path.root,
+                &module.prepared.semantic.string_table,
+                &mut Vec::new(),
+            ) == "leaf"
+        }),
         "reachable dependency path should survive the non-identity string remap"
     );
 }
@@ -282,8 +299,8 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
         assert!(
-            matches!(input_file.source, PreparedSourceKind::PlainMarkdown),
-            "missing-source loading should produce PlainMarkdown inputs"
+            matches!(input_file.source, PreparedSourceKind::Deferred),
+            "missing-source loading should produce deferred inputs"
         );
         let source_code = source_files
             .retained_text(input_file.source_id())
@@ -555,8 +572,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         resolution_table: &mut resolution_table,
     };
     let mut string_table = StringTable::new();
-    let mut path_fork =
-        crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
 
     super::source_discovery::collect_reachable_input_files(
         &nested_entry,

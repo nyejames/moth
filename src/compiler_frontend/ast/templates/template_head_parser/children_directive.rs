@@ -12,6 +12,7 @@
 use super::directive_args::parse_required_parenthesized_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
@@ -25,9 +26,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 /// Typed result for the connected `$children` directive family.
 type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -35,7 +35,7 @@ type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 /// wrapper template to apply around all direct child templates in the body.
 pub(super) fn parse_children_style_directive(
     directive_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,

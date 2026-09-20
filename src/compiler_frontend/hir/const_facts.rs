@@ -15,8 +15,8 @@ use crate::compiler_frontend::ast::const_values::facts::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
-use rustc_hash::FxHashMap;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use rustc_hash::FxHashMap;
 
 /// Collection of HIR advisory const facts for one module.
 #[derive(Clone, Debug, Default)]

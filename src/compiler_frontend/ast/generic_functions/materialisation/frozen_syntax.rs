@@ -1,73 +1,141 @@
-//! Frozen token and path syntax retained by generic-function materialisation.
+//! Frozen generic body ownership and donor file-reference capture.
 //!
-//! Captured bodies use a compact immutable string pool and canonical path-syntax table. The pool
-//! is merged into the generated string table exactly once when a body is materialised.
+//! Persistent generic syntax keeps the canonical declaring-source owner and checked body view.
+//! Stage 0 file-reference facts cross the source-preparation lifetime independently; no
+//! compatibility parser adapter or copied token window is materialised.
 
+use super::super::{GenericFunctionBody, MaterialisedDonorContext};
 use super::frozen_file_references::StableResolvedFileReference;
-use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathIdRemap, PathInternerFork,
-};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
+use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenRange, TokenSequenceId};
 use std::sync::Arc;
-
-/// Owned frozen token buffer retained by one generic declaration artefact.
+/// Shared donor string identity for one declaring source/module domain.
 ///
-/// WHAT: preserves the already-tokenized body as canonical [`Token`] values whose `StringId`
-///       payloads index one context-local immutable frozen string pool, plus the exact donor
-///       `SourceId` that owns the body's spans and path rows.
-/// WHY: successful metadata must not retain donor `StringId`, `PathId`, filesystem paths,
-///      or a mutable string table. Freezing remaps donor string IDs into the pool once, while the
-///      donor `SourceId` is retained verbatim as the materialised owner. Materialisation merges
-///      the pool into the fresh generated-local table once and remaps every token payload through
-///      that single pool remap, without running tokenization again.
-/// OWNERSHIP: every materialised token stream carries this donor identity via
-///      `FileTokens::new_frozen(..., donor_file_id, ...)`, the frozen facts owner and the
-///      late-bound `FrozenIdentityHandle`. The final render boundary installs the matching
-///      project/package context before resolving labels; donor ranges are never silently
-///      remapped onto the requester call-site source, and no magic identity or `None` fallback
-///      is fabricated.
-#[derive(Clone)]
-pub(super) struct StableBodySyntax {
-    /// Declaration-qualified stream path, such as `file/generic_function`.
-    ///
-    /// This path names the token stream's semantic declaration context. The owning source-file
-    /// identity lives in `donor_file_id`, because token and path-row locations are file-scoped
-    /// rather than declaration-scoped.
-    pub(super) declaration_path: PathId,
-    /// Exact owning source identity captured from `FileTokens::file_id`.
-    ///
-    /// Retained verbatim so materialisation can restore a concrete `FileTokens::file_id` and a
-    /// matching frozen-facts owner.
-    pub(super) donor_file_id: crate::compiler_frontend::source::SourceId,
-    /// Required late-bound frozen identity for the donor source domain.
-    pub(super) frozen_identity_handle: FrozenIdentityHandle,
-    pub(super) pool: Box<[String]>,
-    pub(super) tokens: Box<[Token]>,
-    /// Canonical table vocabulary retained only for the path rows referenced by this body.
-    /// Its StringIds index `pool` until materialisation remaps the whole table in place.
-    pub(super) path_syntax: PathSyntaxTable,
-    pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
+/// WHAT: owns one frozen snapshot of the declaring domain's string table behind a shared
+///       owner. Every source-body capture in the domain clones this `Arc` instead of cloning
+///       and freezing the live table per body.
+/// WHY: retained token payloads interpret `StringId`s through the exact table that issued
+///      them. Freezing once per domain preserves that domain while keeping retained storage
+///      proportional to the domain, not to template count. The shared owner is drop-safe:
+///      retained bodies keep the allocation alive after the live preparation tables drop.
+///      A body that retained its own donor identity pair keeps that pair and never uses this
+///      owner.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedDonorIdentity {
+    strings: Arc<FrozenStringTable>,
 }
 
-/// Materialised body payload passed to the generic-function AST builder.
+impl SharedDonorIdentity {
+    pub(crate) fn freeze(table: &StringTable) -> Self {
+        Self {
+            strings: Arc::new(table.clone().freeze()),
+        }
+    }
+
+    /// Borrow the shared frozen strings issued by the declaring domain.
+    pub(crate) fn strings(&self) -> &Arc<FrozenStringTable> {
+        &self.strings
+    }
+}
+/// Durable generic body syntax.
+///
+/// The owner/range pair is the only retained syntax payload: every lane shares the canonical
+/// `SourceTokens` allocation published with its prepared source. No parser adapter or copied
+/// token vector is retained. Source bodies share one declaring-domain frozen string owner
+/// created once per `freeze()` or request capture; donor bodies retain the exact identity tables
+/// that issued their payloads. File-reference rows remain stable semantic facts for generated
+/// value resolution.
+pub(super) struct StableBodySyntax {
+    pub(super) declaration_path: PathId,
+    pub(super) donor_file_id: SourceId,
+    pub(super) frozen_identity_handle: FrozenIdentityHandle,
+    pub(super) source_owner: StableBodyOwner,
+    pub(super) token_range: TokenRange,
+    pub(super) token_sequence: Option<TokenSequenceId>,
+    pub(super) source_path_table: Option<Arc<PathTable>>,
+    /// Shared declaring-domain donor strings for source bodies; the exact retained donor
+    /// strings for a donor body. `(Some, None)` is rejected at the materialisation boundary.
+    pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
+    pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
+}
+impl Clone for StableBodySyntax {
+    fn clone(&self) -> Self {
+        let source_owner = self.source_owner.clone();
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_generic_source_tokens(
+            &source_owner.source_tokens,
+        );
+        Self {
+            declaration_path: self.declaration_path,
+            donor_file_id: self.donor_file_id,
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
+            source_owner,
+            token_range: self.token_range,
+            token_sequence: self.token_sequence,
+            source_path_table: self.source_path_table.clone(),
+            source_string_table: self.source_string_table.clone(),
+            resolved_file_references: self.resolved_file_references.clone(),
+        }
+    }
+}
+
+impl Drop for StableBodySyntax {
+    fn drop(&mut self) {
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::release_generic_source_tokens(
+            &self.source_owner.source_tokens,
+        );
+    }
+}
+
+/// Canonical owner retained by durable generic body syntax.
+///
+/// Every retained body shares its declaring module's immutable `SourceTokens` allocation.
+#[derive(Clone, Debug)]
+pub(super) struct StableBodyOwner {
+    pub(super) source_tokens: Arc<SourceTokens>,
+}
+impl StableBodySyntax {
+    #[cfg(test)]
+    pub(super) fn canonical_donor_file_id(&self) -> SourceId {
+        self.donor_file_id
+    }
+}
+
+/// Materialised body payload passed to generated AST construction.
 pub(super) struct MaterialisedBody {
-    pub(super) file_tokens: FileTokens,
+    pub(super) source_owner: StableBodyOwner,
+    pub(super) token_range: TokenRange,
+    pub(super) token_sequence: Option<TokenSequenceId>,
+    pub(super) declaration_path: PathId,
     pub(super) resolution_facts: Arc<Stage0ResolutionFacts>,
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
+    pub(super) source_path_table: Option<Arc<PathTable>>,
+    pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
 }
 
 impl MaterialisedBody {
-    pub(super) fn into_generic_body(self) -> GenericFunctionBody {
+    #[cfg(test)]
+    pub(super) fn donor_file_id(&self) -> SourceId {
+        self.source_owner.source_tokens.source()
+    }
+
+    pub(super) fn into_generic_body(self) -> Result<GenericFunctionBody, CompilerError> {
         GenericFunctionBody::materialised(
-            self.file_tokens,
-            self.resolution_facts,
-            self.frozen_identity_handle,
+            self.source_owner.source_tokens,
+            self.token_range,
+            self.token_sequence,
+            self.declaration_path,
+            MaterialisedDonorContext {
+                resolution_facts: self.resolution_facts,
+                frozen_identity_handle: self.frozen_identity_handle,
+                source_path_table: self.source_path_table,
+                source_string_table: self.source_string_table,
+            },
         )
     }
 }
@@ -76,21 +144,26 @@ impl std::fmt::Debug for MaterialisedBody {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("MaterialisedBody")
+            .field("donor_file_id", &self.source_owner.source_tokens.source())
+            .field("token_range", &self.token_range)
+            .field("token_sequence", &self.token_sequence)
             .finish_non_exhaustive()
     }
 }
 
 impl StableBodySyntax {
-    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+    pub(super) fn remap_path_ids(
+        &mut self,
+        remap: &crate::compiler_frontend::symbols::path_interner::PathIdRemap,
+    ) {
         self.declaration_path = remap.get(self.declaration_path);
-        self.path_syntax.remap_path_ids(remap);
     }
 
     pub(super) fn capture(
-        tokens: &FileTokens,
+        body: &GenericFunctionBody,
         source_file: PathId,
         path_fork: &PathInternerFork,
-        string_table: &StringTable,
+        donor_identity: Option<&SharedDonorIdentity>,
         stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
         frozen_identity_handle: FrozenIdentityHandle,
         content_value_at_path: &impl Fn(
@@ -100,67 +173,103 @@ impl StableBodySyntax {
             CompilerError,
         >,
     ) -> Result<Self, CompilerError> {
-        if !path_fork.starts_with(tokens.src_path, source_file) {
+        if !path_fork.starts_with(body.declaration_path(), source_file) {
             return Err(CompilerError::compiler_error(
                 "frozen generic body declaration path is outside its owning source file",
             ));
         }
-
-        let source_path_syntax = tokens.path_syntax_table()?;
-        source_path_syntax.validate_file_owned_locations(tokens.file_id)?;
-        source_path_syntax.validate_file_tokens(
-            &tokens.tokens,
-            tokens.file_id,
+        let donor_file_id = body.donor_source_id();
+        let (canonical_owner, token_range, token_sequence) = body.canonical_view();
+        let source_owner = StableBodyOwner {
+            source_tokens: Arc::clone(canonical_owner),
+        };
+        // Source and same-domain bodies share the declaring preparation's cached donor owner.
+        // The cache freezes once per declaring preparation; every body in the domain clones the
+        // same `Arc` instead of cloning and freezing the live table per body. Only a body that
+        // retained its own donor tables keeps that exact pair. A retained string table without a
+        // path table is canonical metadata; the reverse is rejected by the body constructor.
+        let declaring_domain_strings = || {
+            donor_identity
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "frozen generic source body has no declaring-domain donor identity",
+                    )
+                })
+                .map(|identity| Arc::clone(identity.strings()))
+        };
+        let (source_path_table, source_string_table) = match body {
+            GenericFunctionBody::Source { .. } => (None, Some(declaring_domain_strings()?)),
+            GenericFunctionBody::Materialised {
+                source_path_table,
+                source_string_table,
+                ..
+            } => (
+                source_path_table.clone(),
+                match source_string_table {
+                    Some(donor_strings) => Some(Arc::clone(donor_strings)),
+                    None => Some(declaring_domain_strings()?),
+                },
+            ),
+        };
+        let path_syntax = source_owner.source_tokens.path_syntax_table()?;
+        path_syntax.validate_structure()?;
+        let mut cursor = crate::compiler_frontend::ast::generic_functions::templates::body_cursor(
+            &source_owner.source_tokens,
+            token_range,
+            token_sequence,
             "generic body capture",
         )?;
-
-        let mut pool = FrozenStringPool::default();
-        let mut frozen_tokens = tokens.tokens.clone();
-        let (path_syntax, path_syntax_map) =
-            source_path_syntax.capture_persistent_generic_subset(&mut frozen_tokens)?;
-        let mut path_syntax_map = path_syntax_map.into_iter().collect::<Vec<_>>();
-        path_syntax_map.sort_by_key(|(_, compact_id)| *compact_id);
-
-        let mut resolved_file_references = Vec::with_capacity(path_syntax_map.len());
-        for (source_path_id, compact_path_id) in path_syntax_map {
-            let facts = stage0_resolution_facts.ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "persistent generic body has path syntax but no Stage 0 resolution facts",
-                )
-            })?;
-            let resolved = facts
-                .lookup(tokens.file_id, source_path_id)?
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "persistent generic body path handle {:?} had no matching Stage 0 resolved-reference row",
-                        source_path_id
-                    ))
-                })?;
-            resolved_file_references.push(StableResolvedFileReference::capture(
-                compact_path_id,
-                resolved,
-                &mut |text| pool.index(text),
-                content_value_at_path,
-            )?);
+        let mut seen_paths = rustc_hash::FxHashSet::default();
+        let mut resolved_file_references = Vec::new();
+        while let Some(token) = cursor.advance() {
+            let is_eof = token.is_eof();
+            if let Some(source_path_id) = token.path_syntax_id() {
+                path_syntax.try_path_for_token(source_path_id, token.source_span())?;
+                if seen_paths.insert(source_path_id) {
+                    let facts = stage0_resolution_facts.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "persistent generic body has path syntax but no Stage 0 resolution facts",
+                        )
+                    })?;
+                    let resolved = facts
+                        .lookup(donor_file_id, source_path_id)?
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(format!(
+                                "persistent generic body path handle {:?} had no matching Stage 0 resolved-reference row",
+                                source_path_id
+                            ))
+                        })?;
+                    resolved_file_references.push(StableResolvedFileReference::capture(
+                        source_path_id,
+                        resolved,
+                        content_value_at_path,
+                    )?);
+                }
+            }
+            if is_eof {
+                break;
+            }
         }
 
-        // The source stream owns the complete table. A persistent generic retains only the
-        // referenced canonical subset, then token and table payloads enter the same frozen pool.
-        for token in &mut frozen_tokens {
-            token.try_remap_string_ids(&mut |id| {
-                Ok::<StringId, CompilerError>(pool.index(string_table.resolve(id)))
-            })?;
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            crate::compiler_frontend::instrumentation::record_generic_source_tokens(
+                &source_owner.source_tokens,
+            );
+            crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+                source_path_table.as_deref(),
+                source_string_table.as_deref(),
+            );
         }
-        // Path rows already use the build-wide path identity domain; only token string payloads
-        // enter the frozen pool here.
-
         Ok(Self {
-            declaration_path: tokens.src_path,
-            donor_file_id: tokens.file_id,
+            declaration_path: body.declaration_path(),
+            donor_file_id,
             frozen_identity_handle,
-            pool: pool.finish(),
-            path_syntax,
-            tokens: frozen_tokens.into_boxed_slice(),
+            source_owner,
+            token_range: body.token_range(),
+            token_sequence: body.token_sequence(),
+            source_path_table,
+            source_string_table,
             resolved_file_references: resolved_file_references.into_boxed_slice(),
         })
     }
@@ -168,89 +277,62 @@ impl StableBodySyntax {
     pub(super) fn materialise(
         &self,
         source_file: PathId,
-        path_fork: &PathInternerFork,
-        string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
+        _string_table: &mut StringTable,
+        identity_tables: Option<(&Arc<PathTable>, &Arc<FrozenStringTable>)>,
     ) -> Result<MaterialisedBody, CompilerError> {
-        let declaration_path = self.declaration_path;
-        if !path_fork.starts_with(declaration_path, source_file) {
+        // Validate the retained canonical owner before handing its range/sequence to a parser
+        // consumer; no compatibility adapter or copied parser window is created.
+        crate::compiler_frontend::ast::generic_functions::templates::validate_source_owner(
+            &self.source_owner.source_tokens,
+            self.token_range,
+            self.token_sequence,
+            "frozen generic body materialisation",
+        )?;
+        if !path_fork.starts_with(self.declaration_path, source_file) {
             return Err(CompilerError::compiler_error(
                 "frozen generic body declaration path is outside its materialised source file",
             ));
         }
-        let remap = self
-            .pool
-            .iter()
-            .map(|text| string_table.intern(text))
-            .collect::<Vec<_>>();
-        let mut tokens = Vec::with_capacity(self.tokens.len());
-        for token in self.tokens.iter() {
-            let mut materialised = token.clone();
-            materialised.try_remap_string_ids(&mut |id| {
-                let index = id.index() as usize;
-                remap.get(index).copied().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "frozen token payload references out-of-range pool entry {index}"
-                    ))
-                })
-            })?;
-            tokens.push(materialised);
-        }
-        let path_syntax = self.path_syntax.clone();
-        path_syntax.validate_file_owned_locations(self.donor_file_id)?;
-        path_syntax.validate_file_tokens(&tokens, self.donor_file_id, "frozen generic body")?;
 
         let resolved_file_references = self
             .resolved_file_references
             .iter()
-            .map(|reference| reference.materialise(&remap, string_table))
+            .map(StableResolvedFileReference::materialise)
             .collect::<Result<Vec<_>, CompilerError>>()?;
         let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
             self.donor_file_id,
             resolved_file_references,
         )?);
-
-        // Retain the captured donor identity as the explicit materialised owner. The final
-        // boundary installs its domain-specific frozen context before labels render, so donor
-        // ranges stay distinct from the requester call-site source without any rebinding, magic
-        // identity or `None` fallback.
-        Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen(
-                declaration_path,
-                self.donor_file_id,
-                None,
-                tokens,
-                path_syntax,
+        // A retained path/string pair or string-only donor is carried as independent identity
+        // metadata. The parser borrows the canonical donor range and installs these tables as
+        // TokenPayloadOrigin, translating only payloads it consumes into requester tables.
+        // Without a retained path table, the caller's installed identity pair supplies path
+        // provenance for same-domain materialisation.
+        let (source_path_table, source_string_table) = match &self.source_path_table {
+            Some(path_table) => (
+                Some(Arc::clone(path_table)),
+                self.source_string_table.clone(),
             ),
+            None => identity_tables
+                .map(|(path_table, source_strings)| {
+                    (
+                        Some(Arc::clone(path_table)),
+                        Some(Arc::clone(source_strings)),
+                    )
+                })
+                .unwrap_or_else(|| (None, self.source_string_table.clone())),
+        };
+        let source_owner = self.source_owner.clone();
+        Ok(MaterialisedBody {
+            source_owner,
+            token_range: self.token_range,
+            token_sequence: self.token_sequence,
+            declaration_path: self.declaration_path,
             resolution_facts,
             frozen_identity_handle: self.frozen_identity_handle.clone(),
+            source_path_table,
+            source_string_table,
         })
     }
 }
-
-// Path IDs are build-wide identities. The frozen artefact retains them directly rather than
-// rendering to text and interning a second logical path tree at materialisation time.
-
-#[derive(Default)]
-pub(super) struct FrozenStringPool {
-    entries: Vec<String>,
-    by_text: rustc_hash::FxHashMap<String, u32>,
-}
-
-impl FrozenStringPool {
-    fn index(&mut self, text: &str) -> StringId {
-        if let Some(index) = self.by_text.get(text) {
-            return StringId::from_index(*index);
-        }
-
-        let index = self.entries.len() as u32;
-        let owned = text.to_owned();
-        self.entries.push(owned.clone());
-        self.by_text.insert(owned, index);
-        StringId::from_index(index)
-    }
-
-    fn finish(self) -> Box<[String]> {
-        self.entries.into_boxed_slice()
-    }
-}
-

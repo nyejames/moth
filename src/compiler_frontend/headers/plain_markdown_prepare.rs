@@ -12,14 +12,13 @@ use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax, SyntheticContentPayload,
 };
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
-use std::path::PathBuf;
+use crate::compiler_frontend::tokenizer::tokens::TokenRange;
 
 /// Inputs needed to prepare one plain Markdown source file.
 ///
@@ -29,39 +28,29 @@ pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) source_file: PathId,
     pub(crate) file_id: SourceId,
-    pub(crate) canonical_os_path: Option<PathBuf>,
 }
 
 /// Prepare one `.md` source file as a generated `content #String` constant.
 ///
-/// WHAT: renders the raw Markdown to HTML, interns the result, and builds a single literal
-///       initializer token that folds cleanly to a `#String` constant.
+/// WHAT: renders raw Markdown to HTML, interns the result as a compact synthetic payload, and
+///       leaves the prepared source on the no-token path.
 /// WHY: the rest of the frontend pipeline should not know that this constant came from Markdown.
 pub(crate) fn prepare_plain_markdown_file(
     input: PlainMarkdownPrepareInput<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-    let canonical_os_path = input.canonical_os_path.clone();
     let rendered = render_plain_markdown(input.source_code);
     let rendered_html_id = string_table.intern(&rendered.html);
 
-    let file_start_span = LocalSpan::source_start();
-
-    // A `StringSliceLiteral` is the normal top-level string literal token. It preserves the
-    // already-rendered HTML exactly and folds to `#String` through the existing AST constant
-    // folder without re-serializing or escaping source text.
-    let initializer_tokens = vec![Token::new(
-        TokenKind::StringSliceLiteral(rendered_html_id),
-        file_start_span,
-    )];
-
+    let initializer_range =
+        TokenRange::from_raw(input.file_id, 0, 0).expect("empty synthetic header range is valid");
     let content_header = synthetic_content_header(
         SyntheticContentHeaderInput {
             source_file: input.source_file,
             file_id: input.file_id,
-            canonical_os_path: canonical_os_path.clone(),
-            initializer_tokens,
+            initializer_range,
+            payload: SyntheticContentPayload::RenderedHtml(rendered_html_id),
             initializer_references: Vec::new(),
         },
         string_table,
@@ -69,7 +58,7 @@ pub(crate) fn prepare_plain_markdown_file(
     )?;
 
     Ok(FileFrontendPrepareOutput {
-        source_file: content_header.source_file,
+        source_file: input.source_file,
         file_id: input.file_id,
         path_syntax: PreparedFilePathSyntax::empty(),
         token_count: 0,
@@ -78,9 +67,9 @@ pub(crate) fn prepare_plain_markdown_file(
         file_dependency_clauses: Vec::new(),
         structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
-        canonical_os_path,
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),
+        source_token_stream: None,
         const_template_count: 0,
         runtime_fragment_count: 0,
         has_non_trivial_root_body: false,

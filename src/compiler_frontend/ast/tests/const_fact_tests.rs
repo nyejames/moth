@@ -26,12 +26,7 @@ fn assert_has_fact(
     );
 }
 
-fn assert_no_fact(
-    ast: &Ast,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-    name: &str,
-) {
+fn assert_no_fact(ast: &Ast, path_fork: &PathInternerFork, string_table: &StringTable, name: &str) {
     assert!(
         find_fact_by_name(ast, path_fork, string_table, name).is_none(),
         "expected no const fact for '{name}'"
@@ -54,14 +49,11 @@ fn find_fact_by_name<'a>(
     string_table: &StringTable,
     name: &str,
 ) -> Option<&'a AstConstDeclarationFact> {
-    ast.const_facts
-        .declarations
-        .values()
-        .find(|fact| {
-            path_fork
-                .component(fact.declaration_path)
-                .is_some_and(|component| string_table.resolve(component) == name)
-        })
+    ast.const_facts.declarations.values().find(|fact| {
+        path_fork
+            .component(fact.declaration_path)
+            .is_some_and(|component| string_table.resolve(component) == name)
+    })
 }
 
 // ------------------------------

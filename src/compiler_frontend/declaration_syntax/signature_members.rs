@@ -5,18 +5,20 @@
 //! WHY: header parsing owns declaration-shell discovery, but AST owns type resolution and
 //! expression parsing. Keeping this module AST-free preserves that stage boundary.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidFunctionSignatureReason,
+    InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::require_binding_marker_adjacent;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    TypeAnnotationContext, parse_type_annotation,
+    TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
@@ -25,8 +27,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -41,6 +42,20 @@ use rustc_hash::FxHashMap;
 ///      inline diagnostic lane once.
 type SignatureMemberParseResult<T> = Result<T, HeaderParseFailure>;
 
+fn current_diagnostic_token(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> SignatureMemberParseResult<Option<DiagnosticToken>> {
+    token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "signature-member diagnostic projection",
+            ))
+        })
+}
+
 /// Distinguishes the two syntactic contexts that share `| ... |` member parsing.
 ///
 /// WHAT: `this` is valid only in function parameter lists, not in struct fields.
@@ -52,7 +67,6 @@ pub enum SignatureMemberContext {
     ChoicePayloadField,
     TraitRequirement,
 }
-
 /// One parsed parameter/field shell before AST type resolution.
 #[derive(Clone, Debug)]
 pub struct SignatureMemberSyntax {
@@ -60,7 +74,8 @@ pub struct SignatureMemberSyntax {
     pub value_mode: ValueMode,
     pub is_reactive: bool,
     pub type_annotation: ParsedTypeRef,
-    pub default_tokens: Vec<Token>,
+    /// Canonical source-owned default range. `None` means no authored default expression.
+    pub default_range: Option<TokenRange>,
     pub span: Option<SourceSpan>,
 }
 
@@ -92,13 +107,11 @@ pub struct FunctionSignatureSyntax {
 }
 
 impl SignatureMemberSyntax {
-    /// Remap all interned names, type refs, and tokens.
-    // Called by per-file frontend output remapping before module-wide dependency sorting.
+    /// Remap member names and type references into a merged string table.
+    ///
+    /// Source-owned default ranges are identity-qualified and need no remap.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
-        for token in &mut self.default_tokens {
-            token.remap_string_ids(remap);
-        }
     }
 
     /// Remap the member path identity after its path fork merges.
@@ -164,7 +177,7 @@ impl FunctionSignatureSyntax {
 /// ENTRY INVARIANT: the stream is positioned on the opening `|`.
 /// EXIT INVARIANT: the stream is positioned immediately after the terminating `:`.
 pub fn parse_function_signature_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     function_path: PathId,
@@ -184,10 +197,10 @@ pub fn parse_function_signature_syntax(
     )?;
     token_stream.advance();
 
-    match token_stream.current_token_kind() {
-        TokenKind::Arrow => {}
+    match token_stream.current_tag() {
+        TokenTag::ARROW => {}
 
-        TokenKind::Colon => {
+        TokenTag::COLON => {
             token_stream.advance();
             return Ok(FunctionSignatureSyntax {
                 parameters,
@@ -195,24 +208,27 @@ pub fn parse_function_signature_syntax(
             });
         }
 
-        TokenKind::DatatypeInt
-        | TokenKind::DatatypeFloat
-        | TokenKind::DatatypeBool
-        | TokenKind::DatatypeString
-        | TokenKind::DatatypeChar
-        | TokenKind::DatatypeNone
-        | TokenKind::OpenCurly
-        | TokenKind::Symbol(_) => {
+        TokenTag::DATATYPE_INT
+        | TokenTag::DATATYPE_FLOAT
+        | TokenTag::DATATYPE_BOOL
+        | TokenTag::DATATYPE_STRING
+        | TokenTag::DATATYPE_CHAR
+        | TokenTag::DATATYPE_NONE
+        | TokenTag::OPEN_CURLY
+        | TokenTag::SYMBOL => {
+            let found = current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "signature diagnostic requested without a current token",
+                )
+            })?;
             return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone().into(),
-                },
+                InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
             )
             .into());
         }
 
-        TokenKind::Newline | TokenKind::Eof | TokenKind::End => {
+        TokenTag::NEWLINE | TokenTag::EOF | TokenTag::END => {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::UnexpectedEndAfterParameters,
                 current_source_span(token_stream),
@@ -221,10 +237,13 @@ pub fn parse_function_signature_syntax(
         }
 
         _ => {
+            let found = current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "signature diagnostic requested without a current token",
+                )
+            })?;
             return Err(CompilerDiagnostic::invalid_function_signature(
-                InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone().into(),
-                },
+                InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
             )
             .into());
@@ -242,7 +261,7 @@ pub fn parse_function_signature_syntax(
 /// Parses a `| name [~]Type [= default], ... |` member list into neutral shells.
 ///
 pub fn parse_signature_members_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     member_context: SignatureMemberContext,
@@ -257,12 +276,14 @@ pub fn parse_signature_members_syntax(
 
     fn ensure_member_slot(
         expecting_member: bool,
-        token_stream: &FileTokens,
+        token_stream: &DeclarationCursor<'_>,
+        string_table: &mut StringTable,
     ) -> SignatureMemberParseResult<()> {
         if !expecting_member {
-            return Err(CompilerDiagnostic::expected_token(
-                TokenKind::Comma,
-                Some(token_stream.current_token_kind().to_owned()),
+            let found = current_diagnostic_token(token_stream, string_table)?;
+            return Err(CompilerDiagnostic::expected_token_from_tags(
+                TokenTag::COMMA,
+                found,
                 current_source_span(token_stream),
             )
             .into());
@@ -271,13 +292,13 @@ pub fn parse_signature_members_syntax(
         Ok(())
     }
 
-    while token_stream.index < token_stream.tokens.len() {
-        match token_stream.current_token_kind().to_owned() {
-            TokenKind::TypeParameterBracket => {
+    while token_stream.index < token_stream.length {
+        match token_stream.current_tag() {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 return Ok(members);
             }
 
-            TokenKind::End => {
+            TokenTag::END => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     None,
                     current_source_span(token_stream),
@@ -285,16 +306,32 @@ pub fn parse_signature_members_syntax(
                 .into());
             }
 
-            TokenKind::Arrow | TokenKind::Colon => {
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
+            TokenTag::ARROW | TokenTag::COLON => {
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(
+                        None,
+                        current_source_span(token_stream),
+                    )
+                    .into());
+                };
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                    found,
                     current_source_span(token_stream),
                 )
                 .into());
             }
 
-            TokenKind::Symbol(member_name) => {
-                ensure_member_slot(expecting_member, token_stream)?;
+            TokenTag::SYMBOL => {
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
+                let Some(member_name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
 
                 let member_path = path_fork
                     .try_intern_child(owner_path, member_name)
@@ -320,17 +357,18 @@ pub fn parse_signature_members_syntax(
                 member_index += 1;
             }
 
-            TokenKind::This if member_context == SignatureMemberContext::FunctionParameter => {
-                ensure_member_slot(expecting_member, token_stream)?;
+            TokenTag::THIS if member_context == SignatureMemberContext::FunctionParameter => {
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 let this_id = string_table.intern("this");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_signature_member_syntax(
                     token_stream,
                     this_path,
@@ -347,7 +385,7 @@ pub fn parse_signature_members_syntax(
                 member_index += 1;
             }
 
-            TokenKind::This => {
+            TokenTag::THIS => {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ThisNotAllowed,
                     current_source_span(token_stream),
@@ -355,8 +393,8 @@ pub fn parse_signature_members_syntax(
                 .into());
             }
 
-            TokenKind::TraitThis if member_context == SignatureMemberContext::TraitRequirement => {
-                ensure_member_slot(expecting_member, token_stream)?;
+            TokenTag::TRAIT_THIS if member_context == SignatureMemberContext::TraitRequirement => {
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 if member_index > 0 {
                     return Err(CompilerDiagnostic::invalid_signature_member(
@@ -367,13 +405,14 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
                     this_path,
@@ -386,12 +425,12 @@ pub fn parse_signature_members_syntax(
                 member_index += 1;
             }
 
-            TokenKind::Mutable if member_context == SignatureMemberContext::TraitRequirement => {
-                ensure_member_slot(expecting_member, token_stream)?;
+            TokenTag::MUTABLE if member_context == SignatureMemberContext::TraitRequirement => {
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 token_stream.advance();
 
-                if token_stream.current_token_kind() != &TokenKind::TraitThis {
+                if token_stream.current_tag() != TokenTag::TRAIT_THIS {
                     return Err(CompilerDiagnostic::invalid_signature_member(
                         InvalidSignatureMemberReason::TraitReceiverMustBeThis,
                         current_source_span(token_stream),
@@ -408,13 +447,14 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let this_id = string_table.intern("This");
-                let this_path = path_fork
-                    .try_intern_child(owner_path, this_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "path table exhausted while interning a signature member path",
-                        )
-                    })?;
+                let this_path =
+                    path_fork
+                        .try_intern_child(owner_path, this_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "path table exhausted while interning a signature member path",
+                            )
+                        })?;
                 let member = parse_trait_this_member_syntax(
                     token_stream,
                     this_path,
@@ -427,9 +467,9 @@ pub fn parse_signature_members_syntax(
                 member_index += 1;
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 token_stream.advance();
-                if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+                if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
                     return Err(CompilerDiagnostic::unexpected_trailing_comma(
                         current_source_span(token_stream),
                     )
@@ -438,9 +478,9 @@ pub fn parse_signature_members_syntax(
                 expecting_member = true;
             }
 
-            TokenKind::Must | TokenKind::TraitThis => {
-                let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                    token_stream.current_token_kind(),
+            TokenTag::MUST | TokenTag::TRAIT_THIS => {
+                let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                    token_stream.current_tag(),
                     current_source_span(token_stream),
                     "Struct/Parameter Parsing",
                     "signature member parsing",
@@ -453,11 +493,11 @@ pub fn parse_signature_members_syntax(
                 .into());
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 token_stream.advance();
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     None,
                     current_source_span(token_stream),
@@ -466,15 +506,26 @@ pub fn parse_signature_members_syntax(
             }
 
             _ => {
-                if let Some(error) = check_signature_common_mistake(token_stream) {
-                    return Err(error.into());
+                let common_mistake = match token_stream.current_tag() {
+                    TokenTag::OPEN_PARENTHESIS => {
+                        Some(CommonSyntaxMistakeReason::SignatureParenthesisDelimiter)
+                    }
+                    TokenTag::AS => Some(CommonSyntaxMistakeReason::SignatureAsKeyword),
+                    _ => None,
+                };
+                if let Some(reason) = common_mistake {
+                    return Err(CompilerDiagnostic::common_syntax_mistake(
+                        reason,
+                        current_source_span(token_stream),
+                    )
+                    .into());
                 }
 
-                return Err(CompilerDiagnostic::unexpected_token(
-                    token_stream.current_token_kind().to_owned(),
-                    current_source_span(token_stream),
-                )
-                .into());
+                let span = current_source_span(token_stream);
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                    return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+                };
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
             }
         }
     }
@@ -519,7 +570,7 @@ fn record_ordinary_member_name(
     reason = "signature member parsing keeps the token stream, member path, mutable string/warning/span state, the reserved-this flag, member context, and path fork as separate borrows"
 )]
 fn parse_signature_member_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -548,13 +599,13 @@ fn parse_signature_member_syntax(
 
     let mut value_mode = ValueMode::ImmutableOwned;
     let mut is_reactive = false;
-    match token_stream.current_token_kind() {
-        TokenKind::Mutable => {
+    match token_stream.current_tag() {
+        TokenTag::MUTABLE => {
             token_stream.advance();
             value_mode = ValueMode::MutableOwned;
         }
 
-        TokenKind::Reactive => {
+        TokenTag::REACTIVE => {
             if member_context != SignatureMemberContext::FunctionParameter {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ReactiveAccessNotAllowed,
@@ -575,7 +626,7 @@ fn parse_signature_member_syntax(
         _ => {}
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Hash {
+    if token_stream.current_tag() == TokenTag::HASH {
         return Err(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::CompileTimeParameterDeferred,
             current_source_span(token_stream),
@@ -593,17 +644,17 @@ fn parse_signature_member_syntax(
         .into());
     }
 
-    while token_stream.current_token_kind() == &TokenKind::Newline {
+    while token_stream.current_tag() == TokenTag::NEWLINE {
         token_stream.advance();
     }
 
-    let type_annotation = parse_type_annotation(
+    let type_annotation = parse_type_annotation_cursor(
         token_stream,
         type_annotation_context_for_member(member_context),
         string_table,
     )?;
-    let default_tokens = match token_stream.current_token_kind() {
-        TokenKind::Assign => {
+    let default_range = match token_stream.current_tag() {
+        TokenTag::ASSIGN => {
             token_stream.advance();
             if is_reactive {
                 return Err(CompilerDiagnostic::invalid_signature_member(
@@ -627,28 +678,34 @@ fn parse_signature_member_syntax(
                 .into());
             }
 
-            collect_member_default_tokens(token_stream)?
+            collect_member_default_range(token_stream, string_table)?
         }
 
-        TokenKind::Comma
-        | TokenKind::Eof
-        | TokenKind::Newline
-        | TokenKind::TypeParameterBracket => Vec::new(),
+        TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE | TokenTag::TYPE_PARAMETER_BRACKET => {
+            None
+        }
 
-        TokenKind::As => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
+        TokenTag::AS => {
+            let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                return Err(CompilerDiagnostic::unexpected_end_of_file(
+                    None,
+                    current_source_span(token_stream),
+                )
+                .into());
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found,
                 current_source_span(token_stream),
             )
             .into());
         }
 
         _ => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            )
-            .into());
+            let span = current_source_span(token_stream);
+            let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+            };
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
         }
     };
 
@@ -657,7 +714,7 @@ fn parse_signature_member_syntax(
         value_mode,
         is_reactive,
         type_annotation,
-        default_tokens,
+        default_range,
         span: member_span,
     })
 }
@@ -678,7 +735,7 @@ fn type_annotation_context_for_member(
 /// ENTRY INVARIANT: the stream is positioned on `This` (TraitThis).
 /// EXIT INVARIANT: the stream is positioned on the token after `This`.
 fn parse_trait_this_member_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
     value_mode: ValueMode,
     _span_builder: &mut ExtendedSpanBuilder,
@@ -687,43 +744,40 @@ fn parse_trait_this_member_syntax(
 
     token_stream.advance(); // past This
 
-    // Trait receiver parameters have no explicit type annotation;
-    // the type is implicitly the implementing concrete type.
+    // Trait receiver parameters have no explicit type annotation. The type is implicitly
+    // the implementing concrete type and requirements cannot carry defaults.
     let type_annotation = ParsedTypeRef::This { span: member_span };
-
-    // Default values are not allowed in trait requirements.
-    let default_tokens = Vec::new();
 
     Ok(SignatureMemberSyntax {
         id: full_name,
         value_mode,
         is_reactive: false,
         type_annotation,
-        default_tokens,
+        default_range: None,
         span: member_span,
     })
 }
 
 /// A token kind that can only follow an authored `=` when the default value is missing:
 /// top-level comma, closing pipe, newline, block end or EOF.
-fn is_missing_default_boundary(token_kind: &TokenKind) -> bool {
+fn is_missing_default_boundary(tag: TokenTag) -> bool {
     matches!(
-        token_kind,
-        TokenKind::Comma
-            | TokenKind::TypeParameterBracket
-            | TokenKind::Newline
-            | TokenKind::End
-            | TokenKind::Eof
+        tag,
+        TokenTag::COMMA
+            | TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::NEWLINE
+            | TokenTag::END
+            | TokenTag::EOF
     )
 }
 
-fn collect_member_default_tokens(
-    token_stream: &mut FileTokens,
-) -> SignatureMemberParseResult<Vec<Token>> {
+fn collect_member_default_range(
+    token_stream: &mut DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> SignatureMemberParseResult<Option<TokenRange>> {
     // A member/EOF boundary before any expression token is a missing default, not an empty
-    // one, so report it here rather than letting a newline reach the infra error path. Only
-    // fires before the first expression token, so valid multiline defaults still pass.
-    if is_missing_default_boundary(token_stream.current_token_kind()) {
+    // one, so report it here rather than letting a newline reach the infrastructure lane.
+    if is_missing_default_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::MissingDefaultValue,
             current_source_span(token_stream),
@@ -731,22 +785,22 @@ fn collect_member_default_tokens(
         .into());
     }
 
-    let mut tokens = Vec::new();
+    let start = token_stream.canonical_cursor().position();
     let mut depth = NestingDepth::default();
 
     while token_stream.index < token_stream.length {
-        let token_kind = token_stream.current_token_kind().clone();
+        let tag = token_stream.current_tag();
 
         if depth.is_top_level()
             && matches!(
-                token_kind,
-                TokenKind::Comma | TokenKind::TypeParameterBracket | TokenKind::Eof
+                tag,
+                TokenTag::COMMA | TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::EOF
             )
         {
             break;
         }
 
-        if matches!(token_kind, TokenKind::Eof) {
+        if matches!(tag, TokenTag::EOF) {
             return Err(CompilerDiagnostic::unexpected_end_of_file(
                 None,
                 current_source_span(token_stream),
@@ -754,20 +808,27 @@ fn collect_member_default_tokens(
             .into());
         }
 
-        depth.step(&token_kind);
-        tokens.push(token_stream.current_token());
+        depth.step_tag(tag);
         token_stream.advance();
     }
 
-    if tokens.is_empty() {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            current_source_span(token_stream),
-        )
-        .into());
+    let end = token_stream.canonical_cursor().position();
+    let range =
+        TokenRange::try_new_for(token_stream.canonical_cursor().source_tokens(), start, end)
+            .map_err(|error| {
+                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                    "signature member default range exceeded its canonical source owner: {error:?}",
+                )))
+            })?;
+    if range.is_empty() {
+        let span = current_source_span(token_stream);
+        let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+            return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
+        };
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
     }
 
-    Ok(tokens)
+    Ok(Some(range))
 }
 
 /// Parse a return list for a trait requirement, stopping at newline or block end.
@@ -775,7 +836,7 @@ fn collect_member_default_tokens(
 /// ENTRY INVARIANT: the stream is positioned on the `->` arrow.
 /// EXIT INVARIANT: the stream is positioned on the first token after the last return type.
 fn parse_trait_requirement_return_list(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parameters: &[SignatureMemberSyntax],
     string_table: &mut StringTable,
 ) -> SignatureMemberParseResult<Vec<ReturnSlotSyntax>> {
@@ -796,13 +857,13 @@ fn parse_trait_requirement_return_list(
             TypeAnnotationContext::TraitRequirement,
         )?);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 let comma_span = current_source_span(token_stream);
                 token_stream.advance();
 
-                match token_stream.current_token_kind() {
-                    TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+                match token_stream.current_tag() {
+                    TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                         return Err(
                             CompilerDiagnostic::unexpected_trailing_comma(comma_span).into()
                         );
@@ -812,15 +873,19 @@ fn parse_trait_requirement_return_list(
                 }
             }
 
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                 return Ok(return_slots);
             }
 
-            unexpected_token => {
+            _unexpected_token => {
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "signature diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::invalid_function_signature(
-                    InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone().into(),
-                    },
+                    InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),
                 )
                 .into());
@@ -834,7 +899,7 @@ fn parse_trait_requirement_return_list(
 /// ENTRY INVARIANT: the stream is positioned on the opening `|`.
 /// EXIT INVARIANT: the stream is positioned on the first token after the signature.
 pub fn parse_trait_requirement_signature_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     method_path: PathId,
@@ -853,7 +918,7 @@ pub fn parse_trait_requirement_signature_syntax(
     )?;
     token_stream.advance(); // past |
 
-    let returns = if token_stream.current_token_kind() == &TokenKind::Arrow {
+    let returns = if token_stream.current_tag() == TokenTag::ARROW {
         parse_trait_requirement_return_list(token_stream, &parameters, string_table)?
     } else {
         Vec::new()
@@ -876,11 +941,11 @@ pub fn parse_trait_requirement_signature_syntax(
 ///      trait requirement does not. The caller selects the factual reason so the shared
 ///      boundary predicate stays in one place.
 fn missing_return_type_after_arrow(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     reason: InvalidFunctionSignatureReason,
 ) -> Option<CompilerDiagnostic> {
-    match token_stream.current_token_kind() {
-        TokenKind::Colon | TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+    match token_stream.current_tag() {
+        TokenTag::COLON | TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
             Some(CompilerDiagnostic::invalid_function_signature(
                 reason,
                 current_source_span(token_stream),
@@ -891,7 +956,7 @@ fn missing_return_type_after_arrow(
 }
 
 fn parse_return_list_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parameters: &[SignatureMemberSyntax],
     string_table: &mut StringTable,
 ) -> SignatureMemberParseResult<Vec<ReturnSlotSyntax>> {
@@ -913,13 +978,13 @@ fn parse_return_list_syntax(
             TypeAnnotationContext::SignatureReturn,
         )?);
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 let comma_span = current_source_span(token_stream);
                 token_stream.advance();
 
-                match token_stream.current_token_kind() {
-                    TokenKind::Colon => {
+                match token_stream.current_tag() {
+                    TokenTag::COLON => {
                         return Err(CompilerDiagnostic::invalid_function_signature(
                             InvalidFunctionSignatureReason::TrailingCommaInReturns,
                             comma_span,
@@ -927,7 +992,7 @@ fn parse_return_list_syntax(
                         .into());
                     }
 
-                    TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+                    TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                         return Err(CompilerDiagnostic::invalid_function_signature(
                             InvalidFunctionSignatureReason::UnexpectedEndAfterComma,
                             comma_span,
@@ -938,44 +1003,53 @@ fn parse_return_list_syntax(
                     _ => {}
                 }
             }
-            TokenKind::Symbol(symbol) if string_table.resolve(*symbol) == "where" => {
+            TokenTag::SYMBOL
+                if token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                    .is_some_and(|symbol| string_table.resolve(symbol) == "where") =>
+            {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::GenericWhereConstraintsUnsupported,
                     current_source_span(token_stream),
                 )
                 .into());
             }
-            TokenKind::Colon => {
+            TokenTag::COLON => {
                 token_stream.advance();
                 validate_return_slots_syntax(&return_slots, token_stream, string_table)?;
                 return Ok(return_slots);
             }
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::UnexpectedEndInReturns,
                     current_source_span(token_stream),
                 )
                 .into());
             }
-            TokenKind::Newline | TokenKind::End => {
+            TokenTag::NEWLINE | TokenTag::END => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingColonAfterReturns,
                     current_source_span(token_stream),
                 )
                 .into());
             }
-            TokenKind::Arrow => {
+            TokenTag::ARROW => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::UnexpectedArrowInReturns,
                     current_source_span(token_stream),
                 )
                 .into());
             }
-            unexpected_token => {
+            _unexpected_token => {
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "signature diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::invalid_function_signature(
-                    InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone().into(),
-                    },
+                    InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),
                 )
                 .into());
@@ -985,21 +1059,21 @@ fn parse_return_list_syntax(
 }
 
 fn parse_single_return_item_syntax(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     _parameters: &[SignatureMemberSyntax],
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
     parse_value_return_type_syntax(token_stream, string_table, type_context)
 }
 
 fn parse_value_return_type_syntax(
-    token_stream: &mut FileTokens,
-    string_table: &StringTable,
+    token_stream: &mut DeclarationCursor<'_>,
+    string_table: &mut StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
     let span = current_source_span(token_stream);
-    let type_annotation = parse_type_annotation(token_stream, type_context, string_table)?;
+    let type_annotation = parse_type_annotation_cursor(token_stream, type_context, string_table)?;
 
     if parsed_type_ref_is_void(&type_annotation, string_table) {
         return Err(CompilerDiagnostic::invalid_function_signature(
@@ -1009,7 +1083,7 @@ fn parse_value_return_type_syntax(
         .into());
     }
 
-    let channel = if token_stream.current_token_kind() == &TokenKind::Bang {
+    let channel = if token_stream.current_tag() == TokenTag::BANG {
         token_stream.advance();
         ReturnChannelSyntax::Error
     } else {
@@ -1027,7 +1101,7 @@ fn parse_value_return_type_syntax(
 
 fn validate_return_slots_syntax(
     returns: &[ReturnSlotSyntax],
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     string_table: &StringTable,
 ) -> SignatureMemberParseResult<()> {
     let error_return_slots: Vec<(usize, &ReturnSlotSyntax)> = returns
@@ -1074,13 +1148,9 @@ fn parsed_type_ref_is_void(type_ref: &ParsedTypeRef, string_table: &StringTable)
     )
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }
-
 #[cfg(test)]
 #[path = "tests/signature_member_duplicate_tests.rs"]
 mod signature_member_duplicate_tests;

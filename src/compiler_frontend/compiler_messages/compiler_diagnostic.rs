@@ -35,7 +35,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -116,29 +116,77 @@ impl CompilerDiagnostic {
     //  Syntax Constructors
     // ------------------------------------------------------------------
 
-    pub(crate) fn expected_token(
-        expected: TokenKind,
-        found: Option<TokenKind>,
+    /// Projection-based `ExpectedToken` for dynamic expected spellings.
+    ///
+    /// WHAT: retains caller-projected expected/found tokens from the compact projection.
+    /// WHY: the `#Config` qualifier names a dynamic `Symbol(Config)` expected token;
+    ///      static delimiters keep using `expected_token_from_tags`.
+    pub(crate) fn expected_token_from_projections(
+        expected: DiagnosticToken,
+        found: Option<DiagnosticToken>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
+            span,
+            DiagnosticPayload::ExpectedToken { expected, found },
+        )
+    }
+    /// Tag-based `ExpectedToken` for static/path expected spellings.
+    ///
+    /// WHAT: retains the expected static/path descriptor plus the caller-projected
+    ///       found token from the compact projection.
+    /// WHY: the found side arrives as a `DiagnosticToken` built with
+    ///      `from_string_tag`, `from_static_tag`, `try_from_token_ref`, or
+    ///      the infallible `from_token_ref` over a validated view; malformed
+    ///      views stay on the invariant-error lane via `token_view_invariant_error`.
+    pub(crate) fn expected_token_from_tags(
+        expected: TokenTag,
+        found: Option<DiagnosticToken>,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::ExpectedToken),
             span,
             DiagnosticPayload::ExpectedToken {
-                expected: expected.into(),
-                found: found.map(DiagnosticToken::from),
+                expected: DiagnosticToken::from_static_tag(expected),
+                found,
             },
         )
     }
 
-    pub(crate) fn unexpected_token(found: TokenKind, span: Option<SourceSpan>) -> Self {
+    /// Infallible `ExpectedToken` over validated source token views.
+    pub(crate) fn expected_token_from_ref(
+        expected: TokenTag,
+        found: Option<TokenRef<'_>>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        let found = found.map(DiagnosticToken::from_token_ref);
+        Self::expected_token_from_tags(expected, found, span)
+    }
+
+    /// Tag-based `UnexpectedToken` for callsites holding a canonical view.
+    pub(crate) fn unexpected_token_from_tag(
+        found: DiagnosticToken,
+        span: Option<SourceSpan>,
+    ) -> Self {
         Self::new(
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken),
             span,
-            DiagnosticPayload::UnexpectedToken {
-                found: found.into(),
-            },
+            DiagnosticPayload::UnexpectedToken { found },
         )
+    }
+
+    /// Map a token-view failure into the compiler-invariant error lane.
+    ///
+    /// WHAT: keeps malformed compact payloads as infrastructure failures.
+    /// WHY: a malformed canonical view means the validated source-token
+    ///      invariant broke; it must not become a fabricated source diagnostic.
+    pub(crate) fn token_view_invariant_error(
+        error: TokenViewError,
+        context: &'static str,
+    ) -> CompilerError {
+        CompilerError::compiler_error(format!("{context} token payload was malformed: {error:?}"))
     }
 
     pub(crate) fn unexpected_trailing_comma(span: Option<SourceSpan>) -> Self {
@@ -301,10 +349,7 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_namespace_default_name(
-        path: PathId,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub(crate) fn invalid_namespace_default_name(path: PathId, span: Option<SourceSpan>) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidNamespaceDefaultName),
             span,

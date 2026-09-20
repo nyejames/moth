@@ -15,73 +15,62 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    parse_build_config_qualifier, starts_build_config_qualifier,
+    parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
-/// True when `|` at `pipe_index` opens a value record rather than a struct shell.
+/// Cursor-view form of the shared struct-shell/record dispatch for expression-window scans.
 ///
-/// A compile-time receiving context (`#=`) treats every `|...|` initializer as a const
-/// record, including empty and malformed lists. Ordinary `=` keeps empty `| |` and
-/// `| name Type |` as struct shells, and only `| name =` / `| name ,` as records.
-pub(crate) fn pipe_opens_value_record(
-    tokens: &[Token],
+/// WHAT: reads the same newline-tolerant `|`, `name`, `=`, `,` facts through the
+/// canonical cursor view.
+/// WHY: expression field-value checks need only token-local facts; keeping the slice helper
+/// preserves the shared struct-shell grammar boundary owned with `declarations.rs`.
+fn looks_like_nested_record_literal_at_cursor(
+    cursor: &DeclarationCursor,
     pipe_index: usize,
-    compile_time: bool,
 ) -> bool {
-    if compile_time {
+    let skip_newlines = |mut probe: usize| {
+        while matches!(cursor.token_tag_at(probe), Some(TokenTag::NEWLINE)) {
+            probe += 1;
+        }
+        probe
+    };
+
+    let probe = skip_newlines(pipe_index + 1);
+    if matches!(
+        cursor.token_tag_at(probe),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
+    ) {
         return true;
     }
 
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
-    let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
-        }
-        cursor
-    };
-
-    let mut cursor = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
+    let mut probe = skip_newlines(pipe_index + 1);
+    if matches!(
+        cursor.token_tag_at(probe),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
+    ) {
         return false;
     }
-
-    if !matches!(kind_at(cursor), Some(TokenKind::Symbol(_))) {
+    if !matches!(cursor.token_tag_at(probe), Some(TokenTag::SYMBOL)) {
         return false;
     }
-
-    cursor = skip_newlines(cursor + 1);
+    probe = skip_newlines(probe + 1);
     matches!(
-        kind_at(cursor),
-        Some(TokenKind::Assign) | Some(TokenKind::Comma)
+        cursor.token_tag_at(probe),
+        Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA)
     )
-}
-
-fn looks_like_nested_record_literal(tokens: &[Token], pipe_index: usize) -> bool {
-    let kind_at = |cursor: usize| tokens.get(cursor).map(|token| &token.kind);
-    let skip_newlines = |mut cursor: usize| {
-        while matches!(kind_at(cursor), Some(TokenKind::Newline)) {
-            cursor += 1;
-        }
-        cursor
-    };
-
-    let cursor = skip_newlines(pipe_index + 1);
-    if matches!(kind_at(cursor), Some(TokenKind::TypeParameterBracket)) {
-        return true;
-    }
-
-    pipe_opens_value_record(tokens, pipe_index, false)
 }
 
 /// Parse one anonymous const record from `| name = value, ... |` syntax.
@@ -96,7 +85,7 @@ fn looks_like_nested_record_literal(tokens: &[Token], pipe_index: usize) -> bool
 /// WHY: this is the single anonymous-record grammar owner. Struct shells (`field Type`),
 /// choice payloads and signature member lists keep their own parsers.
 pub(super) fn parse_anonymous_const_record_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -110,7 +99,7 @@ pub(super) fn parse_anonymous_const_record_expression(
 
     // Empty record: `| |` (with optional authored newlines) is allowed.
     token_stream.skip_newlines();
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         token_stream.advance();
         return Ok(finish_record(Vec::new(), record_span, type_interner));
     }
@@ -119,19 +108,26 @@ pub(super) fn parse_anonymous_const_record_expression(
         // Record regions span authored lines, so blank lines between fields are layout.
         token_stream.skip_newlines();
 
-        match token_stream.current_token_kind() {
-            TokenKind::TypeParameterBracket => {
+        match token_stream.current_tag() {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 token_stream.advance();
                 break;
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(unexpected_record_end(string_table, token_stream));
             }
 
-            TokenKind::Symbol(field_name) => {
+            TokenTag::SYMBOL => {
+                let field_name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                            "anonymous record field symbol had no string payload",
+                        )
+                    })?;
                 parse_record_field(
-                    *field_name,
+                    field_name,
                     token_stream,
                     context,
                     type_interner,
@@ -154,34 +150,42 @@ pub(super) fn parse_anonymous_const_record_expression(
         // ------------------------
         //  Field separator
         // ------------------------
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
+        match token_stream.current_tag() {
+            TokenTag::COMMA => {
                 token_stream.advance();
                 token_stream.skip_newlines();
 
                 // A trailing comma before the closing pipe is allowed.
-                if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+                if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
                     token_stream.advance();
                     break;
                 }
             }
 
-            TokenKind::TypeParameterBracket => {
+            TokenTag::TYPE_PARAMETER_BRACKET => {
                 token_stream.advance();
                 break;
             }
 
-            TokenKind::Eof
-            | TokenKind::CloseParenthesis
-            | TokenKind::CloseCurly
-            | TokenKind::TemplateClose => {
+            TokenTag::EOF
+            | TokenTag::CLOSE_PARENTHESIS
+            | TokenTag::CLOSE_CURLY
+            | TokenTag::TEMPLATE_CLOSE => {
                 return Err(unexpected_record_end(string_table, token_stream));
             }
 
             _ => {
-                return Err(CompilerDiagnostic::expected_token(
-                    TokenKind::Comma,
-                    Some(token_stream.current_token_kind().to_owned()),
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "anonymous-record separator diagnostic",
+                        )
+                    })?;
+                return Err(CompilerDiagnostic::expected_token_from_tags(
+                    TokenTag::COMMA,
+                    found,
                     current_span(token_stream),
                 )
                 .into());
@@ -203,7 +207,7 @@ pub(super) fn parse_anonymous_const_record_expression(
 )]
 fn parse_record_field(
     field_name: StringId,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     fields: &mut Vec<Declaration>,
@@ -226,16 +230,25 @@ fn parse_record_field(
     seen_field_names.insert(field_name, binding_span);
     token_stream.advance(); // past the field name
 
-    let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
-        Some(parse_build_config_qualifier(
-            token_stream,
-            string_table,
-            None,
-        )?)
-    } else {
-        None
+    let mut qualifier = {
+        let parsed_qualifier = {
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            if !starts_build_config_qualifier_at_cursor(&declaration_cursor, string_table)? {
+                None
+            } else {
+                let qualifier =
+                    parse_build_config_qualifier(&mut declaration_cursor, string_table, None)?;
+                Some((qualifier, declaration_cursor.position()))
+            }
+        };
+        if let Some((qualifier, next_index)) = parsed_qualifier {
+            token_stream.set_position(next_index)?;
+            Some(qualifier)
+        } else {
+            None
+        }
     };
-    let has_initializer = token_stream.current_token_kind() == &TokenKind::Assign;
+    let has_initializer = token_stream.current_tag() == TokenTag::ASSIGN;
     if !has_initializer && qualifier.is_none() {
         // A field not followed by `=` is positional (`| a, b = 2 |`); report it through
         // the dedicated record-field reason instead of a generic `=` expectation.
@@ -250,10 +263,7 @@ fn parse_record_field(
         token_stream.advance(); // past `=`
         token_stream.skip_newlines();
 
-        if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Comma | TokenKind::Eof
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::COMMA | TokenTag::EOF) {
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
                 current_span(token_stream),
@@ -261,8 +271,16 @@ fn parse_record_field(
             .into());
         }
 
-        if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-            if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
+        if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
+            // Nested `|...|` values are rejected; the nested-record fact is token-local
+            // lookahead through the canonical cursor position.
+            let nested = token_stream
+                .declaration_cursor()
+                .map(|cursor| {
+                    looks_like_nested_record_literal_at_cursor(&cursor, cursor.position())
+                })
+                .unwrap_or(false);
+            if nested {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::NestedAnonymousConstRecord,
                     current_span(token_stream),
@@ -279,7 +297,7 @@ fn parse_record_field(
 
         // A bare `none` has no inferred option type. The qualifier carries the option contract,
         // so retain a sentinel and let the config resolver construct the typed OptionNone value.
-        if token_stream.current_token_kind() == &TokenKind::NoneLiteral && qualifier.is_some() {
+        if token_stream.current_tag() == TokenTag::NONE_LITERAL && qualifier.is_some() {
             let span = current_span(token_stream);
             token_stream.advance();
             if let Some(qualifier) = qualifier.as_mut() {
@@ -291,7 +309,13 @@ fn parse_record_field(
                 ValueMode::ImmutableOwned,
             )
         } else {
-            parse_record_field_value(token_stream, context, type_interner, string_table, path_fork)?
+            parse_record_field_value(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?
         }
     } else {
         // A qualified required field may omit its initializer so explicit inputs or builder
@@ -324,7 +348,7 @@ fn parse_record_field(
 /// `|...|` literals are rejected so each record is a single pipe-delimited region.
 /// WHY: inner records are separate declarations; the field then names that binding.
 fn parse_record_field_value(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -356,7 +380,7 @@ fn finish_record(
 
 fn unexpected_record_end(
     string_table: &mut StringTable,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> ExpressionParseError {
     CompilerDiagnostic::unexpected_end_of_file(
         Some(string_table.intern("|")),
@@ -365,9 +389,7 @@ fn unexpected_record_end(
     .into()
 }
 
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    // Record spans are token-local facts on the canonical cursor view.
+    Some(token_stream.current_span())
 }

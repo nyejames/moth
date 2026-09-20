@@ -21,7 +21,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::{
-    compile_moth_template_source, MothTemplateCompilationRequest,
+    MothTemplateCompilationRequest, compile_moth_template_source,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -759,10 +759,11 @@ fn content_source_preparation_failures_name_the_logical_source() {
     let logical_path = source_database
         .source_logical_path(span.source())
         .expect("the diagnosed source should have a logical path");
-    let scope = messages.diagnostic_render_context(0).render_path(logical_path);
+    let scope = messages
+        .diagnostic_render_context(0)
+        .render_path(logical_path);
     assert_eq!(
-        scope,
-        "docs/broken.mtf",
+        scope, "docs/broken.mtf",
         "the failure should name the logical content source, got {scope:?}"
     );
 }
@@ -1044,24 +1045,44 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
     );
     let mut prepared_paths = Vec::new();
     let mut header_count = 0;
-    for prepared in std::iter::once(&bundle.prepared_entry)
-        .chain(bundle.prepared_content_sources.iter())
+    for prepared in
+        std::iter::once(&bundle.prepared_entry).chain(bundle.prepared_content_sources.iter())
     {
         prepared_paths.push(prepared.source_file);
+        let source_owner = prepared.source_token_stream.as_ref();
+        if source_owner.is_none() {
+            assert_eq!(
+                prepared.token_count, 0,
+                "payload-only Markdown sources must not retain token owners",
+            );
+        }
         for header in &prepared.headers {
             header_count += 1;
             assert_eq!(
-                header.source_file, prepared.source_file,
-                "header source identity should match its prepared file",
+                header.tokens.source(),
+                prepared.file_id,
+                "header token range should use its prepared source identity",
             );
-            assert!(
-                source_table
-                    .paths()
-                    .starts_with(header.tokens.src_path, prepared.source_file),
-                "header token source path should remain rooted at its prepared file",
-            );
-            prepared_paths.push(header.source_file);
-            prepared_paths.push(header.tokens.src_path);
+            if let Some(source_owner) = source_owner {
+                assert_eq!(
+                    source_owner.source(),
+                    prepared.file_id,
+                    "prepared token owner should use its prepared source identity",
+                );
+                assert!(
+                    source_table
+                        .paths()
+                        .starts_with(header.declaration_path, prepared.source_file),
+                    "header declaration path should remain rooted at its prepared file",
+                );
+            } else {
+                assert!(
+                    header.tokens.is_empty() && header.token_sequence.is_none(),
+                    "payload-only Markdown headers must not retain token ranges",
+                );
+            }
+            prepared_paths.push(prepared.source_file);
+            prepared_paths.push(header.declaration_path);
         }
         prepared_paths.extend(
             prepared
@@ -1072,7 +1093,10 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
                 .map(|path| path.root),
         );
     }
-    assert!(header_count > 0, "the bundle should retain at least one header");
+    assert!(
+        header_count > 0,
+        "the bundle should retain at least one header"
+    );
     prepared_paths.sort();
     prepared_paths.dedup();
 

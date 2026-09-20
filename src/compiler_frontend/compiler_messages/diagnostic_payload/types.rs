@@ -33,6 +33,12 @@ pub enum SourceSpanCapacityResource {
     ExtendedSpan,
     LogicalPath,
     SourceIdentity,
+    /// Source-owned authored path syntax rows.
+    PathSyntax,
+    /// Source-owned numeric literal side-store rows.
+    NumericLiteral,
+    /// Source-owned token shapes/spans for one source.
+    Token,
 }
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
@@ -797,6 +803,13 @@ pub enum InvalidGenericParameterReason {
     BoundsMustUseIs,
     ListMustStayWithHeader,
     InvalidToken { found: DiagnosticToken },
+}
+impl InvalidGenericParameterReason {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::InvalidToken { found } = self {
+            found.remap_string_ids(remap);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

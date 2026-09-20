@@ -10,28 +10,29 @@
 //! called from both signature-members and body-local declaration parsers.
 
 use super::common_syntax_mistake;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Check for common signature-position mistakes before falling back to a generic error.
 ///
 /// Called from declaration-shell and signature-members parsers when an
 /// unexpected token appears while parsing parameter lists or struct fields.
 pub(crate) fn check_signature_common_mistake(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<CompilerDiagnostic> {
-    let current = token_stream.current_token_kind();
+    let current = token_stream.current_tag();
     let location = token_stream.current_span();
 
     match current {
         // `(` where `|` is expected for parameters/fields
-        TokenKind::OpenParenthesis => Some(common_syntax_mistake(
+        TokenTag::OPEN_PARENTHESIS => Some(common_syntax_mistake(
             CommonSyntaxMistakeReason::SignatureParenthesisDelimiter,
             location,
         )),
 
         // `as` is not valid in parameter/field or declaration position
-        TokenKind::As => Some(common_syntax_mistake(
+        TokenTag::AS => Some(common_syntax_mistake(
             CommonSyntaxMistakeReason::SignatureAsKeyword,
             location,
         )),

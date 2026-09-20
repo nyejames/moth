@@ -5,6 +5,7 @@
 //!      tests keep those decisions aligned without exercising unrelated statement parsing.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, Operator,
 };
@@ -32,7 +33,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, Token, TokenKind, TokenizerEntryMode,
+    TestSourceTokensBuilder, TokenTag, TokenizerEntryMode,
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
@@ -61,32 +62,42 @@ fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext, PathInte
     (scope, context, path_fork)
 }
 
-fn numeric_token_kind(value: &str, string_table: &mut StringTable) -> TokenKind {
-    TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table))
+fn numeric_token(
+    builder: &mut TestSourceTokensBuilder,
+    value: &str,
+    string_table: &mut StringTable,
+) {
+    builder
+        .push_numeric(
+            NumericLiteralToken::test_new(value, string_table),
+            LocalSpan::source_start(),
+        )
+        .expect("numeric fixture token should build");
 }
 
-fn numeric_token(value: &str, _scope: &PathId, string_table: &mut StringTable) -> Token {
-    Token::new(
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        LocalSpan::source_start(),
-    )
-}
-
-fn token(kind: TokenKind, _scope: &PathId) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+fn static_token(builder: &mut TestSourceTokensBuilder, tag: TokenTag) {
+    builder
+        .push_static(tag, LocalSpan::source_start())
+        .expect("static fixture token should build");
 }
 
 #[test]
 fn hash_in_expression_position_rejected() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
-    let tokens = vec![
-        numeric_token("1", &scope, &mut string_table),
-        token(TokenKind::Hash, &scope),
-        numeric_token("2", &scope, &mut string_table),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    numeric_token(&mut builder, "1", &mut string_table);
+    static_token(&mut builder, TokenTag::HASH);
+    numeric_token(&mut builder, "2", &mut string_table);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -106,7 +117,7 @@ fn hash_in_expression_position_rejected() {
 
     // First token: NumericLiteral(1)
     let result = dispatch_expression_token(
-        numeric_token_kind("1", &mut string_table),
+        TokenTag::NUMERIC_LITERAL,
         &mut stream,
         &context,
         &mut type_interner,
@@ -119,7 +130,7 @@ fn hash_in_expression_position_rejected() {
 
     // Second token: Hash — should error because next token is NumericLiteral, not TemplateHead
     let result = dispatch_expression_token(
-        TokenKind::Hash,
+        TokenTag::HASH,
         &mut stream,
         &context,
         &mut type_interner,
@@ -136,13 +147,19 @@ fn hash_in_expression_position_rejected() {
 #[test]
 fn hash_before_template_head_allowed() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
-    let tokens = vec![
-        token(TokenKind::Hash, &scope),
-        token(TokenKind::TemplateHead, &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    static_token(&mut builder, TokenTag::HASH);
+    static_token(&mut builder, TokenTag::TEMPLATE_HEAD);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -161,7 +178,7 @@ fn hash_before_template_head_allowed() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
     let result = dispatch_expression_token(
-        TokenKind::Hash,
+        TokenTag::HASH,
         &mut stream,
         &context,
         &mut type_interner,
@@ -178,14 +195,22 @@ fn hash_before_template_head_allowed() {
 #[test]
 fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut string_table = StringTable::default();
-    let (scope, context, mut path_fork) = test_scope(&mut string_table);
+    let (_scope, context, mut path_fork) = test_scope(&mut string_table);
     let name = string_table.intern("count");
-    let tokens = vec![
-        token(TokenKind::Negative, &scope),
-        token(TokenKind::Symbol(name), &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    static_token(&mut builder, TokenTag::NEGATIVE);
+    builder
+        .push_symbol(TokenTag::SYMBOL, name, LocalSpan::source_start())
+        .expect("symbol fixture token should build");
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
@@ -204,7 +229,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
 
     let result = dispatch_expression_token(
-        TokenKind::Negative,
+        TokenTag::NEGATIVE,
         &mut stream,
         &context,
         &mut type_interner,
@@ -229,30 +254,43 @@ fn hash_from_tokenized_source_rejected() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::default();
     let source = "result = 1 # 2";
-    let file_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let file_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(source, file_path, TokenizerEntryMode::SourceFile, &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let lexed = tokenize(
+        source,
+        file_path,
+        TokenizerEntryMode::SourceFile,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .unwrap();
-
-    // Find the tokens after "result = "
-    let mut index = 0;
-    while index < file_tokens.length {
-        if matches!(file_tokens.tokens[index].kind, TokenKind::Assign) {
-            index += 1;
-            break;
-        }
-        index += 1;
+    let range = lexed
+        .tokens
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&lexed.tokens, range)
+        .expect("test token stream must expose an AST cursor");
+    while stream.current_tag() != TokenTag::ASSIGN {
+        assert!(
+            !stream.is_at_end(),
+            "the source fixture must contain an assignment"
+        );
+        stream.advance();
     }
-
-    // Slice from after Assign to end
-    let expr_tokens: Vec<Token> = file_tokens.tokens[index..].to_vec();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, expr_tokens);
+    stream.advance();
 
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
-        scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        file_path,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -299,7 +337,9 @@ fn full_frontend_stray_hash_error() {
 fn constant_identifier_uses_module_store_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let constant_name = string_table.intern("wrapper");
 
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -329,7 +369,10 @@ fn constant_identifier_uses_module_store_tir() {
     let mut context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -347,11 +390,19 @@ fn constant_identifier_uses_module_store_tir() {
         &path_fork,
     );
 
-    let tokens = vec![
-        token(TokenKind::Symbol(constant_name), &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_symbol(TokenTag::SYMBOL, constant_name, LocalSpan::source_start())
+        .expect("symbol fixture token should build");
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);

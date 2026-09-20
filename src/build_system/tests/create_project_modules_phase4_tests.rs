@@ -204,7 +204,12 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
         &resolver,
         &source_packages,
         Some("helper"),
-        |namespace_set, _source_tree_index, package_prefix, string_table, provider_paths, path_fork| {
+        |namespace_set,
+         _source_tree_index,
+         package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
             let package_source_tree_index = namespace_set
                 .source_package_boundaries()
                 .find(|(prefix, _)| *prefix == package_prefix.expect("package boundary prefix"))

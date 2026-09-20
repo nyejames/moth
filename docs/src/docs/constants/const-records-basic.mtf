@@ -9,7 +9,7 @@ A constant can hold a fully known struct value.
     defaults #= Defaults("Moth", 2026)
 ]
 
-Read its fields during compilation or use one field in runtime code:
+Read its fields during compilation or use an ordinary field in runtime code:
 
 [codeblock, $code("moth"):
     site_title #= defaults.title
@@ -17,9 +17,22 @@ Read its fields during compilation or use one field in runtime code:
 ]
 
 The complete const record is not an ordinary runtime object. Use its fields
-instead.
+instead. A field that is itself a const record keeps the same restriction.
 
-An anonymous `| name = value |` const record uses the same `|...|` parameters
-syntax as structs and functions. Every parameter needs a value, and the list
-does not create a constructable type. Declare a child struct or record first,
-then name it as a parameter. Do not nest one `|...|` list inside another.
+### Anonymous records
+
+**Accepted queued design.** Anonymous construction uses
+@../language-overview/#mon-syntax (MON syntax) and requires all fields to fold.
+Parenthesised anonymous records and inline nesting are not yet implemented.
+
+[codeblock, $code("moth"):
+    settings #= (
+        title = "Strategy",
+        window = (width = 1280, height = 720),
+    )
+
+    width #= settings.window.width
+]
+
+Every field needs a name and a value. Anonymous construction creates a value,
+not a named type. Use an explicit constructor for a named struct.

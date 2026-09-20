@@ -32,12 +32,9 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
         ModuleRootRole::Normal,
     );
 
-    let normal_path =
-        imported_nominal_path(&project_normal, &mut string_table, &mut path_fork);
-    let support_path =
-        imported_nominal_path(&project_support, &mut string_table, &mut path_fork);
-    let builder_path =
-        imported_nominal_path(&builder_normal, &mut string_table, &mut path_fork);
+    let normal_path = imported_nominal_path(&project_normal, &mut string_table, &mut path_fork);
+    let support_path = imported_nominal_path(&project_support, &mut string_table, &mut path_fork);
+    let builder_path = imported_nominal_path(&builder_normal, &mut string_table, &mut path_fork);
 
     assert_eq!(
         path_fork.render_portable(normal_path, &string_table, &mut scratch),
@@ -52,13 +49,15 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
         "<imported>/builder/shared/normal/cards/Card"
     );
 
-    let mut formerly_colliding_authored_path =
-        path_fork
-            .try_intern_portable_path("__imported", &mut string_table)
-            .expect("test path fits");
+    let mut formerly_colliding_authored_path = path_fork
+        .try_intern_portable_path("__imported", &mut string_table)
+        .expect("test path fits");
     for component in ["project", "shared", "normal", "cards", "Card"] {
         formerly_colliding_authored_path = path_fork
-            .try_intern_child(formerly_colliding_authored_path, string_table.intern(component))
+            .try_intern_child(
+                formerly_colliding_authored_path,
+                string_table.intern(component),
+            )
             .expect("test path fits");
     }
     assert_ne!(normal_path, formerly_colliding_authored_path);
@@ -83,7 +82,6 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
         );
     }
 }
-
 
 fn origin(package: StablePackageIdentity, role: ModuleRootRole) -> OriginTypeId {
     OriginTypeId::new(

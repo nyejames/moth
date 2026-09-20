@@ -136,7 +136,9 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
 
     let mut local_string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut local_string_table).expect("test path fits");
+    let start_name_path = path_fork
+        .try_intern_portable_path("start_entry", &mut local_string_table)
+        .expect("test path fits");
 
     let option_value_name = local_string_table.intern("value");
     let mut hir_module = minimal_hir_module(start_name_path);
@@ -217,10 +219,13 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     );
 
     let mut module = Module {
-        executable: ModuleExecutable { hir: hir_module,
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis, path_table: Arc::new(path_table), },
+        executable: ModuleExecutable {
+            hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis,
+            path_table: Arc::new(path_table),
+        },
         link_facts,
         metadata: ModuleCompilerMetadata {
             entry_point: entry_point.clone(),
@@ -301,10 +306,13 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     let module = Module {
-        executable: ModuleExecutable { hir: hir_module,
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],
@@ -1317,7 +1325,9 @@ fn lane_module_with_generated_and_cross_module_calls(
     cross_module_calls: &[OriginFunctionId],
 ) -> Module {
     let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut StringTable::new()).expect("test path fits");
+    let start_name_path = path_fork
+        .try_intern_portable_path("start_entry", &mut StringTable::new())
+        .expect("test path fits");
     let mut hir_module = minimal_hir_module(start_name_path);
     if let Some(identity) = generated_call {
         hir_module.blocks[0].statements.push(HirStatement {
@@ -1344,10 +1354,13 @@ fn lane_module_with_generated_and_cross_module_calls(
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable { hir: hir_module,
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],
@@ -1638,15 +1651,20 @@ fn generated_test_summary() -> PublicCallSummary {
 
 fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
     let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork.try_intern_portable_path("start_entry", &mut StringTable::new()).expect("test path fits");
+    let start_name_path = path_fork
+        .try_intern_portable_path("start_entry", &mut StringTable::new())
+        .expect("test path fits");
     let hir_module = minimal_hir_module(start_name_path);
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable { hir: hir_module,
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],

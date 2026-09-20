@@ -1,8 +1,6 @@
 //! Generated sidecar environment construction, emission and evidence installation.
 use super::super::MaterialisedGenericAst;
-use super::super::{
-    GenericFunctionBody, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
-};
+use super::super::{GenericFunctionInstantiationRequest, GenericFunctionTemplate};
 use super::frozen_syntax::StableBodySyntax;
 use super::nominal_blueprints::intern_generated_canonical_type;
 use super::preparation_freeze::ModuleMaterialisationPreparation;
@@ -61,6 +59,9 @@ use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+type MaterialisedSidecarOutcome = (AstBuildResult, PathId);
+
 impl ModuleMaterialisationPreparation {
     pub(crate) fn build_environment(
         &self,
@@ -72,7 +73,7 @@ impl ModuleMaterialisationPreparation {
         let mut declaration_table =
             TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
         let mut resolved_module_constants = ResolvedConstantSet::default();
-        let mut generated_type_environment = self.type_environment.clone();
+        let mut generated_type_environment = self.type_environment.fork_for_generated();
         let mut template_materialiser = GeneratedFoldedValueMaterialiser {
             type_environment: &mut generated_type_environment,
             external_registry: &self.external_package_registry,
@@ -116,7 +117,7 @@ impl ModuleMaterialisationPreparation {
 
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
-            binding_environment: self.binding_environment.clone(),
+            binding_environment: Rc::clone(&self.binding_environment),
             warnings: Vec::new(),
             declaration_table: Rc::new(declaration_table),
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
@@ -146,15 +147,13 @@ impl ModuleMaterialisationPreparation {
         Ok(AstModuleEnvironment {
             lookups: Rc::new(lookups),
             generated_evidence_pairs: Rc::new(FxHashSet::default()),
-            type_environment: self.type_environment.clone(),
+            type_environment: generated_type_environment,
             resolved_public_type_roots: Default::default(),
             resolved_public_trait_roots: Vec::new(),
         })
     }
 
-    pub(crate) fn generic_function_templates(
-        &self,
-    ) -> &FxHashMap<PathId, GenericFunctionTemplate> {
+    pub(crate) fn generic_function_templates(&self) -> &FxHashMap<PathId, GenericFunctionTemplate> {
         &self.generic_function_templates_by_path
     }
 
@@ -239,21 +238,23 @@ impl ModuleMaterialisationPreparation {
                 &self.string_table,
             )
         })?;
-        let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
-            GenericFunctionBody::Materialised {
-                resolution_facts, ..
-            } => Some(resolution_facts.as_ref()),
-        };
+        // Share the declaring preparation's lazily frozen donor owner across every request.
+        // Source bodies share the cached owner; a nested body that retained its own donor pair
+        // keeps that pair.
+        let donor_identity = self.donor_identity().clone();
+        let stage0_resolution_facts = body
+            .resolution_facts()
+            .map(Arc::as_ref)
+            .or(self.stage0_resolution_facts.as_deref());
         let frozen_identity_handle = body
             .frozen_identity_handle()
             .cloned()
             .unwrap_or_else(|| self.frozen_identity_handle.clone());
         let stable_body = StableBodySyntax::capture(
-            body.tokens(),
+            body,
             template.source_file,
             path_fork,
-            &self.string_table,
+            Some(&donor_identity),
             stage0_resolution_facts,
             frozen_identity_handle,
             &content_value_at_path,
@@ -267,21 +268,19 @@ impl ModuleMaterialisationPreparation {
             let Some(nested_body) = nested_template.body_tokens.as_ref() else {
                 continue;
             };
-            let nested_stage0_resolution_facts = match nested_body {
-                GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
-                GenericFunctionBody::Materialised {
-                    resolution_facts, ..
-                } => Some(resolution_facts.as_ref()),
-            };
+            let nested_stage0_resolution_facts = nested_body
+                .resolution_facts()
+                .map(Arc::as_ref)
+                .or(self.stage0_resolution_facts.as_deref());
             let nested_frozen_identity_handle = nested_body
                 .frozen_identity_handle()
                 .cloned()
                 .unwrap_or_else(|| self.frozen_identity_handle.clone());
             let stable_nested_body = StableBodySyntax::capture(
-                nested_body.tokens(),
+                nested_body,
                 nested_template.source_file,
                 path_fork,
-                &self.string_table,
+                Some(&donor_identity),
                 nested_stage0_resolution_facts,
                 nested_frozen_identity_handle,
                 &content_value_at_path,
@@ -294,8 +293,9 @@ impl ModuleMaterialisationPreparation {
             .fork_materialisation_string_table(boundary_string_table)
             .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
         let source_file = template.source_file;
+        let identity_tables = body.source_identity_tables();
         let materialised_body = stable_body
-            .materialise(source_file, path_fork, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table, identity_tables)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -348,10 +348,14 @@ impl ModuleMaterialisationPreparation {
                     )
                 })
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-            generated_template.body_tokens = Some(materialised_body.into_generic_body());
+            generated_template.body_tokens = Some(
+                materialised_body
+                    .into_generic_body()
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?,
+            );
             for (path, source_file, stable_nested_body) in stable_nested_bodies {
                 let materialised_nested_body = stable_nested_body
-                    .materialise(source_file, path_fork_ref, string_table_ref)
+                    .materialise(source_file, path_fork_ref, string_table_ref, None)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
                 let nested_template = lookups
                     .generic_function_templates_by_path
@@ -362,7 +366,13 @@ impl ModuleMaterialisationPreparation {
                         )
                     })
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-                nested_template.body_tokens = Some(materialised_nested_body.into_generic_body());
+                nested_template.body_tokens = Some(
+                    materialised_nested_body
+                        .into_generic_body()
+                        .map_err(|error| {
+                            CompilerMessages::from_error_ref(error, string_table_ref)
+                        })?,
+                );
             }
         }
         let (build_result, instance_path) = emit_materialised_sidecar(
@@ -414,7 +424,7 @@ pub(super) fn emit_materialised_sidecar<PrimarySource>(
     primary_source: &PrimarySource,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<(AstBuildResult, PathId), CompilerMessages>
+) -> Result<MaterialisedSidecarOutcome, CompilerMessages>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -426,13 +436,14 @@ where
         requester_call_span,
     } = request;
     let type_arguments = identity.type_arguments();
+    let nominal_source = (primary_source, requester_context);
     let mut materialised_type_arguments = Vec::with_capacity(type_arguments.len());
     for canonical_identity in type_arguments {
         let type_id = intern_generated_canonical_type(
             canonical_identity,
             &mut environment.type_environment,
             phase_context.external_package_registry.as_ref(),
-            requester_context,
+            &nominal_source,
             string_table,
             path_fork,
         )
@@ -464,11 +475,15 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstEmit,
             phase_context.timing_context
         );
-        AstEmitter::new(phase_context, &mut environment, 1, path_fork)
-            .with_generic_call_site_identity_handle(
-                requester_context.frozen_identity_handle.clone(),
-            )
-            .emit_generated_request(request, string_table)?
+        AstEmitter::new(
+            phase_context,
+            &mut environment,
+            1,
+            path_fork,
+            FxHashMap::default(),
+        )
+        .with_generic_call_site_identity_handle(requester_context.frozen_identity_handle.clone())
+        .emit_generated_request(request, string_table)?
     };
 
     let mut build_result = {
@@ -477,7 +492,11 @@ where
             crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
             phase_context.timing_context
         );
-        AstFinalizer::new(phase_context, environment, path_fork).finalize(emitted, &[], string_table)?
+        AstFinalizer::new(phase_context, environment, path_fork).finalize(
+            emitted,
+            &[],
+            string_table,
+        )?
     };
     // The declaring source owns authored field provenance. Imported or synthetic requester
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.

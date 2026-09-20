@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
@@ -9,12 +10,35 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path.to_owned(), &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown template should parse");
     let spans = collect_formatted_body_text_spans_from_tir(&template, &context);
 
     assert!(
@@ -113,12 +137,35 @@ fn markdown_formatter_produces_formatted_tir_output() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
-        template_tokens_from_source("[$md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path.to_owned(), &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("markdown template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("markdown template should parse");
 
     let formatted_body = collect_formatted_body_text_from_tir(&template, &context, &string_table);
 

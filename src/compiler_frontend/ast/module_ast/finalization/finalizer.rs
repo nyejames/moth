@@ -55,7 +55,8 @@ use super::debug_type_validation::debug_validate_type_ids_for_hir;
 pub(in crate::compiler_frontend::ast) struct AstFinalizer<'context, 'services> {
     pub(super) context: &'context AstPhaseContext<'services>,
     pub(super) environment: AstModuleEnvironment,
-    pub(super) path_fork: &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    pub(super) path_fork:
+        &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 impl<'context, 'services> AstFinalizer<'context, 'services> {
@@ -262,7 +263,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.path_fork
-                .try_intern_child(self.context.entry_dir, string_table.intern(IMPLICIT_START_FUNC_NAME))
+                .try_intern_child(
+                    self.context.entry_dir,
+                    string_table.intern(IMPLICIT_START_FUNC_NAME),
+                )
                 .expect("path table exhausted while creating implicit start function path")
         });
 

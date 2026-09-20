@@ -20,7 +20,6 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-
 /// Fold every body-local const record in `nodes` into `store`.
 ///
 /// Module-constant paths already present in the store are skipped. Body-local rows are path

@@ -189,7 +189,9 @@ fn struct_type_identity_is_nominal_and_const_record_sensitive_only() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let path = path_fork.try_intern_portable_path("User", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("User", &mut string_table)
+        .expect("test path fits");
 
     let (_, runtime_a) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -226,7 +228,9 @@ fn generic_instance_same_arguments_are_compatible() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let pair_path = path_fork.try_intern_portable_path("Pair", &mut string_table).expect("test path fits");
+    let pair_path = path_fork
+        .try_intern_portable_path("Pair", &mut string_table)
+        .expect("test path fits");
 
     let (pair_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -253,7 +257,9 @@ fn const_record_generic_instance_is_not_compatible_with_runtime_generic_instance
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let pair_path = path_fork.try_intern_portable_path("Pair", &mut string_table).expect("test path fits");
+    let pair_path = path_fork
+        .try_intern_portable_path("Pair", &mut string_table)
+        .expect("test path fits");
 
     let (runtime_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -285,7 +291,9 @@ fn generic_instance_argument_order_still_matters() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let pair_path = path_fork.try_intern_portable_path("Pair", &mut string_table).expect("test path fits");
+    let pair_path = path_fork
+        .try_intern_portable_path("Pair", &mut string_table)
+        .expect("test path fits");
 
     let (pair_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),

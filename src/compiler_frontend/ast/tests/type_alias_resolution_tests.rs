@@ -100,8 +100,7 @@ Holder = |
         ast.type_environment.builtins().int
     );
 
-    let items_type_id =
-        field_type_id(&ast, holder_type_id, "items", &mut string_table, &path_fork);
+    let items_type_id = field_type_id(&ast, holder_type_id, "items", &mut string_table, &path_fork);
     assert_eq!(
         ast.type_environment
             .collection_shape(items_type_id)
@@ -111,8 +110,7 @@ Holder = |
         "collection alias element must keep the local nominal identity of Task"
     );
 
-    let maybe_type_id =
-        field_type_id(&ast, holder_type_id, "maybe", &mut string_table, &path_fork);
+    let maybe_type_id = field_type_id(&ast, holder_type_id, "maybe", &mut string_table, &path_fork);
     assert_eq!(
         ast.type_environment.option_inner_type(maybe_type_id),
         Some(task_type_id),
@@ -145,13 +143,7 @@ Holder = |
         "Priority should be registered as a choice"
     );
     assert_eq!(
-        field_type_id(
-            &ast,
-            holder_type_id,
-            "level",
-            &mut string_table,
-            &path_fork,
-        ),
+        field_type_id(&ast, holder_type_id, "level", &mut string_table, &path_fork,),
         priority_type_id,
         "choice alias must keep the local nominal identity of Priority"
     );
@@ -176,13 +168,7 @@ Holder = |
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
 
     assert_eq!(
-        field_type_id(
-            &ast,
-            holder_type_id,
-            "item",
-            &mut string_table,
-            &path_fork,
-        ),
+        field_type_id(&ast, holder_type_id, "item", &mut string_table, &path_fork,),
         item_type_id,
         "alias chain must resolve to the final local nominal identity"
     );
@@ -202,8 +188,7 @@ Holder = |
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let holder_type_id = nominal_type_id(&ast, &mut string_table, "Holder", &mut path_fork);
-    let names_type_id =
-        field_type_id(&ast, holder_type_id, "names", &mut string_table, &path_fork);
+    let names_type_id = field_type_id(&ast, holder_type_id, "names", &mut string_table, &path_fork);
 
     // The member uses an alias that names a constant-dependent alias, so both aliases must be
     // published from the constant walk before this shell is built. A provisional target would

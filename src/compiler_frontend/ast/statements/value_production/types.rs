@@ -14,7 +14,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-
 /// Values produced by a `then` statement inside a value-producing block.
 ///
 /// WHAT: one or more expressions that are returned from the nearest active value-producing

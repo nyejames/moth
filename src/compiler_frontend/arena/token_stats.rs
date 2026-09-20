@@ -1,10 +1,10 @@
 //! Cheap per-file token classification for arena capacity estimates.
 //!
-//! WHAT: counts simple token-kind categories while tokenization already produces tokens.
+//! WHAT: counts simple TokenTag categories while tokenization already produces tokens.
 //! WHY: these counts are policy-only seeds for capacity heuristics; they never affect
 //!      diagnostics, ordering, lowering, type identity, or emitted artifacts.
 
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::{TokenShape, TokenTag};
 
 /// Cheap token counts gathered during lexing.
 ///
@@ -30,103 +30,82 @@ pub(crate) struct TokenStats {
 }
 
 impl TokenStats {
-    /// Update all category counters for one emitted token.
+    /// Update all category counters for one canonical source token.
     ///
-    /// WHAT: classifies a single `TokenKind` into the cheap buckets used for capacity estimates.
-    /// WHY: called once per token during the existing tokenization loop, avoiding a separate
-    ///      full-token traversal.
-    pub(crate) fn accumulate(&mut self, kind: &TokenKind) {
+    /// WHAT: classifies a single canonical `TokenShape` into the cheap buckets used for
+    ///      capacity estimates. `TokenTag` (and its schema authority) is the single
+    ///      classification source; no second hand-maintained operator table lives here.
+    /// WHY: called once per token while source-token construction already packs shapes,
+    ///      avoiding both a separate full-token traversal and a second classification pass.
+    pub(crate) fn accumulate_shape(&mut self, shape: TokenShape) {
+        self.accumulate_tag(shape.tag());
+    }
+
+    /// Update all category counters for one stable token tag.
+    ///
+    /// WHAT: the tag-level classification behind every `TokenStats` entry point, so shape
+    ///      and tag inputs share one bucket decision.
+    /// WHY: keeps the schema as the single classification authority for capacity seeds.
+    pub(crate) fn accumulate_tag(&mut self, tag: TokenTag) {
         self.total_tokens += 1;
 
-        match kind {
-            TokenKind::Symbol(_) => {
-                self.symbols += 1;
-            }
+        if tag.is_stats_symbol() {
+            self.symbols += 1;
+            return;
+        }
 
-            TokenKind::StringSliceLiteral(_)
-            | TokenKind::RawStringLiteral(_)
-            | TokenKind::NumericLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::NoneLiteral => {
-                self.literals += 1;
-            }
+        if tag.is_stats_literal() {
+            self.literals += 1;
+            return;
+        }
 
-            TokenKind::Add
-            | TokenKind::Subtract
-            | TokenKind::Multiply
-            | TokenKind::Divide
-            | TokenKind::Modulus
-            | TokenKind::IntDivide
-            | TokenKind::Exponent
-            | TokenKind::Negative
-            | TokenKind::AddAssign
-            | TokenKind::SubtractAssign
-            | TokenKind::MultiplyAssign
-            | TokenKind::DivideAssign
-            | TokenKind::ModulusAssign
-            | TokenKind::ExponentAssign
-            | TokenKind::IntDivideAssign
-            | TokenKind::LessThan
-            | TokenKind::LessThanOrEqual
-            | TokenKind::GreaterThan
-            | TokenKind::GreaterThanOrEqual
-            | TokenKind::Is
-            | TokenKind::And
-            | TokenKind::Or
-            | TokenKind::Not
-            | TokenKind::Bang
-            | TokenKind::QuestionMark
-            | TokenKind::Copy
-            | TokenKind::ChannelSend
-            | TokenKind::ChannelReceive
-            | TokenKind::Ampersand
-            | TokenKind::Arrow
-            | TokenKind::FatArrow => {
-                self.operators += 1;
-            }
+        if tag.is_stats_operator() {
+            self.operators += 1;
+            return;
+        }
 
-            TokenKind::TemplateHead | TokenKind::TemplateClose | TokenKind::StartTemplateBody => {
+        match tag {
+            TokenTag::TEMPLATE_HEAD | TokenTag::TEMPLATE_CLOSE | TokenTag::START_TEMPLATE_BODY => {
                 self.template_markers += 1;
             }
 
-            TokenKind::StyleDirective(_) => {
+            TokenTag::STYLE_DIRECTIVE => {
                 self.style_directives += 1;
             }
 
-            TokenKind::Hash => {
+            TokenTag::HASH => {
                 self.hashes += 1;
             }
 
-            TokenKind::If => {
+            TokenTag::IF => {
                 self.if_tokens += 1;
             }
 
-            TokenKind::Loop => {
+            TokenTag::LOOP => {
                 self.loop_tokens += 1;
             }
 
-            TokenKind::Catch => {
+            TokenTag::CATCH => {
                 self.catch_tokens += 1;
             }
 
-            TokenKind::Then => {
+            TokenTag::THEN => {
                 self.then_tokens += 1;
             }
 
-            TokenKind::Return | TokenKind::ReturnBang => {
+            TokenTag::RETURN | TokenTag::RETURN_BANG => {
                 self.return_tokens += 1;
             }
 
-            TokenKind::Cast | TokenKind::CastBang => {
+            TokenTag::CAST | TokenTag::CAST_BANG => {
                 self.cast_tokens += 1;
             }
 
-            TokenKind::Mutable => {
+            TokenTag::MUTABLE => {
                 self.mutable_markers += 1;
             }
 
-            TokenKind::OpenCurly | TokenKind::CloseCurly | TokenKind::Comma => {
+            TokenTag::OPEN_CURLY | TokenTag::CLOSE_CURLY | TokenTag::COMMA => {
                 self.map_or_collection_delimiters += 1;
             }
 

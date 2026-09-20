@@ -32,9 +32,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathIdRemap, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -152,7 +150,6 @@ impl StableNominalBinding {
     }
 }
 
-
 #[derive(Clone)]
 pub(super) enum StableFunctionTarget {
     Imported(OriginFunctionId),
@@ -239,6 +236,39 @@ impl MaterialisationNominalSource for GenericTemplateArtefact {
         &self,
     ) -> impl Iterator<Item = (&CanonicalTypeIdentity, &NominalMaterialisationBlueprint)> + '_ {
         self.nominal_blueprints.iter()
+    }
+}
+
+/// Borrowed composition of two nominal blueprint authorities.
+///
+/// The declaring source is preferred so authored provenance remains authoritative; requester
+/// blueprints fill only identities not retained by that source. The composition owns neither map,
+/// which keeps source lifetime and publication ownership unchanged.
+impl<P, R> MaterialisationNominalSource for (&P, &R)
+where
+    P: MaterialisationNominalSource,
+    R: MaterialisationNominalSource,
+{
+    const SOURCE_LABEL: &'static str = "declaring and requester blueprint sources";
+
+    fn nominal_blueprint(
+        &self,
+        identity: &CanonicalTypeIdentity,
+    ) -> Option<&NominalMaterialisationBlueprint> {
+        self.0
+            .nominal_blueprint(identity)
+            .or_else(|| self.1.nominal_blueprint(identity))
+    }
+
+    fn nominal_blueprints(
+        &self,
+    ) -> impl Iterator<Item = (&CanonicalTypeIdentity, &NominalMaterialisationBlueprint)> + '_ {
+        let primary = self.0;
+        primary.nominal_blueprints().chain(
+            self.1
+                .nominal_blueprints()
+                .filter(move |(identity, _)| primary.nominal_blueprint(identity).is_none()),
+        )
     }
 }
 

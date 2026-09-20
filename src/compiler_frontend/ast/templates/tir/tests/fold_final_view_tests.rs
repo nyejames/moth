@@ -872,7 +872,9 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
         "range",
     );
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let item_path = path_fork.try_intern_portable_path("item", string_table).expect("test path fits");
+        let item_path = path_fork
+            .try_intern_portable_path("item", string_table)
+            .expect("test path fits");
         let mut builder = TemplateIrBuilder::new(store);
         let body = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(

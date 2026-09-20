@@ -5,21 +5,30 @@
 //! WHY: these fixtures need the context's private stable fields, so they live below the owning
 //!      artefact module instead of widening production visibility or adding test APIs there.
 
-use super::super::frozen_syntax::StableBodySyntax;
+use super::super::frozen_syntax::{StableBodyOwner, StableBodySyntax};
 use super::super::semantic_closure::StableSemanticClosure;
 use super::super::stable_types::{GenericTemplateArtefact, StableFunctionSignature};
 use super::super::visibility::StableFileVisibility;
 use super::ModuleMaterialisationContext;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 impl ModuleMaterialisationContext {
     /// Build a test-only context with one artefact per identity and no real body payload.
     pub(crate) fn from_identities_for_test(identities: Vec<GeneratedDeclarationIdentity>) -> Self {
         let frozen_identity_handle = FrozenIdentityHandle::new();
+        let empty_source_owner = TestSourceTokensBuilder::new(
+            crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        )
+        .finish()
+        .expect("canonical empty source fixture should finish");
+        let empty_token_range = empty_source_owner
+            .full_range()
+            .expect("empty canonical source should have a checked full range");
         let artefacts = identities
             .into_iter()
             .map(|declaration_identity| GenericTemplateArtefact {
@@ -34,9 +43,13 @@ impl ModuleMaterialisationContext {
                     declaration_path: PathId::ROOT,
                     donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     frozen_identity_handle: frozen_identity_handle.clone(),
-                    pool: Box::new([]),
-                    tokens: Box::new([]),
-                    path_syntax: PathSyntaxTable::default(),
+                    source_owner: StableBodyOwner {
+                        source_tokens: Arc::clone(&empty_source_owner),
+                    },
+                    token_range: empty_token_range,
+                    token_sequence: None,
+                    source_path_table: None,
+                    source_string_table: None,
                     resolved_file_references: Box::new([]),
                 },
                 signature: StableFunctionSignature {

@@ -4,15 +4,14 @@
 //! WHY: lexing owns the first precise source-location mapping and all delimiter-balancing rules;
 //! callers can run it against worker-local string tables before deterministic module aggregation.
 
-use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
     DiagnosticOperator, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::keywords::{
-    attached_bang_keyword_token_kind, is_identifier_continue, is_valid_identifier,
-    keyword_token_kind,
+    attached_bang_keyword_token_tag, classify_source_word, is_identifier_continue,
+    is_valid_identifier,
 };
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
@@ -30,7 +29,8 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode, TokenizerEntryMode,
+    SourceTokenBuildError, SourceTokens, TemplateBodyMode, TokenEmitError, TokenStream, TokenTag,
+    TokenizeMode, TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -95,47 +95,130 @@ pub(crate) fn source_span_for_bytes(
         .map_err(|error| map_span_capacity_error(source, error))
 }
 
-/// Mint the token the stream has just finished reading, from its anchored start to the cursor.
-///
-/// WHY: `return_token!` expands to this call, so every authored token in the lexer takes its
-/// span from the one encoder. A rejected extended-table row is reported through the typed
-/// diagnostic lane with the stream's own inline source-start anchor; an unrepresentable end
-/// remains a compiler-invariant failure.
-pub(crate) fn mint_token(stream: &mut TokenStream<'_>, kind: TokenKind) -> TokenizeResult<Token> {
+/// Map one direct canonical token-emission failure into the tokenizer's typed lanes.
+pub(crate) fn map_token_emit_error(error: TokenEmitError, source: SourceId) -> TokenizeFailure {
+    match error {
+        TokenEmitError::Span(error) => map_span_capacity_error(source, error),
+        TokenEmitError::Build(error) => map_source_token_build_error(error),
+        TokenEmitError::Path(
+            crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Capacity(_),
+        ) => TokenizeFailure::Diagnosed(CompilerDiagnostic::source_table_capacity(
+            crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::PathSyntax,
+        )),
+        TokenEmitError::Path(
+            crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen,
+        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+            "path syntax table was frozen during tokenization",
+        )),
+        TokenEmitError::Path(
+            crate::compiler_frontend::paths::path_syntax::PathSyntaxError::ForeignSource {
+                ..
+            },
+        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+            "path syntax table received a path row from another source",
+        )),
+        TokenEmitError::Numeric(
+            crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::Capacity(_),
+        ) => TokenizeFailure::Diagnosed(CompilerDiagnostic::source_table_capacity(
+            crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::NumericLiteral,
+        )),
+        TokenEmitError::Numeric(
+            crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::Frozen
+            | crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::Absent
+            | crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::OutOfRange {
+                ..
+            }
+            | crate::compiler_frontend::numeric_text::store::NumericLiteralStoreError::ForeignSource {
+                ..
+            },
+        ) => TokenizeFailure::Infrastructure(CompilerError::compiler_error(
+            "numeric literal store rejected a lexer-owned record",
+        )),
+    }
+}
+
+fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
-        .new_token(kind)
-        .map_err(|error| map_span_capacity_error(source, error))
+        .emit_static(tag)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+fn emit_symbol(
+    stream: &mut TokenStream<'_>,
+    value: crate::compiler_frontend::symbols::string_interning::StringId,
+) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_symbol(value)
+        .map_err(|error| map_token_emit_error(error, source))
 }
 
-#[macro_export]
-macro_rules! return_token {
-    ($kind:expr, $stream:expr $(,)?) => {
-        return $crate::compiler_frontend::tokenizer::lexer::mint_token($stream, $kind)
-    };
+fn emit_style_directive(
+    stream: &mut TokenStream<'_>,
+    value: crate::compiler_frontend::symbols::string_interning::StringId,
+) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_style_directive(value)
+        .map_err(|error| map_token_emit_error(error, source))
 }
 
+fn emit_char(stream: &mut TokenStream<'_>, value: char) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_char(value)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn emit_bool(stream: &mut TokenStream<'_>, value: bool) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_bool(value)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn emit_keyword(
+    stream: &mut TokenStream<'_>,
+    tag: TokenTag,
+    bool_value: Option<bool>,
+) -> TokenizeResult<TokenTag> {
+    match bool_value {
+        Some(value) => emit_bool(stream, value),
+        None => emit_static(stream, tag),
+    }
+}
+
+/// Canonical output of one lexer pass.
+#[derive(Debug)]
+pub(crate) struct LexedSource {
+    pub(crate) tokens: std::sync::Arc<SourceTokens>,
+    pub(crate) path_syntax:
+        std::sync::Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>,
+    pub(crate) logical_path: PathId,
+    pub(crate) file_id: SourceId,
+}
 /// Immediate lexical surroundings for the next token.
 ///
-/// WHAT: carries the previous emitted token and the previous non-newline token into token
-/// recognition.
+/// WHAT: carries the tags of the previous emitted token and the previous non-newline token
+/// into token recognition.
 /// WHY: signed literals and spacing diagnostics need a small amount of left context, but the
-/// tokenizer must not ask AST parsing whether a token is in expression position.
+/// tokenizer must not ask AST parsing whether a token is in expression position. Tags carry
+/// every fact those decisions read, so the loop keeps no token payload alive.
 #[derive(Clone, Copy)]
-struct LexerTokenContext<'a> {
-    previous_token_kind: Option<&'a TokenKind>,
-    last_meaningful_token_kind: Option<&'a TokenKind>,
-    meaningful_token_before_last_kind: Option<&'a TokenKind>,
+struct LexerTokenContext {
+    previous_token_tag: Option<TokenTag>,
+    last_meaningful_token_tag: Option<TokenTag>,
+    meaningful_token_before_last_tag: Option<TokenTag>,
 }
 
-impl<'a> LexerTokenContext<'a> {
+impl LexerTokenContext {
     fn previous_can_end_expression(self) -> bool {
-        self.last_meaningful_token_kind
-            .is_some_and(TokenKind::can_end_expression)
+        self.last_meaningful_token_tag
+            .is_some_and(TokenTag::can_end_expression)
     }
 
     fn has_leading_whitespace(self, whitespace_before_current: bool) -> bool {
-        matches!(self.previous_token_kind, Some(TokenKind::Newline)) || whitespace_before_current
+        self.previous_token_tag == Some(TokenTag::NEWLINE) || whitespace_before_current
     }
 }
 
@@ -155,11 +238,8 @@ fn next_char_is_missing_rhs_boundary(stream: &mut TokenStream<'_>) -> bool {
 ///       expression-ending context from the preceding line.
 /// WHY: the AST match parser owns arm recognition after tokenization, but signed
 ///      numeric tokenization must decide before that parser can see the `=>`.
-fn line_initial_match_arm_header(
-    stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
-) -> bool {
-    if !matches!(context.previous_token_kind, Some(TokenKind::Newline)) {
+fn line_initial_match_arm_header(stream: &mut TokenStream<'_>, context: LexerTokenContext) -> bool {
+    if context.previous_token_tag != Some(TokenTag::NEWLINE) {
         return false;
     }
 
@@ -455,7 +535,7 @@ fn unary_negation_spacing_error(
 /// later parsing can reinterpret the same characters in a less readable way.
 fn require_symbolic_spacing(
     stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
     construct: SymbolicSpacingConstruct,
 ) -> TokenizeResult<()> {
@@ -475,13 +555,13 @@ fn require_symbolic_spacing(
 
 fn less_than_is_template_tag_start(
     stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
 ) -> bool {
     stream.mode != TokenizeMode::Normal
         && !whitespace_before_current
         && (matches!(stream.peek(), Some('/'))
-            || (matches!(context.previous_token_kind, Some(TokenKind::TemplateClose))
+            || (context.previous_token_tag == Some(TokenTag::TEMPLATE_CLOSE)
                 && stream
                     .peek()
                     .is_some_and(|character| character.is_alphabetic())))
@@ -489,30 +569,24 @@ fn less_than_is_template_tag_start(
 
 fn greater_than_is_template_tag_end(
     stream: &TokenStream<'_>,
-    context: LexerTokenContext<'_>,
+    context: LexerTokenContext,
     whitespace_before_current: bool,
 ) -> bool {
     stream.mode != TokenizeMode::Normal
         && !whitespace_before_current
-        && matches!(context.previous_token_kind, Some(TokenKind::Symbol(_)))
+        && context.previous_token_tag == Some(TokenTag::SYMBOL)
         && matches!(
-            context.meaningful_token_before_last_kind,
-            Some(TokenKind::LessThan | TokenKind::Divide)
+            context.meaningful_token_before_last_tag,
+            Some(TokenTag::LESS_THAN | TokenTag::DIVIDE)
         )
 }
 
-/// Tokenize one source file and attach its stable file identity metadata.
-///
-/// WHAT: wraps lexing output in `FileTokens` carrying logical path and `SourceId`. Spans are
-/// encoded into the caller's `span_builder`, which the caller retains on every exit; successive
-/// tokenizations against one builder append to it.
-///
-/// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
+/// Tokenize one source file directly into its canonical source-token owner.
 #[allow(
     clippy::too_many_arguments,
     reason = "tokenization keeps the source text, path identity, entry mode, directives, mutable string/path/span state, and file identity as separate borrows"
 )]
-pub fn tokenize(
+pub(crate) fn tokenize(
     source_code: &str,
     src_path: PathId,
     entry_mode: TokenizerEntryMode,
@@ -521,53 +595,45 @@ pub fn tokenize(
     path_fork: &mut PathInternerFork,
     file_id: SourceId,
     span_builder: &mut ExtendedSpanBuilder,
-) -> TokenizeResult<FileTokens> {
-    // WHY: Estimating token capacity reduces reallocations for large files.
-    // Preliminary tests suggest a ratio of roughly 6 characters per token.
+) -> TokenizeResult<LexedSource> {
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
-
-    let mut tokens: Vec<Token> = Vec::with_capacity(initial_capacity);
-    let mut stream = TokenStream::new(source_code, file_id, entry_mode, span_builder);
-
-    // `ModuleStart` is synthetic and carries the source-local empty anchor. Its owner is the
-    // enclosing `FileTokens.file_id`, not a fabricated path/position record.
-    let mut token = Token::new(
-        TokenKind::ModuleStart,
-        crate::compiler_frontend::source::LocalSpan::source_start(),
+    let mut stream = TokenStream::with_capacity(
+        source_code,
+        file_id,
+        entry_mode,
+        span_builder,
+        initial_capacity,
     );
-    let mut last_meaningful_token_kind: Option<TokenKind> = None;
-    let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
-    let mut token_stats = TokenStats::default();
+    let mut current_tag = emit_static(&mut stream, TokenTag::MODULE_START)?;
+    let mut last_meaningful_token_tag: Option<TokenTag> = None;
+    let mut meaningful_token_before_last_tag: Option<TokenTag> = None;
 
     loop {
-        token_log!(#token);
-        token_stats.accumulate(&token.kind);
-
-        if token.kind == TokenKind::Eof {
+        token_log!(current_tag.raw(), " ", current_tag.descriptor().text());
+        if current_tag == TokenTag::EOF {
             break;
         }
 
-        tokens.push(token);
-
-        let previous_token_kind = tokens.last().map(|token| &token.kind);
-        if !matches!(previous_token_kind, Some(TokenKind::Newline)) {
-            meaningful_token_before_last_kind = last_meaningful_token_kind.clone();
-            last_meaningful_token_kind = previous_token_kind.cloned();
+        let previous_token_tag = Some(current_tag);
+        if previous_token_tag != Some(TokenTag::NEWLINE) {
+            meaningful_token_before_last_tag = last_meaningful_token_tag;
+            last_meaningful_token_tag = previous_token_tag;
         }
 
         let context = LexerTokenContext {
-            previous_token_kind,
-            last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
-            meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
+            previous_token_tag,
+            last_meaningful_token_tag,
+            meaningful_token_before_last_tag,
         };
-        token = match get_token_kind(&mut stream, style_directives, string_table, path_fork, context) {
-            Ok(next_token) => next_token,
+        current_tag = match get_token_tag(
+            &mut stream,
+            style_directives,
+            string_table,
+            path_fork,
+            context,
+        ) {
+            Ok(next_tag) => next_tag,
             Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
-                // Every lexical failure crosses this boundary while its original source
-                // builder is live. Extended-table exhaustion is terminal: capture returns
-                // the capacity failure carrying the exact range, replacing the produced
-                // diagnostic; invalid producer ranges retain the existing infrastructure
-                // error lane.
                 if let Err(error) = diagnostic.capture_preparation_span(file_id) {
                     return Err(TokenizeFailure::Infrastructure(error));
                 }
@@ -577,24 +643,47 @@ pub fn tokenize(
         };
     }
 
-    tokens.push(token);
-    let path_syntax = std::mem::replace(
+    let path_syntax = std::sync::Arc::new(std::mem::replace(
         &mut stream.path_syntax,
         crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
+    ));
+    let numeric_literals = std::mem::take(&mut stream.numeric_literals);
+    let builder = stream.take_source_tokens_builder();
+    let source_tokens = builder
+        .finish(numeric_literals)
+        .map_err(TokenizeFailure::Infrastructure)?;
+    let tokens = std::sync::Arc::new(source_tokens);
+    #[cfg(feature = "data_layout_memory_probe")]
+    crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
+        &tokens,
+        &path_syntax,
     );
-    let mut file_tokens =
-        FileTokens::new_with_identity(src_path, file_id, None, tokens, path_syntax);
-    file_tokens.token_stats = token_stats;
-    Ok(file_tokens)
+    Ok(LexedSource {
+        tokens,
+        path_syntax,
+        logical_path: src_path,
+        file_id,
+    })
 }
 
-fn get_token_kind(
+fn map_source_token_build_error(error: SourceTokenBuildError) -> TokenizeFailure {
+    match error {
+        SourceTokenBuildError::Capacity => TokenizeFailure::Diagnosed(
+            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::source_table_capacity(
+                crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource::Token,
+            ),
+        ),
+        SourceTokenBuildError::Invariant(error) => TokenizeFailure::Infrastructure(error),
+    }
+}
+
+fn get_token_tag(
     stream: &mut TokenStream<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-    context: LexerTokenContext<'_>,
-) -> TokenizeResult<Token> {
+    context: LexerTokenContext,
+) -> TokenizeResult<TokenTag> {
     // WHY: Comments do not produce tokens. A labeled loop allows the comment handler
     // to restart tokenization with `continue` instead of a recursive call, preventing
     // stack overflow in files with deep comment blocks.
@@ -611,7 +700,7 @@ fn get_token_kind(
             }
             None => {
                 stream.begin_token_bytes_at_cursor();
-                return_token!(TokenKind::Eof, stream);
+                return emit_static(stream, TokenTag::EOF);
             }
         };
 
@@ -661,11 +750,11 @@ fn get_token_kind(
                 // Skip trailing whitespace after a newline to reduce redundant tokens.
                 // The parser treats consecutive newlines as a single boundary.
                 consume_all_whitespace(stream);
-                return_token!(TokenKind::Newline, stream);
+                return emit_static(stream, TokenTag::NEWLINE);
             } else if current_char == '\r' {
                 let _ = normalize_consumed_carriage_return_newline(stream);
                 consume_all_whitespace(stream);
-                return_token!(TokenKind::Newline, stream);
+                return emit_static(stream, TokenTag::NEWLINE);
             } else {
                 current_char = match stream.next() {
                     Some(ch) => {
@@ -675,7 +764,7 @@ fn get_token_kind(
                     }
                     None => {
                         stream.begin_token_bytes_at_cursor();
-                        return_token!(TokenKind::Eof, stream);
+                        return emit_static(stream, TokenTag::EOF);
                     }
                 };
             }
@@ -690,7 +779,7 @@ fn get_token_kind(
         if current_char == '[' {
             // Nested templates begin with '[' and switch to TemplateHead mode.
             stream.push_template_mode(TokenizeMode::TemplateHead);
-            return_token!(TokenKind::TemplateHead, stream);
+            return emit_static(stream, TokenTag::TEMPLATE_HEAD);
         }
 
         if current_char == ']' {
@@ -704,7 +793,7 @@ fn get_token_kind(
 
             // Closing a template restores the parent template's mode.
             stream.pop_template_mode();
-            return_token!(TokenKind::TemplateClose, stream);
+            return emit_static(stream, TokenTag::TEMPLATE_CLOSE);
         }
 
         // Colon handling: StartTemplateBody (:) vs DoubleColon (::) vs Colon (:)
@@ -713,15 +802,15 @@ fn get_token_kind(
                 && next_char == ':'
             {
                 stream.next();
-                return_token!(TokenKind::DoubleColon, stream);
+                return emit_static(stream, TokenTag::DOUBLE_COLON);
             }
 
             if stream.mode == TokenizeMode::TemplateHead {
                 stream.set_current_template_mode(TokenizeMode::TemplateBody);
-                return_token!(TokenKind::StartTemplateBody, stream);
+                return emit_static(stream, TokenTag::START_TEMPLATE_BODY);
             }
 
-            return_token!(TokenKind::Colon, stream);
+            return emit_static(stream, TokenTag::COLON);
         }
 
         // -------------------
@@ -731,17 +820,17 @@ fn get_token_kind(
         if current_char == '$' {
             if stream.mode == TokenizeMode::TemplateHead {
                 if stream.peek() == Some(&'(') {
-                    return_token!(TokenKind::Reactive, stream);
+                    return emit_static(stream, TokenTag::REACTIVE);
                 }
 
                 return tokenize_style_directive(stream, style_directives, string_table);
             }
 
-            return_token!(TokenKind::Reactive, stream);
+            return emit_static(stream, TokenTag::REACTIVE);
         }
 
         if current_char == END_SCOPE_CHAR {
-            return_token!(TokenKind::End, stream);
+            return emit_static(stream, TokenTag::END);
         }
 
         // ----------------
@@ -758,7 +847,7 @@ fn get_token_kind(
                 && char_after_next == '\''
             {
                 stream.next(); // Consume closing quote
-                return_token!(TokenKind::CharLiteral(c), stream);
+                return emit_char(stream, c);
             };
 
             return Err(
@@ -771,11 +860,11 @@ fn get_token_kind(
         // -----------------
 
         if current_char == '(' {
-            return_token!(TokenKind::OpenParenthesis, stream);
+            return emit_static(stream, TokenTag::OPEN_PARENTHESIS);
         }
 
         if current_char == ')' {
-            return_token!(TokenKind::CloseParenthesis, stream);
+            return emit_static(stream, TokenTag::CLOSE_PARENTHESIS);
         }
 
         if current_char == '=' {
@@ -783,21 +872,21 @@ fn get_token_kind(
                 && next_char == '>'
             {
                 stream.next();
-                return_token!(TokenKind::FatArrow, stream);
+                return emit_static(stream, TokenTag::FAT_ARROW);
             }
 
             // `==` is a common equality mistake. Keep it on the existing parser diagnostic path
             // instead of reporting the first `=` as a spacing error.
             if stream.peek() != Some(&'=') {
                 let previous_is_mutable_marker =
-                    matches!(context.previous_token_kind, Some(TokenKind::Mutable));
+                    context.previous_token_tag == Some(TokenTag::MUTABLE);
                 let previous_can_start_assignment = context
-                    .previous_token_kind
-                    .is_some_and(TokenKind::can_end_expression);
+                    .previous_token_tag
+                    .is_some_and(TokenTag::can_end_expression);
 
                 if !previous_is_mutable_marker
                     && previous_can_start_assignment
-                    && !matches!(context.previous_token_kind, Some(TokenKind::Bang))
+                    && context.previous_token_tag != Some(TokenTag::BANG)
                     && !next_char_is_missing_rhs_boundary(stream)
                 {
                     let missing_left = !context.has_leading_whitespace(whitespace_before_current);
@@ -814,11 +903,11 @@ fn get_token_kind(
                 }
             }
 
-            return_token!(TokenKind::Assign, stream);
+            return emit_static(stream, TokenTag::ASSIGN);
         }
 
         if current_char == ',' {
-            return_token!(TokenKind::Comma, stream);
+            return emit_static(stream, TokenTag::COMMA);
         }
 
         if current_char == '.' {
@@ -826,30 +915,30 @@ fn get_token_kind(
                 && peeked_char == '.'
             {
                 stream.next();
-                return_token!(TokenKind::Variadic, stream);
+                return emit_static(stream, TokenTag::VARIADIC);
             }
 
-            return_token!(TokenKind::Dot, stream);
+            return emit_static(stream, TokenTag::DOT);
         }
 
         if current_char == '{' {
-            return_token!(TokenKind::OpenCurly, stream);
+            return emit_static(stream, TokenTag::OPEN_CURLY);
         }
 
         if current_char == '}' {
-            return_token!(TokenKind::CloseCurly, stream);
+            return emit_static(stream, TokenTag::CLOSE_CURLY);
         }
 
         if current_char == '|' {
-            return_token!(TokenKind::TypeParameterBracket, stream);
+            return emit_static(stream, TokenTag::TYPE_PARAMETER_BRACKET);
         }
 
         if current_char == '!' {
-            return_token!(TokenKind::Bang, stream);
+            return emit_static(stream, TokenTag::BANG);
         }
 
         if current_char == '?' {
-            return_token!(TokenKind::QuestionMark, stream);
+            return emit_static(stream, TokenTag::QUESTION_MARK);
         }
 
         // ------------------------------
@@ -885,12 +974,12 @@ fn get_token_kind(
                         operator: DiagnosticCompoundAssignmentOperator::Subtract,
                     },
                 )?;
-                return_token!(TokenKind::SubtractAssign, stream);
+                return emit_static(stream, TokenTag::SUBTRACT_ASSIGN);
             }
 
             if next_char == '>' {
                 stream.next();
-                return_token!(TokenKind::Arrow, stream);
+                return emit_static(stream, TokenTag::ARROW);
             }
 
             if next_char.is_ascii_digit() {
@@ -927,11 +1016,11 @@ fn get_token_kind(
                         operator: DiagnosticOperator::Subtract,
                     },
                 )?;
-                return_token!(TokenKind::Subtract, stream);
+                return emit_static(stream, TokenTag::SUBTRACT);
             }
 
             if !next_char_is_whitespace_or_end(stream) {
-                return_token!(TokenKind::Negative, stream);
+                return emit_static(stream, TokenTag::NEGATIVE);
             }
 
             return Err(unary_negation_spacing_error(stream)?.into());
@@ -954,7 +1043,7 @@ fn get_token_kind(
                         operator: DiagnosticCompoundAssignmentOperator::Add,
                     },
                 )?;
-                return_token!(TokenKind::AddAssign, stream);
+                return emit_static(stream, TokenTag::ADD_ASSIGN);
             }
 
             if context.previous_can_end_expression() {
@@ -966,7 +1055,7 @@ fn get_token_kind(
                         operator: DiagnosticOperator::Add,
                     },
                 )?;
-                return_token!(TokenKind::Add, stream);
+                return emit_static(stream, TokenTag::ADD);
             }
 
             return Err(CompilerDiagnostic::common_syntax_mistake(
@@ -989,7 +1078,7 @@ fn get_token_kind(
                         operator: DiagnosticCompoundAssignmentOperator::Multiply,
                     },
                 )?;
-                return_token!(TokenKind::MultiplyAssign, stream);
+                return emit_static(stream, TokenTag::MULTIPLY_ASSIGN);
             }
 
             require_symbolic_spacing(
@@ -1000,7 +1089,7 @@ fn get_token_kind(
                     operator: DiagnosticOperator::Multiply,
                 },
             )?;
-            return_token!(TokenKind::Multiply, stream);
+            return emit_static(stream, TokenTag::MULTIPLY);
         }
 
         if current_char == '/' {
@@ -1021,7 +1110,7 @@ fn get_token_kind(
                                 operator: DiagnosticCompoundAssignmentOperator::IntDivide,
                             },
                         )?;
-                        return_token!(TokenKind::IntDivideAssign, stream);
+                        return emit_static(stream, TokenTag::INT_DIVIDE_ASSIGN);
                     }
                     require_symbolic_spacing(
                         stream,
@@ -1031,7 +1120,7 @@ fn get_token_kind(
                             operator: DiagnosticOperator::IntDivide,
                         },
                     )?;
-                    return_token!(TokenKind::IntDivide, stream);
+                    return emit_static(stream, TokenTag::INT_DIVIDE);
                 }
 
                 // Divide assign (/=)
@@ -1045,7 +1134,7 @@ fn get_token_kind(
                             operator: DiagnosticCompoundAssignmentOperator::Divide,
                         },
                     )?;
-                    return_token!(TokenKind::DivideAssign, stream);
+                    return emit_static(stream, TokenTag::DIVIDE_ASSIGN);
                 }
             }
 
@@ -1057,7 +1146,7 @@ fn get_token_kind(
                     operator: DiagnosticOperator::Divide,
                 },
             )?;
-            return_token!(TokenKind::Divide, stream);
+            return emit_static(stream, TokenTag::DIVIDE);
         }
 
         if current_char == '%' {
@@ -1073,7 +1162,7 @@ fn get_token_kind(
                         operator: DiagnosticCompoundAssignmentOperator::Modulus,
                     },
                 )?;
-                return_token!(TokenKind::ModulusAssign, stream);
+                return emit_static(stream, TokenTag::MODULUS_ASSIGN);
             }
 
             require_symbolic_spacing(
@@ -1084,7 +1173,7 @@ fn get_token_kind(
                     operator: DiagnosticOperator::Modulus,
                 },
             )?;
-            return_token!(TokenKind::Modulus, stream);
+            return emit_static(stream, TokenTag::MODULUS);
         }
 
         if current_char == '^' {
@@ -1100,7 +1189,7 @@ fn get_token_kind(
                         operator: DiagnosticCompoundAssignmentOperator::Exponent,
                     },
                 )?;
-                return_token!(TokenKind::ExponentAssign, stream);
+                return emit_static(stream, TokenTag::EXPONENT_ASSIGN);
             }
 
             require_symbolic_spacing(
@@ -1111,7 +1200,7 @@ fn get_token_kind(
                     operator: DiagnosticOperator::Exponent,
                 },
             )?;
-            return_token!(TokenKind::Exponent, stream);
+            return emit_static(stream, TokenTag::EXPONENT);
         }
 
         // -------------------
@@ -1130,12 +1219,12 @@ fn get_token_kind(
                             operator: DiagnosticOperator::GreaterThanOrEqual,
                         },
                     )?;
-                    return_token!(TokenKind::GreaterThanOrEqual, stream);
+                    return emit_static(stream, TokenTag::GREATER_THAN_OR_EQUAL);
                 }
 
                 if next_char == '>' {
                     stream.next();
-                    return_token!(TokenKind::ChannelSend, stream);
+                    return emit_static(stream, TokenTag::CHANNEL_SEND);
                 }
             }
 
@@ -1149,7 +1238,7 @@ fn get_token_kind(
                     },
                 )?;
             }
-            return_token!(TokenKind::GreaterThan, stream);
+            return emit_static(stream, TokenTag::GREATER_THAN);
         }
 
         if current_char == '<' {
@@ -1164,12 +1253,12 @@ fn get_token_kind(
                             operator: DiagnosticOperator::LessThanOrEqual,
                         },
                     )?;
-                    return_token!(TokenKind::LessThanOrEqual, stream);
+                    return emit_static(stream, TokenTag::LESS_THAN_OR_EQUAL);
                 }
 
                 if next_char == '<' {
                     stream.next();
-                    return_token!(TokenKind::ChannelReceive, stream);
+                    return emit_static(stream, TokenTag::CHANNEL_RECEIVE);
                 }
             }
 
@@ -1183,7 +1272,7 @@ fn get_token_kind(
                     },
                 )?;
             }
-            return_token!(TokenKind::LessThan, stream);
+            return emit_static(stream, TokenTag::LESS_THAN);
         }
 
         if current_char == '~' {
@@ -1210,15 +1299,15 @@ fn get_token_kind(
                 }
             }
 
-            return_token!(TokenKind::Mutable, stream);
+            return emit_static(stream, TokenTag::MUTABLE);
         }
 
         if current_char == '#' {
-            return_token!(TokenKind::Hash, stream);
+            return emit_static(stream, TokenTag::HASH);
         }
 
         if current_char == '&' {
-            return_token!(TokenKind::Ampersand, stream);
+            return emit_static(stream, TokenTag::AMPERSAND);
         }
 
         // -----------------------
@@ -1239,7 +1328,7 @@ fn get_token_kind(
                 return tokenize_identifier_or_keyword(&mut token_value, stream, string_table);
             }
 
-            return_token!(TokenKind::Wildcard, stream);
+            return emit_static(stream, TokenTag::WILDCARD);
         }
 
         // Numeric literals
@@ -1270,7 +1359,7 @@ fn tokenize_style_directive(
     stream: &mut TokenStream<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     if stream.mode != TokenizeMode::TemplateHead {
         return Err(
             CompilerDiagnostic::invalid_character('$', Some(current_source_span(stream)?)).into(),
@@ -1325,7 +1414,7 @@ fn tokenize_style_directive(
     };
 
     stream.mark_current_template_body_mode(body_mode);
-    return_token!(TokenKind::StyleDirective(directive), stream);
+    emit_style_directive(stream, directive)
 }
 
 // ----------------------
@@ -1336,7 +1425,7 @@ pub(crate) fn tokenize_identifier_or_keyword(
     token_value: &mut String,
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     // WHY: Variable names and keywords can contain alphanumeric characters or underscores.
     // The loop keeps consuming identifier characters until a non-identifier boundary is
     // reached, then falls through to keyword and symbol matching.
@@ -1351,20 +1440,22 @@ pub(crate) fn tokenize_identifier_or_keyword(
             continue;
         }
 
-        if let Some(keyword_kind) = attached_bang_keyword_token_kind(token_value.as_str())
+        if attached_bang_keyword_token_tag(token_value.as_str()).is_some()
             && stream.peek() == Some(&'!')
         {
             stream.next();
-            return_token!(keyword_kind, stream);
+            let tag = attached_bang_keyword_token_tag(token_value.as_str())
+                .expect("attached keyword tag was checked above");
+            return emit_static(stream, tag);
         }
 
-        if let Some(keyword_kind) = keyword_token_kind(token_value.as_str()) {
-            return_token!(keyword_kind, stream);
+        if let Some(classified) = classify_source_word(token_value.as_str()) {
+            return emit_keyword(stream, classified.token_tag, classified.bool_value);
         }
 
         if is_valid_identifier(token_value) {
             let interned_symbol = string_table.intern(token_value);
-            return_token!(TokenKind::Symbol(interned_symbol), stream);
+            return emit_symbol(stream, interned_symbol);
         }
 
         return Err(

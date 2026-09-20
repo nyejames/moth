@@ -66,7 +66,9 @@ fn receiver_entry(
 fn collect_emitted_declaration_defaults_rejects_duplicate_function_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("dup_func", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("dup_func", &mut string_table)
+        .expect("test path fits");
     let emitted = vec![function_node(path), function_node(path)];
 
     let result = collect_emitted_declaration_defaults(&emitted);
@@ -81,7 +83,9 @@ fn collect_emitted_declaration_defaults_rejects_duplicate_function_paths() {
 fn collect_emitted_declaration_defaults_rejects_duplicate_struct_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("dup_struct", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("dup_struct", &mut string_table)
+        .expect("test path fits");
     let emitted = vec![struct_node(path), struct_node(path)];
 
     let result = collect_emitted_declaration_defaults(&emitted);
@@ -96,9 +100,15 @@ fn collect_emitted_declaration_defaults_rejects_duplicate_struct_paths() {
 fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let struct_a = path_fork.try_intern_portable_path("StructA", &mut string_table).expect("test path fits");
-    let struct_b = path_fork.try_intern_portable_path("StructB", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
+    let struct_a = path_fork
+        .try_intern_portable_path("StructA", &mut string_table)
+        .expect("test path fits");
+    let struct_b = path_fork
+        .try_intern_portable_path("StructB", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
 
     // Both methods share the bare method name "shared" but live on different receivers, so
     // by_method_name holds two entries under one name while by_receiver_and_name splits them
@@ -174,15 +184,13 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
         .expect("a consistent catalog must synchronize without error");
 
     // by_receiver_and_name entries received the synchronized primary signatures.
-    let synced_a =
-        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_a), shared_name)][0];
+    let synced_a = &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_a), shared_name)][0];
     assert_eq!(
         synced_a.signature.parameters.len(),
         2,
         "by_receiver_and_name entry for method_a must copy the primary signature"
     );
-    let synced_b =
-        &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_b), shared_name)][0];
+    let synced_b = &catalog.by_receiver_and_name[&(ReceiverKey::Struct(struct_b), shared_name)][0];
     assert_eq!(
         synced_b.signature.parameters.len(),
         3,
@@ -220,9 +228,15 @@ fn synchronize_receiver_secondary_indexes_copies_signatures_and_preserves_order(
 fn synchronize_receiver_secondary_indexes_rejects_missing_by_receiver_and_name_entry() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let struct_a = path_fork.try_intern_portable_path("StructA", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
-    let method_a = path_fork.try_intern_portable_path("method", &mut string_table).expect("test path fits");
+    let struct_a = path_fork
+        .try_intern_portable_path("StructA", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
+    let method_a = path_fork
+        .try_intern_portable_path("method", &mut string_table)
+        .expect("test path fits");
     let method_name = path_fork
         .component(method_a)
         .expect("single-component path has a name");
@@ -259,9 +273,15 @@ fn synchronize_receiver_secondary_indexes_rejects_missing_by_receiver_and_name_e
 fn synchronize_receiver_secondary_indexes_rejects_duplicate_by_receiver_and_name_entry() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let struct_a = path_fork.try_intern_portable_path("StructA", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
-    let method_a = path_fork.try_intern_portable_path("method", &mut string_table).expect("test path fits");
+    let struct_a = path_fork
+        .try_intern_portable_path("StructA", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
+    let method_a = path_fork
+        .try_intern_portable_path("method", &mut string_table)
+        .expect("test path fits");
     let method_name = path_fork
         .component(method_a)
         .expect("single-component path has a name");
@@ -307,10 +327,18 @@ fn synchronize_receiver_secondary_indexes_rejects_duplicate_by_receiver_and_name
 fn synchronize_receiver_secondary_indexes_rejects_wrong_receiver_key() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let struct_a = path_fork.try_intern_portable_path("StructA", &mut string_table).expect("test path fits");
-    let struct_b = path_fork.try_intern_portable_path("StructB", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
-    let method_a = path_fork.try_intern_portable_path("method", &mut string_table).expect("test path fits");
+    let struct_a = path_fork
+        .try_intern_portable_path("StructA", &mut string_table)
+        .expect("test path fits");
+    let struct_b = path_fork
+        .try_intern_portable_path("StructB", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
+    let method_a = path_fork
+        .try_intern_portable_path("method", &mut string_table)
+        .expect("test path fits");
     let method_name = path_fork
         .component(method_a)
         .expect("single-component path has a name");
@@ -360,10 +388,18 @@ fn synchronize_receiver_secondary_indexes_rejects_wrong_receiver_key() {
 fn synchronize_receiver_secondary_indexes_rejects_primary_path_key_mismatch() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let receiver_path = path_fork.try_intern_portable_path("Counter", &mut string_table).expect("test path fits");
-    let indexed_path = path_fork.try_intern_portable_path("indexed", &mut string_table).expect("test path fits");
-    let claimed_path = path_fork.try_intern_portable_path("claimed", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
+    let receiver_path = path_fork
+        .try_intern_portable_path("Counter", &mut string_table)
+        .expect("test path fits");
+    let indexed_path = path_fork
+        .try_intern_portable_path("indexed", &mut string_table)
+        .expect("test path fits");
+    let claimed_path = path_fork
+        .try_intern_portable_path("claimed", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
 
     let primary = receiver_entry(
         claimed_path,
@@ -387,11 +423,21 @@ fn synchronize_receiver_secondary_indexes_rejects_primary_path_key_mismatch() {
 fn synchronize_receiver_secondary_indexes_rejects_extra_secondary_entry() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let struct_a = path_fork.try_intern_portable_path("StructA", &mut string_table).expect("test path fits");
-    let struct_b = path_fork.try_intern_portable_path("StructB", &mut string_table).expect("test path fits");
-    let source_file = path_fork.try_intern_portable_path("root.moth", &mut string_table).expect("test path fits");
-    let method_a = path_fork.try_intern_portable_path("method", &mut string_table).expect("test path fits");
-    let orphan = path_fork.try_intern_portable_path("orphan", &mut string_table).expect("test path fits");
+    let struct_a = path_fork
+        .try_intern_portable_path("StructA", &mut string_table)
+        .expect("test path fits");
+    let struct_b = path_fork
+        .try_intern_portable_path("StructB", &mut string_table)
+        .expect("test path fits");
+    let source_file = path_fork
+        .try_intern_portable_path("root.moth", &mut string_table)
+        .expect("test path fits");
+    let method_a = path_fork
+        .try_intern_portable_path("method", &mut string_table)
+        .expect("test path fits");
+    let orphan = path_fork
+        .try_intern_portable_path("orphan", &mut string_table)
+        .expect("test path fits");
     let method_name = path_fork
         .component(method_a)
         .expect("single-component path has a name");

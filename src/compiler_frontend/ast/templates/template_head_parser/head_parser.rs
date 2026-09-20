@@ -35,15 +35,18 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 
 use crate::ast_log;
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -65,7 +68,8 @@ pub(crate) struct TemplateHeadParseRequest<'a, 'types> {
     pub(crate) construction_context: &'a mut TemplateConstructionContext,
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
     pub(crate) string_table: &'a mut StringTable,
-    pub(crate) path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    pub(crate) path_fork:
+        &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -78,7 +82,7 @@ struct TemplateHeadState {
 fn enforce_head_compatibility(
     state: &TemplateHeadState,
     incoming: &TemplateHeadCompatibility,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> TemplateHeadResult<()> {
     if !state.blocked_future_tags.intersects(incoming.presence_tags)
         && !state.seen_tags.intersects(incoming.required_absent_tags)
@@ -99,7 +103,7 @@ fn enforce_head_compatibility(
 /// Attach the current authored head-item span when a constructor did not
 /// already provide one.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
@@ -108,12 +112,13 @@ fn with_current_token_span(
     diagnostic
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    source_span_for(token_stream, token_stream.current_token().span)
-}
-
-fn source_span_for(token_stream: &FileTokens, span: LocalSpan) -> Option<SourceSpan> {
-    Some(SourceSpan::new(token_stream.file_id, span))
+/// Read-only current-token span on the canonical cursor view.
+///
+/// WHAT: reports the exact authored span of the head-item token without
+/// advancing the stream.
+/// WHY: head dispatch needs only token-local span facts on the canonical cursor.
+fn current_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn with_source_span(
@@ -154,11 +159,11 @@ fn parsed_template_head(
 }
 
 fn should_inline_template_head_reference(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     context: &ScopeContext,
     declaration: &Declaration,
 ) -> bool {
-    if token_stream.peek_next_token() != Some(&TokenKind::TemplateClose) {
+    if peek_next_tag(token_stream) != Some(TokenTag::TEMPLATE_CLOSE) {
         return true;
     }
 
@@ -171,6 +176,14 @@ fn should_inline_template_head_reference(
     // wrapper/source plan, so copying an already-materialized template would
     // lose that plan when the surrounding template later crosses into HIR.
     !expression_contains_runtime_slot_handoff(&declaration.value, context)
+}
+
+/// Read-only next-token lookahead on the canonical cursor view.
+///
+/// WHAT: probes the token after the current head item without advancing the stream.
+/// WHY: the inline-reference check is pure lookahead on the cached cursor view.
+fn peek_next_tag(token_stream: &AstCursor) -> Option<TokenTag> {
+    token_stream.peek_next_tag()
 }
 
 fn expression_contains_runtime_slot_handoff(
@@ -205,7 +218,7 @@ enum TemplateHeadSeparatorState {
 /// The explicit early returns make token-state exits visible in this parser
 /// state machine: each accepted boundary or diagnostic exits immediately.
 pub fn parse_template_head(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     request: TemplateHeadParseRequest<'_, '_>,
 ) -> TemplateHeadResult<ParsedTemplateHead> {
     let TemplateHeadParseRequest {
@@ -227,9 +240,9 @@ pub fn parse_template_head(
     token_stream.advance();
 
     let mut last_known_span = current_source_span(token_stream);
-    while token_stream.index < token_stream.length {
+    while token_stream.position() < token_stream.length() {
         last_known_span = current_source_span(token_stream);
-        let token = token_stream.current_token_kind().to_owned();
+        let token = token_stream.current_tag();
 
         ast_log!("Parsing template head: ", #token);
 
@@ -241,7 +254,7 @@ pub fn parse_template_head(
         // EOF inside a template head means the source was truncated before a
         // closing ] delimiter. This is a malformed template, not a valid stream
         // boundary; the user needs a structured diagnostic.
-        if token == TokenKind::Eof {
+        if token == TokenTag::EOF {
             return Err(with_current_token_span(
                 token_stream,
                 CompilerDiagnostic::unexpected_end_of_file(
@@ -253,14 +266,14 @@ pub fn parse_template_head(
         }
 
         // A closing ] without a body is a valid empty template.
-        if token == TokenKind::TemplateClose {
+        if token == TokenTag::TEMPLATE_CLOSE {
             return Ok(parsed_template_head(
                 TemplateBodyParseMode::Normal,
                 &head_state,
             ));
         }
 
-        if token == TokenKind::StartTemplateBody {
+        if token == TokenTag::START_TEMPLATE_BODY {
             if head_state
                 .seen_tags
                 .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
@@ -283,7 +296,7 @@ pub fn parse_template_head(
         }
 
         if separator_state == TemplateHeadSeparatorState::ExpectItem
-            && !matches!(token, TokenKind::If | TokenKind::Loop)
+            && !matches!(token, TokenTag::IF | TokenTag::LOOP)
             && let Some(control_flow_span) = find_unseparated_control_flow_suffix(token_stream)
         {
             return Err(with_source_span(
@@ -298,7 +311,7 @@ pub fn parse_template_head(
 
         // Make sure there is a comma before the next token.
         if separator_state == TemplateHeadSeparatorState::ExpectSeparatorOrBody {
-            if matches!(token, TokenKind::If | TokenKind::Loop) {
+            if matches!(token, TokenTag::IF | TokenTag::LOOP) {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_template_structure(
@@ -309,12 +322,21 @@ pub fn parse_template_head(
                 .into());
             }
 
-            if token != TokenKind::Comma {
+            if token != TokenTag::COMMA {
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head separator diagnostic",
+                        )
+                    })?
+                    .or_else(|| Some(DiagnosticToken::from_static_tag(token)));
                 return Err(with_current_token_span(
                     token_stream,
-                    CompilerDiagnostic::expected_token(
-                        TokenKind::Comma,
-                        Some(token),
+                    CompilerDiagnostic::expected_token_from_tags(
+                        TokenTag::COMMA,
+                        found,
                         current_source_span(token_stream),
                     ),
                 )
@@ -329,7 +351,7 @@ pub fn parse_template_head(
         let mut defer_comma_advance = false;
 
         match token {
-            TokenKind::If => {
+            TokenTag::IF => {
                 if head_state
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
@@ -355,7 +377,7 @@ pub fn parse_template_head(
                 return Ok(parsed_template_head(body_mode, &head_state));
             }
 
-            TokenKind::Loop => {
+            TokenTag::LOOP => {
                 if head_state
                     .seen_tags
                     .intersects(TemplateHeadTag::SLOT_DIRECTIVE)
@@ -381,7 +403,7 @@ pub fn parse_template_head(
                 return Ok(parsed_template_head(body_mode, &head_state));
             }
 
-            TokenKind::Else => {
+            TokenTag::ELSE => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_template_structure(
@@ -392,7 +414,7 @@ pub fn parse_template_head(
                 .into());
             }
 
-            TokenKind::Reactive => {
+            TokenTag::REACTIVE => {
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
@@ -417,7 +439,14 @@ pub fn parse_template_head(
             // expression parser so that namespace member access (`intro.content`),
             // bare dependency-namespace misuse (`intro`), field access and unknown names
             // all get structured diagnostics instead of generic `UnexpectedToken`.
-            TokenKind::Symbol(name) => {
+            TokenTag::SYMBOL => {
+                let name = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "template-head symbol token had no string payload",
+                        )
+                    })?;
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
@@ -491,7 +520,7 @@ pub fn parse_template_head(
             }
 
             // Receiver self-reference
-            TokenKind::This => {
+            TokenTag::THIS => {
                 let this_id = string_table.intern("this");
                 if let Some(reference) = context.get_reference(&this_id) {
                     enforce_head_compatibility(
@@ -528,23 +557,32 @@ pub fn parse_template_head(
                     defer_comma_advance = true;
                     apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
                 } else {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            TokenKind::This,
-                            current_source_span(token_stream),
-                        ),
-                    )
-                    .into());
+                    let span = current_source_span(token_stream);
+                    let diagnostic = token_stream
+                        .current_diagnostic_token(string_table)
+                        .map_err(|error| {
+                            CompilerDiagnostic::token_view_invariant_error(
+                                error,
+                                "template-head `this` diagnostic",
+                            )
+                        })?
+                        .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                        .unwrap_or_else(|| {
+                            CompilerDiagnostic::unexpected_token_from_tag(
+                                DiagnosticToken::from_static_tag(TokenTag::THIS),
+                                span,
+                            )
+                        });
+                    return Err(with_current_token_span(token_stream, diagnostic).into());
                 }
             }
 
             // Constants can be inserted directly into parser TIR.
             // Literal values
-            TokenKind::NumericLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::RawStringLiteral(_) => {
+            TokenTag::NUMERIC_LITERAL
+            | TokenTag::BOOL_LITERAL
+            | TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::RAW_STRING_LITERAL => {
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
@@ -580,7 +618,21 @@ pub fn parse_template_head(
             }
 
             // Path references
-            TokenKind::Path(path_id) => {
+            TokenTag::PATH => {
+                let path_id = token_stream.current_path_syntax_id().ok_or_else(|| {
+                    CompilerError::compiler_error("template-head path token had no payload")
+                })?;
+                if path_id.is_none() {
+                    return Err(CompilerError::compiler_error(
+                        "template-head path token had an absent PathSyntaxId marker",
+                    )
+                    .into());
+                }
+                token_stream.current_path_syntax()?.ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "template-head path token had no validated syntax row",
+                    )
+                })?;
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
@@ -599,7 +651,7 @@ pub fn parse_template_head(
             }
 
             // Parenthesized sub-expressions
-            TokenKind::OpenParenthesis => {
+            TokenTag::OPEN_PARENTHESIS => {
                 enforce_head_compatibility(
                     &head_state,
                     &meaningful_item_compatibility,
@@ -635,7 +687,14 @@ pub fn parse_template_head(
             }
 
             // Style and setting directives
-            TokenKind::StyleDirective(directive) => {
+            TokenTag::STYLE_DIRECTIVE => {
+                let directive = token_stream
+                    .current_string_id_in(string_table)?
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "template-head directive token had no string payload",
+                        )
+                    })?;
                 // Template directives share the `$name` token shape with style directives.
                 // Parse `$slot` / `$insert` first, then fall back to style handling.
                 head_state.has_explicit_template_directive = true;
@@ -679,36 +738,57 @@ pub fn parse_template_head(
             }
 
             // Separators
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 // Multiple commas in succession.
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(
-                        TokenKind::Comma,
-                        current_source_span(token_stream),
-                    ),
-                )
-                .into());
+                let span = current_source_span(token_stream);
+                let diagnostic = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head comma diagnostic",
+                        )
+                    })?
+                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .unwrap_or_else(|| {
+                        CompilerDiagnostic::unexpected_token_from_tag(
+                            DiagnosticToken::from_static_tag(TokenTag::COMMA),
+                            span,
+                        )
+                    });
+                return Err(with_current_token_span(token_stream, diagnostic).into());
             }
 
             // Newlines / empty things in the template head are ignored.
             // Whitespace
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 token_stream.advance();
                 continue;
             }
 
             _ => {
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(token, current_source_span(token_stream)),
-                )
-                .into());
+                let span = current_source_span(token_stream);
+                let diagnostic = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head unexpected-token diagnostic",
+                        )
+                    })?
+                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .unwrap_or_else(|| {
+                        CompilerDiagnostic::unexpected_token_from_tag(
+                            DiagnosticToken::from_static_tag(token),
+                            span,
+                        )
+                    });
+                return Err(with_current_token_span(token_stream, diagnostic).into());
             }
         }
 
         // Guard against malformed or truncated synthetic token streams.
-        if token_stream.index >= token_stream.length {
+        if token_stream.position() >= token_stream.length() {
             return Err(with_source_span(
                 CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern("]")),
@@ -719,7 +799,7 @@ pub fn parse_template_head(
             .into());
         }
 
-        if token_stream.current_token_kind() == &TokenKind::StartTemplateBody {
+        if token_stream.current_tag() == TokenTag::START_TEMPLATE_BODY {
             token_stream.advance();
             return Ok(parsed_template_head(
                 TemplateBodyParseMode::Normal,
@@ -727,7 +807,7 @@ pub fn parse_template_head(
             ));
         }
 
-        if token_stream.current_token_kind() == &TokenKind::Eof {
+        if token_stream.current_tag() == TokenTag::EOF {
             return Err(with_current_token_span(
                 token_stream,
                 CompilerDiagnostic::unexpected_end_of_file(
@@ -738,7 +818,7 @@ pub fn parse_template_head(
             .into());
         }
 
-        if token_stream.current_token_kind() == &TokenKind::TemplateClose {
+        if token_stream.current_tag() == TokenTag::TEMPLATE_CLOSE {
             return Ok(parsed_template_head(
                 TemplateBodyParseMode::Normal,
                 &head_state,
@@ -766,7 +846,7 @@ pub fn parse_template_head(
     reason = "directive dispatch keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and registry spec as separate borrows"
 )]
 fn parse_style_directive_from_spec(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
@@ -810,31 +890,38 @@ fn parse_style_directive_from_spec(
     Ok(false)
 }
 
-/// Scans ahead for unseparated `if` / `loop` suffix tokens.
+/// Find a control-flow suffix that follows a head item without a separating comma.
 ///
-/// Early returns make the first top-level suffix span explicit.
-fn find_unseparated_control_flow_suffix(token_stream: &FileTokens) -> Option<SourceSpan> {
+/// WHAT: reports the span of the first top-level `if`/`loop` reached before a comma or a body
+/// boundary, starting from the token after the current one.
+/// WHY: the head parser turns that span into `MissingCommaBeforeControlFlowSuffix`.
+fn find_unseparated_control_flow_suffix(token_stream: &mut AstCursor) -> Option<SourceSpan> {
+    let resume = token_stream.position();
+    let end = token_stream.length();
     let mut nesting_depth = NestingDepth::default();
-    let mut index = token_stream.index + 1;
-
-    while index < token_stream.length {
-        let token = &token_stream.tokens[index];
-
+    let mut suffix_span = None;
+    token_stream.advance();
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        let tag = token_stream.current_tag();
+        // `Eof` never advances on either cursor lane, so the search ends here.
+        if tag == TokenTag::EOF {
+            break;
+        }
         if nesting_depth.is_top_level() {
-            match token.kind {
-                TokenKind::Comma | TokenKind::StartTemplateBody | TokenKind::TemplateClose => {
-                    return None;
-                }
-                TokenKind::If | TokenKind::Loop => {
-                    return Some(SourceSpan::new(token_stream.file_id, token.span));
+            match tag {
+                TokenTag::COMMA | TokenTag::START_TEMPLATE_BODY | TokenTag::TEMPLATE_CLOSE => break,
+                TokenTag::IF | TokenTag::LOOP => {
+                    suffix_span = Some(token_stream.current_span());
+                    break;
                 }
                 _ => {}
             }
         }
-
-        nesting_depth.step(&token.kind);
-        index += 1;
+        nesting_depth.step_tag(tag);
+        token_stream.advance();
     }
-
-    None
+    token_stream
+        .set_position(resume)
+        .expect("suffix span scan resume stays inside the active parser view");
+    suffix_span
 }

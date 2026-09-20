@@ -7,35 +7,66 @@ The next major plans are kept inside [plans](docs/roadmap/plans) and linked here
 Use the [Compiler Progress Matrix](docs/src/docs/progress/@page.moth) for language, compiler, memory and backend status.
 Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
 
+## Status Notes
+
+**Current validation blockers** (clippy): `CompilerMessages` representation still triggers known `result_large_err` failures.
+This is due to be fixed with the completion of the diagnostic data layout plan.
+
 ---
 
 # Plans
 
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Phase 1 is complete on main. Phase 2 complete-path interning is accepted at checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5` plus validation-lane stabilization). Next: Phase 3, starting at Slice 3A. The plan pauses after Phase 3 and is explicitly reactivated for Phase 4 later (see below).
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Phase 0 foundations and Phase 1 workflow activation are merged. Delivered on `packages-and-builder-progress-plan`: the bounded pre-checkpoint hardening slice for the five existing `@core/text` functions; `@core/math` activated ahead of order, its whole surface covered, its registration simplified and the accepted scalar expansion of thirteen functions and three constants published and implemented; and the `@core/time` v1, where the semantic contract was published first and the implementation then replaced host-defined parsing and rendering with an explicit grammar, calendar and offset validation, compiler-owned error codes, a fallible `to_iso_string` and the accepted Duration and Timestamp arithmetic. Package development is now paused by the user until accepted diagnostics Phase 3 is complete; integrating at the accepted Phase 2 checkpoint synchronises the branch without resuming the lane. Package slices that need result-slot or const-eval changes stay blocked independently.
-- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after data-layout Phase 3 and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+- [Post-Phase-3 compiler cleanup](./plans/moth-post-phase-3-tidy-up-plan.md). Complete this separate maintainer-selected checkpoint after the final Phase 3 closeout and before the MON syntax cutover.
+
+- [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Queued after final Phase 3 closeout and the separate cleanup checkpoint. Deliver parenthesised value construction through the shared argument parser, inline nested const records and a complete source/documentation cutover before MON Rust tooling and later directive work. Runtime records and MON serialisation remain separate follow-ups.
+
+- [MON v1: Rust-facing compiler tooling](./plans/mon-rust-tooling-v1-plan.md) - Queued immediately after the MON syntax checkpoint. Deliver literal-data encoding, nested-value encoding, strict schema-checked decoding and bounded fail-fast errors through the Moth Rust library for engine save files and other native consumers. Moth directives, source operations, backend integration and the static MON project builder remain deferred to the final roadmap entry.
+
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Phase 0 foundations and Phase 1 workflow activation are merged. Delivered on `packages-and-builder-progress-plan`: the bounded pre-checkpoint hardening slice for the five existing `@core/text` functions; `@core/math` activated ahead of order, its whole surface covered, its registration simplified and the accepted scalar expansion of thirteen functions and three constants published and implemented; and the `@core/time` v1, where the semantic contract was published first and the implementation then replaced host-defined parsing and rendering with an explicit grammar, calendar and offset validation, compiler-owned error codes, a fallible `to_iso_string` and the accepted Duration and Timestamp arithmetic. Package development is now paused by the user under the ordered post-Phase-3 compiler cleanup, MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval scheduling prerequisites; data-layout Phase 3 closeout `4cfd9d492` is accepted. Integrating at the accepted Phase 2 checkpoint synchronises the branch without resuming the lane. Package slices that need result-slot or const-eval changes stay blocked independently.
+
+- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after the post-Phase-3 cleanup, MON syntax and MON Rust tooling checkpoints and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+
 - [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
+
 - [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes.
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted Wiring V1 checkpoint and then the accepted native result-slot/Core const-eval checkpoint, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
+
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted post-Phase-3 cleanup, MON syntax and MON Rust tooling checkpoints, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
+
 - [Automatic Markdown heading section links](./plans/automatic-markdown-section-links-plan.md)
+
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
+
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
+
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
+
 - Improve the `tmp/test_brackets.mtf` error example.
-- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: shared directive syntax, explicit $config contracts and strict $project/$html_builder configuration
+
+- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner for general directives, explicit $config contracts and strict $project/$html_builder configuration
+
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
+
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
-- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
+
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and numeric semantics. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
+
 - [Never return contracts](./plans/never-return-contract-plan.md)
+
 - TODO plan: Struct layout directives. Define compiler-owned $layout contracts, permitted field types, alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
+
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
+
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
+
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
+
 - TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
+
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
+
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
-Parallel branches rebase after the initial squash merge, after shared compiler input or representation checkpoints land and before accepting a slice that consumes those changes. Re-run the owning validation gate after each rebase. Parallel scheduling does not remove package-specific prerequisites or permit compatibility wrappers around superseded compiler APIs.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every other currently listed roadmap item. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
 
 ## Adding and maintaining plans
 
@@ -58,6 +89,18 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## MON language integration and static builder
+
+MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format is literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The initial format and Rust compiler-library codec are queued immediately after the syntax checkpoint, not deferred with language integration.
+
+The final roadmap follow-up adds Moth-native usage and the static MON project builder. It reuses the codec, shared lexical/argument owners and ordinary Moth types rather than adding explicit serialisation traits, a second schema language or a second parser. Compiler-owned `$mon` convenience is accepted direction, but its exact invocation syntax is not defined. Source typing, automatic schema extraction, backend operations and builder commands are not delivered by the Rust-only v1 plan.
+
+Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains a collection even at a map receiving context, Unicode escapes use a shared lexical contract and `::Variant(...)` uses a known expected choice type. Track any undelivered source portions explicitly rather than assuming support from the data reader.
+
+The static builder emits compile-time-known `.mon` assets through ordinary build output ownership. Evaluated runtime templates remain ordinary serialisable Strings for consuming builders. Templates acquire no hidden schema, wire, route or subscription. Resource-bearing strings require concrete builder-assigned characters before MON encoding. Applications own schema versions, migrations and resource interpretation.
+
+Dynamic schemas, streaming, public borrowed views and additional canonical byte representations wait for concrete use cases. Canonical bytes are a serialiser policy, not a restriction on MON semantics. Publish durable contracts in the language and compiler/build authorities, with Rust tooling, source integration and builder support tracked separately in the progress matrices.
 
 ## Collector-free memory implementation
 

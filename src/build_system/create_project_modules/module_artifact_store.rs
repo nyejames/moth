@@ -259,6 +259,16 @@ impl ModuleArtifactStore {
         }
     }
 
+    /// Record probe-only generic owners retained by published materialisation contexts.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn record_memory_ledger(&self) {
+        for artifact in &self.artifacts {
+            if let Some(context) = artifact.module.metadata.materialisation_context.as_ref() {
+                context.record_memory_ledger();
+            }
+        }
+    }
+
     /// Resolve the successful artefact for one dense module identity.
     ///
     /// Returns `Ok(None)` for a diagnosed, blocked or unavailable slot. The mapping is retained

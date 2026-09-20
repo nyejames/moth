@@ -30,8 +30,8 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::Config;
@@ -337,12 +337,12 @@ impl From<CompilerError> for DirectoryPremergeFailure {
 impl From<SourceDatabaseError> for DirectoryPremergeFailure {
     fn from(error: SourceDatabaseError) -> Self {
         match error {
-            SourceDatabaseError::Capacity(capacity) => Self::project(
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+            SourceDatabaseError::Capacity(capacity) => Self::project(PremergeFailure::Diagnosed(
+                PremergeDiagnosticBatch::from_diagnostic(
                     CompilerDiagnostic::source_table_capacity(capacity.resource()),
                     StringTable::new(),
-                )),
-            ),
+                ),
+            )),
             SourceDatabaseError::Infrastructure(error) => {
                 Self::project(PremergeFailure::Infrastructure(error))
             }

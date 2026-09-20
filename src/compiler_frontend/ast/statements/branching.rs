@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::statements::match_headers::{
     ParsedMatchArmHeader, parse_match_arm_header,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
@@ -39,9 +38,11 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -80,36 +81,35 @@ pub(crate) struct ParsedMatchBlock {
     pub exhaustiveness: MatchExhaustiveness,
     pub scope: PathId,
 }
-
-/// Peek at the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token(token_stream: &FileTokens) -> Option<&Token> {
+/// Peek at the index and tag of the next non-newline token without advancing.
+///
+/// Restores the entry position before returning, including the not-found path.
+fn peek_next_non_newline(token_stream: &mut AstCursor) -> Option<(usize, TokenTag)> {
+    let resume = token_stream.position();
+    token_stream.advance();
+    let mut found = None;
+    while !token_stream.is_at_end() {
+        if token_stream.current_tag() != TokenTag::NEWLINE {
+            found = Some((token_stream.position(), token_stream.current_tag()));
+            break;
+        }
+        token_stream.advance();
+    }
     token_stream
-        .tokens
-        .iter()
-        .skip(token_stream.index + 1)
-        .find(|token| token.kind != TokenKind::Newline)
+        .set_position(resume)
+        .expect("peek resume stays inside the active parser view");
+    found
 }
 
-/// Peek at the index of the next non-newline token without advancing the stream.
-fn peek_next_non_newline_token_index(token_stream: &FileTokens) -> Option<usize> {
-    token_stream
-        .tokens
-        .iter()
-        .enumerate()
-        .skip(token_stream.index + 1)
-        .find(|(_, token)| token.kind != TokenKind::Newline)
-        .map(|(i, _)| i)
-}
-
-fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
+fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
     let else_span = Some(token_stream.current_span());
-    let Some(next_token) = token_stream.tokens.get(token_stream.index + 1) else {
+    let Some(next_tag) = token_stream.peek_next_tag() else {
         return Ok(());
     };
 
     // Statement `else if` is deliberately not a branch-chain syntax. A nested
     // `if` remains available as the first statement inside a separate `else` body.
-    if matches!(next_token.kind, TokenKind::If) {
+    if next_tag == TokenTag::IF {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
@@ -128,21 +128,23 @@ fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
 /// WHY: the single-predicate and statement-match shapes share the `if` keyword,
 /// so this entry point disambiguates them early based on token lookahead.
 pub fn create_branch(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BranchingResult<Vec<AstNode>> {
-    let header_token = token_stream
-        .tokens
-        .get(token_stream.index.saturating_sub(1));
-    let header_span = header_token
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+    let header_span = token_stream
+        .previous_span()
         .or_else(|| Some(token_stream.current_span()));
-    let parsed_header =
-        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
+    let parsed_header = parse_if_header(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     let condition = match parsed_header {
         ParsedIfHeader::OptionPresentCapture {
@@ -182,7 +184,7 @@ pub fn create_branch(
     };
 
     ast_log!("Creating If Statement");
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -196,11 +198,7 @@ pub fn create_branch(
     // selection, so retain the exact parser boundaries without rescanning calls later.
     let then_request_start = context.generic_request_checkpoint();
 
-    let then_context = context.new_child_control_flow(
-        ContextKind::Branch,
-        string_table,
-        path_fork,
-    );
+    let then_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
     let then_scope = then_context.scope;
     let then_block = function_body_to_ast(
         token_stream,
@@ -212,7 +210,7 @@ pub fn create_branch(
     )?;
     let then_request_end = context.generic_request_checkpoint();
 
-    let (else_block, else_scope) = if token_stream.current_token_kind() == &TokenKind::Else {
+    let (else_block, else_scope) = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
@@ -259,7 +257,7 @@ pub fn create_branch(
 
 fn create_option_present_capture_branch(
     parsed_header: OptionPresentCaptureBranch,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -272,7 +270,7 @@ fn create_option_present_capture_branch(
         then_context,
         header_span,
     } = parsed_header;
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -290,7 +288,7 @@ fn create_option_present_capture_branch(
         path_fork,
     )?;
 
-    let else_block = if token_stream.current_token_kind() == &TokenKind::Else {
+    let else_block = if token_stream.current_tag() == TokenTag::ELSE {
         reject_same_line_else_if(token_stream)?;
         token_stream.advance();
         let else_context =
@@ -344,7 +342,7 @@ fn create_option_present_capture_branch(
 fn create_match_node(
     scrutinee: Expression,
     header_span: Option<SourceSpan>,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -387,7 +385,7 @@ fn create_match_node(
 )]
 pub(crate) fn parse_match_block(
     scrutinee: Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -397,7 +395,7 @@ pub(crate) fn parse_match_block(
 ) -> BranchingResult<ParsedMatchBlock> {
     ast_log!("Creating Match Statement");
 
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -421,17 +419,14 @@ pub(crate) fn parse_match_block(
     loop {
         token_stream.skip_newlines();
 
-        match token_stream.current_token_kind() {
-            TokenKind::End => {
-                let next_token = peek_next_non_newline_token(token_stream);
-                let next_index = peek_next_non_newline_token_index(token_stream);
+        match token_stream.current_tag() {
+            TokenTag::END => {
+                let next = peek_next_non_newline(token_stream);
                 let semicolon_separates_same_level_arms = !seen_else
-                    && matches!(
-                        (next_token, next_index),
-                        (Some(next), Some(idx))
-                            if next.kind == TokenKind::Else
-                                || token_index_has_top_level_fat_arrow(token_stream, idx)
-                    );
+                    && next.is_some_and(|(index, tag)| {
+                        tag == TokenTag::ELSE
+                            || token_index_has_top_level_fat_arrow(token_stream, index)
+                    });
 
                 if semicolon_separates_same_level_arms {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
@@ -443,7 +438,7 @@ pub(crate) fn parse_match_block(
                 break;
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(branching_error(
                     CompilerDiagnostic::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
@@ -452,7 +447,7 @@ pub(crate) fn parse_match_block(
                 ));
             }
 
-            TokenKind::Else => {
+            TokenTag::ELSE => {
                 if arms.is_empty() {
                     return Err(branching_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
@@ -485,9 +480,8 @@ pub(crate) fn parse_match_block(
             // Normal pattern arm or malformed header — delegate to dedicated parsing.
             _ => {
                 if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
-                    debug_assert_eq!(candidate.start_index, token_stream.index);
+                    debug_assert_eq!(candidate.start_index, token_stream.position());
                     debug_assert!(candidate.arrow_index > candidate.start_index);
-
                     let parsed = parse_match_arm(
                         &scrutinee,
                         token_stream,
@@ -519,7 +513,7 @@ pub(crate) fn parse_match_block(
                     continue;
                 }
 
-                if token_is_line_initial(token_stream, token_stream.index)
+                if token_is_line_initial(token_stream, token_stream.position())
                     && current_line_contains_top_level_colon(token_stream)
                 {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
@@ -561,7 +555,7 @@ pub(crate) fn parse_match_block(
 }
 
 fn parse_else_arm(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -571,21 +565,21 @@ fn parse_else_arm(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    if token_stream.current_token_kind() == &TokenKind::Colon {
+    if token_stream.current_tag() == TokenTag::COLON {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyElseSyntax,
             Some(token_stream.current_span()),
         )));
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Arrow {
+    if token_stream.current_tag() == TokenTag::ARROW {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
         )));
     }
 
-    if token_stream.current_token_kind() != &TokenKind::FatArrow {
+    if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
@@ -617,7 +611,7 @@ fn parse_else_arm(
 /// pattern; this function does not advance before parsing.
 fn parse_match_arm(
     scrutinee: &Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -635,12 +629,12 @@ fn parse_match_arm(
         token_stream,
         match_context,
         type_interner,
-        &[TokenKind::FatArrow],
+        &[TokenTag::FAT_ARROW],
         string_table,
         path_fork,
     )?;
 
-    if token_stream.current_token_kind() != &TokenKind::FatArrow {
+    if token_stream.current_tag() != TokenTag::FAT_ARROW {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,

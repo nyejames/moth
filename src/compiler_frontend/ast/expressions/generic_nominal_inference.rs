@@ -183,8 +183,7 @@ pub(crate) fn infer_generic_nominal_constructor(
         Some(string_table.intern(input.display_name)),
         input.span,
         &evidence_context,
-    )
-    {
+    ) {
         diagnostic.primary_span = input.span;
         return Err(CallValidationError::Diagnostic(diagnostic));
     }

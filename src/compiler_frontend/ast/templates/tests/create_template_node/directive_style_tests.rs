@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -15,11 +16,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
-use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
-use std::sync::Arc;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
+use std::rc::Rc;
+use std::sync::Arc;
 
 type DirectiveStyleTestResult<T> = Result<T, CompilerDiagnostic>;
 
@@ -37,30 +38,15 @@ fn directive_tokens(
     string_table: &mut StringTable,
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
-) -> FileTokens {
-    let scope = path_fork
-        .try_intern_portable_path("main.moth/#const_template0", string_table)
-        .expect("test path fits");
+) -> TemplateSourceFixture {
     let style_directives = frontend_test_style_directives();
-    let mut tokens = tokenize(
+    template_tokens_from_source_with_style_directives(
         source,
-        scope,
-        TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        path_fork,
-        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
         span_builder,
+        path_fork,
     )
-    .expect("tokenization should succeed");
-
-    tokens.index = tokens
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::StyleDirective(_)))
-        .expect("expected a style directive token");
-
-    tokens
 }
 fn test_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
     ScopeContext::new_for_tests(
@@ -74,9 +60,8 @@ fn test_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
     .with_source_file_scope(scope)
 }
 
-
 fn parse_optional_parenthesized_expression_for_test(
-    tokens: &mut FileTokens,
+    tokens: &mut AstCursor,
     context: &ScopeContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -99,7 +84,7 @@ fn parse_optional_parenthesized_expression_for_test(
 }
 
 fn parse_required_parenthesized_expression_for_test(
-    tokens: &mut FileTokens,
+    tokens: &mut AstCursor,
     context: &ScopeContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -128,9 +113,25 @@ fn reject_arguments_succeeds_when_no_parens() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let tokens = directive_tokens("[$note]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$note]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("note");
-    let result = reject_unexpected_directive_arguments(directive_name, &tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = reject_unexpected_directive_arguments(directive_name, &cursor);
     assert!(result.is_ok());
 }
 
@@ -139,9 +140,25 @@ fn reject_arguments_fails_when_parens_present() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let tokens = directive_tokens("[$note()]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$note()]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("note");
-    let result = reject_unexpected_directive_arguments(directive_name, &tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = reject_unexpected_directive_arguments(directive_name, &cursor);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
@@ -161,9 +178,26 @@ fn optional_slot_target_no_parens_returns_default() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert_eq!(result.unwrap(), SlotKey::Default);
 }
 
@@ -172,9 +206,26 @@ fn optional_slot_target_named_string() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot(\"style\")]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot(\"style\")]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert!(matches!(result.unwrap(), SlotKey::Named(_)));
 }
 
@@ -183,9 +234,26 @@ fn optional_slot_target_positive_positional() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot(1)]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot(1)]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert_eq!(result.unwrap(), SlotKey::Positional(1));
 }
 
@@ -194,9 +262,26 @@ fn optional_slot_target_zero_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot(0)]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot(0)]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
@@ -213,10 +298,22 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens =
+        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let directive_name = string_table.intern("slot");
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
     let diagnostic = directive_diagnostic(
-        parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table)
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table)
             .expect_err("a symbol is not a valid slot target"),
     );
 
@@ -235,9 +332,26 @@ fn optional_slot_target_negative_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot(-1)]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot(-1)]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
 }
 
@@ -246,9 +360,26 @@ fn optional_slot_target_empty_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot()]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot()]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
@@ -264,14 +395,31 @@ fn optional_slot_target_missing_close_paren_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$slot(\"style\"]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$slot(\"style\"]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("slot");
-    let result = parse_optional_slot_target_argument(directive_name, &mut tokens, &string_table);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result =
+        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from(TokenKind::CloseParenthesis)
+            if expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS)
     ));
 }
 
@@ -284,14 +432,30 @@ fn required_slot_name_missing_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$insert]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$insert]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("insert");
-    let result = parse_required_slot_name_argument(directive_name, &mut tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
         DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from(TokenKind::OpenParenthesis)
+            if expected == DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS)
     ));
 }
 
@@ -300,9 +464,25 @@ fn required_slot_name_string_literal_ok() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$insert(\"style\")]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$insert(\"style\")]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("insert");
-    let result = parse_required_slot_name_argument(directive_name, &mut tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_ok());
 }
 
@@ -311,9 +491,25 @@ fn required_slot_name_positional_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$insert(1)]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$insert(1)]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("insert");
-    let result = parse_required_slot_name_argument(directive_name, &mut tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
@@ -329,9 +525,25 @@ fn required_slot_name_empty_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$insert()]", &mut string_table, &mut span_builder, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$insert()]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
     let directive_name = string_table.intern("insert");
-    let result = parse_required_slot_name_argument(directive_name, &mut tokens);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
@@ -360,10 +572,30 @@ fn optional_expression_no_parens_returns_none() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$css]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$css]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(matches!(result, Ok(None)));
 }
 
@@ -372,10 +604,30 @@ fn optional_expression_with_parens_returns_some() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$code(\"wrap\")]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$code(\"wrap\")]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(matches!(result, Ok(Some(_))));
 }
 
@@ -384,10 +636,30 @@ fn optional_expression_empty_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$code()]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$code()]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
 }
 
@@ -399,10 +671,30 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$code(\n)]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$code(\n)]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic = result.expect_err("whitespace-only directive argument should error");
     assert!(matches!(
         diagnostic.payload,
@@ -418,38 +710,73 @@ fn optional_expression_extra_comma_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$children(\"a\", \"b\")]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$children(\"a\", \"b\")]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     let diagnostic = result.unwrap_err();
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from(TokenKind::Comma)
+            if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
     ));
 }
-
-// ------------------------------------------------------------------------
-// parse_required_parenthesized_expression
-// ------------------------------------------------------------------------
-
 #[test]
 fn required_expression_missing_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$children]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_required_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$children]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     let diagnostic = result.unwrap_err();
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from(TokenKind::OpenParenthesis)
+            if expected == DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS)
     ));
 }
 
@@ -458,10 +785,30 @@ fn required_expression_compile_time_constant_ok() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut tokens = directive_tokens("[$children(\"wrap\")]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(tokens.src_path.to_owned(), &path_fork);
-    let result =
-        parse_required_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table, &mut path_fork);
+    let file_tokens = directive_tokens(
+        "[$children(\"wrap\")]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let result = parse_required_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_ok());
     let expr = result.unwrap();
     assert!(matches!(expr.kind, ExpressionKind::StringSlice(_)));
@@ -518,13 +865,34 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[\"prefix\", $insert(\"style\"): body]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
-
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("insert directive should coexist with other meaningful head items");
+    let file_tokens = template_tokens_from_source(
+        "[\"prefix\", $insert(\"style\"): body]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("insert directive should coexist with other meaningful head items");
 
     assert!(matches!(
         effective_tir_kind(&template, &context),
@@ -557,11 +925,34 @@ fn non_formatter_and_formatter_directives_can_coexist() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
-        template_tokens_from_source("[1, $md:\n# Hello\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("non-formatter and formatter directives should coexist in the same head");
+    let file_tokens = template_tokens_from_source(
+        "[1, $md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("non-formatter and formatter directives should coexist in the same head");
 
     assert_eq!(effective_tir_style(&template, &context).id, "markdown");
 }
@@ -571,14 +962,36 @@ fn doc_templates_treat_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
-        template_tokens_from_source("[$doc:\n[value]\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = runtime_template_context(&token_stream.src_path, &mut string_table, &mut path_fork);
-
+    let file_tokens = template_tokens_from_source(
+        "[$doc:\n[value]\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
     // With suppress_child_templates, brackets are balanced literal text,
     // not nested child templates. Parsing succeeds even with a runtime context.
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("doc template should parse brackets as literal text");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("doc template should parse brackets as literal text");
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
     let result = string_table.resolve(folded);
@@ -603,12 +1016,34 @@ fn doc_templates_are_markdown_formatted_by_default() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
-        template_tokens_from_source("[$doc:\n# Heading\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
-
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("doc template should parse");
+    let file_tokens = template_tokens_from_source(
+        "[$doc:\n# Heading\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("doc template should parse");
     assert!(matches!(
         effective_tir_kind(&template, &context),
         TemplateType::Comment(CommentDirectiveKind::Doc)
@@ -623,12 +1058,34 @@ fn doc_brackets_remain_literal_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
-        template_tokens_from_source("[$doc:\n[: child]\n]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
-
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("doc template should parse");
+    let file_tokens = template_tokens_from_source(
+        "[$doc:\n[: child]\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("doc template should parse");
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
     let result = string_table.resolve(folded);
@@ -653,17 +1110,36 @@ fn css_without_argument_uses_css_formatter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source_with_style_directives("[$css:\n.button { color: red; }\n]",
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context_with_style_directives(
-        token_stream.src_path.to_owned(),
+    let file_tokens = template_tokens_from_source_with_style_directives(
+        "[$css:\n.button { color: red; }\n]",
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("css template should parse");
+    let source_path = file_tokens.source_path;
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "css");
@@ -676,17 +1152,36 @@ fn css_inline_argument_parses_correctly() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source_with_style_directives("[$css(\"inline\"):\ncolor: blue;\n]",
-    &style_directives,
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context_with_style_directives(
-        token_stream.src_path.to_owned(),
+    let file_tokens = template_tokens_from_source_with_style_directives(
+        "[$css(\"inline\"):\ncolor: blue;\n]",
         &style_directives,
-        &path_fork,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
     );
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("inline css template should parse");
+    let source_path = file_tokens.source_path;
+    let context =
+        new_constant_context_with_style_directives(source_path, &style_directives, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("inline css template should parse");
 
     let effective_style = effective_tir_style(&template, &context);
     assert_eq!(effective_style.id, "css");
@@ -863,13 +1358,34 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[value, $code(\"moth\"):\nloop x\n]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = runtime_template_context(&token_stream.src_path, &mut string_table, &mut path_fork);
-
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template should parse");
+    let file_tokens = template_tokens_from_source(
+        "[value, $code(\"moth\"):\nloop x\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template should parse");
 
     let store = context.template_ir_store.borrow();
     assert!(tir_root_has_head_dynamic_expression(

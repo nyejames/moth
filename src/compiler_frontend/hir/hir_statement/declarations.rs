@@ -108,9 +108,9 @@ impl<'a> HirBuilder<'a> {
             let const_id = self.allocate_const_id();
             let const_type = self.lower_type_id(row.metadata.type_id, &span)?;
             let mut path_scratch = Vec::new();
-            let name = self
-                .path_fork
-                .render_portable(*row.path, self.string_table, &mut path_scratch);
+            let name =
+                self.path_fork
+                    .render_portable(*row.path, self.string_table, &mut path_scratch);
 
             self.module.module_constants.push(HirModuleConst {
                 id: const_id,

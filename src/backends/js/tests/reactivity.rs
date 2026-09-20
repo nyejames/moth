@@ -42,7 +42,9 @@ fn lower_minimal_reactive_source_module_with_report(
     let region = RegionId(0);
 
     let source_local = LocalId(0);
-    let source_path = path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("x", &mut string_table)
+        .expect("test path fits");
 
     let block = HirBlock {
         id: BlockId(0),
@@ -71,11 +73,14 @@ fn lower_minimal_reactive_source_module_with_report(
         return_type: types.unit,
     };
 
-    let mut module = build_module(&mut path_fork, &mut string_table,
-    function_name,
-    vec![block],
-    function,
-    &[(source_local, "x")],);
+    let mut module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[(source_local, "x")],
+    );
 
     module.side_table.bind_reactive_source(HirReactiveSource {
         id: ReactiveSourceId(0),
@@ -86,12 +91,14 @@ fn lower_minimal_reactive_source_module_with_report(
         span: None,
     });
 
-    lower_hir_to_js(&module,
-    &borrow_report,
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &borrow_report,
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }
@@ -119,7 +126,9 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
     let region = RegionId(0);
 
     let source_local = LocalId(0);
-    let source_path = path_fork.try_intern_portable_path("x", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("x", &mut string_table)
+        .expect("test path fits");
     let fragments_local = LocalId(1);
 
     let template_value = HirExpression {
@@ -167,11 +176,14 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let mut module = build_module(&mut path_fork, &mut string_table,
-    function_name,
-    vec![block],
-    function,
-    &[(source_local, "x"), (fragments_local, "fragments")],);
+    let mut module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[(source_local, "x"), (fragments_local, "fragments")],
+    );
 
     module.side_table.bind_reactive_source(HirReactiveSource {
         id: ReactiveSourceId(0),
@@ -197,12 +209,14 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
             span: None,
         });
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }
@@ -246,11 +260,14 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
         return_type: types.unit,
     };
 
-    let mut module = build_module(&mut path_fork, &mut string_table,
-    function_name,
-    vec![block],
-    function,
-    &[(parameter, "value")],);
+    let mut module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        function_name,
+        vec![block],
+        function,
+        &[(parameter, "value")],
+    );
 
     module
         .side_table
@@ -266,12 +283,14 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
             span: None,
         });
 
-    lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    JsLoweringConfig::direct_js(false),
-    &type_environment,
-    &path_fork.snapshot_table())
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed")
     .source
 }

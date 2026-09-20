@@ -41,11 +41,11 @@ use super::{
     ModuleBoundaryCheckInput, NamespaceRecord, NamespaceRecordSource,
     NamespaceTargetResolutionInput, NamespaceTypeMember, NamespaceValueMember,
     PublicExportLookupResult, PublicExportResolutionInput, ReceiverMethodVisibility,
-    ResolvedDependencyTarget, SourceDeclarationTarget, SourceDependencyAccess,
-    SourceFunctionTarget, SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
-    check_alias_case_warning, check_module_boundary, check_source_package_boundary,
-    has_explicit_moth_extension, resolve_dependency_target, resolve_external_package_symbol,
-    resolve_namespace_target, resolve_public_export_boundary,
+    ResolvedDependencyTarget, ResolvedNamespaceTarget, SourceDeclarationTarget,
+    SourceDependencyAccess, SourceFunctionTarget, SourcePackageBoundaryCheckInput,
+    VisibleNameBinding, VisibleNameRegistry, check_alias_case_warning, check_module_boundary,
+    check_source_package_boundary, has_explicit_moth_extension, resolve_dependency_target,
+    resolve_external_package_symbol, resolve_namespace_target, resolve_public_export_boundary,
 };
 
 /// Result for the binding-environment builder family.
@@ -206,6 +206,94 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         !consumer_has_explicit_module && !target_has_explicit_module
     }
 
+    /// Validate a Stage 0-resolved same-module edge before binding uses the retained clause.
+    ///
+    /// Stage 0 stores the final compiler `SourceId` on the retained dependency so semantic
+    /// binding can verify that the edge still belongs to this module's prepared source slots.
+    /// Binding continues to resolve the authored symbol path for visibility, but it must fail
+    /// closed if a stale or provider-owned identity is attached to a local source edge.
+    fn validate_local_source_edge(
+        &mut self,
+        dependency: &RetainedDependencyClause,
+    ) -> BuilderResult<()> {
+        let Some(local_source_id) = dependency.dependency.local_source_id else {
+            return Ok(());
+        };
+
+        if matches!(
+            dependency.dependency.target,
+            crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
+                ..
+            }
+        ) {
+            return Err(CompilerError::compiler_error(
+                "external provider dependency retained a local source identity",
+            )
+            .into());
+        }
+
+        let Some(source_record) = self.source_files.get(local_source_id) else {
+            return Err(CompilerError::compiler_error(format!(
+                "retained local dependency references missing source identity {}",
+                local_source_id.index()
+            ))
+            .into());
+        };
+        if !matches!(source_record.kind, Some(SourceKind::Compiler(_))) {
+            return Err(CompilerError::compiler_error(format!(
+                "retained local dependency references non-compiler source identity {}",
+                local_source_id.index()
+            ))
+            .into());
+        }
+        if !self
+            .module_symbols
+            .source_ids_by_source
+            .values()
+            .any(|source_id| *source_id == local_source_id)
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "retained local dependency identity {} is outside the prepared module source slots",
+                local_source_id.index()
+            ))
+            .into());
+        }
+
+        let Some(namespace_target) = resolve_namespace_target(NamespaceTargetResolutionInput {
+            dependency_path: &dependency.dependency.path,
+            module_file_paths: &self.module_symbols.module_file_paths,
+            external_package_registry: self.external_package_registry,
+            string_table: self.string_table,
+            path_fork: &*self.path_fork,
+        }) else {
+            return Err(CompilerError::compiler_error(
+                "retained local dependency path does not resolve to a prepared source file",
+            )
+            .into());
+        };
+        let ResolvedNamespaceTarget::SourceFile(target_path) = namespace_target else {
+            return Err(CompilerError::compiler_error(
+                "retained local dependency path resolves to a non-source namespace target",
+            )
+            .into());
+        };
+        let Some(target_source_id) = self.module_symbols.source_ids_by_source.get(&target_path)
+        else {
+            return Err(CompilerError::compiler_error(
+                "retained local dependency target path has no prepared source identity",
+            )
+            .into());
+        };
+        if *target_source_id != local_source_id {
+            return Err(CompilerError::compiler_error(
+                "retained local dependency identity disagrees with its resolved source path",
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
     pub(super) fn build_file_visibility(
         &mut self,
         source_file: &PathId,
@@ -338,6 +426,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
+                self.validate_local_source_edge(dependency)?;
                 let selections = dependency
                     .selections(selection_table)
                     .map_err(BindingEnvironmentError::Internal)?;
@@ -738,10 +827,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let public_name_id = selection.source_name;
             let public_name = self.string_table.resolve(public_name_id);
             if view.exported_origin(public_name).is_some() {
-            let local_path = self
-                .path_fork
-                .try_intern_child(dependency.dependency.path, public_name_id)
-                .expect("path interner fork exhausted while binding provider declaration");
+                let local_path = self
+                    .path_fork
+                    .try_intern_child(dependency.dependency.path, public_name_id)
+                    .expect("path interner fork exhausted while binding provider declaration");
                 self.register_provider_declaration_binding(
                     file_visibility,
                     registry,
@@ -1036,9 +1125,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 },
                 span,
             )?;
-            file_visibility
-                .visible_declaration_paths_mut()
-                .insert(path);
+            file_visibility.visible_declaration_paths_mut().insert(path);
             file_visibility
                 .visible_source_names
                 .insert(name, SourceDeclarationTarget::Local(path));
@@ -1215,11 +1302,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
     }
 
-    fn symbol_origin_matches_source(
-        &self,
-        symbol_path: &PathId,
-        source_file: &PathId,
-    ) -> bool {
+    fn symbol_origin_matches_source(&self, symbol_path: &PathId, source_file: &PathId) -> bool {
         let Some(origin) = self
             .module_symbols
             .canonical_source_by_symbol_path
@@ -1403,7 +1486,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             path_fork: &mut *self.path_fork,
         };
 
-        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input) {
+        if let Some(public_export_result) = resolve_public_export_boundary(&mut public_export_input)
+        {
             match public_export_result {
                 PublicExportLookupResult::ExportedSource {
                     path,

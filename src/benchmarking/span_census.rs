@@ -16,7 +16,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fmt;
 use std::fs;
@@ -487,7 +487,7 @@ pub(super) fn tokenize_source(
         .try_intern_portable_path(relative, &mut string_table)
         .map_err(|error| format!("synthetic census path should intern: {error:?}"))?;
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         entry_mode,
@@ -506,22 +506,29 @@ pub(super) fn tokenize_source(
         }
     })?;
 
-    let mut spans = Vec::with_capacity(file_tokens.tokens.len());
-
-    for token in &file_tokens.tokens {
-        let resolved = token.span.resolve_with(span_builder.resolver());
+    let source_tokens = lexed.tokens;
+    let resolver = span_builder.resolver();
+    let mut spans = Vec::with_capacity(source_tokens.len());
+    for position in 0..source_tokens.len() {
+        let index =
+            TokenIndex::try_from_index(position).expect("lexer output length fits token indexes");
+        let token = source_tokens
+            .token(index)
+            .expect("lexer output token index must remain in bounds");
+        let resolved = token.span().resolve_with(resolver);
         let start = resolved.start();
         let end = resolved.end();
+        let tag = token.tag();
 
         if end < start {
             return Err(format!(
-                "token {:?} has resolved end {end} before start {start}",
-                token_kind_name(&token.kind)
+                "token {} has resolved end {end} before start {start}",
+                tag.descriptor().text()
             ));
         }
 
         let length = end - start;
-        consider_long_span(longest_spans, relative, start, length, &token.kind);
+        consider_long_span(longest_spans, relative, start, length, tag);
         spans.push((start, length));
     }
 
@@ -664,7 +671,7 @@ fn consider_long_span(
     path: &str,
     start: u32,
     length: u32,
-    kind: &TokenKind,
+    tag: TokenTag,
 ) {
     if longest.len() >= LONGEST_SPAN_LIMIT {
         let Some(minimum_length) = longest.iter().map(|span| span.length).min() else {
@@ -680,7 +687,7 @@ fn consider_long_span(
         path: path.to_string(),
         length,
         start,
-        token_kind: token_kind_name(kind),
+        token_kind: token_tag_name(tag),
     };
 
     if longest.len() < LONGEST_SPAN_LIMIT {
@@ -818,12 +825,7 @@ fn relative_portable_path(workspace_root: &Path, path: &Path) -> Result<String, 
 
     Ok(segments.join("/"))
 }
-
-fn token_kind_name(kind: &TokenKind) -> String {
-    let rendered = format!("{kind:?}");
-
-    match rendered.find(['(', '{']) {
-        Some(index) => rendered[..index].to_string(),
-        None => rendered,
-    }
+/// Stable schema-owned spelling for a census token, including dynamic payload tokens.
+fn token_tag_name(tag: TokenTag) -> String {
+    tag.descriptor().text().to_string()
 }

@@ -28,6 +28,9 @@ pub(crate) mod module_diagnostics;
 pub(crate) mod render;
 pub(crate) mod trait_keyword_diagnostics;
 
+pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenDescriptorPayload;
+#[cfg(test)]
+pub(crate) use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 pub(crate) use compiler_diagnostic::CompilerDiagnostic;
 pub(crate) use diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure};
 pub(crate) use diagnostic_descriptor::DiagnosticDescriptor;
@@ -69,14 +72,15 @@ pub(crate) use diagnostic_payload::{
     UnsupportedOperatorCategory,
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
-#[cfg(test)]
-pub(crate) use diagnostic_token::TokenTag;
-pub(crate) use diagnostic_token::{DiagnosticToken, TokenDescriptorPayload};
+pub(crate) use diagnostic_token::DiagnosticToken;
 pub(crate) use module_diagnostics::ModuleDiagnostics;
 
 #[cfg(test)]
 #[path = "tests/diagnostic_model_tests.rs"]
 mod diagnostic_model_tests;
+#[cfg(test)]
+#[path = "tests/diagnostic_token_projection_tests.rs"]
+mod diagnostic_token_projection_tests;
 
 #[cfg(test)]
 #[path = "tests/module_diagnostics_tests.rs"]

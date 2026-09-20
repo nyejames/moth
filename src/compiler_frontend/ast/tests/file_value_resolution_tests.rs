@@ -5,12 +5,14 @@
 //! folded string identity, rather than only its text, so a second content constant or a
 //! re-interned value cannot pass.
 
-use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValuePayload,
 };
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
@@ -26,12 +28,13 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax, HeaderParseOptions,
+    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
-    prepare_plain_markdown_file, PlainMarkdownPrepareInput,
+    PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::paths::file_references::{
@@ -50,11 +53,10 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, FrozenIdentityHandle
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{tokenize, TokenizeFailure};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -368,7 +370,6 @@ fn compile_fixture(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
         entry_file_id: Some(file_id_for("@page.moth")),
-        project_path_resolver: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -381,7 +382,7 @@ fn compile_fixture(
             .try_intern_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let lexed = tokenize(
             source,
             interned_path,
             TokenizerEntryMode::SourceFile,
@@ -392,8 +393,12 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth tokenization should succeed");
+        let owner = SourceTokenOwner::new(lexed.tokens);
+        let path_syntax = lexed.path_syntax;
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            interned_path,
+            path_syntax,
             &entry_path,
             &options,
             &mut string_table,
@@ -415,7 +420,7 @@ fn compile_fixture(
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let file_tokens = tokenize(
+        let lexed = tokenize(
             source,
             interned_path,
             entry_mode,
@@ -426,9 +431,13 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth template tokenization should succeed");
+        let owner = SourceTokenOwner::new(lexed.tokens);
+        let path_syntax = lexed.path_syntax;
 
         let mut output = prepare_moth_template_file(
-            file_tokens,
+            owner,
+            interned_path,
+            path_syntax,
             &mut string_table,
             &mut path_fork,
             &mut span_builder,
@@ -450,7 +459,6 @@ fn compile_fixture(
                 source_code: source,
                 source_file: interned_path,
                 file_id: file_id_for(path),
-                canonical_os_path: None,
             },
             &mut string_table,
             &mut path_fork,
@@ -649,7 +657,7 @@ fn resolve_file_value_fixture(
         .expect("fixture source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = tokenize(
+    let lexed = tokenize(
         source,
         source_path,
         TokenizerEntryMode::SourceFile,
@@ -660,23 +668,29 @@ fn resolve_file_value_fixture(
         &mut span_builder,
     )
     .expect("file-value fixture should tokenize");
-    token_stream.freeze_path_syntax_for_test();
-    let path_token_index = token_stream
-        .tokens
+    let mut canonical_owner = lexed.tokens;
+    let mut path_syntax = lexed.path_syntax;
+    Arc::get_mut(&mut path_syntax)
+        .expect("file-value fixture path syntax must be uniquely owned")
+        .freeze();
+    Arc::get_mut(&mut canonical_owner)
+        .expect("file-value fixture tokens must be uniquely owned")
+        .attach_shared_path_syntax(path_syntax);
+    let path_token_index = canonical_owner
+        .shapes()
         .iter()
-        .position(|token| matches!(token.kind, TokenKind::Path(_)))
+        .position(|shape| shape.tag() == TokenTag::PATH)
         .expect("file-value fixture should contain a path token");
-    token_stream.index = path_token_index;
-    let path_syntax = match token_stream.tokens[path_token_index].kind {
-        TokenKind::Path(path_syntax) => path_syntax,
-        _ => unreachable!("path token index was selected above"),
-    };
-
+    let path_syntax_id = canonical_owner
+        .shapes()
+        .get(path_token_index)
+        .and_then(|shape| shape.path_syntax_id())
+        .expect("file-value fixture path token should carry a syntax handle");
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
             source_file,
-            path_syntax,
+            path_syntax: path_syntax_id,
             class,
             outcome,
         })
@@ -709,9 +723,17 @@ fn resolve_file_value_fixture(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("file-value fixture should expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("file-value fixture should expose an AST cursor");
+    cursor
+        .set_position(path_token_index)
+        .expect("file-value fixture path position must remain in canonical range");
     let expression = resolve_file_value(
-        path_syntax,
-        &token_stream,
+        path_syntax_id,
+        &cursor,
         &context,
         &type_interner,
         &ValueMode::ImmutableOwned,

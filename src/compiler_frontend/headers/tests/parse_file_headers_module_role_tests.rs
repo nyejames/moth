@@ -113,8 +113,8 @@ fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
             if !matches!(header.kind, HeaderKind::Struct { .. }) {
                 return None;
             }
-            let name = path_fork.component(header.tokens.src_path)?;
-            (string_table.resolve(name) == "Point").then_some(header.tokens.src_path)
+            let name = path_fork.component(header.declaration_path)?;
+            (string_table.resolve(name) == "Point").then_some(header.declaration_path)
         })
         .expect("expected Point struct header");
 
@@ -140,7 +140,7 @@ fn function_error_return_retains_local_ordering_hint_for_named_type() {
         .iter()
         .find(|header| {
             matches!(header.kind, HeaderKind::Function { .. })
-                && header.tokens.src_path != PathId::ROOT
+                && header.declaration_path != PathId::ROOT
         })
         .expect("expected parse function header");
 

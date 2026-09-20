@@ -645,7 +645,9 @@ fn reactive_subscription_rejects_non_text_node() {
     let mut path_fork = PathInternerFork::empty();
     let sequence = empty_sequence(&mut store);
     let source = ReactiveSource {
-        path: path_fork.try_intern_portable_path("main.moth/#reactive", &mut string_table).expect("test path fits"),
+        path: path_fork
+            .try_intern_portable_path("main.moth/#reactive", &mut string_table)
+            .expect("test path fits"),
         kind: ReactiveSourceKind::Declaration,
     };
     let error = store

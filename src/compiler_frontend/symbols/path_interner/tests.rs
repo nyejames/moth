@@ -797,8 +797,8 @@ fn merge_rejection_leaves_no_delta_counter_trace() {
     // leave the delta counters untouched, so the increments sit behind complete local
     // validation rather than ahead of it.
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, frontend_counter_test_values, lock_counter_test,
-        reset_frontend_counters, FrontendCounter,
+        FrontendCounter, capture_frontend_counters_for_test, frontend_counter_test_values,
+        lock_counter_test, reset_frontend_counters,
     };
     let _guard = lock_counter_test();
     let _capture = capture_frontend_counters_for_test();

@@ -1,16 +1,23 @@
 //! Tokenizer string-ID remapping tests.
 //!
-//! WHAT: verifies that token streams produced from local string tables can be remapped into a
-//! merged module/global table without losing source locations or path-token metadata.
+//! WHAT: verifies that canonical token stores produced from local string tables can be resolved
+//! through a merged module/global table without losing source locations or path-token metadata.
 //! WHY: per-file frontend preparation depends on token outputs being safe to merge before
 //! module-wide header parsing and dependency sorting consume them.
 
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::test_support::TestSourceContext;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRef, TokenTag, TokenizerEntryMode,
+};
+use std::sync::Arc;
+
 fn path_strings(fork: &PathInternerFork, path: PathId, strings: &StringTable) -> Vec<String> {
     let mut scratch = Vec::new();
     fork.resolve_components(path, &mut scratch)
@@ -19,80 +26,189 @@ fn path_strings(fork: &PathInternerFork, path: PathId, strings: &StringTable) ->
         .collect()
 }
 
-fn make_token(kind: TokenKind, _scope: PathId) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+fn token_at(tokens: &SourceTokens, index: usize) -> TokenRef<'_> {
+    let index = TokenIndex::try_from_index(index).expect("source token index should fit");
+    tokens
+        .token(index)
+        .expect("source token index should resolve")
+}
+
+fn finish_tokens(builder: TestSourceTokensBuilder) -> Arc<SourceTokens> {
+    builder
+        .finish()
+        .expect("canonical source token fixture should finish")
+}
+
+fn remapped_string(
+    token: TokenRef<'_>,
+    remap: &StringIdRemap,
+    global_table: &StringTable,
+) -> String {
+    let mut projected = DiagnosticToken::from_token_ref(token);
+    projected.remap_string_ids(remap);
+    global_table.resolve(projected.string_id()).to_owned()
+}
+
+fn remapped_numeric(token: TokenRef<'_>, remap: &StringIdRemap) -> NumericLiteralToken {
+    let mut literal = token
+        .numeric_literal()
+        .expect("numeric token payload must resolve")
+        .expect("numeric token must carry a literal")
+        .clone();
+    literal
+        .try_remap_string_ids(&mut |id| Ok::<_, std::convert::Infallible>(remap.get(id)))
+        .expect("numeric literal remap should be infallible");
+    literal
 }
 
 #[test]
-fn flat_token_kinds_remap_correctly() {
+fn flat_token_payloads_remap_correctly() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut global_table = StringTable::new();
 
     let alpha_local = local_table.intern("alpha");
     let beta_local = local_table.intern("beta");
+    let numeric_local = NumericLiteralToken::test_new("42", &mut local_table);
 
-    global_table.intern("alpha");
-    let _gamma_global = global_table.intern("gamma");
-
-    let numeric_token = NumericLiteralToken::test_new("42", &mut local_table);
-
+    global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
 
-    let mut symbol = TokenKind::Symbol(alpha_local);
-    symbol.remap_string_ids(&remap);
-    assert!(
-        matches!(symbol, TokenKind::Symbol(id) if global_table.resolve(id) == "alpha"),
-        "symbol should resolve to 'alpha' in global table"
-    );
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_symbol(TokenTag::SYMBOL, alpha_local, LocalSpan::source_start())
+        .expect("symbol fixture token should build");
+    builder
+        .push_symbol(
+            TokenTag::STYLE_DIRECTIVE,
+            beta_local,
+            LocalSpan::source_start(),
+        )
+        .expect("style directive fixture token should build");
+    builder
+        .push_symbol(
+            TokenTag::STRING_SLICE_LITERAL,
+            alpha_local,
+            LocalSpan::source_start(),
+        )
+        .expect("string literal fixture token should build");
+    builder
+        .push_symbol(
+            TokenTag::RAW_STRING_LITERAL,
+            beta_local,
+            LocalSpan::source_start(),
+        )
+        .expect("raw string fixture token should build");
+    builder
+        .push_numeric(numeric_local, LocalSpan::source_start())
+        .expect("numeric fixture token should build");
+    let owner = finish_tokens(builder);
 
-    let mut style = TokenKind::StyleDirective(beta_local);
-    style.remap_string_ids(&remap);
-    assert!(
-        matches!(style, TokenKind::StyleDirective(id) if global_table.resolve(id) == "beta"),
-        "style directive should resolve to 'beta' in global table"
-    );
+    let symbol = token_at(owner.as_ref(), 0);
+    assert_eq!(symbol.tag(), TokenTag::SYMBOL);
+    assert_eq!(remapped_string(symbol, &remap, &global_table), "alpha");
 
-    let mut string_lit = TokenKind::StringSliceLiteral(alpha_local);
-    string_lit.remap_string_ids(&remap);
-    assert!(
-        matches!(string_lit, TokenKind::StringSliceLiteral(id) if global_table.resolve(id) == "alpha"),
-        "string slice literal should resolve to 'alpha' in global table"
-    );
+    let style = token_at(owner.as_ref(), 1);
+    assert_eq!(style.tag(), TokenTag::STYLE_DIRECTIVE);
+    assert_eq!(remapped_string(style, &remap, &global_table), "beta");
 
-    let mut raw_lit = TokenKind::RawStringLiteral(beta_local);
-    raw_lit.remap_string_ids(&remap);
-    assert!(
-        matches!(raw_lit, TokenKind::RawStringLiteral(id) if global_table.resolve(id) == "beta"),
-        "raw string literal should resolve to 'beta' in global table"
-    );
+    let string_lit = token_at(owner.as_ref(), 2);
+    assert_eq!(string_lit.tag(), TokenTag::STRING_SLICE_LITERAL);
+    assert_eq!(remapped_string(string_lit, &remap, &global_table), "alpha");
 
-    let mut non_string_kind = TokenKind::NumericLiteral(numeric_token);
-    non_string_kind.remap_string_ids(&remap);
-    assert!(
-        matches!(non_string_kind, TokenKind::NumericLiteral(ref token) if global_table.resolve(token.source_text) == "42" && global_table.resolve(token.normalized_text) == "42"),
-        "non-string-bearing numeric token kind should remap both source_text and normalized_text"
+    let raw_lit = token_at(owner.as_ref(), 3);
+    assert_eq!(raw_lit.tag(), TokenTag::RAW_STRING_LITERAL);
+    assert_eq!(remapped_string(raw_lit, &remap, &global_table), "beta");
+
+    let numeric = token_at(owner.as_ref(), 4);
+    assert_eq!(numeric.tag(), TokenTag::NUMERIC_LITERAL);
+    let remapped_numeric = remapped_numeric(numeric, &remap);
+    assert_eq!(
+        global_table.resolve(remapped_numeric.source_text),
+        "42",
+        "numeric source text should resolve in the merged table"
+    );
+    assert_eq!(
+        global_table.resolve(remapped_numeric.normalized_text),
+        "42",
+        "numeric normalized text should resolve in the merged table"
+    );
+}
+
+#[test]
+fn lexer_numeric_tokens_carry_checked_side_store_handles() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut source_context = TestSourceContext::new("numeric.moth");
+    let mut path_fork = PathInternerFork::empty();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let lexed = source_context
+        .tokenize(
+            "value = 42 + 3.5\n",
+            &mut path_fork,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("numeric source should tokenize");
+
+    let owner = lexed.tokens.as_ref();
+    assert_eq!(owner.source(), source);
+    let numeric_positions = (0..owner.len())
+        .filter(|index| token_at(owner, *index).tag() == TokenTag::NUMERIC_LITERAL)
+        .collect::<Vec<_>>();
+    assert_eq!(numeric_positions.len(), 2);
+    assert_eq!(owner.numeric_literal_store().len(), 2);
+    assert_eq!(owner.numeric_literal_store().owner_source(), Some(source));
+    for (expected_row, token_index) in numeric_positions.iter().enumerate() {
+        let token = token_at(owner, *token_index);
+        let handle = token
+            .shape()
+            .numeric_literal_id()
+            .expect("numeric token must carry a side-store handle");
+        assert_eq!(handle.index(), Some(expected_row));
+        let stored = owner
+            .numeric_literal_store()
+            .try_get(handle)
+            .expect("handle must address a staged row");
+        let typed = token
+            .numeric_literal()
+            .expect("numeric token payload must resolve")
+            .expect("numeric token must carry a literal");
+        assert_eq!(stored.source_text, typed.source_text);
+        assert_eq!(stored.normalized_text, typed.normalized_text);
+        assert_eq!(stored.kind, typed.kind);
+    }
+    let non_numeric = (0..owner.len())
+        .find(|index| token_at(owner, *index).tag() == TokenTag::SYMBOL)
+        .expect("symbol token");
+    assert_eq!(
+        token_at(owner, non_numeric).shape().numeric_literal_id(),
+        None
     );
 }
 
 #[test]
 fn path_syntax_rows_remap_all_fields() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
     let mut global_paths = PathInternerFork::empty();
 
-    let mut path_syntax = PathSyntaxTable::new();
-    let id = path_syntax.push(
-        local_paths
-            .try_intern_components(&[
-                local_table.intern("components"),
-                local_table.intern("Button"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let id = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[
+                    local_table.intern("components"),
+                    local_table.intern("Button"),
+                ])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
 
-    let _alpha_global = global_table.intern("alpha");
+    global_table.intern("alpha");
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
@@ -104,11 +220,12 @@ fn path_syntax_rows_remap_all_fields() {
         path_strings(&global_paths, path.root, &global_table),
         vec!["components", "Button"]
     );
-    assert_eq!(path.span.source(), SourceId::COMPILATION_ROOT);
+    assert_eq!(path_syntax.owner_source(), Some(source));
 }
 
 #[test]
-fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
+fn canonical_tokens_remap_src_path_and_payloads_preserving_source_spans() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
@@ -117,49 +234,47 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
     let src_path_local = local_paths
         .try_intern_portable_path("local.moth", &mut local_table)
         .expect("test path fits");
-    let token_scope_local = src_path_local;
     let symbol_local = local_table.intern("my_symbol");
-    let tokens = vec![
-        make_token(TokenKind::Symbol(symbol_local), token_scope_local),
-        make_token(
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("7", &mut local_table)),
-            token_scope_local,
-        ),
-    ];
-    let canonical_path = std::path::PathBuf::from("/absolute/local.moth");
-    let mut file_tokens = FileTokens::new_with_identity(
-        src_path_local,
-        SourceId::COMPILATION_ROOT,
-        Some(canonical_path.clone()),
-        tokens,
-        PathSyntaxTable::new(),
-    );
+    let numeric_local = NumericLiteralToken::test_new("7", &mut local_table);
+
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_symbol(TokenTag::SYMBOL, symbol_local, LocalSpan::source_start())
+        .expect("symbol fixture token should build");
+    builder
+        .push_numeric(numeric_local, LocalSpan::source_start())
+        .expect("numeric fixture token should build");
+    let owner = finish_tokens(builder);
+
     global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
         .expect("path delta should merge");
-    file_tokens.remap_string_ids(&remap);
-    file_tokens.remap_path_ids(&path_remap);
+    let src_path_global = path_remap.get(src_path_local);
     assert_eq!(
-        path_strings(&global_paths, file_tokens.src_path, &global_table),
+        path_strings(&global_paths, src_path_global, &global_table),
         vec!["local.moth"]
     );
-    assert_eq!(file_tokens.canonical_os_path, Some(canonical_path));
-    let first_token = file_tokens.tokens.first().expect("first token should exist");
-    assert!(matches!(
-        first_token.kind,
-        TokenKind::Symbol(id) if global_table.resolve(id) == "my_symbol"
-    ));
-    assert_eq!(first_token.span, LocalSpan::source_start());
-    assert!(matches!(
-        file_tokens.tokens.get(1).expect("second token should exist").kind,
-        TokenKind::NumericLiteral(_)
-    ));
+
+    let first_token = token_at(owner.as_ref(), 0);
+    assert_eq!(first_token.tag(), TokenTag::SYMBOL);
+    assert_eq!(
+        remapped_string(first_token, &remap, &global_table),
+        "my_symbol"
+    );
+    assert_eq!(first_token.span(), LocalSpan::source_start());
+
+    let second_token = token_at(owner.as_ref(), 1);
+    assert_eq!(second_token.tag(), TokenTag::NUMERIC_LITERAL);
+    let numeric = remapped_numeric(second_token, &remap);
+    assert_eq!(global_table.resolve(numeric.source_text), "7");
+    assert_eq!(global_table.resolve(numeric.normalized_text), "7");
 }
 
 #[test]
-fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner() {
+fn canonical_path_tokens_resolve_after_preparation_path_remap() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
@@ -167,52 +282,62 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
     let src_path_local = local_paths
         .try_intern_portable_path("module.moth", &mut local_table)
         .expect("test path fits");
-    let token_scope_local = src_path_local;
-    let mut path_syntax = PathSyntaxTable::new();
-    let ui_button = path_syntax.push(
-        local_paths
-            .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
-    let utils_helper = path_syntax.push(
-        local_paths
-            .try_intern_components(&[
-                local_table.intern("utils"),
-                local_table.intern("helper"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
-    let tokens = vec![
-        make_token(TokenKind::Path(ui_button), token_scope_local),
-        make_token(TokenKind::Path(utils_helper), token_scope_local),
-    ];
-    let mut file_tokens = FileTokens::new_with_identity(
-        src_path_local,
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
-        path_syntax,
-    );
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let ui_button = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+    let utils_helper = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[local_table.intern("utils"), local_table.intern("helper")])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+
+    global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
         .expect("path delta should merge");
-    file_tokens.remap_string_ids(&remap);
-    file_tokens
-        .remap_preparing_path_ids(&path_remap)
-        .expect("path table should be preparing");
-    assert!(matches!(
-        file_tokens.tokens[0].kind,
-        TokenKind::Path(id) if id == ui_button
-    ));
-    let first = file_tokens.path_syntax.try_path(ui_button).expect("valid path handle");
+    path_syntax.remap_path_ids(&path_remap);
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, ui_button, LocalSpan::source_start())
+        .expect("first path fixture token should build");
+    builder
+        .push_path(TokenTag::PATH, utils_helper, LocalSpan::source_start())
+        .expect("second path fixture token should build");
+    let owner = finish_tokens(builder);
+
+    assert_eq!(
+        path_strings(&global_paths, path_remap.get(src_path_local), &global_table),
+        vec!["module.moth"]
+    );
+    assert_eq!(token_at(owner.as_ref(), 0).tag(), TokenTag::PATH);
+    assert_eq!(
+        token_at(owner.as_ref(), 0).shape().path_syntax_id(),
+        Some(ui_button)
+    );
+    let first = token_at(owner.as_ref(), 0)
+        .path_syntax()
+        .expect("first path token should resolve")
+        .expect("first path token should carry a row");
     assert_eq!(
         path_strings(&global_paths, first.root, &global_table),
         vec!["ui", "Button"]
     );
-    let second = file_tokens.path_syntax.try_path(utils_helper).expect("valid path handle");
+    let second = token_at(owner.as_ref(), 1)
+        .path_syntax()
+        .expect("second path token should resolve")
+        .expect("second path token should carry a row");
     assert_eq!(
         path_strings(&global_paths, second.root, &global_table),
         vec!["utils", "helper"]
@@ -220,7 +345,8 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
 }
 
 #[test]
-fn file_tokens_preparing_remap_updates_owned_path_table() {
+fn canonical_preparing_path_remap_updates_owned_path_table() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
@@ -228,33 +354,37 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
     let source_path = local_paths
         .try_intern_portable_path("module.moth", &mut local_table)
         .expect("test path fits");
-    let mut path_syntax = PathSyntaxTable::new();
-    let button = path_syntax.push(
-        local_paths
-            .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
-    let tokens = vec![make_token(TokenKind::Path(button), source_path)];
-    let mut file_tokens = FileTokens::new_with_identity(
-        source_path,
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
-        path_syntax,
-    );
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let button = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+
     global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
         .expect("path delta should merge");
-    file_tokens
-        .remap_preparing_string_ids(&remap)
-        .expect("the preparing token stream should own a mutable path table");
-    file_tokens
-        .remap_preparing_path_ids(&path_remap)
-        .expect("the preparing path table should remap");
-    let path = file_tokens.path_syntax.try_path(button).expect("valid path handle");
+    path_syntax.remap_path_ids(&path_remap);
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, button, LocalSpan::source_start())
+        .expect("path fixture token should build");
+    let owner = finish_tokens(builder);
+
+    assert_eq!(
+        path_strings(&global_paths, path_remap.get(source_path), &global_table),
+        vec!["module.moth"]
+    );
+    let path = token_at(owner.as_ref(), 0)
+        .path_syntax()
+        .expect("path token should resolve")
+        .expect("path token should carry a row");
     assert_eq!(
         path_strings(&global_paths, path.root, &global_table),
         vec!["ui", "Button"]
@@ -263,87 +393,159 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
 
 #[test]
 fn rebind_source_identity_updates_source_spans_without_changing_paths() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let original_scope = path_fork
+        .try_intern_portable_path("stage0_absolute.moth", &mut table)
+        .expect("test path fits");
+    let logical_scope = path_fork
+        .try_intern_portable_path("module/logical.moth", &mut table)
+        .expect("test path fits");
 
-    let original_scope = path_fork.try_intern_portable_path("stage0_absolute.moth", &mut table).expect("test path fits");
-    let logical_scope = path_fork.try_intern_portable_path("module/logical.moth", &mut table).expect("test path fits");
-
-    let mut path_syntax = PathSyntaxTable::new();
-    let helper_util = path_syntax.push(
-        path_fork.try_intern_components(&[table.intern("helper"), table.intern("util")]).expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
-    let tokens = vec![
-        make_token(
-            TokenKind::Symbol(table.intern("alpha")),
-            original_scope,
-        ),
-        make_token(TokenKind::Path(helper_util), original_scope),
-    ];
-
-    let canonical = std::path::PathBuf::from("/canonical/logical.moth");
-    let mut file_tokens = FileTokens::new_with_identity(
-        original_scope,
-        SourceId::COMPILATION_ROOT,
-        None,
-        tokens,
-        path_syntax,
-    );
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let helper_util = path_syntax
+        .try_push_for_source(
+            path_fork
+                .try_intern_components(&[table.intern("helper"), table.intern("util")])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+    let symbol = table.intern("alpha");
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_symbol(TokenTag::SYMBOL, symbol, LocalSpan::source_start())
+        .expect("symbol fixture token should build");
+    builder
+        .push_path(TokenTag::PATH, helper_util, LocalSpan::source_start())
+        .expect("path fixture token should build");
+    let owner = finish_tokens(builder);
+    let mut owner = Arc::try_unwrap(owner).expect("canonical owner should be unique");
 
     let file_id = SourceId::from_index(7);
-    file_tokens
-        .rebind_source_identity(logical_scope, file_id, Some(canonical.clone()))
-        .expect("the sole mutable source table should accept final identity rebinding");
+    owner.rebind_source_identity(file_id);
 
-    // Top-level identity fields are rebound.
-    assert_eq!(file_tokens.src_path, logical_scope);
-    assert_eq!(file_tokens.file_id, file_id);
-    assert_eq!(file_tokens.canonical_os_path, Some(canonical));
-
-    // Every token keeps its local span while the enclosing stream supplies the final source ID.
-    for token in &file_tokens.tokens {
-        assert_eq!(token.span, LocalSpan::source_start());
+    assert_eq!(owner.source(), file_id);
+    for index in 0..owner.len() {
+        assert_eq!(token_at(&owner, index).span(), LocalSpan::source_start());
     }
-
-    // Path table spans are rebound but the root payload is unchanged.
-    let path = file_tokens
-        .path_syntax
-        .try_path(helper_util)
-        .expect("valid path handle");
-    assert_eq!(path.span.source(), file_id);
+    let path = token_at(&owner, 1)
+        .path_syntax()
+        .expect("path token should resolve")
+        .expect("path token should carry a row");
+    assert_eq!(
+        owner
+            .path_syntax_table()
+            .expect("canonical owner should retain its path table")
+            .owner_source(),
+        Some(file_id)
+    );
     assert_eq!(
         path_strings(&path_fork, path.root, &table),
         vec!["helper", "util"]
     );
+    assert_eq!(
+        path_strings(&path_fork, original_scope, &table),
+        vec!["stage0_absolute.moth"]
+    );
+    assert_eq!(
+        path_strings(&path_fork, logical_scope, &table),
+        vec!["module", "logical.moth"]
+    );
 }
 
 #[test]
-fn token_kind_path_handle_is_a_remap_no_op_while_table_rows_remap() {
+fn rebind_source_identity_restamps_numeric_owner_and_preserves_rows() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut table = StringTable::new();
+    let numeric = NumericLiteralToken::test_new("7", &mut table);
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_numeric(numeric, LocalSpan::source_start())
+        .expect("numeric fixture token should build");
+    let owner = finish_tokens(builder);
+    let mut owner = Arc::try_unwrap(owner).expect("canonical owner should be unique");
+    let handle = token_at(&owner, 0)
+        .shape()
+        .numeric_literal_id()
+        .expect("numeric token must carry a handle");
+    let rebound = SourceId::from_index(11);
+
+    owner.rebind_source_identity(rebound);
+
+    assert_eq!(owner.numeric_literal_store().owner_source(), Some(rebound));
+    owner
+        .numeric_literal_store()
+        .try_get(handle)
+        .expect("source-local numeric row must survive rebinding");
+    owner
+        .numeric_literal_store()
+        .try_get_for_source(handle, rebound)
+        .expect("rebound owner must read its numeric row");
+}
+
+#[test]
+fn frozen_numeric_store_rejects_post_publication_remap() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut local = StringTable::new();
+    let mut global = StringTable::new();
+    let numeric = NumericLiteralToken::test_new("7", &mut local);
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_numeric(numeric, LocalSpan::source_start())
+        .expect("numeric fixture token should build");
+    let owner = finish_tokens(builder);
+    let mut owner = Arc::try_unwrap(owner).expect("canonical owner should be unique");
+    global.intern("preexisting");
+    let remap = global.merge_from(&local);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        owner.remap_string_ids(&remap);
+    }));
+    assert!(
+        result.is_err(),
+        "post-freeze remap must not silently mutate the canonical store"
+    );
+}
+
+#[test]
+fn canonical_path_handle_is_a_remap_no_op_while_table_rows_remap() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
     let mut global_paths = PathInternerFork::empty();
-    let mut path_syntax = PathSyntaxTable::new();
-    let button = path_syntax.push(
-        local_paths
-            .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
-    let mut kind = TokenKind::Path(button);
-    let handle_before = match &kind {
-        TokenKind::Path(id) => *id,
-        _ => unreachable!("path kind constructed above"),
-    };
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let button = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[local_table.intern("ui"), local_table.intern("Button")])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+    let handle_before = button;
+
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
         .expect("path delta should merge");
-    kind.remap_string_ids(&remap);
     path_syntax.remap_path_ids(&path_remap);
-    assert!(matches!(kind, TokenKind::Path(id) if id == handle_before));
-    let path = path_syntax.try_path(button).expect("valid path handle");
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, button, LocalSpan::source_start())
+        .expect("path fixture token should build");
+    let owner = finish_tokens(builder);
+
+    let token = token_at(owner.as_ref(), 0);
+    assert_eq!(token.tag(), TokenTag::PATH);
+    assert_eq!(token.shape().path_syntax_id(), Some(handle_before));
+    let path = token
+        .path_syntax()
+        .expect("path token should resolve")
+        .expect("path token should carry a row");
     assert_eq!(
         path_strings(&global_paths, path.root, &global_table),
         vec!["ui", "Button"]
@@ -352,26 +554,43 @@ fn token_kind_path_handle_is_a_remap_no_op_while_table_rows_remap() {
 
 #[test]
 fn path_table_root_components_keep_their_allocation_under_remap() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut local_table = StringTable::new();
     let mut local_paths = PathInternerFork::empty();
     let mut global_table = StringTable::new();
     let mut global_paths = PathInternerFork::empty();
-    let mut path_syntax = PathSyntaxTable::new();
-    let button = path_syntax.push(
-        local_paths
-            .try_intern_components(&[
-                local_table.intern("components"),
-                local_table.intern("Button"),
-            ])
-            .expect("test path fits"),
-        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-    );
+    let mut path_syntax = PathSyntaxTable::with_source(source);
+    let button = path_syntax
+        .try_push_for_source(
+            local_paths
+                .try_intern_components(&[
+                    local_table.intern("components"),
+                    local_table.intern("Button"),
+                ])
+                .expect("test path fits"),
+            source,
+            LocalSpan::source_start(),
+        )
+        .expect("path syntax row should build");
+    let handle_before = button;
+
     let remap = global_table.merge_from(&local_table);
     let path_remap = global_paths
         .merge_delta_from(&local_paths, &remap)
         .expect("path delta should merge");
     path_syntax.remap_path_ids(&path_remap);
-    let path = path_syntax.try_path(button).expect("valid path handle");
+    let mut builder = TestSourceTokensBuilder::with_path_syntax(source, path_syntax);
+    builder
+        .push_path(TokenTag::PATH, button, LocalSpan::source_start())
+        .expect("path fixture token should build");
+    let owner = finish_tokens(builder);
+
+    let token = token_at(owner.as_ref(), 0);
+    assert_eq!(token.shape().path_syntax_id(), Some(handle_before));
+    let path = token
+        .path_syntax()
+        .expect("path token should resolve")
+        .expect("path token should carry a row");
     assert_eq!(
         path_strings(&global_paths, path.root, &global_table),
         vec!["components", "Button"]

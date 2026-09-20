@@ -195,7 +195,7 @@ pub(crate) fn build_receiver_method_catalog(
 
         let Some(resolved_signature) = input
             .resolved_function_signatures_by_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
         else {
             continue;
         };
@@ -204,18 +204,18 @@ pub(crate) fn build_receiver_method_catalog(
             continue;
         };
 
-        let Some(method_name) = input.path_fork.component(header.tokens.src_path) else {
+        let Some(method_name) = input.path_fork.component(header.declaration_path) else {
             continue;
         };
         let Some(method_source_file) = input
             .source_file_by_symbol_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
             .copied()
         else {
             return Err(CompilerError::compiler_error(format!(
                 "Receiver method '{}' is missing canonical source-file metadata.",
                 input.path_fork.render_portable(
-                    header.tokens.src_path,
+                    header.declaration_path,
                     input.string_table,
                     &mut Vec::new(),
                 )
@@ -274,7 +274,7 @@ pub(crate) fn build_receiver_method_catalog(
             .is_some_and(|parameter| parameter.value.value_mode.is_mutable());
 
         let entry = ReceiverMethodEntry {
-            function_path: header.tokens.src_path,
+            function_path: header.declaration_path,
             receiver: receiver.to_owned(),
             source_file: method_source_file,
             receiver_mutable,
@@ -293,7 +293,7 @@ pub(crate) fn build_receiver_method_catalog(
             .push(entry.to_owned());
         catalog
             .by_function_path
-            .insert(header.tokens.src_path.to_owned(), entry);
+            .insert(header.declaration_path.to_owned(), entry);
     }
 
     for entries in catalog.by_method_name.values_mut() {

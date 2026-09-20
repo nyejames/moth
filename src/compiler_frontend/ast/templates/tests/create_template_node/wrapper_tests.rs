@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -14,8 +15,12 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let mut path_fork = PathInternerFork::empty();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut span_builder = ExtendedSpanBuilder::new();
-    let declarations =
-        docs_style_table_and_data_declarations(&mut string_table, &shared_store, &mut span_builder, &mut path_fork);
+    let declarations = docs_style_table_and_data_declarations(
+        &mut string_table,
+        &shared_store,
+        &mut span_builder,
+        &mut path_fork,
+    );
 
     let row_count = 48usize;
     let mut source =
@@ -27,13 +32,36 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     }
     source.push(']');
 
-    let mut token_stream =
-        template_tokens_from_source(&source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork)
+    let file_tokens = template_tokens_from_source(
+        &source,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(shared_store);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("docs-style table with many rows should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("docs-style table with many rows should parse");
 
     let reference = &template.tir_reference;
 
@@ -63,31 +91,99 @@ fn docs_style_table_and_data_declarations(
     span_builder: &mut ExtendedSpanBuilder,
     path_fork: &mut PathInternerFork,
 ) -> Vec<Declaration> {
-    let wrapper_scope = path_fork.try_intern_portable_path("main.moth/#const_template0", string_table).expect("test path fits");
+    let wrapper_scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", string_table)
+        .expect("test path fits");
 
-    let mut header_row_tokens = template_tokens_from_source("[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",
-    string_table,
-    span_builder, path_fork);
-    let header_row_context = new_constant_context(header_row_tokens.src_path.to_owned(), path_fork)
+    let header_row_file_tokens = template_tokens_from_source(
+        "[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",
+        string_table,
+        span_builder,
+        path_fork,
+    );
+    let header_row_path = header_row_file_tokens.source_path;
+    let header_row_context = new_constant_context(header_row_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let header_row = Template::new(&mut header_row_tokens, &header_row_context, vec![], string_table, path_fork)
+    let canonical_owner = header_row_file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut header_row_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    header_row_stream
+        .set_position(header_row_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let header_row = Template::new(
+        &mut header_row_stream,
+        header_row_path,
+        &header_row_context,
+        vec![],
+        string_table,
+        path_fork,
+    )
     .expect("docs-style header row wrapper should parse");
 
-    let mut table_tokens = template_tokens_from_source("[:\n    <table style=\"[$slot(\"style\") ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot(1)]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
-    string_table,
-    span_builder, path_fork);
-    let table_context = new_constant_context(table_tokens.src_path.to_owned(), path_fork)
+    let table_file_tokens = template_tokens_from_source(
+        "[:\n    <table style=\"[$slot(\"style\") ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot(1)]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
+        string_table,
+        span_builder,
+        path_fork,
+    );
+    let table_path = table_file_tokens.source_path;
+    let table_context = new_constant_context(table_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let table = Template::new(&mut table_tokens, &table_context, vec![], string_table, path_fork)
-        .expect("docs-style table wrapper should parse");
+    let canonical_owner = table_file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut table_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    table_stream
+        .set_position(table_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let table = Template::new(
+        &mut table_stream,
+        table_path,
+        &table_context,
+        vec![],
+        string_table,
+        path_fork,
+    )
+    .expect("docs-style table wrapper should parse");
 
-    let mut data_tokens = template_tokens_from_source("[$children([: <td style=\"padding: 0.2em 0.5em;\">[$slot]</td>]):\n    [$slot]\n]",
-    string_table,
-    span_builder, path_fork);
-    let data_context = new_constant_context(data_tokens.src_path.to_owned(), path_fork)
+    let data_file_tokens = template_tokens_from_source(
+        "[$children([: <td style=\"padding: 0.2em 0.5em;\">[$slot]</td>]):\n    [$slot]\n]",
+        string_table,
+        span_builder,
+        path_fork,
+    );
+    let data_path = data_file_tokens.source_path;
+    let data_context = new_constant_context(data_path.to_owned(), path_fork)
         .with_template_ir_store(Rc::clone(shared_store));
-    let data = Template::new(&mut data_tokens, &data_context, vec![], string_table, path_fork)
-        .expect("docs-style data wrapper should parse");
+    let canonical_owner = data_file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut data_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    data_stream
+        .set_position(data_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let data = Template::new(
+        &mut data_stream,
+        data_path,
+        &data_context,
+        vec![],
+        string_table,
+        path_fork,
+    )
+    .expect("docs-style data wrapper should parse");
 
     vec![
         Declaration {
@@ -122,13 +218,35 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[$children([:<b>[$slot]</b>]): hello [:child] ]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$children([:<b>[$slot]</b>]): hello [:child] ]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let context = new_constant_context(source_path.to_owned(), &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
 
-    let template = Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("child-wrapper composition should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("child-wrapper composition should parse");
 
     let reference = &template.tir_reference;
 

@@ -12,14 +12,24 @@ use std::path::Path;
 fn tokenize_source(source: &str) -> (TokenStats, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path =
-        path_fork.try_intern_filesystem_path(Path::new("src/main.moth"), &mut string_table).expect("test path should be UTF-8");
+    let path = path_fork
+        .try_intern_filesystem_path(Path::new("src/main.moth"), &mut string_table)
+        .expect("test path should be UTF-8");
     let directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(source, path, TokenizerEntryMode::SourceFile, &directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        source,
+        path,
+        TokenizerEntryMode::SourceFile,
+        &directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("source should tokenize");
 
-    (file_tokens.token_stats, string_table)
+    (file_tokens.tokens.token_stats(), string_table)
 }
 
 #[test]

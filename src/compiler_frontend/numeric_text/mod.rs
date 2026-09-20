@@ -7,6 +7,7 @@
 
 pub mod format;
 pub mod parse;
+pub mod store;
 pub mod token;
 
 pub(crate) mod grammar;

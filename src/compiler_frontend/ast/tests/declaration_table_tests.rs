@@ -21,18 +21,27 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRange};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn updates_existing_declaration_slot_without_reordering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
-    let second_path = path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits");
+    let first_path = path_fork
+        .try_intern_portable_path("first", &mut string_table)
+        .expect("test path fits");
+    let second_path = path_fork
+        .try_intern_portable_path("second", &mut string_table)
+        .expect("test path fits");
 
-    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Inferred),
-    declaration(&second_path, DataType::Bool),], &path_fork);
+    let mut table = TopLevelDeclarationTable::new(
+        vec![
+            declaration(&first_path, DataType::Inferred),
+            declaration(&second_path, DataType::Bool),
+        ],
+        &path_fork,
+    );
 
     let first_id = table
         .declaration_id_by_path(&first_path)
@@ -45,7 +54,9 @@ fn updates_existing_declaration_slot_without_reordering() {
     assert_eq!(declarations[1].id, second_path);
     assert_eq!(declarations[1].value.diagnostic_type, DataType::Bool);
 
-    let first_name = path_fork.component(first_path).expect("test path should have a name");
+    let first_name = path_fork
+        .component(first_path)
+        .expect("test path should have a name");
     let by_name = table
         .get_visible_resolved_by_name(first_name, None)
         .expect("name lookup should see updated declaration");
@@ -56,10 +67,18 @@ fn updates_existing_declaration_slot_without_reordering() {
 fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
-    let constant_path = path_fork.try_intern_portable_path("constant", &mut string_table).expect("test path fits");
-    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
-    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
+    let alias_path = path_fork
+        .try_intern_portable_path("Alias", &mut string_table)
+        .expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_portable_path("constant", &mut string_table)
+        .expect("test path fits");
+    let trait_path = path_fork
+        .try_intern_portable_path("Trait", &mut string_table)
+        .expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("function", &mut string_table)
+        .expect("test path fits");
 
     let table = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -132,7 +151,9 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
 fn stage3_order_rejects_duplicate_semantic_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let duplicate_path = path_fork.try_intern_portable_path("Duplicate", &mut string_table).expect("test path fits");
+    let duplicate_path = path_fork
+        .try_intern_portable_path("Duplicate", &mut string_table)
+        .expect("test path fits");
 
     let result = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -165,8 +186,12 @@ fn stage3_order_rejects_duplicate_semantic_paths() {
 fn stage3_order_rejects_missing_and_unexpected_value_rows() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let constant_path = path_fork.try_intern_portable_path("constant", &mut string_table).expect("test path fits");
-    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
+    let constant_path = path_fork
+        .try_intern_portable_path("constant", &mut string_table)
+        .expect("test path fits");
+    let alias_path = path_fork
+        .try_intern_portable_path("Alias", &mut string_table)
+        .expect("test path fits");
 
     let missing_value = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -205,8 +230,12 @@ fn stage3_order_rejects_missing_and_unexpected_value_rows() {
 fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let record_path = path_fork.try_intern_portable_path("record", &mut string_table).expect("test path fits");
-    let value_path = path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits");
+    let record_path = path_fork
+        .try_intern_portable_path("record", &mut string_table)
+        .expect("test path fits");
+    let value_path = path_fork
+        .try_intern_portable_path("value", &mut string_table)
+        .expect("test path fits");
 
     let non_dense = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -245,7 +274,9 @@ fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
 fn compiler_owned_rows_reject_semantic_path_collisions() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("collision", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("collision", &mut string_table)
+        .expect("test path fits");
 
     let result = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
@@ -269,7 +300,9 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
 fn implicit_start_rejects_authored_start_collision() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let start_path = path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("start", &mut string_table)
+        .expect("test path fits");
     let authored = declaration(
         &start_path,
         DataType::Function(Box::new(None), Default::default()),
@@ -327,7 +360,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
                 config_qualifier: None,
-                initializer_tokens: Vec::new(),
+                initializer_range: None,
                 initializer_references: Vec::new(),
             },
         },
@@ -338,7 +371,9 @@ fn declaration_lanes_reject_missing_semantic_records() {
     ];
 
     for (index, kind) in semantic_kinds.into_iter().enumerate() {
-        let path = path_fork.try_intern_portable_path(&format!("missing_{index}"), &mut string_table).expect("test path fits");
+        let path = path_fork
+            .try_intern_portable_path(&format!("missing_{index}"), &mut string_table)
+            .expect("test path fits");
         let header = semantic_header(kind, path, &mut string_table);
 
         assert!(
@@ -352,8 +387,12 @@ fn declaration_lanes_reject_missing_semantic_records() {
 fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
-    let other_path = path_fork.try_intern_portable_path("other", &mut string_table).expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("function", &mut string_table)
+        .expect("test path fits");
+    let other_path = path_fork
+        .try_intern_portable_path("other", &mut string_table)
+        .expect("test path fits");
     let header = semantic_header(
         HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -424,7 +463,9 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
 fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let function_path = path_fork.try_intern_portable_path("function", &mut string_table).expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("function", &mut string_table)
+        .expect("test path fits");
     let header = semantic_header(
         HeaderKind::Function {
             generic_parameters: Default::default(),
@@ -469,11 +510,21 @@ fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
 fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
-    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
-    let start_path = path_fork.try_intern_portable_path("start", &mut string_table).expect("test path fits");
-    let builtin_path = path_fork.try_intern_portable_path("Builtin", &mut string_table).expect("test path fits");
-    let imported_path = path_fork.try_intern_portable_path("imported", &mut string_table).expect("test path fits");
+    let alias_path = path_fork
+        .try_intern_portable_path("Alias", &mut string_table)
+        .expect("test path fits");
+    let trait_path = path_fork
+        .try_intern_portable_path("Trait", &mut string_table)
+        .expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("start", &mut string_table)
+        .expect("test path fits");
+    let builtin_path = path_fork
+        .try_intern_portable_path("Builtin", &mut string_table)
+        .expect("test path fits");
+    let imported_path = path_fork
+        .try_intern_portable_path("imported", &mut string_table)
+        .expect("test path fits");
 
     let mut table = TopLevelDeclarationTable::from_stage3_order(
         vec![
@@ -527,10 +578,15 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
 fn appending_declaration_updates_path_and_name_indexes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
-    let appended_path = path_fork.try_intern_portable_path("appended", &mut string_table).expect("test path fits");
+    let first_path = path_fork
+        .try_intern_portable_path("first", &mut string_table)
+        .expect("test path fits");
+    let appended_path = path_fork
+        .try_intern_portable_path("appended", &mut string_table)
+        .expect("test path fits");
 
-    let mut table = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)], &path_fork);
+    let mut table =
+        TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)], &path_fork);
     let appended = declaration(&appended_path, DataType::StringSlice);
 
     table
@@ -560,7 +616,7 @@ fn appending_declaration_updates_path_and_name_indexes() {
     );
     assert!(
         table
-        .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
+            .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
             .is_none()
     );
 }
@@ -569,13 +625,17 @@ fn appending_declaration_updates_path_and_name_indexes() {
 fn generated_layer_keeps_replacements_and_appends_local() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
-    let appended_path = path_fork.try_intern_portable_path("appended", &mut string_table).expect("test path fits");
+    let shared_path = path_fork
+        .try_intern_portable_path("shared", &mut string_table)
+        .expect("test path fits");
+    let appended_path = path_fork
+        .try_intern_portable_path("appended", &mut string_table)
+        .expect("test path fits");
 
-    let original = std::rc::Rc::new(TopLevelDeclarationTable::new(vec![declaration(
-        &shared_path,
-        DataType::Bool,
-    )], &path_fork));
+    let original = std::rc::Rc::new(TopLevelDeclarationTable::new(
+        vec![declaration(&shared_path, DataType::Bool)],
+        &path_fork,
+    ));
     let mut generated = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&original));
 
     let shared_id = generated
@@ -610,11 +670,21 @@ fn generated_layer_keeps_replacements_and_appends_local() {
 fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let alias_path = path_fork.try_intern_portable_path("Alias", &mut string_table).expect("test path fits");
-    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
-    let trait_path = path_fork.try_intern_portable_path("Trait", &mut string_table).expect("test path fits");
-    let first_path = path_fork.try_intern_portable_path("first_local", &mut string_table).expect("test path fits");
-    let nested_path = path_fork.try_intern_portable_path("nested_local", &mut string_table).expect("test path fits");
+    let alias_path = path_fork
+        .try_intern_portable_path("Alias", &mut string_table)
+        .expect("test path fits");
+    let shared_path = path_fork
+        .try_intern_portable_path("shared", &mut string_table)
+        .expect("test path fits");
+    let trait_path = path_fork
+        .try_intern_portable_path("Trait", &mut string_table)
+        .expect("test path fits");
+    let first_path = path_fork
+        .try_intern_portable_path("first_local", &mut string_table)
+        .expect("test path fits");
+    let nested_path = path_fork
+        .try_intern_portable_path("nested_local", &mut string_table)
+        .expect("test path fits");
 
     let root = std::rc::Rc::new(
         TopLevelDeclarationTable::from_stage3_order(
@@ -713,10 +783,19 @@ fn declaration_copy_counter_detects_flat_row_clones() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let first_path = path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits");
-    let second_path = path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits");
-    let root = TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool),
-    declaration(&second_path, DataType::StringSlice),], &path_fork);
+    let first_path = path_fork
+        .try_intern_portable_path("first", &mut string_table)
+        .expect("test path fits");
+    let second_path = path_fork
+        .try_intern_portable_path("second", &mut string_table)
+        .expect("test path fits");
+    let root = TopLevelDeclarationTable::new(
+        vec![
+            declaration(&first_path, DataType::Bool),
+            declaration(&second_path, DataType::StringSlice),
+        ],
+        &path_fork,
+    );
 
     let _prohibited_flat_copy = root.clone();
     log_frontend_counters();
@@ -745,12 +824,16 @@ fn generated_layer_clones_do_not_copy_inherited_rows() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let shared_path = path_fork.try_intern_portable_path("shared", &mut string_table).expect("test path fits");
-    let local_path = path_fork.try_intern_portable_path("local", &mut string_table).expect("test path fits");
-    let root = std::rc::Rc::new(TopLevelDeclarationTable::new(vec![declaration(
-        &shared_path,
-        DataType::Bool,
-    )], &path_fork));
+    let shared_path = path_fork
+        .try_intern_portable_path("shared", &mut string_table)
+        .expect("test path fits");
+    let local_path = path_fork
+        .try_intern_portable_path("local", &mut string_table)
+        .expect("test path fits");
+    let root = std::rc::Rc::new(TopLevelDeclarationTable::new(
+        vec![declaration(&shared_path, DataType::Bool)],
+        &path_fork,
+    ));
     let mut generated = TopLevelDeclarationTable::fork_for_generated(root);
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
@@ -811,16 +894,20 @@ fn ordered_declaration(
     }
 }
 
-fn semantic_header(kind: HeaderKind, path: PathId, string_table: &mut StringTable) -> Header {
-    let mut path_fork = PathInternerFork::empty();
+fn semantic_header(kind: HeaderKind, path: PathId, _string_table: &mut StringTable) -> Header {
+    let token_index =
+        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind,
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: Default::default(),
         name_span: None,
-        tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        synthetic_content_payload: None,
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path: path,
+        token_sequence: None,
         capacity_references: Vec::new(),
     }
 }

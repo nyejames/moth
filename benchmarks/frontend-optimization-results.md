@@ -3637,3 +3637,275 @@ vector capacity for its 39 diagnostics. Multi-module Arc-sharing coverage
 sidecars in one boundary reuse the installed table rather than retaining one deep snapshot each.
 The path-table copy counters remain useful transient-allocation evidence and are not a retained
 owner-size claim.
+
+## Data Layout Migration - Phase 3 Slice 3A Token Array Layout Selection (2026-09-14)
+
+Decision: the canonical production token layout is SoA `Vec`/`Box<[TokenShape]>` plus
+`Vec`/`Box<[LocalSpan]>`. Compact AoS `TokenRecord { shape: TokenShape, span: LocalSpan }` at the
+required 12-byte layout is rejected: at equal retained capacity it showed no repeatable material
+improvement, and the probe showed a repeatable SoA parser-cursor iteration advantage, so the
+layout authority's SoA baseline is preserved.
+
+Method: short-lived Rust `-O` probe on branch `diagnostic-data-layout-changes` (clean tree; no
+repo files added or edited for the probe; not a second benchmark runner; no permanent probe
+added). Five independent invocations, N=41,331 representative tokens. `TokenShape` 8 bytes,
+`LocalSpan` 4 bytes, AoS `TokenRecord` 12 bytes; both layouts held 495,972 capacity bytes. The
+probe's parser-cursor-shaped loop reads current shape/span values, checks an adjacent peek and
+advances by index; conditional flag modes exercise cache-sensitive access patterns without
+claiming hardware cache-counter evidence. The checked validation loop performs 12,399,300
+range/length checks per layout. This remains a parser/cache/validation proxy, not a full
+production parser benchmark; later Phase 3 evidence owns end-to-end parser, retention and
+timing checks.
+
+| Mode | SoA five-run range (ms) | AoS five-run range (ms) |
+| --- | ---: | ---: |
+| Parser cursor, flags=false | 5.681-5.804 | 6.158-6.513 |
+| Parser cursor, flags=true | 6.692-6.884 | 8.161-8.515 |
+| Checked validation | 1.881-1.938 | 1.928-1.948 |
+
+SoA was no slower in any invocation/mode (one validation pair tied at the displayed precision);
+the validation loop reported zero failures. No AoS run produced a repeatable material improvement,
+so the rejected layout has no re-entry condition beyond new representative evidence showing a
+material gain without weakening the 8-byte/4-byte contracts.
+
+## Data Layout Migration - Phase 3 Slice 3H Resumption Baseline (2026-09-18)
+
+> This section is the durable record for the Phase 3 Slice 3H resumption. It holds the matched
+> scaling distributions, the retention probes and the reproduced R0 gate baseline so the owning
+> plan keeps only a short status pointer. Budgets are unchanged throughout.
+
+Resumption baseline: pause commit `3fb55d31b96f81bd983c26efe82465353f09479a` on branch
+`diagnostic-data-layout-changes`, plus four inherited Clippy-lint corrections in
+`src/compiler_frontend/ast/cursor.rs` and
+`src/compiler_frontend/ast/statements/declarations.rs` (`collapsible_if` x2,
+`unnecessary_lazy_evaluations`, `needless_lifetimes`). Toolchain rustc/clippy
+`1.98.1 (48a229cea 2026-09-01)`, host `aarch64-apple-darwin` Apple M1 Pro,
+`RAYON_NUM_THREADS` unset. This section records an independent reproduction of the pause
+commit, not a new claim about the earlier uncommitted tree based on `f7927597e`; that earlier
+record is kept below as superseded context.
+
+### Earlier recorded closeout (superseded uncommitted-tree record)
+
+The plan previously recorded closeout validation on the uncommitted worktree based on
+`f7927597e` (no new commit hash): toolchain rustc/clippy `1.98.1 aarch64-apple-darwin`, host
+Apple Silicon `6D851D`, `RAYON_NUM_THREADS` unset/default, frontend dev runner with timers
+build, unchanged budgets nominal `n^1.25`, constant `n^1.25`, generic `n^1.70`. That record
+reported: latest `just validate` passed native featured Clippy, feature coverage, source and
+first-party audits, `5193` workspace tests, integration `1973/1973`, docs check, and bench-ci
+`82/82` preflight plus quick measurements, stopping only at generic scaling: nominal
+`3.411/6.372/12.706/25.322ms n^0.97`, constant `1.125/3.321/10.896ms n^0.82`, generic
+`78.442/249.278/919.138/3328.514ms n^1.81` (exceeds `1.70`). Independent
+`just test-feature-matrix` passed all `8` standard lanes; `just timers-erasure-check` passed
+the no-timer binary clean at `8,928,192` bytes; `just bench-data-layout-check` passed `2/2`
+cases over `10` measured iterations (`-5ms` average). The inferred pre-H0 `9f7438f849` point
+remains a non-authoritative context point.
+
+### Reproduced R0 gate baseline (pause commit)
+
+`just validate` passed native featured Clippy only after the four inherited lint corrections
+landed. The recorded "featured Clippy passed" evidence did not reproduce until those fixes:
+the recorded claim predated the pause commit's own final edits. After the corrections, the
+gate passed feature-lane coverage, source audit and first-party dependency audit, workspace
+tests `5193` + `839` + `17`, integration `1973/1973`, docs check, and bench-ci `82/82`
+preflight plus quick measurements; the gate then stopped at complexity budgets.
+
+`just bench-scaling` inside that gate:
+
+| Workload | Measurements | Fitted exponent | Budget | Outcome |
+| --- | --- | --- | --- | --- |
+| Nominal | `3.444/6.885/13.403/26.019ms` | `n^0.97` | `n^1.25` | within |
+| Constant chain | `1.137/3.221/11.481ms` | `n^0.83` | `n^1.25` | within |
+| Generic instantiation | `75.710/233.246/816.346/3166.498ms` | `n^1.80` | `n^1.70` | exceeds; the single reproduced failure |
+
+Independent gates after the fail-fast stop: `just test-feature-matrix` ran 8 standard lanes,
+8 passed, 0 failed; `just timers-erasure-check` passed with the no-timer binary clean at
+`8,928,208` bytes; `just bench-data-layout-check` passed `2/2` cases over 10 measured
+iterations (`-4ms` average).
+
+### Matched scaling comparison (three invocations, five iterations each)
+
+Three independent read-only `bench-scaling` runs, each with five measured iterations, compare
+the current tree against exact pre-Phase-3 `c17672bb5`:
+
+| Workload | Size | Pre-Phase-3 `c17672bb5` median (range) | Current median (range) |
+| --- | ---: | --- | --- |
+| Constant chain | 32 | `0.890ms (0.814-0.979)` | `1.373ms (1.202-1.441)` |
+| Constant chain | 128 | `2.199ms (1.951-2.490)` | `3.131ms (2.852-3.292)` |
+| Constant chain | 512 | `7.166ms (7.147-7.471)` | `10.506ms (10.236-11.120)` |
+| Generic instantiation | 20 | `74.249ms (74.206-75.991)` | `81.244ms (77.293-84.387)` |
+| Generic instantiation | 40 | `232.332ms (229.410-240.732)` | `255.924ms (243.001-263.498)` |
+| Generic instantiation | 80 | `808.026ms (791.367-863.148)` | `880.415ms (840.509-903.943)` |
+| Generic instantiation | 160 | `3096.371ms (3048.797-3135.177)` | `3295.397ms (3281.227-3417.194)` |
+
+The current constant-chain fit is `n^0.73` against pre-Phase-3 `n^0.75`; the current generic
+fit is `n^1.78` against pre-Phase-3 `n^1.79`. Absolute generic cost is higher at every size,
+so no no-worsening claim is made; generic remains above the unchanged `n^1.70` budget, and
+constant attribution, generic attribution and the retained/intermediate ownership ledger
+remain open.
+
+### Retention probes (proxies only)
+
+These probes are investigation leads, not a complete owner ledger. They do not yet count
+`TokenShape`/common-cold bytes, parser adapters/vectors, or distinct generic donor owner
+counts; the full retained/intermediate ownership ledger remains missing:
+
+| Probe | Elapsed | Live / peak / after-drop bytes | Retained snapshot | Identity slots | Records | Contexts | Path tables (count / rows / bytes) | String clones | Path copies (copies / rows / bytes) |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| Warning-heavy | `48.402ms` | `29,970/2,057,994/1,479` | `1,200` | `2` | `39` | `1` | `1/78/1,536` | `1` | `7/100/1,200` |
+| Diagnosed | `87.707ms` | `319,702/1,978,183/1,488` | `903` | `42` | `40` | `1` | `41/6,602/79,224` | `42` | `48/6,965/83,580` |
+| Generic-scaling-160 | `4185.310ms` (`generated.materialise 3551.072ms`) | `17,098/360,435,524/1,469` | `0` | `-` | `-` | `-` | `-` | `802` | `807/3,379,512/40,554,144` |
+
+Retained report metrics for generic-scaling-160 are zero because the clean result drops its
+report context. No budget is raised or loosened by this record.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 matched evidence (provisional, 2026-09-20)
+
+> This section records the independent R5 comparison for the pre-final candidate `aa337b136`.
+> The final parser cutover at `6309adf6d` came afterward, so these measurements are not evidence
+> for the final checkpoint. Raw per-process output is local-only under `/tmp/moth-r5-independent/`;
+> no raw allocator logs are committed. Budgets remain nominal/constant `n^1.25` and generic
+> `n^1.70`.
+
+### Measurement identity
+
+- Compared commits: pre-Phase-3 `c17672bb5bb8306432c69cefbb9afbe8a5484b2d`, pause `3fb55d31b96f81bd983c26efe82465353f09479a`, immediate correction parent `fcc41b602084e1ce3c1af240ed4baf3ec089cc04`, candidate `aa337b13648712c28c84368750940944f940ae5e`.
+- Fixtures and metric boundaries were identical: constant chain (`frontend.ast.total`, sizes 32/128/512), nominal scaling (`frontend.ast.environment`, sizes 40/80/160/320), generic scaling (`frontend.generated.materialise`, sizes 20/40/80/160), warning-heavy, and diagnosed fixtures from `benchmarks/manifest.toml`.
+- Each commit used a release `data_layout_memory_probe` binary built with the same `rustc 1.98.1 (48a229cea 2026-09-01)`, Cargo `1.98.1`, host `aarch64-apple-darwin`, Apple M1 Pro, and `RAYON_NUM_THREADS=1`. Five measured independent process invocations followed one discarded warm-up per tag; rounds interleaved fixture then tag order `pre`, `pause`, `parent`, `candidate`.
+- Probe allocator values are baseline-relative aggregate proxies; semantic retention fields are owner-ledger observations. They are not substituted for one another.
+
+### Scaling distributions
+
+Each cell lists the five independent measurements in round order; `median [min,max]` follows. Deltas are candidate minus the named comparison.
+
+#### Constant chain — `stage.frontend.ast.total`, budget `n^1.25`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 32 | `0.257/0.240/0.266/0.276/0.247`; `0.257 [0.240,0.276]` | `0.277/0.298/0.275/0.285/0.276`; `0.277 [0.275,0.298]` | `0.297/0.249/0.259/0.248/0.274`; `0.259 [0.248,0.297]` | `0.263/0.257/0.278/0.267/0.269`; `0.267 [0.257,0.278]` | `+0.010` | `-0.010` | `+0.008` |
+| 128 | `0.430/0.447/0.541/0.419/0.435`; `0.435 [0.419,0.541]` | `0.530/0.554/0.488/0.472/0.494`; `0.494 [0.472,0.554]` | `0.453/0.472/0.487/0.443/0.458`; `0.458 [0.443,0.487]` | `0.455/0.446/0.452/0.428/0.443`; `0.446 [0.428,0.455]` | `+0.012` | `-0.048` | `-0.012` |
+| 512 | `1.202/1.361/1.190/1.166/1.295`; `1.202 [1.166,1.361]` | `1.300/1.267/1.258/1.265/1.459`; `1.267 [1.258,1.459]` | `1.339/1.178/1.198/1.392/1.305`; `1.305 [1.178,1.392]` | `1.211/1.135/1.218/1.379/1.201`; `1.211 [1.135,1.379]` | `+0.009` | `-0.057` | `-0.094` |
+
+Fits: pre `n^0.557`, pause `n^0.549`, parent `n^0.584`, candidate `n^0.545`.
+
+#### Nominal environment — `stage.frontend.ast.environment`, budget `n^1.25`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 40 | `0.575/0.598/0.589/0.629/0.600`; `0.598 [0.575,0.629]` | `0.619/0.646/0.637/0.635/0.630`; `0.635 [0.619,0.646]` | `0.650/0.681/0.627/0.605/0.601`; `0.627 [0.601,0.681]` | `0.607/0.587/0.599/0.627/0.592`; `0.599 [0.587,0.627]` | `+0.001` | `-0.036` | `-0.028` |
+| 80 | `1.073/1.081/1.110/1.062/1.052`; `1.073 [1.052,1.110]` | `1.143/1.118/1.142/1.116/1.224`; `1.142 [1.116,1.224]` | `1.084/1.083/1.115/1.119/1.335`; `1.115 [1.083,1.335]` | `1.059/1.090/1.135/1.093/1.063`; `1.090 [1.059,1.135]` | `+0.017` | `-0.052` | `-0.025` |
+| 160 | `2.051/2.093/2.024/2.049/2.101`; `2.051 [2.024,2.101]` | `2.119/2.361/2.168/2.148/2.099`; `2.148 [2.099,2.361]` | `2.267/2.072/2.035/2.064/2.073`; `2.072 [2.035,2.267]` | `2.056/2.143/2.072/2.013/2.039`; `2.056 [2.013,2.143]` | `+0.005` | `-0.093` | `-0.017` |
+| 320 | `3.945/4.131/3.875/4.010/3.938`; `3.945 [3.875,4.131]` | `4.321/4.137/4.035/4.075/4.162`; `4.137 [4.035,4.321]` | `4.076/4.034/4.428/3.998/4.087`; `4.076 [3.998,4.428]` | `3.905/3.963/4.131/3.959/4.048`; `3.963 [3.905,4.131]` | `+0.018` | `-0.174` | `-0.114` |
+
+Fits: pre `n^0.910`, pause `n^0.902`, parent `n^0.900`, candidate `n^0.909`.
+
+#### Generic materialisation — `stage.frontend.generated.materialise`, budget `n^1.70`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 20 | `10.074/9.826/9.857/9.654/9.986`; `9.857 [9.654,10.074]` | `9.915/10.937/10.325/9.703/9.838`; `9.915 [9.703,10.937]` | `9.605/10.211/10.437/10.347/10.291`; `10.291 [9.605,10.437]` | `9.725/9.918/9.861/10.083/10.151`; `9.918 [9.725,10.151]` | `+0.062` | `+0.003` | `-0.373` |
+| 40 | `29.471/29.502/29.645/30.140/31.690`; `29.645 [29.471,31.690]` | `29.668/30.285/29.900/29.701/31.061`; `29.900 [29.668,31.061]` | `29.353/29.200/29.526/30.537/30.762`; `29.526 [29.200,30.762]` | `29.894/29.665/32.557/28.778/29.562`; `29.665 [28.778,32.557]` | `+0.021` | `-0.234` | `+0.139` |
+| 80 | `106.885/107.315/106.859/106.000/123.533`; `106.885 [106.000,123.533]` | `113.390/105.473/108.013/105.403/105.747`; `105.747 [105.403,113.390]` | `106.067/109.020/106.914/105.073/106.219`; `106.219 [105.073,109.020]` | `104.315/105.379/106.819/104.979/106.441`; `105.379 [104.315,106.819]` | `-1.506` | `-0.368` | `-0.841` |
+| 160 | `399.389/406.654/408.831/408.601/407.764`; `407.764 [399.389,408.831]` | `405.015/410.638/418.993/397.652/401.318`; `405.015 [397.652,418.993]` | `406.677/402.113/402.604/419.315/418.719`; `406.677 [402.113,419.315]` | `402.883/408.304/397.600/406.818/402.029`; `402.883 [397.600,408.304]` | `-4.881` | `-2.131` | `-3.794` |
+
+Fits: pre `n^1.796`, pause `n^1.788`, parent `n^1.776`, candidate `n^1.786`.
+
+### Outcome and allocator distributions
+
+All five samples preserved the same outcome and diagnostic counts per fixture: warning-heavy was clean with 39 warnings; diagnosed was diagnosed with 40 errors. Median aggregate allocator values (live / peak / after-report-drop bytes) were:
+
+| fixture | pre | pause | parent | candidate |
+| --- | --- | --- | --- | --- |
+| warning-heavy.moth (Success, 0 errors, 39 warnings) | `30108 / 2057633 / 1479` | `29953 / 2057695 / 1479` | `29954 / 2057714 / 1479` | `29957 / 2056363 / 1479` |
+| diagnosed (Diagnosed, 40 errors, 0 warnings) | `318671 / 1730799 / 1488` | `317998 / 1965214 / 1488` | `318040 / 1965977 / 1488` | `318166 / 1947482 / 1488` |
+
+The candidate remained within the unchanged constant and nominal budgets, while generic remained
+above the inherited `n^1.70` budget at every compared point. Absolute generic medians were lower
+than pre/pause at sizes 80 and 160 but are still a measured tradeoff rather than a no-worsening
+claim; the budget is intentionally unchanged. This four-point, five-sample comparison is
+provisional historical evidence for candidate `aa337b136`, not final-checkpoint performance
+acceptance; exact R5 attribution for `6309adf6d` remains open.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 ownership ledger smoke evidence (provisional, 2026-09-20)
+
+The feature-gated ledger records compiler-owned storage and lifetime events rather than allocator bookkeeping. The release probe was built from the candidate implementation with `data_layout_memory_probe`, rustc/cargo `1.98.1`, Apple M1 Pro, and `RAYON_NUM_THREADS=1`. These are one-process smoke observations; matched five-run allocator distributions remain above.
+
+| Fixture | Outcome | Errors/warnings | Owners | Shape/span bytes | Numeric/path/sequence bytes | Transient bytes (peak) | Donor identity tables | Generic owner bytes (live/peak) | Frozen report contexts/path tables | Incomplete |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | --- |
+| `benchmarks/speed-test.moth` | Success | 0 / 0 | 1 | 32,816 / 16,408 | 8,688 / 0 / 888 | 68,616 (68,616) | 0 / 0 | 0 (0 / 0) | 0 / 0 | false |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 1 | 2,120 / 1,060 | 0 / 0 / 16 | 5,760 (5,760) | 0 / 0 | 0 (0 / 0) | 1 / 1 | false |
+| `benchmarks/adversarial/generic-trait-churn.moth` | Success | 0 / 0 | 1 | 7,568 / 3,784 | 312 / 0 / 280 | 18,864 (18,864) | strings 2 / paths 1 | 1 (11,944 / 11,944) | 0 / 0 | false |
+| `benchmarks/data-layout/diagnosed` | Diagnosed | 40 / 0 | 42 | 9,112 / 4,556 | 48 / 8 / 736 | 22,560 (19,008) | 0 / 0 | 0 (0 / 0) | 1 / 41 | false |
+| `/tmp/moth-r5-independent/early-malformed.moth` (`[`, newline) | Diagnosed | 1 / 0 | 1 | 32 / 16 | 0 / 0 / 4 | 48 (48) | 0 / 0 | 0 (0 / 0) | 0 / 0 | false |
+
+The warning-heavy report retained one identity context and path table with 78 rows/1,536 bytes; the diagnosed report retained one context and 41 path tables with 6,602 rows/79,224 bytes. Clean and early malformed outcomes retained no frozen report context. The diagnosed path table count is intentionally higher because each diagnosed source domain keeps its own source-owned table. Full raw output remains local-only in `/tmp/moth-r5-independent/`; the ledger reports `incomplete=false` for every smoke.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 exact final-checkpoint closeout (2026-09-20)
+
+This section records the exact final source checkpoint `4cfd9d492`, derived from the Phase 3
+implementation checkpoint `6309adf6d`. The closeout changes use a generated `TypeEnvironment`
+fork and share the immutable completed header-binding environment through `Rc`; the rejected
+shared path-source experiment is not part of this checkpoint.
+
+- Toolchain: rustc/cargo `1.98.1 (48a229cea)`, Apple M1 Pro `aarch64-apple-darwin`,
+  `RAYON_NUM_THREADS=1`.
+- Probe: `cargo build --release --bin data_layout_memory_probe --features
+  data_layout_memory_probe`, then `./target/release/data_layout_memory_probe <fixture>`.
+- Fixtures and metric boundaries: constant chain (`frontend.ast.total`, sizes `32/128/512`),
+  nominal scaling (`frontend.ast.environment`, sizes `40/80/160/320`) and generic scaling
+  (`frontend.generated.materialise`, sizes `20/40/80/160`).
+- Each final-checkpoint size had one discarded warm-up and five independent process samples.
+  Samples were collected in size order within each series; the earlier pre/pause/parent
+  distributions and the candidate-attribution policy remain in the matched comparison above.
+- Final medians and fits:
+
+| series | five samples by size, in ms | medians by size, in ms | fit | budget |
+| --- | --- | --- | ---: | ---: |
+| Constant chain | `32: 0.237/0.217/0.241/0.219/0.225`; `128: 0.393/0.435/0.423/0.487/0.439`; `512: 1.254/1.173/1.176/1.174/1.123` | `0.225/0.435/1.174` | `n^0.597` | `n^1.25` |
+| Nominal environment | `40: 0.588/0.608/0.606/0.596/0.620`; `80: 1.111/1.111/1.151/1.082/1.111`; `160: 2.187/2.251/2.073/2.090/2.099`; `320: 4.108/4.089/4.036/4.146/4.104` | `0.606/1.111/2.099/4.104` | `n^0.919` | `n^1.25` |
+| Generic materialisation | `20: 9.793/10.374/10.210/10.272/10.626`; `40: 29.417/29.568/35.892/30.339/31.666`; `80: 103.514/105.039/109.133/104.984/105.897`; `160: 408.542/400.639/395.957/424.336/405.826` | `10.272/30.339/105.039/405.826` | `n^1.770` | `n^1.70` |
+
+Constant and nominal remain within their locked budgets. Generic remains above the unchanged
+`n^1.70` budget. The generic exceedance is explicitly accepted as the inherited Phase 3
+exception required by the owning plan; no budget is raised or loosened, and no no-worsening claim
+is made.
+
+The bounded executable closeout recipe attached to source checkpoint `4cfd9d492` completed native
+featured Clippy, feature-lane coverage, source and first-party audits, workspace tests
+(`5210 + 17 + 839` passed), integration (`1973/1973`), docs and benchmark preflight/quick sanity
+(`82/82`); it stopped only at the accepted generic scaling exception. `just timers-erasure-check`
+then passed with a clean no-timer binary of `8,862,096` bytes. This is checkpoint-scoped executable
+evidence, not a claim that the final platform workflow was green.
+### Final pre-merge validation disposition
+
+The manually dispatched `Validate and deploy` workflow at `7afdcc4e16` is the final pre-merge
+platform evidence for the Phase 3 code checkpoint. It is intentionally not green: native and
+feature-configured Clippy portions report the known `clippy::result_large_err` failures caused by
+the current `CompilerMessages` representation, including `Result` call sites whose `Err` variant
+is at least 128 bytes.
+
+These failures are deferred diagnostic-layout work owned by the later compact-diagnostic/error
+carrier phases. This closeout does not box `CompilerMessages`, add lint allowances or suppress
+`result_large_err`. The workflow still exercised the successful feature coverage, source and
+first-party audits, workspace, integration, documentation and benchmark-preflight families recorded
+above; those results do not make the aggregate workflow green. Fresh validation is required when
+the next implementation checkpoint activates.
+
+The generic `n^1.70` scaling exception remains separately accepted with its existing evidence and
+unchanged budget. The documentation-only commits after the executable checkpoint do not change that
+disposition or establish validation provenance for the final documentation HEAD.
+
+### Final owner-ledger smoke observations
+
+The same release probe reported complete owner-ledger observations (`incomplete=false`) for the
+clean, warning, generic-heavy, diagnosed and early-malformed cases:
+
+| fixture | outcome/errors/warnings | shape/span bytes | numeric/path/sequence bytes | transient bytes (peak) | donor identity tables | generic owner bytes (live/peak) | report contexts/path tables |
+| --- | --- | --- | --- | ---: | --- | --- | --- |
+| `speed-test.moth` | Success / `0/0` | `32816/16408` | `8688/0/888` | `68616 (68616)` | `0/0` | `0 (0/0)` | `0/0` |
+| `warning-heavy.moth` | Success / `0/39` | `2120/1060` | `0/0/16` | `5760 (5760)` | `0/0` | `0 (0/0)` | `1/1` |
+| `generic-trait-churn.moth` | Success / `0/0` | `7568/3784` | `312/0/280` | `18864 (18864)` | `2/1` | `11944 (11944/11944)` | `0/0` |
+| `data-layout/diagnosed` | Diagnosed / `40/0` | `9112/4556` | `48/8/736` | `22560 (19008)` | `0/0` | `0 (0/0)` | `1/41` |
+| `early-malformed.moth` | Diagnosed / `1/0` | `32/16` | `0/0/4` | `48 (48)` | `0/0` | `0 (0/0)` | `0/0` |
+
+Raw per-process output remains local-only under `/tmp/moth-r5-independent/`; allocator values
+remain baseline-relative proxies and are not substituted for owner attribution.

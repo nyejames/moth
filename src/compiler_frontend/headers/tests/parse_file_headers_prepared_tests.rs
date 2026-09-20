@@ -1,5 +1,47 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag};
+
+fn prepared_header_body_range<'a>(
+    prepared: &'a PreparedHeaderSyntax,
+    header: &Header,
+) -> TokenCursor<'a> {
+    let source = prepared
+        .source_token_owners
+        .get(&header.tokens.source())
+        .expect("header body range has no prepared source token owner")
+        .tokens_ref();
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner")
+            .cursor()
+            .expect("header sequence cursor should be valid");
+    }
+    source
+        .cursor(header.tokens)
+        .expect("header range should resolve through its source owner")
+}
+
+fn output_header_body_range<'a>(
+    output: &'a FileFrontendPrepareOutput,
+    header: &Header,
+) -> TokenCursor<'a> {
+    let source = output
+        .source_token_stream
+        .as_ref()
+        .expect("prepared source retains its token owner");
+    if let Some(sequence) = header.token_sequence {
+        return source
+            .token_sequence(sequence)
+            .expect("header sequence should resolve through its source owner")
+            .cursor()
+            .expect("header sequence cursor should be valid");
+    }
+    source
+        .cursor(header.tokens)
+        .expect("header range should resolve through its source owner")
+}
 
 /// Extended token spans keep their source-owned table through aggregation. Later span producers
 /// may append to that same builder without invalidating the retained header's earlier handles.
@@ -13,24 +55,61 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
-    let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        &source,
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &options, &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
+    let mut outputs = [prepare_file_from_tokens(
+        owner,
+        interned_path,
+        path_syntax,
+        &file_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+        &mut path_fork,
+    )
     .expect("preparation should succeed")];
-    let prepared = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
+    let prepared = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
+    )
     .expect("header syntax should aggregate");
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("a later source span should fit");
     let resolver = span_builder.resolver();
-    let literal = prepared
+    let literal_span = prepared
         .headers
         .iter()
-        .flat_map(|header| header.tokens.tokens.iter())
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .find_map(|header| {
+            let mut cursor = prepared_header_body_range(&prepared, header);
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    return Some(token.span());
+                }
+                if token.is_eof() {
+                    break;
+                }
+            }
+            None
+        })
         .expect("the retained header must keep its long string literal");
-    let resolved = literal.span.resolve_with(resolver);
+    let resolved = literal_span.resolve_with(resolver);
 
     assert_eq!(
         source.get(resolved.start() as usize..resolved.end() as usize),
@@ -52,21 +131,58 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let file_path = PathBuf::from("src/@page.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
-    let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        &source,
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
-    let mut outputs = [prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
+    let mut outputs = [prepare_file_from_tokens(
+        owner,
+        interned_path,
+        path_syntax,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+        &mut path_fork,
+    )
     .expect("preparation should succeed")];
-    let literal_span = outputs[0]
+    let output = &outputs[0];
+    let literal_span = output
         .headers
         .iter()
-        .flat_map(|header| header.tokens.tokens.iter())
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("the function body should retain its long literal")
-        .span;
+        .find_map(|header| {
+            let mut cursor = output_header_body_range(output, header);
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    return Some(token.span());
+                }
+                if token.is_eof() {
+                    break;
+                }
+            }
+            None
+        })
+        .expect("the function body should retain its long literal");
 
-    let diagnostics = match prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork) {
+    let diagnostics = match prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
+    ) {
         Err(failure) => expect_aggregation_diagnostics(failure),
         Ok(_) => panic!("a nested config qualifier should fail aggregation"),
     };
@@ -145,9 +261,14 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
             .expect("declaration shells prepare"),
         );
     }
-    let failure = prepare_header_syntax(&mut outputs, &mut string_table, &mut |source, diagnostic| diagnostic.capture_preparation_span(source), &mut path_fork)
-        .err()
-        .expect("nested qualifiers fail aggregation");
+    let failure = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut path_fork,
+    )
+    .err()
+    .expect("nested qualifiers fail aggregation");
     let diagnostics = expect_aggregation_diagnostics(failure).into_diagnostics();
     assert_eq!(diagnostics.len(), 2);
     for (index, diagnostic) in diagnostics.iter().enumerate() {
@@ -178,9 +299,18 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
         options: &options,
         style_directives: &styles,
     };
-    let failure = prepare_test_source_file(source, path, &context, &mut strings, 0, 0, &mut spans, &mut path_fork)
-        .err()
-        .expect("continued clause must diagnose statement");
+    let failure = prepare_test_source_file(
+        source,
+        path,
+        &context,
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+        &mut path_fork,
+    )
+    .err()
+    .expect("continued clause must diagnose statement");
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("expected source diagnostic");
     };
@@ -211,23 +341,47 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let source_id = SourceId::from_index(7);
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, source_id, &mut span_builder)
+    let file_tokens = tokenize(
+        &source,
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        source_id,
+        &mut span_builder,
+    )
     .expect("source should tokenize");
-    let long_span = file_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("tokenized source should retain the long string literal")
-        .span;
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
+    let long_span = {
+        let range = owner
+            .full_range()
+            .expect("canonical source range should fit");
+        let mut cursor = owner
+            .cursor(range)
+            .expect("canonical source cursor should fit");
+        loop {
+            let token = cursor
+                .advance()
+                .expect("source should contain a string literal");
+            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                break token.span();
+            }
+            assert!(!token.is_eof(), "source should contain a string literal");
+        }
+    };
     let expected_range = long_span.resolve_with(span_builder.resolver_for(source_id));
 
     let error = match parse_file_headers_with_table(
-        &mut file_tokens,
+        owner,
+        interned_path,
+        path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
@@ -273,14 +427,36 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let interned_path = path_fork.try_intern_filesystem_path(&file_path, &mut string_table)
+    let interned_path = path_fork
+        .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize("@core/math\n", interned_path, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder)
+    let file_tokens = tokenize(
+        "@core/math\n",
+        interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
     .expect("tokenization should succeed");
 
-    let output = prepare_file_from_tokens(file_tokens, &file_path, &HeaderParseOptions::default(), &mut string_table, 0, 0, &mut span_builder, &mut path_fork)
+    let (owner, path_syntax) = super::canonical_handoff(file_tokens);
+    let output = prepare_file_from_tokens(
+        owner,
+        interned_path,
+        path_syntax,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+        &mut path_fork,
+    )
     .expect("a dependency shell with a compilation-root identity should prepare");
 
     assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);

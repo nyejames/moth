@@ -20,7 +20,7 @@ type BlockIfResult<T> = Result<T, ExpressionParseError>;
 
 /// Parses a block-form value-if after the condition has been parsed and `:` is current.
 pub(super) fn parse_block_value_if(
-    input: ValueIfParseInput<'_, '_>,
+    input: ValueIfParseInput<'_, '_, '_>,
 ) -> BlockIfResult<ParsedReceiverValue> {
     let ValueIfParseInput {
         token_stream,

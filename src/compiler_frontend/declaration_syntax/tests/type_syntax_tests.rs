@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, GenericApplicationErrorReason,
     InvalidCollectionTypeReason, InvalidGenericInstantiationReason, InvalidMapTypeReason,
-    InvalidTypeAnnotationReason, NameNamespace, TokenTag,
+    InvalidTypeAnnotationReason, NameNamespace,
 };
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -25,8 +25,9 @@ use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation,
+    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
@@ -34,30 +35,70 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
-
-fn numeric_token(value: &str, string_table: &mut StringTable) -> Token {
-    Token::new(
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        LocalSpan::source_start(),
-    )
-}
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TestSourceTokensBuilder, TokenTag,
+};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
-fn stream_from_tokens(tokens: Vec<Token>, string_table: &mut StringTable) -> FileTokens {
-    let mut path_fork = PathInternerFork::empty();
-    FileTokens::new(
-        path_fork.try_intern_portable_path("type_syntax_tests", string_table).expect("test path fits"),
-        SourceId::COMPILATION_ROOT,
-        tokens,
-    )
+enum FixturePart {
+    Static(TokenTag),
+    Symbol(StringId),
+    Numeric(NumericLiteralToken),
 }
 
-fn token(kind: TokenKind) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+fn numeric_token(value: &str, string_table: &mut StringTable) -> FixturePart {
+    FixturePart::Numeric(NumericLiteralToken::test_new(value, string_table))
+}
+
+fn stream_from_tokens(
+    tokens: Vec<FixturePart>,
+    _string_table: &mut StringTable,
+) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    for token in tokens {
+        match token {
+            FixturePart::Static(tag) => builder
+                .push_static(tag, LocalSpan::source_start())
+                .expect("static type fixture token should build"),
+            FixturePart::Symbol(value) => builder
+                .push_symbol(TokenTag::SYMBOL, value, LocalSpan::source_start())
+                .expect("symbol type fixture token should build"),
+            FixturePart::Numeric(value) => builder
+                .push_numeric(value, LocalSpan::source_start())
+                .expect("numeric type fixture token should build"),
+        }
+    }
+    builder
+        .finish()
+        .expect("canonical type fixture tokens should build")
+}
+
+/// Parse a type annotation through the canonical source owner and declaration cursor.
+fn parse_type_annotation_test(
+    stream: &Arc<SourceTokens>,
+    context: TypeAnnotationContext,
+    string_table: &mut StringTable,
+) -> Result<ParsedTypeRef, HeaderParseFailure> {
+    let range = stream
+        .full_range()
+        .expect("test canonical source owner must expose a checked full range");
+    let cursor = stream
+        .cursor(range)
+        .expect("test canonical source owner must accept its checked full range");
+    let mut declaration_cursor =
+        DeclarationCursor::new(cursor).expect("test canonical cursor must build");
+    parse_type_annotation_cursor(&mut declaration_cursor, context, string_table)
+}
+
+fn token(tag: TokenTag) -> FixturePart {
+    FixturePart::Static(tag)
+}
+fn symbol_token(value: StringId) -> FixturePart {
+    FixturePart::Symbol(value)
 }
 
 fn assert_diagnostic_payload(
@@ -113,7 +154,10 @@ fn resolve_type_annotation_error(
     string_table: &mut StringTable,
     expected_failure: &str,
 ) -> CompilerDiagnostic {
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -126,15 +170,15 @@ fn resolve_type_annotation_error(
 fn declaration_context_allows_inferred_annotations() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
-        vec![token(TokenKind::Assign), token(TokenKind::Eof)],
+    let stream = stream_from_tokens(
+        vec![token(TokenTag::ASSIGN), token(TokenTag::EOF)],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("declaration type annotation should parse");
 
@@ -145,7 +189,10 @@ fn declaration_context_allows_inferred_annotations() {
 fn resolved_type_annotation_carries_canonical_type_id() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -167,7 +214,10 @@ fn resolved_type_annotation_carries_canonical_type_id() {
 fn resolved_inferred_annotation_has_no_type_id() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -190,20 +240,20 @@ fn declaration_context_parses_named_optional_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let point = string_table.intern("Point");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(point)),
-            token(TokenKind::QuestionMark),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            symbol_token(point),
+            token(TokenTag::QUESTION_MARK),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("named optional declaration type annotation should parse");
 
@@ -226,16 +276,16 @@ fn declaration_context_parses_named_optional_type() {
 fn signature_parameter_rejects_none_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
-        vec![token(TokenKind::DatatypeNone), token(TokenKind::Eof)],
+    let stream = stream_from_tokens(
+        vec![token(TokenTag::DATATYPE_NONE), token(TokenTag::EOF)],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("none parameter type should fail"),
     );
@@ -253,16 +303,16 @@ fn signature_parameter_rejects_none_type() {
 fn signature_parameter_rejects_reserved_trait_this_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
-        vec![token(TokenKind::TraitThis), token(TokenKind::Eof)],
+    let stream = stream_from_tokens(
+        vec![token(TokenTag::TRAIT_THIS), token(TokenTag::EOF)],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("reserved trait keyword type should fail"),
     );
@@ -280,16 +330,16 @@ fn signature_parameter_rejects_reserved_trait_this_type() {
 fn declaration_target_rejects_type_keyword_inside_type_annotation() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
-        vec![token(TokenKind::Type), token(TokenKind::Eof)],
+    let stream = stream_from_tokens(
+        vec![token(TokenTag::TYPE), token(TokenTag::EOF)],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("type keyword should be reserved"),
     );
@@ -299,7 +349,7 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
         DiagnosticPayload::InvalidTypeAnnotation {
             context: TypeAnnotationContext::DeclarationTarget,
             reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
-        } if found == DiagnosticToken::from(TokenKind::Type)
+        } if found == DiagnosticToken::from_static_tag(TokenTag::TYPE)
     ));
 }
 
@@ -307,16 +357,16 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
 fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
-        vec![token(TokenKind::Of), token(TokenKind::Eof)],
+    let stream = stream_from_tokens(
+        vec![token(TokenTag::OF), token(TokenTag::EOF)],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureReturn,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("of keyword should fail in type position"),
     );
@@ -324,7 +374,7 @@ fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
     assert!(matches!(
         error.payload,
         DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from(TokenKind::Of)
+            if found == DiagnosticToken::from_static_tag(TokenTag::OF)
     ));
 }
 
@@ -333,21 +383,21 @@ fn parses_generic_type_application() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(box_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            symbol_token(box_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("generic type application should parse");
 
@@ -375,21 +425,21 @@ fn public_option_type_syntax_is_deferred() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let option_name = string_table.intern("Option");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(option_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            symbol_token(option_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("public option syntax should parse before resolution rejects it");
 
@@ -419,23 +469,23 @@ fn public_result_type_syntax_is_deferred() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let result_name = string_table.intern("Result");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(result_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::Comma),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            symbol_token(result_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::COMMA),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("public result syntax should parse before resolution rejects it");
 
@@ -465,23 +515,23 @@ fn parses_collection_of_generic_type_application() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(box_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(box_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection element generic type application should parse");
 
@@ -517,26 +567,26 @@ fn rejects_nested_generic_type_application() {
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
     let map_name = string_table.intern("Map");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(box_name)),
-            token(TokenKind::Of),
-            token(TokenKind::Symbol(map_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Comma),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::Assign),
-            token(TokenKind::Eof),
+            symbol_token(box_name),
+            token(TokenTag::OF),
+            symbol_token(map_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::COMMA),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("nested generic type application should fail"),
     );
@@ -559,21 +609,21 @@ fn rejects_nested_generic_type_application() {
 fn duplicate_optional_marker_is_rejected() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::DatatypeString),
-            token(TokenKind::QuestionMark),
-            token(TokenKind::QuestionMark),
-            token(TokenKind::Eof),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::QUESTION_MARK),
+            token(TokenTag::QUESTION_MARK),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureReturn,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("duplicate optional marker should fail"),
     );
@@ -598,10 +648,15 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let maybe_name = string_table.intern("MaybeString");
-    let maybe_path = path_fork.try_intern_portable_path("MaybeString", &mut string_table).expect("test path fits");
+    let maybe_path = path_fork
+        .try_intern_portable_path("MaybeString", &mut string_table)
+        .expect("test path fits");
 
     let unresolved = DataType::Option(Box::new(DataType::NamedType(maybe_name)));
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &PathInternerFork::empty()));
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        Vec::new(),
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut visible_type_aliases = FxHashMap::default();
     visible_type_aliases.insert(
@@ -667,7 +722,9 @@ fn resolves_named_types_recursively_in_composite_types() {
     let unresolved =
         DataType::collection(DataType::Option(Box::new(DataType::NamedType(point_name))));
 
-    let point_path = path_fork.try_intern_portable_path("Point", &mut string_table).expect("test path fits");
+    let point_path = path_fork
+        .try_intern_portable_path("Point", &mut string_table)
+        .expect("test path fits");
     let declarations = vec![Declaration {
         id: point_path,
         value: Expression::no_value(None, DataType::Int, ValueMode::ImmutableOwned),
@@ -700,7 +757,9 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         arguments: vec![DataType::StringSlice],
     };
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -759,7 +818,9 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         arguments: vec![DataType::StringSlice, DataType::Int],
     };
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -824,7 +885,9 @@ fn bare_generic_type_name_requires_type_arguments() {
     let t_name = string_table.intern("T");
     let unresolved = DataType::NamedType(box_name);
 
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     let mut type_environment = TypeEnvironment::new();
     let box_type_id = register_single_parameter_struct(&mut type_environment, &box_path, t_name);
     let declarations = vec![Declaration {
@@ -885,7 +948,10 @@ fn unknown_named_type_reports_consistent_error() {
     let missing = string_table.intern("Missing");
 
     let unresolved = DataType::NamedType(missing);
-    let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) );
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        vec![],
+        &PathInternerFork::empty(),
+    ));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
@@ -934,7 +1000,9 @@ fn optional_generic_instance_conversion_rejects_unresolved_arguments() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
-    let box_path = path_fork.try_intern_portable_path("Box", &mut string_table).expect("test path fits");
+    let box_path = path_fork
+        .try_intern_portable_path("Box", &mut string_table)
+        .expect("test path fits");
     type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path.to_owned(),
@@ -999,21 +1067,21 @@ fn parses_collection_with_capacity() {
     // New pre-element syntax: {64 Int}
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
+            token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection with capacity should parse");
 
@@ -1035,20 +1103,20 @@ fn parses_collection_with_capacity() {
 fn parses_collection_without_capacity() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection without capacity should parse");
 
@@ -1069,22 +1137,22 @@ fn parses_collection_without_capacity() {
 fn rejects_old_post_element_collection_capacity_syntax() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeInt),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_INT),
             numeric_token("64", &mut string_table),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("old post-element capacity syntax should not parse"),
     );
@@ -1097,7 +1165,7 @@ fn rejects_old_post_element_collection_capacity_syntax() {
                 DiagnosticPayload::ExpectedToken {
                     expected,
                     found: Some(found),
-                } if *expected == DiagnosticToken::from(TokenKind::CloseCurly)
+                } if *expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
                     && found.tag() == TokenTag::NUMERIC_LITERAL
             )
         },
@@ -1111,23 +1179,23 @@ fn parses_collection_with_generic_element_and_capacity() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let box_name = string_table.intern("Box");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
+            token(TokenTag::OPEN_CURLY),
             numeric_token("16", &mut string_table),
-            token(TokenKind::Symbol(box_name)),
-            token(TokenKind::Of),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            symbol_token(box_name),
+            token(TokenTag::OF),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("collection with generic element and capacity should parse");
 
@@ -1148,25 +1216,25 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(capacity_name)),
-            token(TokenKind::Add),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(capacity_name),
+            token(TokenTag::ADD),
             numeric_token("16", &mut string_table),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::QuestionMark),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::QUESTION_MARK),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("arithmetic in capacity position should be rejected"),
     );
@@ -1192,24 +1260,24 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
     let _path_fork = PathInternerFork::empty();
     let rows_name = string_table.intern("rows");
     let cols_name = string_table.intern("cols");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(rows_name)),
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(cols_name)),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(rows_name),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(cols_name),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("nested fixed collection should parse");
 
@@ -1248,22 +1316,22 @@ fn parses_namespaced_type_using_member_name_case() {
     let _path_fork = PathInternerFork::empty();
     let namespace_name = string_table.intern("canvas");
     let type_name = string_table.intern("Canvas2d");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(namespace_name)),
-            token(TokenKind::Dot),
-            token(TokenKind::Symbol(type_name)),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(namespace_name),
+            token(TokenTag::DOT),
+            symbol_token(type_name),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("namespaced collection element should parse");
 
@@ -1281,21 +1349,21 @@ fn rejects_capacity_only_shorthand_in_signature_context() {
     // Capacity-only shorthand {64} is not allowed in signature/alias/field/return contexts.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
+            token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("capacity-only shorthand should be rejected in signature context"),
     );
@@ -1319,21 +1387,21 @@ fn rejects_lower_snake_capacity_only_shorthand_in_signature_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(capacity_name)),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(capacity_name),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("lower-snake capacity-only shorthand should be rejected in signatures"),
     );
@@ -1357,20 +1425,20 @@ fn parses_capacity_only_shorthand_in_declaration_target() {
     // Capacity-only shorthand {64} in declaration target — element type is inferred.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
+            token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("capacity-only shorthand should parse in declaration target");
 
@@ -1390,20 +1458,20 @@ fn parses_capacity_only_shorthand_in_declaration_target() {
 fn rejects_collection_type_missing_close_curly_with_expected_token() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("missing collection close delimiter should fail"),
     );
@@ -1416,8 +1484,8 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
                 DiagnosticPayload::ExpectedToken {
                     expected,
                     found: Some(found),
-                } if *expected == DiagnosticToken::from(TokenKind::CloseCurly)
-                    && *found == DiagnosticToken::from(TokenKind::Eof)
+                } if *expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_CURLY)
+                    && *found == DiagnosticToken::from_static_tag(TokenTag::EOF)
             )
         },
         "ExpectedToken(CloseCurly)",
@@ -1432,22 +1500,22 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
 fn parses_simple_map_type() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("simple map type should parse");
 
@@ -1464,24 +1532,24 @@ fn parses_simple_map_type() {
 fn parses_map_type_with_collection_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with collection value should parse");
 
@@ -1500,26 +1568,26 @@ fn parses_map_type_with_collection_value() {
 fn parses_map_type_with_nested_map_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureReturn,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with nested map value should parse");
 
@@ -1536,22 +1604,22 @@ fn parses_map_type_with_nested_map_value() {
 fn parses_map_type_in_parameter_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeBool),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_BOOL),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("map type in parameter context should parse");
 
@@ -1562,22 +1630,22 @@ fn parses_map_type_in_parameter_context() {
 fn rejects_map_type_with_empty_key() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("empty map key should fail"),
     );
@@ -1600,22 +1668,22 @@ fn rejects_map_type_with_empty_key() {
 fn rejects_map_type_with_empty_value() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("empty map value should fail"),
     );
@@ -1638,25 +1706,25 @@ fn rejects_map_type_with_empty_value() {
 fn rejects_map_type_with_multiple_separators() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeBool),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_BOOL),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::DeclarationTarget,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("multiple map separators should fail"),
     );
@@ -1679,24 +1747,24 @@ fn rejects_map_type_with_multiple_separators() {
 fn rejects_fixed_capacity_map_syntax_on_key_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
+            token(TokenTag::OPEN_CURLY),
             numeric_token("4", &mut string_table),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("fixed capacity on key side should fail"),
     );
@@ -1719,24 +1787,24 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
 fn rejects_fixed_capacity_map_syntax_on_value_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
             numeric_token("4", &mut string_table),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("fixed capacity on value side should fail"),
     );
@@ -1760,24 +1828,24 @@ fn rejects_named_capacity_map_syntax() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let capacity_name = string_table.intern("capacity");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::Symbol(capacity_name)),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            symbol_token(capacity_name),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("named capacity on map key side should fail"),
     );
@@ -1800,25 +1868,25 @@ fn rejects_named_capacity_map_syntax() {
 fn rejects_postfix_capacity_map_syntax_with_colon() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::Colon),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::COLON),
             numeric_token("5", &mut string_table),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with colon on map value side should fail"),
     );
@@ -1841,24 +1909,24 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
 fn rejects_postfix_capacity_map_syntax_with_number() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
             numeric_token("5", &mut string_table),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with number on map value side should fail"),
     );
@@ -1881,25 +1949,25 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
 fn rejects_postfix_capacity_map_syntax_on_key_side() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Colon),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::COLON),
             numeric_token("5", &mut string_table),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("postfix capacity with colon on map key side should fail"),
     );
@@ -1922,26 +1990,26 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
 fn map_separator_inside_nested_braces_is_ignored() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::OpenCurly),
-            token(TokenKind::OpenCurly),
-            token(TokenKind::DatatypeString),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeInt),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Assign),
-            token(TokenKind::DatatypeBool),
-            token(TokenKind::CloseCurly),
-            token(TokenKind::Eof),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::OPEN_CURLY),
+            token(TokenTag::DATATYPE_STRING),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::ASSIGN),
+            token(TokenTag::DATATYPE_BOOL),
+            token(TokenTag::CLOSE_CURLY),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::DeclarationTarget,
-        &string_table,
+        &mut string_table,
     )
     .expect("map with inner map key should parse");
 
@@ -2018,22 +2086,22 @@ fn parses_qualified_type_with_three_segments() {
     let root_name = string_table.intern("io");
     let child_name = string_table.intern("input");
     let type_name = string_table.intern("Input");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(root_name)),
-            token(TokenKind::Dot),
-            token(TokenKind::Symbol(child_name)),
-            token(TokenKind::Dot),
-            token(TokenKind::Symbol(type_name)),
-            token(TokenKind::Eof),
+            symbol_token(root_name),
+            token(TokenTag::DOT),
+            symbol_token(child_name),
+            token(TokenTag::DOT),
+            symbol_token(type_name),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
-    let parsed = parse_type_annotation(
-        &mut stream,
+    let parsed = parse_type_annotation_test(
+        &stream,
         TypeAnnotationContext::SignatureParameter,
-        &string_table,
+        &mut string_table,
     )
     .expect("qualified type should parse");
 
@@ -2049,25 +2117,25 @@ fn rejects_generic_application_on_qualified_base() {
     let root_name = string_table.intern("io");
     let child_name = string_table.intern("input");
     let type_name = string_table.intern("Input");
-    let mut stream = stream_from_tokens(
+    let stream = stream_from_tokens(
         vec![
-            token(TokenKind::Symbol(root_name)),
-            token(TokenKind::Dot),
-            token(TokenKind::Symbol(child_name)),
-            token(TokenKind::Dot),
-            token(TokenKind::Symbol(type_name)),
-            token(TokenKind::Of),
-            token(TokenKind::Symbol(string_table.intern("T"))),
-            token(TokenKind::Eof),
+            symbol_token(root_name),
+            token(TokenTag::DOT),
+            symbol_token(child_name),
+            token(TokenTag::DOT),
+            symbol_token(type_name),
+            token(TokenTag::OF),
+            symbol_token(string_table.intern("T")),
+            token(TokenTag::EOF),
         ],
         &mut string_table,
     );
 
     let error = unwrap_type_parse_diagnostic(
-        parse_type_annotation(
-            &mut stream,
+        parse_type_annotation_test(
+            &stream,
             TypeAnnotationContext::SignatureParameter,
-            &string_table,
+            &mut string_table,
         )
         .expect_err("generic application on qualified base should fail"),
     );

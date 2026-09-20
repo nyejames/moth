@@ -1,11 +1,11 @@
 # September 2026 Summary
 
 ## End-to-end CLI / macOS Apple Silicon (6D851D)
-Change since initial benchmark: -6ms avg; 9 faster, 0 slower; 28/40 cases; workload changed: 12 cases (speed_test_check, speed_test_build, docs_check, type_stress_check, fold_stress_check, collection_stress_check, one_module_kitchen_sink_check, expression_rpn_churn_check, collection_map_borrow_churn_check, import_external_churn_check, import_external_churn_build, borrow_stress_check)
+Change since initial benchmark: -31ms avg; 22 faster, 0 slower; 28/40 cases; workload changed: 12 cases (speed_test_check, speed_test_build, docs_check, type_stress_check, fold_stress_check, collection_stress_check, one_module_kitchen_sink_check, expression_rpn_churn_check, collection_map_borrow_churn_check, import_external_churn_check, import_external_churn_build, borrow_stress_check)
 Timing schema: 2
 Initial: all ~56ms, Core ~25ms, Docs ~280ms, Stress ~70ms, Module ~11ms, Borrow ~7ms
-Latest: all ~50ms, Core ~21ms, Docs ~263ms, Stress ~63ms, Module ~10ms, Borrow ~6ms
-Case spread latest: ~161ms
+Latest: all ~29ms, Core ~15ms, Docs ~189ms, Stress ~34ms, Module ~8ms, Borrow ~5ms
+Case spread latest: ~84ms
 
 ## Diagnostic data layout / macOS Apple Silicon (6D851D)
 Change since initial benchmark: baseline
@@ -54,3 +54,9 @@ Timing schema: 2
 mixed: avg +17ms; 1 faster, 8 slower; 39/40 cases; workload changed: 1 case (docs_check)
 Avg: all ~50ms, Core ~21ms, Docs ~263ms, Stress ~63ms, Module ~10ms, Borrow ~6ms
 Stage movement: check total +655ms, frontend +493ms, module semantics +492ms
+
+# End-to-end CLI / macOS Apple Silicon (6D851D): September 20th - 18:54
+Timing schema: 2
+**-20ms avg**; 28 faster, 0 slower; 39/40 cases; workload changed: 1 case (docs_check)
+Avg: all ~29ms, Core ~15ms, Docs ~189ms, Stress ~34ms, Module ~8ms, Borrow ~5ms
+Stage movement: check total -728ms, frontend -551ms, boundary compile -540ms

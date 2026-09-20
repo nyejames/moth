@@ -10,11 +10,12 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span, mint_token};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
+use crate::compiler_frontend::tokenizer::lexer::{
+    TokenizeResult, current_source_span, map_token_emit_error,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
 
 mod components;
 type PathComponents = Vec<StringId>;
@@ -34,7 +35,7 @@ pub fn parse_file_path(
     stream: &mut TokenStream,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     // Path syntax accepted by the tokenizer.
     //
     // Canonical examples:
@@ -49,10 +50,10 @@ pub fn parse_file_path(
         stream.next();
 
         match stream.peek().copied() {
-            None => return mint_path_token(stream, PathId::ROOT, path_fork),
+            None => return mint_path_token(stream, PathId::ROOT),
             Some(next) => {
                 if next.is_whitespace() || matches!(next, ':' | ']' | ')' | '}' | ',' | ';') {
-                    return mint_path_token(stream, PathId::ROOT, path_fork);
+                    return mint_path_token(stream, PathId::ROOT);
                 }
 
                 return Err(CompilerDiagnostic::invalid_path(
@@ -82,23 +83,22 @@ pub fn parse_file_path(
         .into());
     }
 
-    let root = path_fork.try_intern_components(&parsed_prefix.components).ok_or_else(|| {
-        CompilerError::compiler_error("path table exhausted while interning an authored path row")
-    })?;
-    mint_path_token(stream, root, path_fork)
+    let root = path_fork
+        .try_intern_components(&parsed_prefix.components)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while interning an authored path row",
+            )
+        })?;
+    mint_path_token(stream, root)
 }
 
-/// Mint one span and share it between the path token and its source-owned syntax row.
-fn mint_path_token(
-    stream: &mut TokenStream<'_>,
-    root: PathId,
-    _path_fork: &mut PathInternerFork,
-) -> TokenizeResult<Token> {
-    let mut token = mint_token(stream, TokenKind::Path(PathSyntaxId::NONE))?;
-    let source_span = crate::compiler_frontend::source::SourceSpan::new(stream.file_id, token.span);
-    let id = stream.path_syntax.push(root, source_span);
-    token.kind = TokenKind::Path(id);
-    Ok(token)
+/// Emit one canonical path shape and its source-owned syntax row from the same packed span.
+fn mint_path_token(stream: &mut TokenStream<'_>, root: PathId) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_path(root)
+        .map_err(|error| map_token_emit_error(error, source))
 }
 
 /// WHAT: Parses the path components of one path token.

@@ -12,6 +12,7 @@ use rustc_hash::FxHashMap;
 
 use super::{const_inline_field_value, const_inline_field_value_from_receiver};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
@@ -27,7 +28,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn slot_template(store: &mut TemplateIrStore) -> Template {
@@ -92,8 +93,8 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
 
     let inlined =
         const_inline_field_value_from_receiver(&receiver, field_name, &registry, None, &path_fork)
-        .expect("effective TIR classification should succeed")
-        .expect("receiver-authored const field should inline");
+            .expect("effective TIR classification should succeed")
+            .expect("receiver-authored const field should inline");
 
     assert!(matches!(inlined.kind, ExpressionKind::Template(_)));
     assert_eq!(inlined.value_mode, ValueMode::ImmutableOwned);
@@ -104,24 +105,26 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     // A non-EOF token after the dot is the immediate missing-member boundary. The diagnostic
     // must point at that offending token, not the authored dot or the receiver start. This
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork
-        .try_intern_portable_path("test.moth", &mut string_table)
-        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let offending_span =
         LocalSpan::exact(12, 1, &mut span_builder).expect("offending token span should fit");
 
-    let stream = FileTokens::new(
-        scope,
-        SourceId::COMPILATION_ROOT,
-        vec![
-            Token::new(TokenKind::Comma, offending_span),
-            Token::new(TokenKind::Eof, LocalSpan::source_start()),
-        ],
-    );
-
-    let error = super::parse_member_name_typed(&stream, &string_table)
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_static(TokenTag::COMMA, offending_span)
+        .expect("offending token fixture should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
+    let error = super::parse_member_name_typed(&stream, &mut string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");
     let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(
         diagnostic,

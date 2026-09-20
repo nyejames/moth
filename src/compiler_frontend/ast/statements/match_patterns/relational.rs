@@ -5,6 +5,8 @@
 //! WHY: relational patterns share literal parsing but have distinct validation
 //! rules, so they live in a dedicated submodule.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp, literal::parse_literal_pattern,
 };
@@ -13,31 +15,29 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// Result for the relational pattern family.
 ///
-/// Relational parsing returns plain `CompilerDiagnostic` values on the
-/// diagnosed lane; the surrounding parser boundary owns infrastructure errors.
-type RelationalPatternResult<T> = Result<T, CompilerDiagnostic>;
+/// Authored mismatches remain diagnostics while malformed retained payloads stay infrastructure.
+type RelationalPatternResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse a relational comparison pattern (`<`, `<=`, `>`, `>=`).
 ///
 /// Validates that the subject type supports ordering, then parses the literal
 /// operand that follows the operator.
 pub(super) fn parse_relational_pattern(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     subject_type_id: TypeId,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> RelationalPatternResult<MatchPattern> {
     let span = Some(token_stream.current_span());
 
-    let op = match token_stream.current_token_kind() {
-        TokenKind::LessThan => RelationalPatternOp::LessThan,
-        TokenKind::LessThanOrEqual => RelationalPatternOp::LessThanOrEqual,
-        TokenKind::GreaterThan => RelationalPatternOp::GreaterThan,
-        TokenKind::GreaterThanOrEqual => RelationalPatternOp::GreaterThanOrEqual,
+    let op = match token_stream.current_tag() {
+        TokenTag::LESS_THAN => RelationalPatternOp::LessThan,
+        TokenTag::LESS_THAN_OR_EQUAL => RelationalPatternOp::LessThanOrEqual,
+        TokenTag::GREATER_THAN => RelationalPatternOp::GreaterThan,
+        TokenTag::GREATER_THAN_OR_EQUAL => RelationalPatternOp::GreaterThanOrEqual,
         _ => unreachable!("caller checked relational lead token"),
     };
 
@@ -79,7 +79,8 @@ fn ensure_relational_subject_type(
             None,
             None,
             span,
-        ));
+        )
+        .into());
     }
 
     Ok(())

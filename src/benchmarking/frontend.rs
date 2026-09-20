@@ -84,9 +84,11 @@ pub enum FrontendBenchmarkOutcome {
 /// Retained source and diagnostic storage observed at the frontend render boundary.
 ///
 /// These values are layout counters, not allocator ownership attribution. They are populated only
-/// with the `data_layout_memory_probe` feature; normal benchmark builds carry zeroes. The probe
-/// records them beside peak, live-report and after-report-drop allocator deltas so repeated runs
-/// distinguish construction pressure from report-owner retention.
+/// with the `data_layout_memory_probe` feature; normal benchmark builds carry zeroes. Report
+/// retention fields describe the returned message owner, while source-token and generic fields
+/// preserve the command-scoped ledger so clean runs can still expose construction ownership. The
+/// probe records them beside peak, live-report and after-report-drop allocator deltas so repeated
+/// runs distinguish construction pressure from report-owner retention.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrontendBenchmarkRetention {
     pub source_snapshot_bytes: usize,
@@ -102,8 +104,39 @@ pub struct FrontendBenchmarkRetention {
     pub path_table_node_rows: usize,
     /// Backing vector capacity bytes for those deduplicated path tables.
     pub path_table_storage_bytes: usize,
+    pub source_tokens_owners: usize,
+    pub source_tokens_shape_bytes: usize,
+    pub source_tokens_shape_capacity_bytes: usize,
+    pub source_tokens_span_bytes: usize,
+    pub source_tokens_span_capacity_bytes: usize,
+    pub source_tokens_numeric_store_bytes: usize,
+    pub source_tokens_numeric_store_capacity_bytes: usize,
+    pub source_tokens_path_store_bytes: usize,
+    pub source_tokens_path_store_capacity_bytes: usize,
+    pub source_tokens_sequence_store_bytes: usize,
+    pub source_tokens_sequence_store_capacity_bytes: usize,
+    /// Cumulative builder shape/span capacities sampled at finish; not simultaneous live storage.
+    pub transient_construction_buffer_bytes: usize,
+    /// Largest individual builder buffer sample; a high-water observation, not an aggregate live
+    /// allocation claim.
+    pub transient_construction_peak_bytes: usize,
+    pub cutover_adapter_bytes: usize,
+    pub donor_identity_string_tables: usize,
+    pub donor_identity_string_storage_bytes: usize,
+    pub donor_identity_path_tables: usize,
+    pub donor_identity_path_storage_bytes: usize,
+    pub generic_source_tokens_owners: usize,
+    pub generic_source_tokens_bytes: usize,
+    /// Distinct generic source-owner bytes whose Arc is live at the final ledger snapshot.
+    pub generic_source_tokens_live_bytes: usize,
+    /// High-water distinct generic source-owner bytes observed at a ledger event.
+    pub generic_source_tokens_peak_bytes: usize,
+    pub requester_remap_count: usize,
+    pub requester_remap_used_bytes: usize,
+    pub requester_remap_capacity_bytes: usize,
+    /// True when bounded probe bookkeeping could not observe every distinct owner.
+    pub memory_ledger_incomplete: bool,
 }
-
 #[cfg(feature = "data_layout_memory_probe")]
 impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
     fn from(metrics: FrozenRenderRetentionMetrics) -> Self {
@@ -117,6 +150,35 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
             path_table_count: metrics.path_table_count,
             path_table_node_rows: metrics.path_table_node_rows,
             path_table_storage_bytes: metrics.path_table_storage_bytes,
+            source_tokens_owners: metrics.source_tokens_owners,
+            source_tokens_shape_bytes: metrics.source_tokens_shape_bytes,
+            source_tokens_shape_capacity_bytes: metrics.source_tokens_shape_capacity_bytes,
+            source_tokens_span_bytes: metrics.source_tokens_span_bytes,
+            source_tokens_span_capacity_bytes: metrics.source_tokens_span_capacity_bytes,
+            source_tokens_numeric_store_bytes: metrics.source_tokens_numeric_store_bytes,
+            source_tokens_numeric_store_capacity_bytes: metrics
+                .source_tokens_numeric_store_capacity_bytes,
+            source_tokens_path_store_bytes: metrics.source_tokens_path_store_bytes,
+            source_tokens_path_store_capacity_bytes: metrics
+                .source_tokens_path_store_capacity_bytes,
+            source_tokens_sequence_store_bytes: metrics.source_tokens_sequence_store_bytes,
+            source_tokens_sequence_store_capacity_bytes: metrics
+                .source_tokens_sequence_store_capacity_bytes,
+            transient_construction_buffer_bytes: metrics.transient_construction_buffer_bytes,
+            transient_construction_peak_bytes: metrics.transient_construction_peak_bytes,
+            cutover_adapter_bytes: metrics.cutover_adapter_bytes,
+            donor_identity_string_tables: metrics.donor_identity_string_tables,
+            donor_identity_string_storage_bytes: metrics.donor_identity_string_storage_bytes,
+            donor_identity_path_tables: metrics.donor_identity_path_tables,
+            donor_identity_path_storage_bytes: metrics.donor_identity_path_storage_bytes,
+            generic_source_tokens_owners: metrics.generic_source_tokens_owners,
+            generic_source_tokens_bytes: metrics.generic_source_tokens_bytes,
+            generic_source_tokens_live_bytes: metrics.generic_source_tokens_live_bytes,
+            generic_source_tokens_peak_bytes: metrics.generic_source_tokens_peak_bytes,
+            requester_remap_count: metrics.requester_remap_count,
+            requester_remap_used_bytes: metrics.requester_remap_used_bytes,
+            requester_remap_capacity_bytes: metrics.requester_remap_capacity_bytes,
+            memory_ledger_incomplete: metrics.observation_incomplete,
         }
     }
 }
@@ -171,6 +233,8 @@ pub struct FrontendBenchmarkError {
     pub diagnostic_codes: Vec<String>,
     /// Terse pre-rendered message for direct display by xtask or tooling.
     pub message: String,
+    /// Command-scoped ownership observations captured before this error escaped.
+    pub retention: Box<FrontendBenchmarkRetention>,
 }
 
 /// Identifies the boundary that rejected a frontend benchmark.
@@ -196,19 +260,74 @@ impl std::fmt::Display for FrontendBenchmarkError {
     }
 }
 
+#[cfg(feature = "data_layout_memory_probe")]
+fn snapshot_ledger_retention() -> FrontendBenchmarkRetention {
+    FrontendBenchmarkRetention::from(FrozenRenderRetentionMetrics::from_ledger(
+        crate::compiler_frontend::instrumentation::snapshot_memory_ledger(),
+    ))
+}
+
+#[cfg(not(feature = "data_layout_memory_probe"))]
+fn snapshot_ledger_retention() -> FrontendBenchmarkRetention {
+    FrontendBenchmarkRetention::default()
+}
+
+fn frontend_benchmark_error_with_retention(
+    kind: FrontendBenchmarkFailureKind,
+    diagnostic_codes: Vec<String>,
+    message: String,
+    retention: FrontendBenchmarkRetention,
+) -> FrontendBenchmarkError {
+    FrontendBenchmarkError {
+        kind,
+        diagnostic_codes,
+        message,
+        retention: Box::new(retention),
+    }
+}
+
+fn frontend_benchmark_error(
+    kind: FrontendBenchmarkFailureKind,
+    diagnostic_codes: Vec<String>,
+    message: String,
+) -> FrontendBenchmarkError {
+    frontend_benchmark_error_with_retention(
+        kind,
+        diagnostic_codes,
+        message,
+        snapshot_ledger_retention(),
+    )
+}
+
+#[cfg(feature = "timers")]
+fn frontend_benchmark_error_without_ledger(
+    kind: FrontendBenchmarkFailureKind,
+    diagnostic_codes: Vec<String>,
+    message: String,
+) -> FrontendBenchmarkError {
+    frontend_benchmark_error_with_retention(
+        kind,
+        diagnostic_codes,
+        message,
+        FrontendBenchmarkRetention::default(),
+    )
+}
+
 fn build_config_inputs_from_options(
     inputs: &[FrontendBenchmarkInput],
 ) -> Result<BuildConfigInputSet, FrontendBenchmarkError> {
     let mut typed_inputs = BuildConfigInputSet::new();
 
     for (index, input) in inputs.iter().enumerate() {
-        let name = BuildInputName::new(&input.name).map_err(|_| FrontendBenchmarkError {
-            kind: FrontendBenchmarkFailureKind::BuildConfigInput,
-            diagnostic_codes: Vec::new(),
-            message: format!(
-                "Frontend benchmark build-config input name '{}' is not lower_snake_case.",
-                input.name
-            ),
+        let name = BuildInputName::new(&input.name).map_err(|_| {
+            frontend_benchmark_error(
+                FrontendBenchmarkFailureKind::BuildConfigInput,
+                Vec::new(),
+                format!(
+                    "Frontend benchmark build-config input name '{}' is not lower_snake_case.",
+                    input.name
+                ),
+            )
         })?;
         let value = match &input.value {
             FrontendBenchmarkInputValue::String(value) => {
@@ -216,13 +335,15 @@ fn build_config_inputs_from_options(
             }
             FrontendBenchmarkInputValue::Int(value) => PrimitiveBuildValue::Int(*value),
             FrontendBenchmarkInputValue::Float(value) => PrimitiveBuildValue::float(*value)
-                .map_err(|_| FrontendBenchmarkError {
-                    kind: FrontendBenchmarkFailureKind::BuildConfigInput,
-                    diagnostic_codes: Vec::new(),
-                    message: format!(
-                        "Frontend benchmark build-config input '{}' must use a finite Float.",
-                        input.name
-                    ),
+                .map_err(|_| {
+                    frontend_benchmark_error(
+                        FrontendBenchmarkFailureKind::BuildConfigInput,
+                        Vec::new(),
+                        format!(
+                            "Frontend benchmark build-config input '{}' must use a finite Float.",
+                            input.name
+                        ),
+                    )
                 })?,
             FrontendBenchmarkInputValue::Bool(value) => PrimitiveBuildValue::Bool(*value),
             FrontendBenchmarkInputValue::Char(value) => PrimitiveBuildValue::Char(*value),
@@ -234,13 +355,15 @@ fn build_config_inputs_from_options(
                 value,
                 BuildConfigValueLocation::Command(BuildCommandLocation::new(index)),
             ))
-            .map_err(|_| FrontendBenchmarkError {
-                kind: FrontendBenchmarkFailureKind::BuildConfigInput,
-                diagnostic_codes: Vec::new(),
-                message: format!(
-                    "Frontend benchmark build-config input '{}' is repeated.",
-                    input.name
-                ),
+            .map_err(|_| {
+                frontend_benchmark_error(
+                    FrontendBenchmarkFailureKind::BuildConfigInput,
+                    Vec::new(),
+                    format!(
+                        "Frontend benchmark build-config input '{}' is repeated.",
+                        input.name
+                    ),
+                )
             })?;
     }
 
@@ -255,6 +378,11 @@ pub fn run_frontend_benchmark(
     options: FrontendBenchmarkOptions,
 ) -> Result<FrontendBenchmarkReport, FrontendBenchmarkError> {
     run_frontend_benchmark_with_owner_internal(options).map(|(report, _)| report)
+}
+/// Warm the probe-only ownership ledger before its allocator baseline is sampled.
+#[cfg(feature = "data_layout_memory_probe")]
+pub fn prepare_frontend_memory_ledger() {
+    crate::compiler_frontend::instrumentation::prepare_memory_ledger();
 }
 
 /// Completed benchmark report plus its live diagnostic/render owner.
@@ -293,30 +421,31 @@ fn run_frontend_benchmark_with_owner_internal(
 ) -> Result<(FrontendBenchmarkReport, CompilerMessages), FrontendBenchmarkError> {
     let start = Instant::now();
 
-    // Acquire the raw session before even path validation. A benchmark must
-    // fail as tooling when another owner is active, never compile into that
-    // owner's snapshot and then report misleading stage timings.
+    // Acquire the raw session before resetting the command ledger. If another benchmark owns the
+    // timing session, preserve that owner's ledger and return without observing or clearing it.
     #[cfg(feature = "timers")]
     let timing_session = crate::timing::start_raw_benchmark_collection(true).map_err(|error| {
-        FrontendBenchmarkError {
-            kind: FrontendBenchmarkFailureKind::TimingSession,
-            diagnostic_codes: Vec::new(),
-            message: format!("Could not start frontend benchmark timing session: {error}"),
-        }
+        frontend_benchmark_error_without_ledger(
+            FrontendBenchmarkFailureKind::TimingSession,
+            Vec::new(),
+            format!("Could not start frontend benchmark timing session: {error}"),
+        )
     })?;
+    // Reset at the benchmark command boundary, before bootstrap/config compilation. The
+    // compilation module itself must not reset here because bootstrap owns measured preparation.
+    crate::compiler_frontend::instrumentation::reset_memory_ledger();
     let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
 
-    let path = options
-        .entry_path
-        .to_str()
-        .ok_or_else(|| FrontendBenchmarkError {
-            kind: FrontendBenchmarkFailureKind::InvalidUtf8Path,
-            diagnostic_codes: Vec::new(),
-            message: format!(
+    let path = options.entry_path.to_str().ok_or_else(|| {
+        frontend_benchmark_error(
+            FrontendBenchmarkFailureKind::InvalidUtf8Path,
+            Vec::new(),
+            format!(
                 "Frontend benchmark path is not valid UTF-8: {}",
                 options.entry_path.display()
             ),
-        })?;
+        )
+    })?;
     let normalized = if path.trim().is_empty() { "." } else { path };
 
     let valid_path = match check_if_valid_path(normalized) {
@@ -327,11 +456,11 @@ fn run_frontend_benchmark_with_owner_internal(
             if messages.has_infrastructure_error() {
                 diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
             }
-            return Err(FrontendBenchmarkError {
-                kind: FrontendBenchmarkFailureKind::PathValidation,
+            return Err(frontend_benchmark_error(
+                FrontendBenchmarkFailureKind::PathValidation,
                 diagnostic_codes,
-                message: format_compiler_messages(&messages),
-            });
+                format_compiler_messages(&messages),
+            ));
         }
     };
 
@@ -348,11 +477,11 @@ fn run_frontend_benchmark_with_owner_internal(
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             let diagnostic_codes = collect_diagnostic_codes(&messages);
-            return Err(FrontendBenchmarkError {
-                kind: FrontendBenchmarkFailureKind::Bootstrap,
+            return Err(frontend_benchmark_error(
+                FrontendBenchmarkFailureKind::Bootstrap,
                 diagnostic_codes,
-                message: format_compiler_messages(&messages),
-            });
+                format_compiler_messages(&messages),
+            ));
         }
     };
 
@@ -380,10 +509,12 @@ fn run_frontend_benchmark_with_owner_internal(
                     project_source_files.take(),
                     None,
                 )
-                .map_err(|error| FrontendBenchmarkError {
-                    kind: FrontendBenchmarkFailureKind::Compilation,
-                    diagnostic_codes: Vec::new(),
-                    message: error.msg,
+                .map_err(|error| {
+                    frontend_benchmark_error(
+                        FrontendBenchmarkFailureKind::Compilation,
+                        Vec::new(),
+                        error.msg,
+                    )
                 })?;
             #[cfg(not(feature = "data_layout_memory_probe"))]
             let messages = frontend
@@ -392,10 +523,12 @@ fn run_frontend_benchmark_with_owner_internal(
                     project_source_files.take(),
                     None,
                 )
-                .map_err(|error| FrontendBenchmarkError {
-                    kind: FrontendBenchmarkFailureKind::Compilation,
-                    diagnostic_codes: Vec::new(),
-                    message: error.msg,
+                .map_err(|error| {
+                    frontend_benchmark_error(
+                        FrontendBenchmarkFailureKind::Compilation,
+                        Vec::new(),
+                        error.msg,
+                    )
                 })?;
             #[cfg(feature = "data_layout_memory_probe")]
             let retention = FrontendBenchmarkRetention::from(retention);
@@ -403,7 +536,7 @@ fn run_frontend_benchmark_with_owner_internal(
             let retention = FrontendBenchmarkRetention::default();
             (messages, retention, false)
         }
-        Err(messages) => (messages, FrontendBenchmarkRetention::default(), true),
+        Err(messages) => (messages, snapshot_ledger_retention(), true),
     };
 
     #[cfg(feature = "timers")]
@@ -427,11 +560,12 @@ fn run_frontend_benchmark_with_owner_internal(
     // failure or a failed compilation with no user error is still a runner
     // failure and must abort the benchmark.
     if has_infrastructure_error || (compilation_failed && error_count == 0) {
-        return Err(FrontendBenchmarkError {
-            kind: FrontendBenchmarkFailureKind::Compilation,
+        return Err(frontend_benchmark_error_with_retention(
+            FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,
-            message: format_compiler_messages(&messages),
-        });
+            format_compiler_messages(&messages),
+            retention,
+        ));
     }
 
     #[cfg(feature = "timers")]

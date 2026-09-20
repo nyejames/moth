@@ -14,6 +14,7 @@ use super::directive_args::{
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::styles::raw::configure_raw_style;
@@ -23,17 +24,17 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{CoreStyleDirectiveKind, StyleDirectiveKind};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Typed result for the connected core-directive family.
 type CoreDirectiveResult<T> = Result<T, TemplateError>;
 
 pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     directive_kind: &StyleDirectiveKind,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
 ) -> CoreDirectiveResult<bool> {
@@ -52,7 +53,7 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::Insert)
     ) {
         let insert_name = string_table.intern("insert");
-        let slot_name = parse_required_slot_name_argument(insert_name, token_stream)?;
+        let slot_name = parse_required_slot_name_argument(insert_name, token_stream, string_table)?;
         build_state.kind = TemplateType::SlotInsert(SlotKey::named(slot_name));
         return Ok(true);
     }
@@ -65,7 +66,7 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     reason = "core directive parsing keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and kind as separate borrows"
 )]
 pub(super) fn parse_core_style_directive(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
@@ -126,7 +127,7 @@ pub(super) fn parse_core_style_directive(
                 format!(
                     "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
                 ),
-                token_stream.current_span().into(),
+                core_invariant_span(token_stream),
                 ErrorType::Compiler,
             )));
         }
@@ -153,4 +154,13 @@ fn apply_markdown_style(build_state: &mut TemplateBuildState) {
 
 pub(super) fn mark_template_body_whitespace_style_controlled(build_state: &mut TemplateBuildState) {
     build_state.style.body_whitespace_policy = BodyWhitespacePolicy::StyleDirectiveControlled;
+}
+
+/// Read-only invariant span on the canonical cursor view.
+///
+/// WHAT: reports the current token span for the slot/insert dispatch
+/// invariant without advancing the stream.
+/// WHY: the invariant span is a pure token-local read.
+fn core_invariant_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }

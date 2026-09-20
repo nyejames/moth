@@ -841,13 +841,13 @@ label <span class='moth-code-operator'>=</span> <span class='moth-code-function'
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
 <span class='moth-code-delimiter'>;</span></code></pre><h3>Parameter forms</h3><pre style=""><code class='codeblock'>name <span class='moth-code-nominal'>Type</span>
 name <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Type</span>
-name <span class='moth-code-nominal'>Type</span> <span class='moth-code-operator'>=</span> default</code></pre><ul><li><code>name Type</code> declares a shared parameter.</li><li><code>name ~Type</code> declares a mutable or exclusive parameter.</li><li><code>= default</code> provides a value when the caller omits that slot.</li><li>Parameter names follow the no-shadowing rule.</li><li>Each parameter name must be unique in the signature.</li></ul><p><code>$</code> is not a reactive parameter mode. Any future reactive parameter spelling remains owned by its accepted Wiring design rather than this function-parameter contract.</p><p>Directive calls share the ordinary argument parser and slot routing. Ordinary <code>f()</code> remains valid; only directive syntax rejects an authored empty <code>()</code>.</p><h3>Defaults</h3><p>A default belongs to the declaration.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
+name <span class='moth-code-nominal'>Type</span> <span class='moth-code-operator'>=</span> default</code></pre><ul><li><code>name Type</code> declares a shared parameter.</li><li><code>name ~Type</code> declares a mutable or exclusive parameter.</li><li><code>= default</code> provides a value when the caller omits that slot.</li><li>Parameter names follow the no-shadowing rule.</li><li>Each parameter name must be unique in the signature.</li></ul><p><code>$</code> is not a reactive parameter mode. Any future reactive parameter spelling remains owned by its accepted Wiring design rather than this function-parameter contract.</p><p>Directive calls share the ordinary argument parser and slot routing. Ordinary <code>f()</code> remains valid. Only directive syntax rejects an authored empty <code>()</code>.</p><h3>Defaults</h3><p>A default belongs to the declaration.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>A caller can omit a defaulted parameter.</p><p>Named arguments can skip an earlier default:</p><pre style=""><code class='codeblock'>label <span class='moth-code-operator'>=</span> <span class='moth-code-function'>describe</span><span class='moth-code-delimiter'>(</span>subject <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;apple&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>A positional call cannot skip a slot in the middle. Use a named argument when the call needs to reach a later parameter.</p><h3>Default value constraints</h3><p>A parameter default must be a compile-time value.</p><p>Accepted:</p><pre style=""><code class='codeblock'>DEFAULT_PREFIX <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;item&quot;</span>
 
 <span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> DEFAULT_PREFIX, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. A const record uses the same <code>|...|</code> parameters list with a value required for every parameter, and it does not declare a constructable type. See <a href="../constants/#const-records">Const records</a>. Choice payload fields do not support defaults.</p>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Rejected:</p><ul><li>runtime bindings</li><li>runtime function calls</li><li>references to other parameters</li></ul><p>Struct fields share the same <code>= default</code> syntax, but struct defaults have their own compile-time rule. Choice payload fields do not support defaults.</p><p>Pipes declare parameters or typed fields. Supplied values use <a href="../language-overview/#mon-syntax">MON syntax</a>. An anonymous const record requires an initializer for every field and declares no constructable type. Its entries are values, not parameters or defaults. See <a href="../constants/#const-records">Const records</a>.</p><p>Declaration lists remain flat. Nesting a legal value expression in a default does not introduce a nested type declaration or make an anonymous record compatible with a named parameter type.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -906,7 +906,7 @@ name <span class='moth-code-nominal'>Type</span> <span class='moth-code-operator
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>Function calls use positional arguments, named arguments or both.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title, body<span class='moth-code-delimiter'>)</span>
 <span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title <span class='moth-code-operator'>=</span> title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-delimiter'>)</span>
-<span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-delimiter'>)</span></code></pre><h3>Argument routing</h3><ul><li>Positional arguments must come before the first named argument.</li><li>A positional argument is invalid after a named argument.</li><li>A named argument must match a real parameter name.</li><li>Each parameter may be supplied once.</li><li>Omitted defaulted parameters use their declared default.</li><li>Every non-defaulted parameter must receive an argument.</li><li>Extra positional arguments are invalid.</li><li>Argument values are checked and contextually coerced against their parameter types.</li></ul><p>Named arguments can skip earlier defaults.</p><p>User functions, struct constructors, choice payload constructors and source-authored receiver methods share this routing policy.</p><p>Host functions and compiler-owned builtin member calls are positional-only.</p><h3>Shared call syntax</h3><p>Directives use the same ordinary call parser, parameter-slot router and default validation as functions. Ordinary <code>f()</code> remains unchanged; only a directive&#39;s entry syntax rejects an authored empty <code>()</code>, even when every parameter has a default.</p><h3>Shared parameters</h3><p>A shared parameter receives an ordinary argument without <code>~</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>show</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-function'>render_card</span><span class='moth-code-delimiter'>(</span>title, body <span class='moth-code-operator'>=</span> body<span class='moth-code-delimiter'>)</span></code></pre><h3>Argument routing</h3><ul><li>Positional arguments must come before the first named argument.</li><li>A positional argument is invalid after a named argument.</li><li>A named argument must match a real parameter name.</li><li>Each parameter may be supplied once.</li><li>Omitted defaulted parameters use their declared default.</li><li>Every non-defaulted parameter must receive an argument.</li><li>Extra positional arguments are invalid.</li><li>Argument values are checked and contextually coerced against their parameter types.</li></ul><p>Named arguments can skip earlier defaults.</p><p>User functions, struct constructors, choice payload constructors and source-authored receiver methods share this routing policy.</p><p>Host functions and compiler-owned builtin member calls are positional-only.</p><h3>Shared MON syntax</h3><p><a href="../language-overview/#mon-syntax">MON syntax</a> names the shared parenthesised argument and value-construction notation. The accepted record and directive integrations use one argument parser with context-specific policies.</p><p>Calls route supplied values into a declared signature. Anonymous records require named fields and have no callee signature or omitted defaults. Sharing syntax does not enable record spreading, structural conversion or new runtime uses of const records.</p><p>Directives use the same ordinary call parser, parameter-slot router and default validation as functions. Ordinary <code>f()</code> remains valid. A directive&#39;s entry syntax rejects an authored empty <code>()</code>, even when every parameter has a default. Directive values retain their compile-time and specialised category rules.</p><h3>Shared parameters</h3><p>A shared parameter receives an ordinary argument without <code>~</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>show</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span>
 
@@ -1202,99 +1202,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

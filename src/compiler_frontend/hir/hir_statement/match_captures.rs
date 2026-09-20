@@ -74,8 +74,7 @@ impl<'a> HirBuilder<'a> {
                         &capture.span,
                     )?;
 
-                    self.locals_by_name
-.insert(capture.binding_path, local_id);
+                    self.locals_by_name.insert(capture.binding_path, local_id);
                     self.side_table
                         .bind_local_name(local_id, capture.binding_path);
                     local_ids.push(local_id);
@@ -109,8 +108,7 @@ impl<'a> HirBuilder<'a> {
                 )?;
 
                 self.locals_by_name.insert(*binding_path, local_id);
-                self.side_table
-                    .bind_local_name(local_id, *binding_path);
+                self.side_table.bind_local_name(local_id, *binding_path);
 
                 Ok(vec![local_id])
             }
@@ -362,10 +360,7 @@ impl<'a> HirBuilder<'a> {
     }
 }
 
-fn arm_capture_bindings(
-    arm: &MatchArm,
-    capture_locals: &[LocalId],
-) -> Vec<(PathId, LocalId)> {
+fn arm_capture_bindings(arm: &MatchArm, capture_locals: &[LocalId]) -> Vec<(PathId, LocalId)> {
     match &arm.pattern {
         MatchPattern::ChoiceVariant { captures, .. } => captures
             .iter()

@@ -8,6 +8,7 @@
 //! In either lane, resource and site-root rows remain structural strings.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
@@ -25,30 +26,29 @@ use crate::compiler_frontend::headers::synthetic_content_header::content_constan
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Resolve one `TokenKind::Path` through the value-position Stage 0 view.
+/// Resolve one path token through the value-position Stage 0 view.
 ///
 /// Resolution is driven by the immutable view supplied by semantic orchestration. It covers
 /// ordinary module rows and frozen persistent-generic rows, so this function never reopens source
 /// tables or calls a filesystem path resolver.
 pub(crate) fn resolve_file_value(
     path_syntax: PathSyntaxId,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
-    let token_span = SourceSpan::new(token_stream.file_id, token_stream.current_token().span);
+    let token_span = token_stream.current_span();
     let span = Some(token_span);
     token_stream
-        .path_syntax
+        .path_syntax_table()?
         .try_path_for_token(path_syntax, token_span)?;
     let services = context
         .shared

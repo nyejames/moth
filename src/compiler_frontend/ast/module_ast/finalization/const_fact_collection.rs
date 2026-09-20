@@ -194,7 +194,7 @@ impl<'a> ConstFactCollector<'a> {
         {
             Ok(fact) => {
                 if let AstConstFactValue::Expression(expression) = &fact.value {
-env.insert(declaration.id, expression.as_ref().clone());
+                    env.insert(declaration.id, expression.as_ref().clone());
                 }
                 self.facts.declarations.insert(declaration.id, fact);
             }
@@ -374,7 +374,7 @@ env.insert(declaration.id, expression.as_ref().clone());
         {
             Ok(fact) => {
                 if let AstConstFactValue::Expression(expression) = &fact.value {
-env.insert(declaration.id, expression.as_ref().clone());
+                    env.insert(declaration.id, expression.as_ref().clone());
                 }
                 self.facts.declarations.insert(declaration.id, fact);
             }

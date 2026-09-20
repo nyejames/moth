@@ -219,11 +219,14 @@ fn synthetic_module(
     let function_link_facts = collect_module_function_link_facts(&hir)
         .expect("synthetic HIR should produce function link facts");
     Module {
-        executable: ModuleExecutable { hir,
-        resource_table,
-        type_environment:
-            crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir,
+            resource_table,
+            type_environment:
+                crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: Vec::new(),

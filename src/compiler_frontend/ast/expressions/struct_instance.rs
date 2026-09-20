@@ -10,6 +10,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
@@ -32,7 +33,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Input bundle for `parse_struct_constructor_expression`.
@@ -63,7 +64,7 @@ pub(crate) struct StructConstructorParseInput<'a> {
 ///   resolution system.
 /// - Const-record coercion for top-level compile-time constants is applied after resolution.
 pub(super) fn parse_struct_constructor_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     input: StructConstructorParseInput<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -85,7 +86,7 @@ pub(super) fn parse_struct_constructor_expression(
     // Advance past it to '(' so the shared call-argument parser can take over.
     token_stream.advance();
 
-    if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
         return Err(CompilerError::compiler_error(
             "Struct constructor parser called without an opening parenthesis",
         )

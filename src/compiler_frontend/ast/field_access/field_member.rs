@@ -26,12 +26,13 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -429,17 +430,37 @@ fn resolve_field_member(
 }
 
 pub(super) fn parse_member_name_typed(
-    token_stream: &FileTokens,
-    _string_table: &StringTable,
+    token_stream: &AstCursor<'_>,
+    string_table: &mut StringTable,
 ) -> Result<StringId, ExpressionParseError> {
-    match token_stream.current_token_kind() {
-        TokenKind::Symbol(id) => Ok(*id),
-        TokenKind::NumericLiteral(token) if token.kind == NumericLiteralKind::WholeNumber => {
-            Ok(token.normalized_text)
+    match token_stream.current_tag() {
+        TokenTag::SYMBOL => Ok(token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error("member symbol token had no string payload")
+            })?),
+        TokenTag::NUMERIC_LITERAL => {
+            let token = token_stream
+                .current_numeric_literal_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("member numeric token had no payload")
+                })?;
+            if token.kind == NumericLiteralKind::WholeNumber {
+                Ok(token.normalized_text)
+            } else {
+                Err(CompilerDiagnostic::invalid_field_access(
+                    InvalidFieldAccessReason::ExpectedNameAfterDot,
+                    None,
+                    None,
+                    Vec::new(),
+                    Some(token_stream.current_span()),
+                )
+                .into())
+            }
         }
-        TokenKind::Must | TokenKind::TraitThis => {
-            let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                token_stream.current_token_kind(),
+        TokenTag::MUST | TokenTag::TRAIT_THIS => {
+            let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                token_stream.current_tag(),
                 Some(token_stream.current_span()),
                 "AST Construction",
                 "postfix/member parsing",
@@ -464,7 +485,7 @@ pub(super) fn parse_member_name_typed(
 // --------------------------
 
 pub(super) fn parse_field_member_access_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     path_fork: &PathInternerFork,
@@ -503,7 +524,7 @@ pub(super) fn parse_field_member_access_typed(
 
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::OpenParenthesis {
+    if token_stream.current_tag() == TokenTag::OPEN_PARENTHESIS {
         return Err(CompilerDiagnostic::invalid_field_access(
             InvalidFieldAccessReason::FieldNotMethod,
             Some(member_name),

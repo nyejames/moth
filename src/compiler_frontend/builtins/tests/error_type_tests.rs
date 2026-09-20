@@ -19,11 +19,10 @@ fn registers_builtin_error_manifest_with_canonical_symbols() {
     assert_eq!(manifest.declarations.len(), 1);
     assert_eq!(manifest.visible_symbol_paths.len(), 1);
 
-    let error_path =
-        crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-            &mut path_fork,
-            &mut string_table,
-        );
+    let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+        &mut path_fork,
+        &mut string_table,
+    );
     let error_fields = manifest
         .resolved_struct_fields_by_path
         .get(&error_path)

@@ -768,7 +768,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the standard library expands.</p><h3>Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
+    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.</p><h3>Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
 
 <span class='moth-code-string'>@web/canvas</span></code></pre><h3>Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
             
@@ -1480,99 +1480,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

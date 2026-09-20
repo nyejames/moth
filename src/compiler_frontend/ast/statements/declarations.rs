@@ -9,6 +9,7 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
@@ -37,30 +38,29 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidCollectionTypeReason,
-    InvalidConfigReason, InvalidDeclarationReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
+    InvalidExpressionReason, InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 
-use crate::compiler_frontend::ast::expressions::anonymous_const_record::pipe_opens_value_record;
 use crate::compiler_frontend::build_config::BuildInputName;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::r#struct::{
     parse_struct_shell, validate_struct_default_values,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
@@ -73,6 +73,40 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 /// frozen file table. If that retained-table invariant fails, the error must reach module
 /// emission as `CompilerError`, not become an authored declaration diagnostic.
 type DeclarationResult<T> = Result<T, ExpressionParseError>;
+
+/// True when `|` at `pipe_index` opens a value record in the bounded declaration cursor view.
+///
+/// WHAT: classifies the statement-owned struct/record dispatch from canonical `TokenTag` facts.
+/// WHY: initializer substreams remain bounded views, so cursor-relative indexes and source spans
+/// stay tied to the same source-token owner.
+fn pipe_opens_value_record_at_cursor(
+    cursor: &DeclarationCursor,
+    pipe_index: usize,
+    compile_time: bool,
+) -> bool {
+    if compile_time {
+        return true;
+    }
+    let tag_at = |probe: usize| cursor.token_tag_at(probe);
+    let skip_newlines = |mut probe: usize| {
+        while matches!(tag_at(probe), Some(TokenTag::NEWLINE)) {
+            probe += 1;
+        }
+        probe
+    };
+    let mut probe = skip_newlines(pipe_index + 1);
+    if matches!(tag_at(probe), Some(TokenTag::TYPE_PARAMETER_BRACKET)) {
+        return false;
+    }
+    if !matches!(tag_at(probe), Some(TokenTag::SYMBOL)) {
+        return false;
+    }
+    probe = skip_newlines(probe + 1);
+    matches!(
+        tag_at(probe),
+        Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA)
+    )
+}
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
 ///
@@ -88,6 +122,18 @@ fn capacity_only_shorthand(type_ref: &ParsedTypeRef) -> Option<&ParsedCollection
         } if matches!(element.as_ref(), ParsedTypeRef::Inferred) => Some(capacity),
         _ => None,
     }
+}
+/// Inspect the first authored initializer token without retaining a token vector on the shell.
+fn initializer_starts_with_type_parameter(source: &AstCursor, range: Option<TokenRange>) -> bool {
+    let Some(range) = range else {
+        return false;
+    };
+    matches!(
+        source
+            .token_ref_at(range.start().index())
+            .map(|token| token.tag()),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET)
+    )
 }
 
 /// Classify a body-local constant initializer through the module's effective TIR views.
@@ -200,12 +246,22 @@ pub(crate) enum ResolvedDeclarationStatementKind {
     },
 }
 
+/// Mutable interner tables shared by declaration lowering.
+///
+/// WHAT: groups the string and path tables that every declaration-lowering call needs together.
+/// WHY: keeping them together keeps `resolve_declaration_syntax` under the argument-count lint
+/// without changing lowering behavior.
+pub(crate) struct DeclarationLoweringTables<'a> {
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
+}
+
 /// Parse a new body-local declaration from the token stream.
 ///
 /// Handles function declarations as a fast path (they use a dedicated signature/body syntax)
 /// before falling through to generic value declaration parsing via `resolve_declaration_syntax`.
 pub(crate) fn new_declaration(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     symbol_id: StringId,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -228,7 +284,6 @@ pub(crate) fn new_declaration(
         )
         .into());
     }
-
     // Capture the authored binding-name span before advancing past the name token.
     let binding_span = Some(token_stream.current_span());
 
@@ -244,7 +299,7 @@ pub(crate) fn new_declaration(
     // ----------------------------
     // Function declarations are parsed eagerly here because they use
     // a dedicated signature/body syntax that does not fit value declarations.
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         if let Some(warning) = naming_warning_for_identifier(
             symbol_id,
             Some(token_stream.current_span()),
@@ -316,17 +371,26 @@ pub(crate) fn new_declaration(
     //  Parse declaration syntax
     // ----------------------------
     let mut span_builder = ExtendedSpanBuilder::new();
-    let declaration_syntax =
-        parse_declaration_syntax(token_stream, symbol_id, string_table, &mut span_builder)?;
+    let declaration_syntax = {
+        let (syntax, next_index) = {
+            let mut declaration_cursor = token_stream.declaration_cursor()?;
+            let syntax = parse_declaration_syntax(
+                &mut declaration_cursor,
+                symbol_id,
+                string_table,
+                &mut span_builder,
+            )?;
+            (syntax, declaration_cursor.position())
+        };
+        token_stream.set_position(next_index)?;
+        syntax
+    };
 
     // Heuristic: a leading type-parameter pipe after the binding marker indicates
     // a struct or generic type definition, which uses type-like naming conventions.
-    let naming_kind = if matches!(
-        declaration_syntax
-            .initializer_tokens
-            .first()
-            .map(|token| &token.kind),
-        Some(TokenKind::TypeParameterBracket)
+    let naming_kind = if initializer_starts_with_type_parameter(
+        token_stream,
+        declaration_syntax.initializer_range,
     ) {
         IdentifierNamingKind::TypeLike
     } else {
@@ -345,11 +409,13 @@ pub(crate) fn new_declaration(
     let mut declaration = resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
-        &token_stream.path_syntax,
+        Some(token_stream),
         &mut *context,
         type_interner,
-        string_table,
-        path_fork,
+        DeclarationLoweringTables {
+            string_table,
+            path_fork,
+        },
     )?;
     // The binding anchor is the declaration-name token captured on entry, not the
     // initializer value span. `resolve_declaration_syntax` leaves it empty for this
@@ -393,12 +459,15 @@ fn function_signature_receiver(
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: PathId,
-    path_syntax: &FilePathSyntax,
+    source_owner: Option<&AstCursor>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    tables: DeclarationLoweringTables<'_>,
 ) -> DeclarationResult<Declaration> {
+    let DeclarationLoweringTables {
+        string_table,
+        path_fork,
+    } = tables;
     let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
@@ -457,16 +526,13 @@ pub fn resolve_declaration_syntax(
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
         let mut initializer_stream = declaration_initializer_stream(
-            &qualified_name,
+            source_owner,
+            declaration_syntax.initializer_range,
             declaration_syntax.span,
-            declaration_syntax.initializer_tokens.clone(),
-            path_syntax,
-            context,
-            path_fork,
         )?;
 
         // Shorthand requires an immediate collection literal initializer.
-        if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
+        if initializer_stream.current_tag() != TokenTag::OPEN_CURLY {
             return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
                 Some(initializer_stream.current_span()),
@@ -489,7 +555,7 @@ pub fn resolve_declaration_syntax(
 
         // The collection literal parser stops at the closing `}` without consuming it.
         // Advance past it so the remainder of the declaration validation sees EOF.
-        if initializer_stream.current_token_kind() == &TokenKind::CloseCurly {
+        if initializer_stream.current_tag() == TokenTag::CLOSE_CURLY {
             initializer_stream.advance();
         }
 
@@ -515,9 +581,20 @@ pub fn resolve_declaration_syntax(
         }
 
         initializer_stream.skip_newlines();
-        if initializer_stream.current_token_kind() != &TokenKind::Eof {
-            return Err(CompilerDiagnostic::unexpected_token(
-                initializer_stream.current_token_kind().to_owned(),
+        if initializer_stream.current_tag() != TokenTag::EOF {
+            let found = initializer_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "declaration initializer diagnostic",
+                    )
+                })?
+                .unwrap_or_else(|| {
+                    DiagnosticToken::from_static_tag(initializer_stream.current_tag())
+                });
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found,
                 Some(initializer_stream.current_span()),
             )
             .into());
@@ -614,56 +691,66 @@ pub fn resolve_declaration_syntax(
             id: qualified_name,
             value,
             binding_span: None,
-            config_qualifier: None,
+            config_qualifier,
         });
     }
     let mut initializer_stream = declaration_initializer_stream(
-        &qualified_name,
+        source_owner,
+        declaration_syntax.initializer_range,
         declaration_syntax.span,
-        declaration_syntax.initializer_tokens,
-        path_syntax,
-        context,
-        path_fork,
     )?;
 
-    // Check the first token before dispatching so we don't wastefully call
-    // `create_expression` recursively when the initializer is a struct definition.
-
-    let mut parsed_initializer = match initializer_stream.current_token_kind() {
+    let mut parsed_initializer = match initializer_stream.current_tag() {
         // Struct Definition
         //
         // Compile-time `| name = expr |` and empty `#= | |` are const records. Ordinary
         // empty `| |` and `| name Type |` stay with the struct shell grammar.
-        TokenKind::TypeParameterBracket
-            if !pipe_opens_value_record(
-                &initializer_stream.tokens,
-                initializer_stream.index,
-                declaration_syntax.binding_mode.is_compile_time(),
-            ) =>
+        TokenTag::TYPE_PARAMETER_BRACKET
+            if !initializer_stream
+                .declaration_cursor()
+                .map(|cursor| {
+                    pipe_opens_value_record_at_cursor(
+                        &cursor,
+                        cursor.position(),
+                        declaration_syntax.binding_mode.is_compile_time(),
+                    )
+                })
+                .unwrap_or(false) =>
         {
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
-            let constant_context =
-                ScopeContext::new_constant(initializer_stream.src_path.to_owned(), context);
+            let constant_context = ScopeContext::new_constant(qualified_name, context);
             let mut field_warnings = Vec::new();
-            let owner_path = initializer_stream.src_path.to_owned();
-            let field_syntax = parse_struct_shell(
-                &mut initializer_stream,
-                string_table,
-                &mut field_warnings,
-                owner_path,
-                path_fork,
-                &mut span_builder,
-            )?;
+            let field_syntax = {
+                let (field_syntax, next_index) = {
+                    let mut declaration_cursor = initializer_stream.declaration_cursor()?;
+                    let field_syntax = parse_struct_shell(
+                        &mut declaration_cursor,
+                        string_table,
+                        &mut field_warnings,
+                        qualified_name,
+                        path_fork,
+                        &mut span_builder,
+                    )?;
+                    (field_syntax, declaration_cursor.position())
+                };
+                initializer_stream.set_position(next_index)?;
+                field_syntax
+            };
             for warning in field_warnings {
                 context.emit_warning(warning);
             }
+            let source_owner = source_owner.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "struct field defaults have no canonical source token owner",
+                )
+            })?;
 
             let mut params = Vec::with_capacity(field_syntax.len());
             for field in &field_syntax {
                 params.push(signature_member_to_declaration(
                     field,
-                    path_syntax,
+                    source_owner,
                     &constant_context,
                     type_interner,
                     string_table,
@@ -791,7 +878,7 @@ pub fn resolve_declaration_syntax(
     // If tokens remain, the parser stopped early (e.g. a newline broke the
     // expression before it was complete). This prevents silent truncation.
     initializer_stream.skip_newlines();
-    if initializer_stream.current_token_kind() == &TokenKind::Else
+    if initializer_stream.current_tag() == TokenTag::ELSE
         && type_interner
             .environment()
             .option_inner_type(parsed_initializer.type_id)
@@ -804,14 +891,13 @@ pub fn resolve_declaration_syntax(
         .into());
     }
 
-    if initializer_stream.current_token_kind() != &TokenKind::Eof {
-        if matches!(
-            initializer_stream.current_token_kind(),
-            TokenKind::TypeParameterBracket
-        ) && matches!(
-            parsed_initializer.kind,
-            ExpressionKind::AnonymousConstRecord { .. }
-        ) {
+    if initializer_stream.current_tag() != TokenTag::EOF {
+        if initializer_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET
+            && matches!(
+                parsed_initializer.kind,
+                ExpressionKind::AnonymousConstRecord { .. }
+            )
+        {
             // Extra `|` after a complete record is the usual leftover from an
             // inline nested `|...|` that the parser already closed.
             return Err(CompilerDiagnostic::invalid_expression(
@@ -821,8 +907,17 @@ pub fn resolve_declaration_syntax(
             .into());
         }
 
-        return Err(CompilerDiagnostic::unexpected_token(
-            initializer_stream.current_token_kind().to_owned(),
+        let found = initializer_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "declaration initializer diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(initializer_stream.current_tag()));
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            found,
             Some(initializer_stream.current_span()),
         )
         .into());
@@ -866,41 +961,32 @@ pub fn resolve_declaration_syntax(
         config_qualifier,
     })
 }
-
-/// Wrap a declaration's initializer tokens in a stream terminated at the declaration's location.
+/// Build the bounded parser cursor for a declaration initializer.
 ///
-/// WHY the context: the initializer was lexed from the file that declared it, so the substream
-/// takes that scope's source identity rather than an identity a caller could pass wrongly.
-fn declaration_initializer_stream(
-    qualified_name: &PathId,
+/// Source-owned ranges stay on the canonical `AstCursor` view. A missing owner is an
+/// invariant failure: every declaration initializer is parsed through a nested canonical cursor.
+fn declaration_initializer_stream<'tokens>(
+    source_owner: Option<&AstCursor<'tokens>>,
+    initializer_range: Option<TokenRange>,
     declaration_span: Option<SourceSpan>,
-    mut initializer_tokens: Vec<Token>,
-    path_syntax: &FilePathSyntax,
-    context: &ScopeContext,
-    path_fork: &PathInternerFork,
-) -> DeclarationResult<FileTokens> {
-    let Some(eof_span) = declaration_span
+) -> DeclarationResult<AstCursor<'tokens>> {
+    let range = initializer_range
+        .ok_or_else(|| CompilerError::compiler_error("declaration initializer range is missing"))?;
+    let eof_span = declaration_span
         .map(SourceSpan::local)
-        .or_else(|| initializer_tokens.last().map(|token| token.span))
-    else {
-        return Err(CompilerDiagnostic::invalid_declaration(
-            InvalidDeclarationReason::MissingInitializerExpression,
-            path_fork.component(*qualified_name),
-            None,
-        )
-        .into());
-    };
-    initializer_tokens.push(Token::new(TokenKind::Eof, eof_span));
-    FileTokens::new_from_slice(
-        *qualified_name,
-        context.shared.declaring_file_id,
-        None,
-        initializer_tokens,
-        path_syntax,
-    )
-    .map_err(ExpressionParseError::from)
-}
+        .unwrap_or_else(LocalSpan::source_start);
 
+    let source_owner = source_owner.ok_or_else(|| {
+        CompilerError::compiler_error("declaration initializer has no canonical source owner")
+    })?;
+    let cursor = source_owner.nested_cursor(range).map_err(|error| {
+        ExpressionParseError::from(CompilerError::compiler_error(format!(
+            "declaration initializer range cursor construction failed: {error:?}"
+        )))
+    })?;
+    let source_id = cursor.source_id();
+    Ok(cursor.with_synthetic_eof_span(SourceSpan::new(source_id, eof_span)))
+}
 #[cfg(test)]
 #[path = "tests/declaration_tests.rs"]
 mod declaration_tests;

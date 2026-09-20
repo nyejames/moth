@@ -9,6 +9,7 @@ use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else, same_
 use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::if_headers::{
@@ -26,13 +27,13 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input for the inline single-predicate body parser after `if` has been consumed.
-pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct InlineSinglePredicateParseInput<'a, 'b, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
@@ -47,7 +48,7 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
 ///
 /// WHAT: consumes the shared header parser, then requires same-line `then`.
 pub(super) fn try_parse_inline_single_predicate_value_match(
-    input: InlineSinglePredicateParseInput<'_, '_>,
+    input: InlineSinglePredicateParseInput<'_, '_, '_>,
 ) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
     let InlineSinglePredicateParseInput {
         token_stream,
@@ -75,7 +76,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
     };
 
     if header.body_delimiter != IfHeaderDelimiter::InlineThen
-        || token_stream.current_token_kind() != &TokenKind::Then
+        || token_stream.current_tag() != TokenTag::THEN
     {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
@@ -84,7 +85,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         .into()));
     }
 
-    if !same_logical_line(token_stream, header_index, token_stream.index) {
+    if !same_logical_line(token_stream, header_index, token_stream.position()) {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
             Some(token_stream.current_span()),
@@ -106,8 +107,8 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
     }))
 }
 
-struct InlineValueMatchParseInput<'a, 'b> {
-    token_stream: &'a mut FileTokens,
+struct InlineValueMatchParseInput<'a, 'b, 'tokens> {
+    token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     then_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
@@ -124,7 +125,7 @@ struct InlineValueMatchParseInput<'a, 'b> {
 type InlineValueMatchResult<T> = Result<T, ExpressionParseError>;
 
 fn parse_inline_value_match(
-    input: InlineValueMatchParseInput<'_, '_>,
+    input: InlineValueMatchParseInput<'_, '_, '_>,
 ) -> InlineValueMatchResult<ParsedReceiverValue> {
     let InlineValueMatchParseInput {
         token_stream,

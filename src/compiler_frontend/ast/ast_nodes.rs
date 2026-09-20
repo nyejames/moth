@@ -199,7 +199,7 @@ pub enum NodeKind {
     // example: new_struct_instance = MyStructDefinition(arg1, arg2)
     //          new_struct_instance(arg) -- Calls the main function of the struct
     StructDefinition(
-        PathId,     // Full unique name path
+        PathId,           // Full unique name path
         Vec<Declaration>, // Fields
     ),
 

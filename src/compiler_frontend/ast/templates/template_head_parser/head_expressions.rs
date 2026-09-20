@@ -11,6 +11,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, ReactiveSource,
 };
@@ -21,18 +22,17 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,
@@ -320,7 +320,7 @@ pub(super) fn push_template_head_reactive_subscription(
 /// extensionless and source-kind diagnostics.
 pub(super) fn push_template_head_path_expression(
     path_syntax: PathSyntaxId,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     construction_context: &mut TemplateConstructionContext,
@@ -328,7 +328,7 @@ pub(super) fn push_template_head_path_expression(
     path_fork: &mut PathInternerFork,
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
-    let source_span = Some(token_stream.current_span());
+    let source_span = path_source_span_for(token_stream);
     let expression = resolve_file_value(
         path_syntax,
         token_stream,
@@ -351,6 +351,14 @@ pub(super) fn push_template_head_path_expression(
         source_span,
         string_table,
     )
+}
+
+/// Read-only path-expression source span on the canonical cursor view.
+///
+/// WHAT: reports the current token span for head path diagnostics and insertion.
+/// WHY: the path span is a pure token-local read.
+fn path_source_span_for(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn with_source_span_error(source_span: Option<SourceSpan>, error: TemplateError) -> TemplateError {

@@ -7,6 +7,7 @@
 //! function calls.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallArgument, order_call_arguments_by_retained_slot,
 };
@@ -40,20 +41,20 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashMap;
 
 /// Input bundle for generic call inference.
-pub(crate) struct GenericFunctionCallParseInput<'a, 'b> {
-    pub(crate) token_stream: &'a mut FileTokens,
+pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
+    pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) template: &'a GenericFunctionTemplate,
     pub(crate) context: &'a ScopeContext,
     pub(crate) expected_context: GenericCallExpectedContext<'a>,
@@ -79,8 +80,8 @@ pub(crate) enum GenericCallExpectedContext<'a> {
     None,
 }
 
-struct GenericFunctionCallFinishInput<'a, 'b> {
-    token_stream: &'a mut FileTokens,
+struct GenericFunctionCallFinishInput<'a, 'b, 'tokens> {
+    token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     call: HandledFallibleCall,
     error_return_type_id: Option<TypeId>,
@@ -93,7 +94,7 @@ struct GenericFunctionCallFinishInput<'a, 'b> {
 }
 
 fn parse_generic_function_call(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -149,7 +150,8 @@ fn parse_generic_function_call(
         .component(template.function_path)
         .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
+    let expectations =
+        expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
     let arguments = resolve_call_arguments(
         CallDiagnosticContext::function(&callee_name),
@@ -197,13 +199,13 @@ fn parse_generic_function_call(
 }
 
 pub(crate) fn parse_generic_function_call_expression(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     parse_generic_function_call(input)
 }
 
 fn validate_generic_function_template_call(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -252,7 +254,8 @@ fn validate_generic_function_template_call(
         .component(template.function_path)
         .map(|name| string_table.resolve(name).to_owned())
         .unwrap_or_else(|| String::from("<generic function>"));
-    let expectations = expectations_from_user_parameters(&inference.signature.parameters, path_fork);
+    let expectations =
+        expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let arguments = resolve_call_arguments_shape_and_access(
         CallDiagnosticContext::function(&callee_name),
         &raw_arguments,
@@ -286,13 +289,13 @@ fn validate_generic_function_template_call(
 }
 
 pub(crate) fn validate_generic_function_template_call_expression(
-    input: GenericFunctionCallParseInput<'_, '_>,
+    input: GenericFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     validate_generic_function_template_call(input)
 }
 
 fn finish_generic_function_call(
-    input: GenericFunctionCallFinishInput<'_, '_>,
+    input: GenericFunctionCallFinishInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let GenericFunctionCallFinishInput {
         token_stream,
@@ -308,16 +311,13 @@ fn finish_generic_function_call(
     } = input;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Bang | TokenKind::Catch
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
             return Err(CompilerDiagnostic::invalid_fallible_handling(
-                non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+                non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
             .into());
@@ -326,10 +326,10 @@ fn finish_generic_function_call(
         return Ok(call.into_plain_expression(type_interner.environment_mut_for_derived_types()));
     };
 
-    if token_stream.current_token_kind() == &TokenKind::Bang
-        || token_stream.current_token_kind() == &TokenKind::Catch
-        || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
-            && token_stream.peek_next_token() == Some(&TokenKind::Bang))
+    if token_stream.current_tag() == TokenTag::BANG
+        || token_stream.current_tag() == TokenTag::CATCH
+        || (token_stream.current_tag() == TokenTag::SYMBOL
+            && token_stream.peek_next_tag() == Some(TokenTag::BANG))
     {
         return parse_fallible_handling_suffix_for_call_expression(
             token_stream,
@@ -732,20 +732,17 @@ fn collect_binding_evidence(
             // mismatch, not a repeated-parameter conflict.
             Ok(())
         }
-        Err(conflict) => Err(
-            binding_conflict_diagnostic(
-                context.template,
-                conflict,
-                &*context.evidence_locations,
-                context.type_environment,
-                &mut *context.string_table,
-                context.path_fork,
-                span,
-            )
-            .into(),
-        ),
+        Err(conflict) => Err(binding_conflict_diagnostic(
+            context.template,
+            conflict,
+            &*context.evidence_locations,
+            context.type_environment,
+            &mut *context.string_table,
+            context.path_fork,
+            span,
+        )
+        .into()),
     }
-
 }
 fn binding_conflict_diagnostic(
     template: &GenericFunctionTemplate,
@@ -880,7 +877,11 @@ pub(crate) fn generic_function_instance_path(
         .collect::<Vec<_>>()
         .join("_");
     let component = string_table.intern(&format!("__generic_instance_{argument_suffix}"));
-    path_fork.try_intern_child(function_path, component).ok_or_else(|| {
-        CompilerError::compiler_error("path table exhausted while creating generic function instance")
-    })
+    path_fork
+        .try_intern_child(function_path, component)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while creating generic function instance",
+            )
+        })
 }

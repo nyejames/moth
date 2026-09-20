@@ -8,6 +8,7 @@
 //! misuse by the orchestration layer and never reach here.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::external_namespace_members::{
@@ -28,7 +29,6 @@ use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Shared mutable state passed to leaf resolution helpers.
 ///
@@ -36,8 +36,8 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// boundary-catch flag, and string table so each helper signature stays small.
 /// WHY: every leaf resolver needs the same parser state; a context struct avoids
 /// repeating the same long argument list in three functions.
-pub(super) struct LeafDispatchContext<'a, 'env> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct LeafDispatchContext<'a, 'env, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
@@ -55,7 +55,7 @@ pub(super) struct LeafDispatchContext<'a, 'env> {
 /// BOUNDARY: the caller has already verified the path ends at this value member;
 /// this function only handles expression production for the leaf.
 pub(super) fn resolve_namespace_value_member(
-    context: &mut LeafDispatchContext<'_, '_>,
+    context: &mut LeafDispatchContext<'_, '_, '_>,
     value_member: &NamespaceValueMember,
     member_name: StringId,
     member_span: Option<SourceSpan>,
@@ -86,7 +86,7 @@ pub(super) fn resolve_namespace_value_member(
 /// BOUNDARY: the caller has already positioned `token_stream` on the member name and
 /// has verified that no further dot follows; this function only handles the leaf.
 fn resolve_source_value_member(
-    context: &mut LeafDispatchContext<'_, '_>,
+    context: &mut LeafDispatchContext<'_, '_, '_>,
     symbol_path: &PathId,
     member_name: StringId,
     member_span: Option<SourceSpan>,
@@ -162,7 +162,7 @@ fn resolve_source_value_member(
 /// BOUNDARY: the caller has already verified the path ends at this member; this
 /// function only handles the leaf expression production.
 fn resolve_external_value_member(
-    context: &mut LeafDispatchContext<'_, '_>,
+    context: &mut LeafDispatchContext<'_, '_, '_>,
     symbol_id: ExternalSymbolId,
     member_name: StringId,
     member_span: Option<SourceSpan>,

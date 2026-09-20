@@ -33,7 +33,9 @@ fn lowers_hir_to_wasm_module_bytes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
 
     let start_block = HirBlock {
         id: BlockId(0),
@@ -49,19 +51,24 @@ fn lowers_hir_to_wasm_module_bytes() {
         return_type: types.int,
     };
 
-    let hir_module = build_module(&mut path_fork, &mut string_table,
-    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-    vec![start_block],
-    FunctionId(0),);
+    let hir_module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
 
     let mut request = WasmBackendRequest::default();
     request.emit_options.validate_emitted_module = false;
-    let result = lower_hir_to_wasm_module(&hir_module,
-    &default_borrow_facts(),
-    &request,
-    &string_table,
+    let result = lower_hir_to_wasm_module(
+        &hir_module,
+        &default_borrow_facts(),
+        &request,
+        &string_table,
         &type_environment,
-        &path_fork.snapshot_table())
+        &path_fork.snapshot_table(),
+    )
     .expect("Wasm lowering should emit module bytes");
     let wasm_bytes = result.wasm_bytes.expect("wasm bytes should be available");
     validate_wasm(&wasm_bytes);
@@ -110,7 +117,9 @@ fn rejects_invalid_helper_export_policy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
     let start_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
@@ -124,17 +133,22 @@ fn rejects_invalid_helper_export_policy() {
         params: vec![],
         return_type: types.int,
     };
-    let hir_module = build_module(&mut path_fork, &mut string_table,
-    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-    vec![start_block],
-    FunctionId(0),);
+    let hir_module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
 
-    let error = lower_hir_to_wasm_module(&hir_module,
-    &default_borrow_facts(),
-    &request,
-    &string_table,
+    let error = lower_hir_to_wasm_module(
+        &hir_module,
+        &default_borrow_facts(),
+        &request,
+        &string_table,
         &type_environment,
-        &path_fork.snapshot_table())
+        &path_fork.snapshot_table(),
+    )
     .expect_err("invalid helper policy should fail");
     let error = error
         .infrastructure_error()
@@ -178,7 +192,9 @@ fn rejects_unsupported_wasm_feature_flags() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
     let start_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
@@ -192,17 +208,22 @@ fn rejects_unsupported_wasm_feature_flags() {
         params: vec![],
         return_type: types.int,
     };
-    let hir_module = build_module(&mut path_fork, &mut string_table,
-    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-    vec![start_block],
-    FunctionId(0),);
+    let hir_module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
 
-    let error = lower_hir_to_wasm_module(&hir_module,
-    &default_borrow_facts(),
-    &request,
-    &string_table,
+    let error = lower_hir_to_wasm_module(
+        &hir_module,
+        &default_borrow_facts(),
+        &request,
+        &string_table,
         &type_environment,
-        &path_fork.snapshot_table())
+        &path_fork.snapshot_table(),
+    )
     .expect_err("unsupported feature toggle should fail");
     let error = error
         .infrastructure_error()
@@ -222,7 +243,9 @@ fn rejects_unsupported_cfg_lowering_strategy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
-    let start_path = path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits");
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
     let start_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
@@ -236,17 +259,22 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         params: vec![],
         return_type: types.int,
     };
-    let hir_module = build_module(&mut path_fork, &mut string_table,
-    vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-    vec![start_block],
-    FunctionId(0),);
+    let hir_module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
 
-    let error = lower_hir_to_wasm_module(&hir_module,
-    &default_borrow_facts(),
-    &request,
-    &string_table,
+    let error = lower_hir_to_wasm_module(
+        &hir_module,
+        &default_borrow_facts(),
+        &request,
+        &string_table,
         &type_environment,
-        &path_fork.snapshot_table())
+        &path_fork.snapshot_table(),
+    )
     .expect_err("unsupported cfg strategy should fail");
     let error = error
         .infrastructure_error()

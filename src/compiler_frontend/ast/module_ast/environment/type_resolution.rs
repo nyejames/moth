@@ -6,6 +6,7 @@
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_bounds::{
@@ -142,13 +143,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         );
                         let list_id = registered.list_id;
                         self.generic_parameter_lists_by_path
-                            .insert(header.tokens.src_path, registered);
+                            .insert(header.declaration_path, registered);
                         Some(list_id)
                     };
 
                     let struct_def = StructTypeDefinition {
                         id: NominalTypeId(0),
-                        path: header.tokens.src_path,
+                        path: header.declaration_path,
                         fields: Box::new([]),
                         generic_parameters: generic_param_list_id,
                         const_record: false,
@@ -156,18 +157,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     let (_, struct_type_id) =
                         self.type_environment.register_nominal_struct(struct_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-.insert(header.tokens.src_path, struct_type_id);
+                        .insert(header.declaration_path, struct_type_id);
 
                     self.replace_declaration(
                         declaration_id,
                         Declaration {
-                            id: header.tokens.src_path.to_owned(),
+                            id: header.declaration_path.to_owned(),
                             value: Expression::new(
                                 ExpressionKind::NoValue,
                                 header.name_span,
                                 struct_type_id,
                                 DataType::runtime_struct(
-                                    header.tokens.src_path.to_owned(),
+                                    header.declaration_path.to_owned(),
                                     struct_type_id,
                                 ),
                                 ValueMode::ImmutableReference,
@@ -193,31 +194,31 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         );
                         let list_id = registered.list_id;
                         self.generic_parameter_lists_by_path
-                            .insert(header.tokens.src_path, registered);
+                            .insert(header.declaration_path, registered);
                         Some(list_id)
                     };
 
                     let choice_def = ChoiceTypeDefinition {
                         id: NominalTypeId(0),
-                        path: header.tokens.src_path,
+                        path: header.declaration_path,
                         variants: Box::new([]),
                         generic_parameters: generic_param_list_id,
                     };
                     let (_, choice_type_id) =
                         self.type_environment.register_nominal_choice(choice_def);
                     Rc::make_mut(&mut self.nominal_type_ids_by_path)
-.insert(header.tokens.src_path, choice_type_id);
+                        .insert(header.declaration_path, choice_type_id);
 
                     self.replace_declaration(
                         declaration_id,
                         Declaration {
-                            id: header.tokens.src_path.to_owned(),
+                            id: header.declaration_path.to_owned(),
                             value: Expression::new(
                                 ExpressionKind::NoValue,
                                 header.name_span,
                                 choice_type_id,
                                 DataType::Choices {
-                                    nominal_path: header.tokens.src_path.to_owned(),
+                                    nominal_path: header.declaration_path.to_owned(),
                                     type_id: choice_type_id,
                                     generic_instance_key: None,
                                 },
@@ -281,7 +282,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     emit_warnings,
                 )?;
                 Rc::make_mut(&mut self.resolved_struct_fields_by_path)
-                    .insert(header.tokens.src_path.to_owned(), unresolved_fields);
+                    .insert(header.declaration_path.to_owned(), unresolved_fields);
             }
             HeaderKind::Choice { variants, .. } => {
                 let unresolved_variants = self.unresolved_choice_variants_for_header(
@@ -292,7 +293,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     emit_warnings,
                 )?;
                 Rc::make_mut(&mut self.choice_variant_shells_by_path)
-                    .insert(header.tokens.src_path.to_owned(), unresolved_variants);
+                    .insert(header.declaration_path.to_owned(), unresolved_variants);
             }
             _ => {}
         }
@@ -358,7 +359,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let visibility = self.header_visibility(header, string_table)?;
 
-            let source_file_scope = header.source_file;
+            let source_file_scope = self.header_source_path(header);
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
                 header,
                 generic_parameters,
@@ -380,13 +381,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.file_id,
+                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
 
             let resolved_fields = resolve_struct_field_types(
-                &header.tokens.src_path,
+                &header.declaration_path,
                 &unresolved_fields,
                 &mut type_resolution_context,
                 &template_ir_store,
@@ -407,7 +408,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let field_definitions =
                 self.field_definitions_from_declarations(&resolved_fields, string_table)?;
 
-            if let Some(&type_id) = self.nominal_type_ids_by_path.get(&header.tokens.src_path) {
+            if let Some(&type_id) = self.nominal_type_ids_by_path.get(&header.declaration_path) {
                 self.type_environment
                     .update_struct_fields(type_id, field_definitions);
             }
@@ -415,7 +416,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // Update the AST-owned shell table with resolved fields so later stages
             // (including constant parsing) see canonical member metadata.
             Rc::make_mut(&mut self.resolved_struct_fields_by_path).insert(
-                header.tokens.src_path.to_owned(),
+                header.declaration_path.to_owned(),
                 resolved_fields.to_owned(),
             );
 
@@ -426,7 +427,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validate_generic_parameters_used(
                 generic_parameters,
                 &used_parameters,
-                &header.tokens.src_path,
+                &header.declaration_path,
                 header.name_span,
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -436,7 +437,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             if !generic_parameters.is_empty() {
                 for field in &resolved_fields {
                     validate_no_recursive_generic_type(
-                        &header.tokens.src_path,
+                        &header.declaration_path,
                         &field.value.diagnostic_type,
                         field.value.span,
                         string_table,
@@ -447,7 +448,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             // Record the source file that owns this struct for later diagnostic rendering.
             self.struct_source_by_path.insert(
-                header.tokens.src_path.to_owned(),
+                header.declaration_path.to_owned(),
                 source_file_scope.to_owned(),
             );
         }
@@ -467,7 +468,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let source_file_scope = header.source_file;
+            let source_file_scope = self.header_source_path(header);
             let visibility = self.header_visibility(header, string_table)?;
 
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
@@ -487,7 +488,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.file_id,
+                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -509,7 +510,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validate_generic_parameters_used(
                 generic_parameters,
                 &used_parameters,
-                &header.tokens.src_path,
+                &header.declaration_path,
                 header.name_span,
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -521,7 +522,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     if let ChoiceVariantPayload::Record { fields } = &variant.payload {
                         for field in fields {
                             validate_no_recursive_generic_type(
-                                &header.tokens.src_path,
+                                &header.declaration_path,
                                 &field.value.diagnostic_type,
                                 field.value.span,
                                 string_table,
@@ -557,12 +558,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 });
             }
 
-            let Some(&choice_type_id) = self.nominal_type_ids_by_path.get(&header.tokens.src_path)
+            let Some(&choice_type_id) = self.nominal_type_ids_by_path.get(&header.declaration_path)
             else {
                 let error = CompilerError::compiler_error(format!(
                     "Choice '{}' was not registered before resolved variant update",
                     self.path_fork.render_portable(
-                        header.tokens.src_path,
+                        header.declaration_path,
                         string_table,
                         &mut Vec::new(),
                     )
@@ -576,11 +577,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // Update the AST-owned shell table with resolved variants for later
             // constant constructor parsing and body emission.
             Rc::make_mut(&mut self.choice_variant_shells_by_path).insert(
-                header.tokens.src_path.to_owned(),
+                header.declaration_path.to_owned(),
                 resolved_variants.to_owned(),
             );
             self.choice_source_by_path.insert(
-                header.tokens.src_path.to_owned(),
+                header.declaration_path.to_owned(),
                 source_file_scope.to_owned(),
             );
 
@@ -588,13 +589,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.replace_declaration(
                 declaration_id,
                 Declaration {
-                    id: header.tokens.src_path.to_owned(),
+                    id: header.declaration_path.to_owned(),
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         header.name_span,
                         choice_type_id,
                         DataType::Choices {
-                            nominal_path: header.tokens.src_path.to_owned(),
+                            nominal_path: header.declaration_path.to_owned(),
                             type_id: choice_type_id,
                             generic_instance_key: None,
                         },
@@ -659,19 +660,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
 
             if header.export_mode.is_public() {
-                let owner_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "Public nominal generic header had no source-path name.",
-                        ),
-                        string_table,
-                    )
-                })?;
+                let owner_name = self
+                    .path_fork
+                    .component(header.declaration_path)
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "Public nominal generic header had no source-path name.",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 self.validate_public_generic_bounds(
                     owner_name,
                     generic_parameters,
                     &resolved_bounds_by_local,
-                    &header.source_file,
+                    &self.header_source_path(header),
                     trait_environment,
                     string_table,
                 )?;
@@ -679,7 +683,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             if let Some(registered) = self
                 .generic_parameter_lists_by_path
-                .get(&header.tokens.src_path)
+                .get(&header.declaration_path)
             {
                 self.type_environment.update_generic_parameter_bounds(
                     registered.list_id,
@@ -721,7 +725,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::TypeAlias { .. } => {
                     let Some(alias) = self
                         .resolved_type_aliases_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -750,7 +754,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Struct { .. } => {
                     let Some(fields) = self
                         .resolved_struct_fields_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -767,7 +771,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Choice { .. } => {
                     let Some(variants) = self
                         .choice_variant_shells_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -788,7 +792,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Function { .. } => {
                     let Some(resolved_signature) = self
                         .resolved_function_signatures_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                         .cloned()
                     else {
                         continue;
@@ -841,12 +845,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .type_environment
             .nominal_path(type_id)
             .and_then(|path| self.path_fork.component(*path));
-        validate_nominal_generic_bound_evidence(
-            type_id,
-            instance_name,
-            span,
-            &evidence_context,
-        )
+        validate_nominal_generic_bound_evidence(type_id, instance_name, span, &evidence_context)
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
@@ -879,7 +878,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     let unresolved_fields = self
                         .resolved_struct_fields_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                         .cloned()
                         .ok_or_else(|| {
                             self.error_messages(
@@ -895,12 +894,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
-                                header.tokens.file_id,
+                                header.tokens.source(),
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );
                         resolve_struct_constructor_shell_types(
-                            &header.tokens.src_path,
+                            &header.declaration_path,
                             &unresolved_fields,
                             &mut type_resolution_context,
                             string_table,
@@ -922,7 +921,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     // this base definition empty makes an instance created by an earlier type
                     // annotation retain a zero-parameter constructor view forever.
                     if let Some(&struct_type_id) =
-                        self.nominal_type_ids_by_path.get(&header.tokens.src_path)
+                        self.nominal_type_ids_by_path.get(&header.declaration_path)
                     {
                         let field_definitions = self
                             .field_definitions_from_declarations(&resolved_fields, string_table)?;
@@ -932,7 +931,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     // Store resolved constructor shell types for constant parsing.
                     Rc::make_mut(&mut self.resolved_struct_fields_by_path)
-                        .insert(header.tokens.src_path.to_owned(), resolved_fields);
+                        .insert(header.declaration_path.to_owned(), resolved_fields);
                 }
 
                 HeaderKind::Choice {
@@ -949,7 +948,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     let unresolved_variants = self
                         .choice_variant_shells_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                         .cloned()
                         .ok_or_else(|| {
                             self.error_messages(
@@ -964,7 +963,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
-                                header.tokens.file_id,
+                                header.tokens.source(),
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );
@@ -981,7 +980,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     // environment owns the eager substituted-instance cache, so updating the
                     // base definition is what refreshes any instance created from its shell.
                     if let Some(&choice_type_id) =
-                        self.nominal_type_ids_by_path.get(&header.tokens.src_path)
+                        self.nominal_type_ids_by_path.get(&header.declaration_path)
                     {
                         let mut variant_definitions = Vec::with_capacity(resolved_variants.len());
                         for (tag, variant) in resolved_variants.iter().enumerate() {
@@ -1013,7 +1012,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     // Store resolved constructor shell types for constant parsing.
                     Rc::make_mut(&mut self.choice_variant_shells_by_path)
-                        .insert(header.tokens.src_path.to_owned(), resolved_variants);
+                        .insert(header.declaration_path.to_owned(), resolved_variants);
                 }
 
                 _ => {}
@@ -1098,6 +1097,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
+            source_token_owners: self.source_token_owners.clone(),
         });
 
         let mut aliases_left = aliases_waiting_for_constants.len();
@@ -1109,11 +1109,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             match &header.kind {
                 HeaderKind::TypeAlias { .. }
-                    if aliases_waiting_for_constants.contains(&header.tokens.src_path) =>
+                    if aliases_waiting_for_constants.contains(&header.declaration_path) =>
                 {
                     if !self
                         .resolved_type_aliases_by_path
-                        .contains_key(&header.tokens.src_path)
+                        .contains_key(&header.declaration_path)
                     {
                         self.resolve_one_type_alias(header, string_table)?;
                     }
@@ -1136,6 +1136,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Constant { .. }
                     if !self.resolved_module_constants.contains(declaration_id) =>
                 {
+                    let source_file_scope = self
+                        .module_symbols
+                        .source_path_for_header(header)
+                        .ok_or_else(|| {
+                            self.error_messages(
+                                CompilerError::compiler_error(
+                                    "header body range has no prepared source-path identity",
+                                ),
+                                string_table,
+                            )
+                        })?;
                     let visibility = self.header_visibility(header, string_table)?;
 
                     let declaration = session
@@ -1154,6 +1165,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                     &self.choice_variant_shells_by_path,
                                 ),
                                 file_visibility: &visibility,
+                                source_file_scope,
                                 type_environment: &mut self.type_environment,
                                 warnings: &mut self.warnings,
                                 path_fork: self.path_fork,
@@ -1199,6 +1211,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
         let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
+            let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "member-bearing header has no prepared source token owner",
+                )
+            })?;
+            // Live parser state stays on the canonical source owner. The transient
+            // cursor spans the full canonical source so nested default ranges stay
+            // inside its bounds for this member-shell parse only. `from_source_tokens`
+            // retains the canonical owner for later bounded expression handoffs.
+            let full = owner_tokens.full_range().map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "member-bearing header source range could not be constructed: {error:?}"
+                ))
+            })?;
+            let source_owner =
+                AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
+                    CompilerError::compiler_error(format!(
+                        "member-bearing header source range is outside its source owner: {error:?}"
+                    ))
+                })?;
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
                 AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -1207,7 +1239,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             for field in fields {
                 let declaration = signature_member_to_declaration(
                     field,
-                    &header.tokens.path_syntax,
+                    &source_owner,
                     &field_context,
                     &mut type_interner,
                     string_table,

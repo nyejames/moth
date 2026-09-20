@@ -5,25 +5,28 @@
 //! WHY: declared-region parsing and placement semantics are deferred, but this final source spelling must
 //!      take precedence over existing-reference, external-call and declaration dispatch.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidStatementPositionReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(crate) fn classify_deferred_declared_region_header(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<CompilerDiagnostic> {
-    if token_stream.peek_next_token() != Some(&TokenKind::Colon) {
+    // Statement-position `identifier:` classification reads one token of tag lookahead.
+    let next_is_colon = token_stream.peek_next_tag() == Some(TokenTag::COLON);
+    if !next_is_colon {
         return None;
     }
 
     let span = Some(token_stream.current_span());
-    match token_stream.current_token_kind() {
-        TokenKind::Symbol(_) => Some(CompilerDiagnostic::deferred_feature_reason(
+    match token_stream.current_tag() {
+        TokenTag::SYMBOL => Some(CompilerDiagnostic::deferred_feature_reason(
             DeferredFeatureReason::DeclaredRegion,
             span,
         )),
-        TokenKind::Wildcard => Some(CompilerDiagnostic::invalid_statement_position(
+        TokenTag::WILDCARD => Some(CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::AnonymousDeclaredRegion,
             span,
         )),

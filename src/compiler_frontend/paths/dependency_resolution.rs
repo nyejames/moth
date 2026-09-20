@@ -60,8 +60,7 @@ fn validate_dependency_boundary_against_base(
             }
             _ => InvalidImportPathReason::EscapesProjectRoot,
         };
-        let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
+        let diagnostic = CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
     Ok(())
@@ -127,8 +126,7 @@ pub(crate) fn validate_dependency_case_sensitivity(
             provided: string_table.intern(&provided),
             expected: string_table.intern(&expected),
         };
-        let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
+        let diagnostic = CompilerDiagnostic::invalid_import_path(dependency_path, reason, None);
         return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
 

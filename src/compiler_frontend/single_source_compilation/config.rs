@@ -36,12 +36,13 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing_in_cursor;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
     convert_const_value_to_folded_value,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header,
     HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
@@ -55,9 +56,7 @@ use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathInternError, PathInternerFork,
-};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -73,8 +72,6 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     /// WHY: this is the authored identity every config diagnostic reports and every authored-scope
     ///      comparison uses, so it must not be replaced by the canonical form.
     pub(crate) authored_path: &'a Path,
-    /// The canonical filesystem path the authored config resolved to.
-    pub(crate) canonical_path: &'a Path,
     /// The registered authored source identity carried by this config's token stream.
     pub(crate) file_id: SourceId,
     pub(crate) source_code: &'a str,
@@ -134,7 +131,8 @@ pub(crate) fn compile_config_source(
     // Construct the authored logical identity in the config service's path domain before
     // tokenization and header preparation. The service is self-contained, so its fork owns the
     // complete config path table.
-    let authored_scope = match path_fork.try_intern_filesystem_path(request.authored_path, string_table)
+    let authored_scope = match path_fork
+        .try_intern_filesystem_path(request.authored_path, string_table)
     {
         Ok(scope) => scope,
         Err(PathInternError::NonUtf8(non_utf8)) => {
@@ -270,19 +268,21 @@ fn compile_prepared_config_source(
     })?;
 
     // Order local declarations.
-    let sorted =
-        resolve_module_dependencies(
-            bound_headers,
-            &ContentSourceTargets::empty(),
-            string_table,
-            path_fork,
-        )
-        .map_err(|failure| failure.into_messages(string_table))?;
+    let sorted = resolve_module_dependencies(
+        bound_headers,
+        &ContentSourceTargets::empty(),
+        string_table,
+        path_fork,
+    )
+    .map_err(|failure| failure.into_messages(string_table))?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
-    let authored_key_name_provenance =
-        collect_authored_config_key_name_provenance(&sorted.headers, authored_scope);
+    let authored_key_name_provenance = collect_authored_config_key_name_provenance(
+        &sorted.headers,
+        authored_scope,
+        &sorted.module_symbols.source_paths_by_source_id,
+    );
 
     // Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
     let config_resolution = ConfigResolutionServices::new(
@@ -293,6 +293,7 @@ fn compile_prepared_config_source(
     let ast = Ast::new(
         AstBuildInput {
             headers: sorted.headers,
+            source_token_owners: sorted.source_token_owners,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
@@ -365,7 +366,11 @@ fn reject_authored_config_dialect(
 ) -> Vec<CompilerDiagnostic> {
     let mut rejections =
         reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
-    rejections.extend(reject_mutable_config_bindings(ast, authored_scope, path_fork));
+    rejections.extend(reject_mutable_config_bindings(
+        ast,
+        authored_scope,
+        path_fork,
+    ));
     rejections
 }
 
@@ -387,7 +392,9 @@ fn reject_authored_config_start_body(
             continue;
         };
 
-        if path_fork.component(*path).map(|name| string_table.resolve(name))
+        if path_fork
+            .component(*path)
+            .map(|name| string_table.resolve(name))
             != Some(IMPLICIT_START_FUNC_NAME)
         {
             continue;
@@ -630,8 +637,7 @@ fn prepare_config_file(
 ) -> Result<FileFrontendPrepareOutput, ConfigPreparationFailure> {
     let mut diagnostics = Vec::new();
 
-    // The caller registers this source before invoking the service.
-    let mut file_tokens = match tokenize(
+    let lexed = match tokenize(
         request.source_code,
         authored_scope,
         TokenizerEntryMode::SourceFile,
@@ -650,14 +656,31 @@ fn prepare_config_file(
             return Err(ConfigPreparationFailure::Infrastructure(error));
         }
     };
-    file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
+    if lexed.logical_path != authored_scope || lexed.file_id != request.file_id {
+        return Err(ConfigPreparationFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "lexer source identity does not match its config preparation identity",
+            ),
+        ));
+    }
+    let owner = SourceTokenOwner::new(lexed.tokens);
+    let path_syntax = lexed.path_syntax;
 
-    if let Some(marker_span) = find_invalid_config_qualifier_spacing(
-        &file_tokens.tokens,
-        string_table,
-        request.file_id,
-        span_builder,
-    ) {
+    let marker_span = {
+        let canonical = owner.tokens_ref();
+        let full_range = canonical.full_range().map_err(|error| {
+            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "config qualifier scan range is invalid: {error:?}"
+            )))
+        })?;
+        let cursor = canonical.cursor(full_range).map_err(|error| {
+            ConfigPreparationFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "config qualifier scan cursor is invalid: {error:?}"
+            )))
+        })?;
+        find_invalid_config_qualifier_spacing_in_cursor(cursor, string_table, span_builder)
+    };
+    if let Some(marker_span) = marker_span {
         let mut diagnostic = CompilerDiagnostic::common_syntax_mistake(
             CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
             Some(marker_span),
@@ -670,7 +693,9 @@ fn prepare_config_file(
     }
 
     let output = match prepare_file_from_tokens(
-        file_tokens,
+        owner,
+        authored_scope,
+        path_syntax,
         request.authored_path,
         &HeaderParseOptions::default(),
         string_table,
@@ -737,20 +762,24 @@ fn prepare_config_file(
 
 /// Collect authored key-name spans for config key-identity diagnostics.
 ///
-/// Imported support declarations are excluded because they are not config entries.
 fn collect_authored_config_key_name_provenance(
     headers: &[Header],
     authored_scope: PathId,
+    source_paths_by_source_id: &rustc_hash::FxHashMap<SourceId, PathId>,
 ) -> HashMap<PathId, Option<SourceSpan>> {
     let mut key_name_provenance = HashMap::new();
     for header in headers {
         let HeaderKind::Constant { .. } = &header.kind else {
             continue;
         };
-        if header.source_file != authored_scope {
+        if source_paths_by_source_id
+            .get(&header.tokens.source())
+            .copied()
+            != Some(authored_scope)
+        {
             continue;
         }
-        key_name_provenance.insert(header.tokens.src_path, header.name_span);
+        key_name_provenance.insert(header.declaration_path, header.name_span);
     }
     key_name_provenance
 }
@@ -800,7 +829,7 @@ fn validate_authored_config_surface(
 
         if let Some(reason) = reason {
             errors.push(config_diagnostic(
-                path_fork.component(header.tokens.src_path),
+                path_fork.component(header.declaration_path),
                 reason,
                 header.name_span,
             ));

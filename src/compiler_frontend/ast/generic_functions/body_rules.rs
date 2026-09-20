@@ -55,14 +55,17 @@ pub(crate) fn validate_generic_function_body(
 
     context.generic_template_validation = true;
 
-    let mut token_stream = template
-        .body_tokens
-        .as_ref()
-        .expect("declaring-module generic validation requires retained body syntax")
-        .tokens()
-        .clone();
+    let Some(body) = template.body_tokens.as_ref() else {
+        return Err(ExpressionParseError::Infrastructure(Box::new(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "declaring-module generic validation requires retained body syntax",
+            ),
+        )));
+    };
+    let parse_owner = body.parse_owner()?;
+    let (mut body_cursor, _) = parse_owner.cursor()?;
     function_body_to_ast(
-        &mut token_stream,
+        &mut body_cursor,
         context,
         type_interner,
         warnings,

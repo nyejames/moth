@@ -109,8 +109,8 @@ pub(super) fn finalize_failed_discovery(
             let mut diagnostics = warnings;
             diagnostics.push(diagnostic);
             let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
-            if let Err(error) =
-                batch.attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
+            if let Err(error) = batch
+                .attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
             {
                 return finish_discovery_source_owner(
                     PremergeFailure::Infrastructure(error),
@@ -464,18 +464,13 @@ pub(super) fn finalize_reachable_files(
                 output.rebind_source_identity(
                     final_source_id,
                     final_record.logical_path,
-                    source_file.path.clone(),
                     path_fork,
                 )?;
                 output.freeze_path_syntax(string_table, path_fork)?;
                 match source_kind {
-                    SourceKind::Compiler(SourceFileKind::Moth) => {
+                    SourceKind::Compiler(SourceFileKind::Moth)
+                    | SourceKind::Compiler(SourceFileKind::MothTemplate) => {
                         PreparedSourceKind::MothPrepared {
-                            output: Box::new(output),
-                        }
-                    }
-                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                        PreparedSourceKind::MothTemplatePrepared {
                             output: Box::new(output),
                         }
                     }
@@ -503,12 +498,9 @@ pub(super) fn finalize_reachable_files(
                     )));
                 }
                 match source_kind {
-                    SourceKind::Compiler(SourceFileKind::MothTemplate) => {
-                        PreparedSourceKind::MothTemplate
-                    }
-                    SourceKind::Compiler(SourceFileKind::PlainMarkdown) => {
-                        PreparedSourceKind::PlainMarkdown
-                    }
+                    SourceKind::Compiler(
+                        SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown,
+                    ) => PreparedSourceKind::Deferred,
                     SourceKind::Compiler(SourceFileKind::Moth) => {
                         unreachable!("Moth sources were handled above")
                     }

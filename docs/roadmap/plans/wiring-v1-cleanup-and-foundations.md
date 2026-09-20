@@ -6,8 +6,10 @@ Intended repository path: `docs/roadmap/plans/wiring-v1-cleanup-and-foundations-
 
 - Status: queued, with the design interview accepted.
 - Current slice: not started.
-- Blockers: accepted source/token-layout Phase 3 completion and the intervening work selected by the maintainer must be merged into the activation branch.
-- Next action: establish the current baseline, pause the compact-diagnostics migration before Phase 4 and start Phase 0 below.
+- Blockers: source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; compiler cleanup, MON
+  syntax and MON Rust tooling checkpoints must be merged into the activation branch.
+- Next action: establish the current baseline, pause the compact-diagnostics migration before Phase
+  4 and start Phase 0 below after those prerequisites are complete.
 
 ## Purpose
 
@@ -634,7 +636,7 @@ Each phase ends with the relevant validation, a Slice review and a coherent comm
 
 **Goal:** establish the real integration boundary and a complete removal map before code changes.
 
-- [ ] Confirm accepted source/token-layout Phase 3 completion and the selected intervening merges.
+- [ ] Confirm final source/token-layout Phase 3 closeout and the selected intervening merges.
 - [ ] Record activation revision, worktree state, active diagnostic representation and any existing failures in working notes.
 - [ ] Add the roadmap interlude and explicit Phase 4 blocker. Preserve the separate diagnostics-improvement pause.
 - [ ] Read the authorities and locate every owner in the removal/reuse and docs matrices.

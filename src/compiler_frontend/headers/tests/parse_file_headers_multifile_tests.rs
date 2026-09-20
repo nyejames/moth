@@ -140,9 +140,11 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
         .headers
         .iter()
         .filter_map(|header| match &header.kind {
-            HeaderKind::Constant { .. } => Some(
-                path_fork.render_portable(header.tokens.src_path, &string_table, &mut path_scratch),
-            ),
+            HeaderKind::Constant { .. } => Some(path_fork.render_portable(
+                header.declaration_path,
+                &string_table,
+                &mut path_scratch,
+            )),
             _ => None,
         })
         .collect();
@@ -342,6 +344,13 @@ fn retained_js_provider_path_records_external_target() {
         }
         other => panic!("expected an external provider target, got {other:?}"),
     }
+    let provider_target = output.file_dependency_clauses[0]
+        .dependency
+        .provider_target
+        .as_ref()
+        .expect("provider classification should retain a checked target fact");
+    assert_eq!(provider_target.raw_prefix(), "drawing.js");
+    assert!(provider_target.remaining_components().is_empty());
 }
 
 #[test]
@@ -367,7 +376,6 @@ fn dependency_clause_is_rejected_in_config_source() {
     let file_path = PathBuf::from("config.moth");
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

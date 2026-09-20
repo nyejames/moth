@@ -46,6 +46,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// without re-sorting or re-packaging the top-level symbol data.
 #[derive(Debug)]
 pub(crate) struct SortedHeaders {
+    pub(crate) source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub(crate) headers: Vec<Header>,
     pub(crate) source_build_config_contracts:
         Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
@@ -175,6 +176,7 @@ struct DependencyGraph<'a> {
     source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
     provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
     content_source_targets: &'a ContentSourceTargets,
+    source_paths_by_source_id: &'a FxHashMap<SourceId, PathId>,
 }
 
 impl<'a> DependencyGraph<'a> {
@@ -183,6 +185,7 @@ impl<'a> DependencyGraph<'a> {
         source_package_public_exports: &'a FxHashMap<String, FxHashSet<PublicExportEntry>>,
         provider_interface_paths: &'a FxHashMap<PathId, OriginDeclarationId>,
         content_source_targets: &'a ContentSourceTargets,
+        source_paths_by_source_id: &'a FxHashMap<SourceId, PathId>,
     ) -> Self {
         let mut headers_by_path: FxHashMap<PathId, Header> =
             FxHashMap::with_capacity_and_hasher(headers.len(), Default::default());
@@ -193,7 +196,7 @@ impl<'a> DependencyGraph<'a> {
         for header in headers {
             header_log!(header);
 
-            let path = header.tokens.src_path;
+            let path = header.declaration_path;
             source_order_by_path.insert(path, ordered_paths.len());
             ordered_paths.push(path);
             headers_by_path.insert(path, header);
@@ -206,6 +209,7 @@ impl<'a> DependencyGraph<'a> {
             source_package_public_exports,
             provider_interface_paths,
             content_source_targets,
+            source_paths_by_source_id,
         }
     }
 
@@ -238,9 +242,7 @@ impl<'a> DependencyGraph<'a> {
         // concrete root-file header path. Accept those public edges without treating them as
         // graph nodes.
         if self.is_source_package_public_export_path(requested_path, string_table, path_fork) {
-            return Some(ResolvedGraphPath::SourcePackagePublicExport(
-                requested_path,
-            ));
+            return Some(ResolvedGraphPath::SourcePackagePublicExport(requested_path));
         }
 
         None
@@ -252,11 +254,12 @@ impl<'a> DependencyGraph<'a> {
         string_table: &StringTable,
         path_fork: &PathInternerFork,
     ) -> Option<usize> {
-        let resolved_path = match self.resolve_requested_path(requested_path, string_table, path_fork)? {
-            ResolvedGraphPath::Header(path) => path,
-            ResolvedGraphPath::ProviderInterface(_)
-            | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
-        };
+        let resolved_path =
+            match self.resolve_requested_path(requested_path, string_table, path_fork)? {
+                ResolvedGraphPath::Header(path) => path,
+                ResolvedGraphPath::ProviderInterface(_)
+                | ResolvedGraphPath::SourcePackagePublicExport(_) => return None,
+            };
 
         self.source_order_by_path.get(&resolved_path).copied()
     }
@@ -267,7 +270,7 @@ impl<'a> DependencyGraph<'a> {
         string_table: &StringTable,
         path_fork: &PathInternerFork,
     ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
-        let source = header.tokens.file_id;
+        let source = header.tokens.source();
 
         // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
         // traversal needs one edge per resolved target. In particular, repeated file-value paths
@@ -369,7 +372,15 @@ impl<'a> DependencyGraph<'a> {
                 source_order,
                 kind: DependencyEdgeKind::ProviderInterface,
             },
-            None if self.is_same_file_symbol_hint(requested_path, header.source_file, path_fork) => {
+            None if self.is_same_file_symbol_hint(
+                requested_path,
+                *self
+                    .source_paths_by_source_id
+                    .get(&header.tokens.source())
+                    .expect("header body range has no prepared source-path identity"),
+                path_fork,
+            ) =>
+            {
                 ResolvedDependencyEdge {
                     requested_path,
                     resolved_path: None,
@@ -495,6 +506,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
 ) -> Result<SortedHeaders, PremergeFailure> {
     let BoundModuleHeaders {
         headers,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -504,7 +516,6 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
         binding_environment,
         ..
     } = parsed;
-
     // Partition: StartFunction headers are appended last, not sorted.
     // WHY: start is build-system-only and has no dependents. Module-root declarations remain graph
     // participants because other modules can depend on their public constants and type surfaces;
@@ -533,9 +544,9 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
             &module_symbols.source_package_public_exports,
             &binding_environment.imported_declarations_by_local_path,
             content_source_targets,
+            &module_symbols.source_paths_by_source_id,
         );
         let mut diagnostic_bag = DiagnosticBag::new();
-
         // Resolve retained hints and topologically sort the resulting dependency edges.
         let mut tracker = DependencyTracker::new(graph.len());
         let mut sorted: Vec<Header> = Vec::with_capacity(graph.len());
@@ -562,7 +573,10 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                             drop(graph);
                             let table = std::mem::take(string_table);
                             let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
-                            PremergeFailure::Mixed { batch, error: Box::new(error) }
+                            PremergeFailure::Mixed {
+                                batch,
+                                error: Box::new(error),
+                            }
                         } else {
                             PremergeFailure::Infrastructure(error)
                         };
@@ -602,6 +616,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     );
 
     Ok(SortedHeaders {
+        source_token_owners,
         headers: sorted,
         source_build_config_contracts,
         top_level_const_fragments,

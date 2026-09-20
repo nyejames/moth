@@ -8,6 +8,19 @@
 pub(crate) mod ast_counters;
 pub(crate) mod frontend_counters;
 
+mod memory_ledger;
+#[cfg(not(feature = "data_layout_memory_probe"))]
+pub(crate) use memory_ledger::reset_memory_ledger;
+#[cfg(feature = "data_layout_memory_probe")]
+pub(crate) use memory_ledger::{
+    MemoryLedgerSnapshot, observe_generic_source_tokens, prepare as prepare_memory_ledger,
+    record_donor_identity_tables, record_generic_source_tokens, record_requester_remap,
+    record_source_tokens, record_source_tokens_path_table,
+    record_transient_construction_buffer_bytes, release_donor_identity_path,
+    release_donor_identity_string, release_generic_source_tokens, release_source_path_table,
+    release_source_tokens, reset_memory_ledger, snapshot_memory_ledger,
+};
+
 pub(crate) use ast_counters::*;
 pub(crate) use frontend_counters::*;
 

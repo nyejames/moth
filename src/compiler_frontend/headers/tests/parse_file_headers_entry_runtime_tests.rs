@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 #[test]
 fn entry_runtime_fragment_count_is_zero_with_no_templates() {
@@ -65,5 +66,63 @@ fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
     assert_eq!(
         headers.entry_runtime_fragment_count, 0,
         "runtime_fragment_count must be 0 when the file is not the active root"
+    );
+}
+
+#[test]
+fn start_function_retains_segmented_source_runs_in_order_with_eof() {
+    let (headers, string_table) =
+        parse_single_file_headers_with_table("before = 1\nanswer #= 2\nafter = 3\n");
+    let start_header = start_function_header(&headers);
+    assert!(
+        start_header.tokens.is_empty(),
+        "start syntax should be retained by its sequence handle, not a contiguous body range"
+    );
+    let sequence = start_header
+        .token_sequence
+        .expect("active start function should retain a source sequence");
+    let source = headers
+        .source_token_owners
+        .get(&start_header.tokens.source())
+        .expect("start sequence should retain its canonical source owner");
+    let source = source.tokens_ref();
+    let view = source
+        .token_sequence(sequence)
+        .expect("start sequence handle should resolve");
+    let ranges = view.ranges().collect::<Vec<_>>();
+    assert_eq!(
+        ranges.len(),
+        2,
+        "the compile-time header should split the two start-body runs"
+    );
+    assert!(ranges[0].end() < ranges[1].start());
+
+    let mut body = header_body_tokens(&headers, start_header);
+    let mut symbols = Vec::new();
+    let mut contains_answer = false;
+    let mut last_tag = None;
+    while let Some(token) = body.advance() {
+        let tag = token.tag();
+        last_tag = Some(tag);
+        if tag == TokenTag::SYMBOL
+            && let Some(symbol) = token.string_id()
+        {
+            let symbol = string_table.resolve(symbol);
+            contains_answer |= symbol == "answer";
+            symbols.push(symbol.to_owned());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    assert_eq!(symbols, ["before", "after"]);
+    assert!(
+        !contains_answer,
+        "the constant declaration must not leak into the start body"
+    );
+    assert_eq!(
+        last_tag,
+        Some(TokenTag::EOF),
+        "segmented start syntax must retain the source EOF sentinel"
     );
 }

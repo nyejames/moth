@@ -10,6 +10,7 @@ use super::ReceiverAccessMode;
 use super::shared::{TraitSurfaceReceiverMethod, receiver_result_type_ids_for_call};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
@@ -42,7 +43,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(super) fn lookup_receiver_method<'a>(
     context: &'a ScopeContext,
@@ -170,8 +171,8 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
     Ok((inference.instance_path, inference.signature, request))
 }
 
-pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct SourceReceiverMethodCallInput<'a, 'interner, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) receiver_node: &'a AstNode,
     pub(super) member_name: StringId,
     pub(super) member_span: Option<SourceSpan>,
@@ -185,7 +186,7 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
 }
 
 pub(super) fn parse_source_receiver_method_target_call_typed(
-    input: SourceReceiverMethodCallInput<'_, '_>,
+    input: SourceReceiverMethodCallInput<'_, '_, '_>,
 ) -> Result<AstNode, ExpressionParseError> {
     let SourceReceiverMethodCallInput {
         token_stream,
@@ -213,7 +214,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         .into());
     }
 
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::invalid_receiver_call(
             InvalidReceiverCallReason::MustUseParentheses,
             None,
@@ -310,10 +311,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
     };
 
-    let expectations = expectations_from_receiver_method_signature(
-        &call_signature.parameters[1..],
-        path_fork,
-    );
+    let expectations =
+        expectations_from_receiver_method_signature(&call_signature.parameters[1..], path_fork);
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
         CallDiagnosticContext::receiver_method(&method_name),

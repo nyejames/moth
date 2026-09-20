@@ -35,18 +35,31 @@ INFERRED #= 1\n"
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let tokenizer_extended_span_count = spans.len();
     assert_eq!(
         tokenizer_extended_span_count, 5,
         "only the long named, qualified, generic and capacity identifier tokens should overflow"
     );
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        scope,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
@@ -152,7 +165,7 @@ INFERRED #= 1\n"
         .try_intern_portable_path("parsed-type-spans.moth", &mut merged)
         .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);
@@ -218,10 +231,20 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .get_by_canonical_path(&canonical)
         .expect("source identity")
         .id;
-    let scope =
-        path_fork.try_intern_filesystem_path(&canonical, &mut strings).expect("source path");
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
     let mut spans = ExtendedSpanBuilder::new();
-    let mut tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("source should tokenize");
     let tokenizer_extended_span_count = spans.len();
     assert_eq!(
@@ -229,8 +252,11 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         "trait declarations, generic declarations, bounds and type uses should own the long rows"
     );
 
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        scope,
+        path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
@@ -359,7 +385,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .try_intern_portable_path("generic-anchor-spans.moth", &mut merged)
         .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);

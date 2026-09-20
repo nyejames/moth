@@ -45,7 +45,9 @@ pub(crate) struct AstModuleLookups {
     // Header-stage source data.
     // WHY: these are moved straight from the header/dependency-sort phase; AST does not rebuild them.
     pub(crate) module_symbols: ModuleSymbols,
-    pub(crate) binding_environment: HeaderBindingEnvironment,
+    // Shared immutable header bindings; wrapped once at environment finish so generated
+    // sidecars and materialisation preparations reuse one owner instead of deep-cloning.
+    pub(crate) binding_environment: Rc<HeaderBindingEnvironment>,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
 
     // Declaration tables and resolved constant artifacts.

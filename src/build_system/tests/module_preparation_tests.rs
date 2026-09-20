@@ -10,20 +10,23 @@
 //!      semantic stages behind that call are tested with their own owners.
 
 use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
-use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::SourceFileKindRegistry;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    parse_file_headers_with_table, prepare_header_syntax, FileFrontendPrepareOutput, HeaderKind,
-    HeaderParseOptions, PreparedHeaderSyntax, SourcePreparationDelta,
+    FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
+    SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
-    compile_module, ModuleCompilationContext, ModuleCompilationOutcome,
-    ProviderMaterialisationRegistry,
+    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
+    compile_module,
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
@@ -37,9 +40,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
-use crate::compiler_frontend::CompilerFrontend;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -49,21 +50,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Retain tokens under their registered source identity; the caller owns their span builder.
+/// Retain a canonical owner and its preparing path table under their registered source identity.
 fn moth_prepared_input(
     source_files: &SourceDatabase,
     source_path: &Path,
-    tokens: FileTokens,
+    owner: SourceTokenOwner,
+    path_syntax: Arc<PathSyntaxTable>,
 ) -> PreparedSourceInput {
-    let source_id = source_files
+    let identity = source_files
         .get_by_canonical_path(source_path)
-        .expect("test source should have a registered identity")
-        .id;
+        .expect("test source should have a registered identity");
+    assert_eq!(
+        owner.source_id(),
+        identity.id,
+        "test source owner should retain its registered identity"
+    );
     PreparedSourceInput {
-        source_id,
-        source: PreparedSourceKind::Moth {
-            tokens: Box::new(tokens),
-        },
+        source_id: identity.id,
+        source: PreparedSourceKind::Moth { owner, path_syntax },
     }
 }
 
@@ -80,7 +84,7 @@ fn tokenized_moth_prepared_input(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> PreparedSourceInput {
     let mut path_fork = source_files.fork_path_interner();
-    let tokens = CompilerFrontend::tokenize_source(
+    let (owner, path_syntax) = CompilerFrontend::tokenize_source(
         source_files,
         style_directives,
         source_code,
@@ -91,7 +95,7 @@ fn tokenized_moth_prepared_input(
         span_builder,
     )
     .expect("test source should tokenize");
-    moth_prepared_input(source_files, &source_path, tokens)
+    moth_prepared_input(source_files, &source_path, owner, path_syntax)
 }
 
 fn source_byte_count(input_files: &[PreparedSourceInput], source_files: &SourceDatabase) -> usize {
@@ -110,7 +114,6 @@ struct FrontendPreparationInputs {
     style_directives: StyleDirectiveRegistry,
     string_table: StringTable,
     path_fork: PathInternerFork,
-    project_path_resolver: Option<ProjectPathResolver>,
     source_files: Arc<SourceDatabase>,
 }
 
@@ -170,7 +173,7 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
             .expect("test source should have a registered identity")
             .id;
         let mut span_builder = source_spans.take_span_builder(source_id);
-        let tokens = CompilerFrontend::tokenize_source(
+        let (owner, path_syntax) = CompilerFrontend::tokenize_source(
             source_files,
             &style_directives,
             source,
@@ -181,7 +184,12 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
             &mut span_builder,
         )
         .expect("fixture source should tokenize");
-        input_files.push(moth_prepared_input(source_files, canonical, tokens));
+        input_files.push(moth_prepared_input(
+            source_files,
+            canonical,
+            owner,
+            path_syntax,
+        ));
         source_spans.retain_span_builder(source_id, span_builder);
     }
 
@@ -189,7 +197,6 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         style_directives,
         string_table,
         path_fork,
-        project_path_resolver: None,
         source_files: Arc::clone(source_files),
     };
 
@@ -202,6 +209,76 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
     }
 }
 
+fn source_path_for_header(headers: &PreparedHeaderSyntax, header: &Header) -> PathId {
+    headers
+        .module_symbols
+        .source_paths_by_source_id
+        .get(&header.tokens.source())
+        .copied()
+        .expect("every retained header should have a source-path owner")
+}
+
+fn token_slice_for_header<'a>(
+    headers: &'a PreparedHeaderSyntax,
+    header: &Header,
+) -> TokenCursor<'a> {
+    let source = headers
+        .source_token_owners
+        .get(&header.tokens.source())
+        .expect("every retained header should have a token owner");
+    if let Some(sequence) = header.token_sequence {
+        return TokenCursor::from_sequence(
+            source
+                .tokens_ref()
+                .token_sequence(sequence)
+                .expect("header sequence should resolve through its source owner"),
+        )
+        .expect("header sequence cursor should be valid");
+    }
+    source
+        .tokens_ref()
+        .cursor(header.tokens)
+        .expect("header range should resolve through its source owner")
+}
+fn find_symbol_id(
+    mut cursor: TokenCursor<'_>,
+    string_table: &StringTable,
+    expected: &str,
+) -> Option<crate::compiler_frontend::symbols::string_interning::StringId> {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return token.string_id();
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    None
+}
+
+fn find_symbol_span(
+    mut cursor: TokenCursor<'_>,
+    string_table: &StringTable,
+    expected: &str,
+) -> Option<SourceSpan> {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return Some(token.source_span());
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    None
+}
 fn header_source_file_names(
     headers: &PreparedHeaderSyntax,
     string_table: &StringTable,
@@ -212,7 +289,11 @@ fn header_source_file_names(
         .iter()
         .map(|header| {
             path_fork
-                .render_native(header.source_file, string_table, &mut Vec::new())
+                .render_native(
+                    source_path_for_header(headers, header),
+                    string_table,
+                    &mut Vec::new(),
+                )
                 .file_name()
                 .expect("test logical source path should have a file name")
                 .to_string_lossy()
@@ -283,7 +364,6 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .source_files
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.id),
-        project_path_resolver: frontend.project_path_resolver,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -303,7 +383,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .expect("test source should have a registered identity")
             .id;
         let mut span_builder = ExtendedSpanBuilder::new();
-        let retained_tokens = CompilerFrontend::tokenize_source(
+        let (owner, path_syntax) = CompilerFrontend::tokenize_source(
             frontend.source_files,
             frontend.style_directives,
             source_code,
@@ -331,10 +411,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
-                source: FrontendFilePrepareSource::Moth {
-                    source_path: source_path.clone(),
-                    tokens: Box::new(retained_tokens),
-                },
+                source: FrontendFilePrepareSource::Moth { owner, path_syntax },
                 source_id,
                 span_builder,
                 const_template_offset,
@@ -422,7 +499,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let beta_header = headers.headers.iter().find(|h| {
         frontend
             .path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("beta")
     });
@@ -440,7 +517,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_name = const_template_header.unwrap().tokens.src_path;
+    let const_template_name = const_template_header.unwrap().declaration_path;
     let const_template_name = frontend
         .path_fork
         .component(const_template_name)
@@ -452,15 +529,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     );
 
     // Verify token symbols inside the const template also resolve.
-    let hello_token = const_template_header
-        .unwrap()
-        .tokens
-        .tokens
-        .iter()
-        .find_map(|t| match &t.kind {
-            TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
-            _ => None,
-        });
+    let hello_token = find_symbol_id(
+        token_slice_for_header(&headers, const_template_header.unwrap()),
+        &frontend.string_table,
+        "hello",
+    );
     assert!(
         hello_token.is_some(),
         "hello symbol inside const template should resolve through module table"
@@ -470,11 +543,11 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     // non-identity remapping occurred for at least one file's local suffix.
     let beta_id = frontend
         .path_fork
-        .component(beta_header.unwrap().tokens.src_path)
+        .component(beta_header.unwrap().declaration_path)
         .expect("beta should have a name ID");
     let const_template_id = frontend
         .path_fork
-        .component(const_template_header.unwrap().tokens.src_path)
+        .component(const_template_header.unwrap().declaration_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -583,7 +656,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
     };
 
     // Single-file preparation tests use the same deterministic synthetic normal-module origin
@@ -624,15 +696,12 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         .prepared_header_syntax
         .headers
         .iter()
-        .filter(|header| matches!(header.kind, HeaderKind::Function { .. }))
-        .flat_map(|header| &header.tokens.tokens)
-        .find_map(|token| match token.kind {
-            TokenKind::Symbol(id)
-                if prepared.semantic.string_table.resolve(id) == parameter_name =>
-            {
-                Some(SourceSpan::new(source_id, token.span))
-            }
-            _ => None,
+        .find_map(|header| {
+            find_symbol_span(
+                token_slice_for_header(&prepared.semantic.prepared_header_syntax, header),
+                &prepared.semantic.string_table,
+                &parameter_name,
+            )
         })
         .expect("retained function body should contain its extended parameter-use span");
     assert_eq!(
@@ -812,7 +881,6 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
     };
     #[cfg(feature = "timers")]
     let prepared_result = preparation_context.prepare_module(
@@ -888,16 +956,18 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     assert_eq!(draft.public_interface.export_bindings.len(), 1);
     assert_eq!(draft.module.executable.hir.start_function, None);
     assert!(draft.module.executable.hir.functions.is_empty());
-    assert!(draft
-        .module
-        .executable
-        .hir
-        .function_origins
-        .values()
-        .all(|origin| !matches!(
-            origin,
-            crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
-        )));
+    assert!(
+        draft
+            .module
+            .executable
+            .hir
+            .function_origins
+            .values()
+            .all(|origin| !matches!(
+                origin,
+                crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
+            ))
+    );
 }
 
 #[test]
@@ -979,9 +1049,11 @@ fn chunk_planning_is_bounded_by_thread_policy_and_minimum_chunk_size() {
     assert_eq!(four_thread_plans.last().unwrap().file_range, 35..40);
 
     assert_eq!(uneven_plans.len(), 2);
-    assert!(uneven_plans
-        .iter()
-        .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE));
+    assert!(
+        uneven_plans
+            .iter()
+            .all(|plan| plan.file_range.len() >= super::FILE_PREPARATION_MIN_CHUNK_SIZE)
+    );
 }
 
 #[test]
@@ -1127,7 +1199,6 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1150,19 +1221,8 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify deterministic header ordering: input order is preserved before aggregation.
-    let header_source_names: Vec<_> = headers
-        .headers
-        .iter()
-        .map(|h| {
-            preparation_path_fork
-                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
-                .file_name()
-                .expect("test logical source path should have a file name")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-
+    let header_source_names =
+        header_source_file_names(&headers, &frontend.string_table, &preparation_path_fork);
     let last_a = header_source_names
         .iter()
         .rposition(|name| name == "a.moth")
@@ -1183,7 +1243,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     // Verify headers from all files exist and strings resolve.
     let beta_header = headers.headers.iter().find(|h| {
         preparation_path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("Beta")
     });
@@ -1191,7 +1251,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
 
     let gamma_header = headers.headers.iter().find(|h| {
         preparation_path_fork
-            .component(h.tokens.src_path)
+            .component(h.declaration_path)
             .map(|id| frontend.string_table.resolve(id))
             == Some("Gamma")
     });
@@ -1205,7 +1265,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
         const_template_header.is_some(),
         "const template header should exist"
     );
-    let const_template_path = const_template_header.unwrap().tokens.src_path;
+    let const_template_path = const_template_header.unwrap().declaration_path;
     let const_template_name = preparation_path_fork
         .component(const_template_path)
         .map(|id| frontend.string_table.resolve(id))
@@ -1216,15 +1276,11 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     );
 
     // Verify token symbols inside the const template resolve.
-    let hello_token = const_template_header
-        .unwrap()
-        .tokens
-        .tokens
-        .iter()
-        .find_map(|t| match &t.kind {
-            TokenKind::Symbol(id) if frontend.string_table.resolve(*id) == "hello" => Some(*id),
-            _ => None,
-        });
+    let hello_token = find_symbol_id(
+        token_slice_for_header(&headers, const_template_header.unwrap()),
+        &frontend.string_table,
+        "hello",
+    );
     assert!(
         hello_token.is_some(),
         "hello symbol inside const template should resolve through module table"
@@ -1262,10 +1318,10 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     // Verify non-identity remapping: Beta and the const template should have different
     // global IDs, proving at least one file's local suffix was remapped.
     let beta_id = preparation_path_fork
-        .component(beta_header.unwrap().tokens.src_path)
+        .component(beta_header.unwrap().declaration_path)
         .expect("Beta should have a name ID");
     let const_template_id = preparation_path_fork
-        .component(const_template_header.unwrap().tokens.src_path)
+        .component(const_template_header.unwrap().declaration_path)
         .expect("const template should have a name ID");
     assert_ne!(
         beta_id, const_template_id,
@@ -1379,7 +1435,6 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1396,19 +1451,8 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
 
     assert!(warnings.is_empty(), "test declarations should not warn");
 
-    let header_source_names: Vec<_> = headers
-        .headers
-        .iter()
-        .map(|h| {
-            preparation_path_fork
-                .render_native(h.source_file, &frontend.string_table, &mut Vec::new())
-                .file_name()
-                .expect("test logical source path should have a file name")
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-
+    let header_source_names =
+        header_source_file_names(&headers, &frontend.string_table, &preparation_path_fork);
     let mut previous_file_last_header = None;
     for index in 0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT {
         let expected_name = format!("{index}.moth");
@@ -1448,7 +1492,6 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
-        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -1531,7 +1574,6 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let mut preparation_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = preparation_context
@@ -1553,7 +1595,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
         .iter()
         .filter_map(|header| {
             preparation_path_fork
-                .component(header.tokens.src_path)
+                .component(header.declaration_path)
                 .map(|id| fixture.frontend.string_table.resolve(id).to_owned())
         })
         .collect();
@@ -1618,7 +1660,6 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                 .source_files
                 .get_by_canonical_path(&fixture.entry_file_path)
                 .map(|record| record.id),
-            project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         };
@@ -1697,7 +1738,6 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
@@ -1747,7 +1787,7 @@ fn parsed_prepared_output(
         .try_intern_filesystem_path(&source_path, string_table)
         .expect("test source path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut tokens = tokenize(
+    let lexed = tokenize(
         source_code,
         source_identity,
         TokenizerEntryMode::SourceFile,
@@ -1758,9 +1798,13 @@ fn parsed_prepared_output(
         span_builder,
     )
     .expect("test source should tokenize");
+    let owner = SourceTokenOwner::new(lexed.tokens);
+    let path_syntax = lexed.path_syntax;
 
     parse_file_headers_with_table(
-        &mut tokens,
+        owner,
+        source_identity,
+        path_syntax,
         Path::new(source_name),
         &HeaderParseOptions::default(),
         string_table,
@@ -1793,8 +1837,10 @@ fn dummy_preparation_chunk(
                 SourceId::COMPILATION_ROOT,
             );
             span_builders.push((SourceId::COMPILATION_ROOT, builder));
+            let source_id = output.file_id;
             super::PreparedFileResult {
                 file_index,
+                source_id,
                 string_domain: super::PreparedFileStringDomain::ChunkLocal,
                 result: Ok(output),
             }
@@ -1863,6 +1909,14 @@ fn merge_rejects_out_of_range_file_index() {
 }
 
 #[test]
+fn merge_rejects_source_identity_mismatch() {
+    let mut chunk = dummy_preparation_chunk(0, vec![0]);
+    chunk.results[0].source_id = crate::compiler_frontend::source::SourceId::from_index(1);
+
+    assert_malformed_chunks_rejected(vec![chunk], 1, "does not match its slot owner");
+}
+
+#[test]
 fn merge_rejects_duplicate_chunk_indexes() {
     let chunk_zero = dummy_preparation_chunk(0, vec![0]);
     let duplicate_zero = dummy_preparation_chunk(0, vec![1]);
@@ -1888,7 +1942,6 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
-        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -2052,6 +2105,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         local_path_fork: first_path_fork,
         results: vec![super::PreparedFileResult {
             file_index: 0,
+            source_id: first_output.file_id,
             string_domain: super::PreparedFileStringDomain::ChunkLocal,
             result: Ok(first_output),
         }],
@@ -2064,11 +2118,13 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         results: vec![
             super::PreparedFileResult {
                 file_index: 1,
+                source_id: synthetic_output.file_id,
                 string_domain: super::PreparedFileStringDomain::AlreadyGlobal,
                 result: Ok(synthetic_output),
             },
             super::PreparedFileResult {
                 file_index: 2,
+                source_id: second_output.file_id,
                 string_domain: super::PreparedFileStringDomain::ChunkLocal,
                 result: Ok(second_output),
             },
@@ -2202,7 +2258,6 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
@@ -2254,7 +2309,6 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(

@@ -223,21 +223,27 @@ fn aggregate_value_constructors_union_child_provenance() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let field_a = Declaration {
-        id: path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("first", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(3, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(project_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
     };
     let field_b = Declaration {
-        id: path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits"),
+        id: path_fork
+            .try_intern_portable_path("second", &mut string_table)
+            .expect("test path fits"),
         value: Expression::int(4, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(builder_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
     };
     let struct_expression = Expression::struct_instance(
-        path_fork.try_intern_portable_path("Record", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("Record", &mut string_table)
+            .expect("test path fits"),
         vec![field_a, field_b],
         span,
         ValueMode::ImmutableOwned,
@@ -251,10 +257,14 @@ fn aggregate_value_constructors_union_child_provenance() {
     );
 
     let choice_expression = Expression::choice_construct(ChoiceConstructInput {
-        nominal_path: path_fork.try_intern_portable_path("Choice", &mut string_table).expect("test path fits"),
+        nominal_path: path_fork
+            .try_intern_portable_path("Choice", &mut string_table)
+            .expect("test path fits"),
         tag: 0,
         fields: vec![Declaration {
-            id: path_fork.try_intern_portable_path("payload", &mut string_table).expect("test path fits"),
+            id: path_fork
+                .try_intern_portable_path("payload", &mut string_table)
+                .expect("test path fits"),
             value: Expression::int(5, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance),
             binding_span: None,

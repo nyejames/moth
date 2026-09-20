@@ -63,7 +63,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let target = self.alias_target(header, string_table)?;
 
             if !header.capacity_references.is_empty() {
-                waiting.insert(header.tokens.src_path.to_owned());
+                waiting.insert(header.declaration_path.to_owned());
                 continue;
             }
 
@@ -78,7 +78,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             });
             if depends_on_waiting {
-                waiting.insert(header.tokens.src_path.to_owned());
+                waiting.insert(header.declaration_path.to_owned());
             }
         }
 
@@ -102,7 +102,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let header = declaration_lanes
                 .header(declaration_id, sorted_headers)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            if waiting_for_constants.contains(&header.tokens.src_path) {
+            if waiting_for_constants.contains(&header.declaration_path) {
                 continue;
             }
 
@@ -132,7 +132,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?;
             if self
                 .resolved_type_aliases_by_path
-                .contains_key(&header.tokens.src_path)
+                .contains_key(&header.declaration_path)
             {
                 continue;
             }
@@ -141,7 +141,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 format!(
                     "Type alias '{}' was never published with a completed target type.",
                     self.path_fork.render_portable(
-                        header.tokens.src_path,
+                        header.declaration_path,
                         string_table,
                         &mut Vec::new(),
                     ),
@@ -184,7 +184,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         };
 
         Rc::make_mut(&mut self.resolved_type_aliases_by_path)
-            .insert(header.tokens.src_path.to_owned(), alias);
+            .insert(header.declaration_path.to_owned(), alias);
 
         Ok(())
     }
@@ -256,7 +256,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     InvalidDeclarationReason::ExternalTypeAlias {
                         type_name: string_table.intern(&type_name),
                     },
-                    self.path_fork.component(header.tokens.src_path),
+                    self.path_fork.component(header.declaration_path),
                     header.name_span,
                 ),
                 string_table,

@@ -238,7 +238,6 @@ impl<'a> DirectoryDependencyResolution<'a> {
         }
     }
 
-
     pub(crate) fn resolve_dependency(
         self,
         provider: &RetainedDependencyPath,
@@ -359,7 +358,12 @@ impl ModuleNamespaceSet {
         let dependency_span = Some(provider.span);
         reject_invalid_path_components(dependency_path, dependency_span, string_table, path_fork)?;
         reject_direct_special_file_dependency(provider, string_table, path_fork)?;
-        reject_explicit_source_extension(dependency_path, dependency_span, string_table, path_fork)?;
+        reject_explicit_source_extension(
+            dependency_path,
+            dependency_span,
+            string_table,
+            path_fork,
+        )?;
 
         let mut scratch = Vec::new();
         let prefix_components = path_fork.resolve_components(dependency_path, &mut scratch);
@@ -471,8 +475,10 @@ impl ModuleNamespaceSet {
         path_fork: &PathInternerFork,
     ) -> Option<&'a str> {
         let mut scratch = Vec::new();
-        let key =
-            portable_dependency_key(path_fork.resolve_components(dependency_path, &mut scratch), string_table);
+        let key = portable_dependency_key(
+            path_fork.resolve_components(dependency_path, &mut scratch),
+            string_table,
+        );
         self.binding_package_prefix_for_key(&key)
     }
 
@@ -897,12 +903,9 @@ fn resolve_entry(
                 root_file,
             })
         }
-        NamespaceEntry::SameModuleProvider { .. } => {
-            Err(CompilerDiagnostic::missing_import_target(
-                dependency_path,
-                dependency_span,
-            ))
-        }
+        NamespaceEntry::SameModuleProvider { .. } => Err(
+            CompilerDiagnostic::missing_import_target(dependency_path, dependency_span),
+        ),
     }
 }
 

@@ -8,17 +8,17 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_tokens,
+    ParsedLoopHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Stage-local result for loop statement AST construction.
@@ -29,7 +29,7 @@ type LoopResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse a complete `loop` statement after the `loop` keyword has been consumed.
 pub fn create_loop(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -38,28 +38,26 @@ pub fn create_loop(
 ) -> LoopResult<AstNode> {
     ast_log!("Creating a Loop");
 
-    let header_token = token_stream
-        .tokens
-        .get(token_stream.index.saturating_sub(1));
-    let span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
+    let span = token_stream.previous_span();
     let scope = context.scope;
-    let colon_index = find_loop_header_colon_index(token_stream)?;
+    let start_index = token_stream.position();
+    let colon_index = find_loop_header_colon_index(&mut *token_stream)?;
 
-    let header_tokens = &token_stream.tokens[token_stream.index..colon_index];
-    if header_tokens
-        .iter()
-        .all(|token| matches!(token.kind, TokenKind::Newline))
-    {
+    let mut window = token_stream.subcursor_window(start_index, colon_index)?;
+    if is_empty_header_window(&mut window)? {
         return Err(CompilerDiagnostic::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
             span,
         )
         .into());
     }
-
-    let (parsed_loop_header, body_context) = parse_loop_header_tokens(
-        header_tokens,
-        &token_stream.path_syntax,
+    let eof_span = window
+        .span_at(colon_index.saturating_sub(1))
+        .or(span)
+        .unwrap_or_else(|| token_stream.current_span());
+    let mut window = window.with_synthetic_eof_span(eof_span);
+    let (parsed_loop_header, body_context) = parse_loop_header_cursor(
+        &mut window,
         context,
         type_interner,
         warnings,
@@ -67,7 +65,8 @@ pub fn create_loop(
         path_fork,
     )?;
 
-    token_stream.index = colon_index + 1;
+    token_stream.set_position(colon_index.saturating_add(1))?;
+
     let body = function_body_to_ast(
         token_stream,
         body_context,
@@ -94,35 +93,71 @@ pub fn create_loop(
     Ok(AstNode { kind, span, scope })
 }
 
-fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> {
+fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usize> {
+    let resume = token_stream.position();
+    let end = token_stream.length();
     let mut nesting_depth = NestingDepth::default();
-    let mut search_index = token_stream.index;
-
-    while search_index < token_stream.length {
-        let token = &token_stream.tokens[search_index];
+    let mut outcome: Option<LoopResult<usize>> = None;
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        token_stream.validate_current_payload()?;
+        let tag = token_stream.current_tag();
+        let token_span = token_stream.current_span();
         let is_top_level = nesting_depth.is_top_level();
 
-        if is_top_level && matches!(token.kind, TokenKind::Colon) {
-            return Ok(search_index);
+        if is_top_level && tag == TokenTag::COLON {
+            outcome = Some(Ok(token_stream.position()));
+            break;
         }
 
-        if is_top_level && matches!(token.kind, TokenKind::End | TokenKind::Eof) {
-            return Err(CompilerDiagnostic::invalid_loop_header(
+        if is_top_level && matches!(tag, TokenTag::END | TokenTag::EOF) {
+            outcome = Some(Err(CompilerDiagnostic::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
-                Some(SourceSpan::new(token_stream.file_id, token.span)),
+                Some(token_span),
             )
-            .into());
+            .into()));
+            break;
         }
 
-        nesting_depth.step(&token.kind);
-        search_index += 1;
+        nesting_depth.step_tag(tag);
+        let before = token_stream.position();
+        token_stream.advance();
+        // Eof never advances, so a stalled step ends the search.
+        if token_stream.position() == before {
+            break;
+        }
     }
 
-    Err(CompilerDiagnostic::invalid_loop_header(
-        InvalidLoopHeaderReason::MissingColon,
-        Some(token_stream.current_span()),
-    )
-    .into())
+    token_stream
+        .set_position(resume)
+        .map_err(ExpressionParseError::from)?;
+    outcome.unwrap_or_else(|| {
+        Err(CompilerDiagnostic::invalid_loop_header(
+            InvalidLoopHeaderReason::MissingColon,
+            Some(token_stream.current_span()),
+        )
+        .into())
+    })
+}
+
+/// Canonical empty-header check over the header window.
+///
+/// WHAT: reports whether the window holds only newlines (or nothing) without cloning tokens.
+fn is_empty_header_window(window: &mut AstCursor) -> LoopResult<bool> {
+    let resume = window.position();
+    let end = window.length();
+    let mut empty = true;
+    while window.position() < end && !window.is_at_end() {
+        window.validate_current_payload()?;
+        if window.current_tag() != TokenTag::NEWLINE {
+            empty = false;
+            break;
+        }
+        window.advance();
+    }
+    window
+        .set_position(resume)
+        .expect("empty header resume stays inside the active parser view");
+    Ok(empty)
 }
 
 #[cfg(test)]

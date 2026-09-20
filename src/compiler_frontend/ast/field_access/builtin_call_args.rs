@@ -4,6 +4,7 @@
 //! WHY: collection and error builtins share positional-only parsing and type validation rules.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
@@ -16,16 +17,15 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[allow(
     clippy::too_many_arguments,
     reason = "builtin method argument parsing keeps the token stream, member identity, expected types, scope, mutable interner/string/path state, and member span as separate borrows"
 )]
 pub(super) fn parse_builtin_method_args_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     member_name: &str,
     expected_type_ids: &[TypeId],
     context: &ScopeContext,

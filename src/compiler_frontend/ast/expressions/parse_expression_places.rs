@@ -7,6 +7,7 @@ use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ExpressionKind,
 };
@@ -19,10 +20,10 @@ use crate::compiler_frontend::ast::field_access::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
     InvalidReceiverCallReason, NameNamespace,
 };
 use crate::compiler_frontend::datatypes::DataType;
@@ -30,7 +31,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(super) struct ParsedCopyPlace {
     pub(super) place: PlaceExpression,
@@ -42,7 +43,7 @@ pub(super) struct ParsedCopyPlace {
 // WHY: mutable receiver syntax is a distinct place expression that must resolve to a field-access
 //      chain so the backend can pass the receiver by mutable reference.
 pub(super) fn parse_mutable_receiver_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,
@@ -50,19 +51,28 @@ pub(super) fn parse_mutable_receiver_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let marker_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let marker_span = Some(token_stream.current_postfix_operator_span());
     token_stream.advance();
 
-    let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
-        return Err(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            marker_span,
-        )
-        .into());
-    };
+    if token_stream.current_tag() != TokenTag::SYMBOL {
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "mutable-receiver symbol diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(found, marker_span).into());
+    }
+    let symbol_id = token_stream
+        .current_string_id_in(string_table)?
+        .ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "mutable receiver symbol had no string payload",
+            )
+        })?;
 
     let Some(receiver_declaration) = context.get_reference(&symbol_id) else {
         if context.is_visible_type_alias_name(symbol_id) {
@@ -82,10 +92,10 @@ pub(super) fn parse_mutable_receiver_expression(
     // The mutable marker must be followed by a field-access chain; bare `~name` is not valid.
     // When the author wrote `~name = ...`, the intent was an assignment target, not a receiver
     // call, so report the assignment-target reason instead of the receiver-call reason.
-    if token_stream.peek_next_token() != Some(&TokenKind::Dot) {
+    if token_stream.peek_next_tag() != Some(TokenTag::DOT) {
         if token_stream
-            .peek_next_token()
-            .is_some_and(|token| token.is_assignment_operator())
+            .peek_next_tag()
+            .is_some_and(TokenTag::is_assignment_operator)
         {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::MutableMarkerOnAssignmentTarget,
@@ -136,26 +146,30 @@ pub(super) fn parse_mutable_receiver_expression(
 // WHY: `copy` clones the current stored value at a place; arbitrary expressions do not have
 //      stable storage, so the parser restricts this to names and parenthesized places.
 pub(super) fn parse_copy_place_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
-    parse_copy_place_payload(token_stream, context, type_interner, string_table, path_fork)
+    parse_copy_place_payload(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )
 }
 
 fn parse_copy_place_payload(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
-    match token_stream.current_token_kind() {
-        // Parenthesized places are allowed for grouping; the outer `(` span is preserved
-        // so diagnostics point at the `copy(` call site rather than the inner name.
-        TokenKind::OpenParenthesis => {
+    match token_stream.current_tag() {
+        TokenTag::OPEN_PARENTHESIS => {
             let open_span = current_span(token_stream);
             token_stream.advance();
 
@@ -167,10 +181,18 @@ fn parse_copy_place_payload(
                 path_fork,
             )?;
 
-            if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-                return Err(CompilerDiagnostic::expected_token(
-                    TokenKind::CloseParenthesis,
-                    Some(token_stream.current_token_kind().to_owned()),
+            if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "copy-place closing-delimiter diagnostic",
+                        )
+                    })?;
+                return Err(CompilerDiagnostic::expected_token_from_tags(
+                    TokenTag::CLOSE_PARENTHESIS,
+                    found,
                     current_span(token_stream),
                 )
                 .into());
@@ -181,12 +203,18 @@ fn parse_copy_place_payload(
             Ok(parsed_place)
         }
 
-        // Named places: resolve the symbol and verify it denotes a place-capable value, not a function.
-        TokenKind::Symbol(symbol_id) => {
-            let Some(place_declaration) = context.get_reference(symbol_id) else {
-                if context.is_visible_type_alias_name(*symbol_id) {
+        TokenTag::SYMBOL => {
+            let symbol_id = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        "copy-place symbol had no string payload",
+                    )
+                })?;
+            let Some(place_declaration) = context.get_reference(&symbol_id) else {
+                if context.is_visible_type_alias_name(symbol_id) {
                     return Err(CompilerDiagnostic::namespace_misuse(
-                        *symbol_id,
+                        symbol_id,
                         NameNamespace::Value,
                         NameNamespace::Type,
                         current_span(token_stream),
@@ -194,7 +222,7 @@ fn parse_copy_place_payload(
                     .into());
                 }
                 return Err(CompilerDiagnostic::unknown_value_name(
-                    *symbol_id,
+                    symbol_id,
                     current_span(token_stream),
                 )
                 .into());
@@ -204,11 +232,7 @@ fn parse_copy_place_payload(
                 .source_callable_signature(place_declaration.as_declaration())
                 .is_some()
             {
-                // A bare function name is not a copyable value; a call returns a value that
-                // must be received in a binding first. Distinguish the two by checking whether
-                // `(` follows the name, since `token_stream` is still positioned at the symbol.
-                let reason = if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
-                {
+                let reason = if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
                     InvalidCopyTargetReason::FunctionCall
                 } else {
                     InvalidCopyTargetReason::FunctionName
@@ -227,8 +251,8 @@ fn parse_copy_place_payload(
                 );
                 token_stream.advance();
 
-                let copied_expression = if token_stream.index < token_stream.length
-                    && token_stream.current_token_kind() == &TokenKind::Dot
+                let copied_expression = if token_stream.position() < token_stream.length()
+                    && token_stream.current_tag() == TokenTag::DOT
                 {
                     parse_postfix_chain_expression(
                         token_stream,
@@ -260,10 +284,9 @@ fn parse_copy_place_payload(
             }
         }
 
-        // Reserved trait keywords are not valid place expressions.
-        TokenKind::Must | TokenKind::TraitThis => {
-            let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                token_stream.current_token_kind(),
+        TokenTag::MUST | TokenTag::TRAIT_THIS => {
+            let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                token_stream.current_tag(),
                 current_span(token_stream),
                 "Expression Parsing",
                 "copy-place parsing",
@@ -272,12 +295,7 @@ fn parse_copy_place_payload(
             Err(reserved_trait_keyword_error(keyword, current_span(token_stream)).into())
         }
 
-        // `copy` does not take the `~` mutable-access marker. When `~` precedes
-        // an otherwise valid binding or field projection, the marker is just
-        // unnecessary. When the operand is itself invalid (literal, call, etc.),
-        // the recursive call returns the existing factual diagnostic, since
-        // removing `~` would not make it copyable.
-        TokenKind::Mutable => {
+        TokenTag::MUTABLE => {
             let marker_span = current_span(token_stream);
             token_stream.advance();
 
@@ -297,12 +315,6 @@ fn parse_copy_place_payload(
             }
         }
 
-        // Any other token cannot begin a place expression.
-        //
-        // `copy` requires a binding or field projection, not a literal, call,
-        // or computed expression. We emit a targeted diagnostic so the user
-        // understands *why* `copy` rejected this token, not just that it was
-        // unexpected.
         _ => Err(CompilerDiagnostic::invalid_copy_target(
             InvalidCopyTargetReason::NonPlace,
             current_span(token_stream),
@@ -393,9 +405,6 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
     expression
 }
 
-fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }

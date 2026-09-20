@@ -414,7 +414,6 @@ fn compile_single_file_frontend_with_target(
         let preparation_context = ModulePreparationContext {
             source_files,
             style_directives,
-            project_path_resolver: Some(project_path_resolver.clone()),
         };
 
         let graph_stable_origin = stable_origin.clone();

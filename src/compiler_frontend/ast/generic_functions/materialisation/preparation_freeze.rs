@@ -1,7 +1,7 @@
 //! Declaring-module preparation capture and publication freeze.
-use super::super::{GenericFunctionBody, GenericFunctionTemplate};
+use super::super::GenericFunctionTemplate;
 use super::artefact_emit::ModuleMaterialisationContext;
-use super::frozen_syntax::StableBodySyntax;
+use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
 use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
@@ -63,20 +63,25 @@ use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
-use crate::compiler_frontend::symbols::string_interning::{
-    StringId, StringIdRemap, StringTable,
-};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 /// Self-contained immutable semantic context owned by one successful declaring module.
 #[derive(Clone)]
 pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) string_table: StringTable,
+    /// Lazily frozen declaring-domain donor identity shared by every body this preparation captures.
+    ///
+    /// WHAT: caches one `SharedDonorIdentity` frozen from `string_table` on first capture.
+    /// WHY: `materialise_ast()` runs once per generated request; freezing per request clones
+    /// the whole table per request. The `Rc` keeps the cache shared across clones of the
+    /// preparation, and laziness keeps bodyless preparations from paying a freeze.
+    donor_identity_cache: Rc<OnceCell<SharedDonorIdentity>>,
     pub(crate) entry_dir: PathId,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
@@ -85,9 +90,8 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(super) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
-    pub(crate) binding_environment: HeaderBindingEnvironment,
-    pub(crate) imported_functions_by_local_path:
-        FxHashMap<PathId, AstImportedFunctionContract>,
+    pub(crate) binding_environment: Rc<HeaderBindingEnvironment>,
+    pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,
@@ -95,11 +99,9 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(super) default_const_templates_by_path: FxHashMap<PathId, PublicConstTemplate>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
-    pub(crate) resolved_function_signatures_by_path:
-        FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
-    pub(super) generic_template_paths_by_identity:
-        FxHashMap<GeneratedDeclarationIdentity, PathId>,
+    pub(super) generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, PathId>,
     pub(crate) resolved_type_aliases_by_path: FxHashMap<PathId, ResolvedTypeAlias>,
     pub(crate) choice_variant_shells_by_path: FxHashMap<PathId, Vec<ChoiceVariant>>,
     pub(crate) declaration_semantics: DeclarationSemanticTable,
@@ -278,6 +280,18 @@ impl ModuleMaterialisationPreparationBuilder {
 }
 
 impl ModuleMaterialisationPreparation {
+    /// Borrow the cached declaring-domain donor identity, freezing `string_table` once.
+    ///
+    /// WHAT: lazily freezes the declaring string domain and shares the owner across every
+    /// body this preparation (and its clones) captures.
+    /// WHY: per-request freezes clone the whole table per generated request. `Rc<OnceCell>`
+    /// keeps one frozen snapshot per declaring preparation; bodyless preparations never call
+    /// this and pay no freeze.
+    pub(super) fn donor_identity(&self) -> &SharedDonorIdentity {
+        self.donor_identity_cache
+            .get_or_init(|| SharedDonorIdentity::freeze(&self.string_table))
+    }
+
     /// Fork one generated-local table from the live compiler identity prefix.
     ///
     /// Provider rebasing can extend the compiler table after this preparation was frozen. The
@@ -345,11 +359,20 @@ impl ModuleMaterialisationPreparation {
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
         let semantic_closure = self.stable_semantic_closure(resources, path_fork)?;
+        // Share one lazily frozen declaring-domain owner across every artefact in this freeze.
+        let donor_identity = self.donor_identity().clone();
 
         let artefacts = templates
             .into_iter()
             .map(|template| {
-                self.freeze_template(template, public_interface, &semantic_closure, resources, path_fork)
+                self.freeze_template(
+                    template,
+                    public_interface,
+                    &semantic_closure,
+                    resources,
+                    path_fork,
+                    &donor_identity,
+                )
             })
             .collect::<Result<Box<[_]>, CompilerError>>()?;
         Ok(Some(ModuleMaterialisationContext {
@@ -370,6 +393,7 @@ impl ModuleMaterialisationPreparation {
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        donor_identity: &super::SharedDonorIdentity,
     ) -> Result<GenericTemplateArtefact, CompilerError> {
         let declaration_identity = template.declaration_identity.clone().ok_or_else(|| {
             CompilerError::compiler_error(
@@ -395,7 +419,8 @@ impl ModuleMaterialisationPreparation {
             resources,
             path_fork,
         )?;
-        let mut referenced_names = stable_body_symbol_names(body.tokens(), &self.string_table);
+        let capture_string_table = body.capture_string_table(donor_identity.strings().as_ref());
+        let mut referenced_names = stable_body_symbol_names(body, capture_string_table)?;
         self.retain_generic_bound_trait_names(
             &template.source_file,
             &generic_parameters,
@@ -403,8 +428,12 @@ impl ModuleMaterialisationPreparation {
         )?;
         let selected_paths =
             self.selected_visible_paths(&template.source_file, &referenced_names)?;
-        let visibility = self
-            .stable_file_visibility(&template.source_file, &referenced_names, resources, path_fork)?;
+        let visibility = self.stable_file_visibility(
+            &template.source_file,
+            &referenced_names,
+            resources,
+            path_fork,
+        )?;
         let declarations = self.stable_declaration_bindings(&selected_paths, public_interface)?;
         let local_declarations = self.stable_local_declaration_bindings(&selected_paths);
         let callables = self.stable_callable_bindings(&selected_paths, resources, path_fork)?;
@@ -420,12 +449,10 @@ impl ModuleMaterialisationPreparation {
             let content_path = self.content_constant_path_for_capture(logical_path, path_fork)?;
             self.stable_folded_value_at_path(&content_path, resources, path_fork)
         };
-        let stage0_resolution_facts = match body {
-            GenericFunctionBody::Source(_) => self.stage0_resolution_facts.as_deref(),
-            GenericFunctionBody::Materialised {
-                resolution_facts, ..
-            } => Some(resolution_facts.as_ref()),
-        };
+        let stage0_resolution_facts = body
+            .resolution_facts()
+            .map(std::sync::Arc::as_ref)
+            .or(self.stage0_resolution_facts.as_deref());
         let frozen_identity_handle = body
             .frozen_identity_handle()
             .cloned()
@@ -440,10 +467,10 @@ impl ModuleMaterialisationPreparation {
             source_file: template.source_file,
             declaration_span: template.declaration_span,
             body: StableBodySyntax::capture(
-                body.tokens(),
+                body,
                 template.source_file,
                 path_fork,
-                &self.string_table,
+                Some(donor_identity),
                 stage0_resolution_facts,
                 frozen_identity_handle,
                 &content_value_at_path,
@@ -564,11 +591,8 @@ impl ModuleMaterialisationPreparation {
             .copied()
             .ok_or_else(|| {
                 let mut scratch = Vec::new();
-                let rendered = path_fork.render_portable(
-                    *logical_path,
-                    &self.string_table,
-                    &mut scratch,
-                );
+                let rendered =
+                    path_fork.render_portable(*logical_path, &self.string_table, &mut scratch);
                 CompilerError::compiler_error(format!(
                     "synthetic content constant for {} was not present before generic capture",
                     rendered
@@ -1251,11 +1275,8 @@ impl ModuleMaterialisationPreparation {
                 let mut scratch = Vec::new();
                 path_fork.render_portable(path, &self.string_table, &mut scratch)
             };
-            let identity = ModulePrivateNominalIdentity::new(
-                module_origin.clone(),
-                defining_path,
-                category,
-            );
+            let identity =
+                ModulePrivateNominalIdentity::new(module_origin.clone(), defining_path, category);
             self.type_environment.register_canonical_identity(
                 CanonicalTypeIdentity::ModulePrivateNominal(identity.clone()),
                 type_id,
@@ -1343,11 +1364,7 @@ impl ModuleMaterialisationPreparation {
         let receiver_path = match resolved.receiver.as_ref() {
             Some(ReceiverKey::Struct(receiver) | ReceiverKey::Choice(receiver)) => {
                 let mut scratch = Vec::new();
-                Some(paths.render_portable(
-                    *receiver,
-                    &self.string_table,
-                    &mut scratch,
-                ))
+                Some(paths.render_portable(*receiver, &self.string_table, &mut scratch))
             }
             Some(ReceiverKey::External(_) | ReceiverKey::BuiltinScalar(_)) => {
                 return Err(CompilerError::compiler_error(
@@ -1398,6 +1415,7 @@ impl ModuleMaterialisationPreparation {
 
         Ok(Self {
             string_table: string_table.clone_preserving_inherited_prefix(),
+            donor_identity_cache: Rc::new(OnceCell::new()),
             entry_dir,
             module_origin,
             module_resources,
@@ -1408,7 +1426,7 @@ impl ModuleMaterialisationPreparation {
                 &lookups.declaration_table,
                 const_values,
             )?,
-            binding_environment: lookups.binding_environment.clone(),
+            binding_environment: Rc::clone(&lookups.binding_environment),
             imported_functions_by_local_path: lookups.imported_functions_by_local_path.clone(),
             imported_struct_definitions: lookups.imported_struct_definitions.clone(),
             imported_choice_definitions: lookups.imported_choice_definitions.clone(),

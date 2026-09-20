@@ -1,222 +1,135 @@
-# Runtime anonymous records implementation plan
+# Runtime anonymous records
 
-## Purpose
+## Status
 
-Enable `|...|` in a runtime receiving context as a local hidden nominal struct after numeric semantics are stable. Reuse ordinary struct construction, field access, copy, borrow and lifetime owners. Do not add structural typing, a second record grammar or a second record IR.
+- Status: queued. The canonical and Basic runtime references are published.
+- Current slice: implementation not started.
+- Blockers: shared MON syntax with nested const records, accepted numeric semantics and the required ordinary-struct validation paths must be delivered.
+- Next action: establish the activation tree and complete Phase 0.
 
-## Current-state capsule
+## Purpose and prerequisites
 
-```text
-ACTIVE_PLAN: docs/roadmap/plans/runtime-anonymous-records-plan.md
-STATUS: queued
-CURRENT_SLICE: Phase 0 - complete a read-only runtime-record ownership and escape review
-LAST_GOOD_COMMIT: none until the first implementation slice is accepted
-BRANCH: main
-IMPLEMENTATION_SCOPE: AST expressions, hidden nominal structs, HIR struct lowering, borrow and lifetime validation
-```
+Enable named-only parenthesised MON construction in runtime receiving contexts. Each literal site creates a local hidden nominal struct. Support inline nested anonymous records and explicitly constructed nominal children through ordinary struct semantics.
 
-Keep this block concise. Git history is the implementation record.
+Reuse the shared argument parser, type environment, struct construction, field access, copy, borrow and lifetime owners. This work introduces no structural typing, anonymous-specific runtime IR or MON serialisation implementation.
 
-## Roadmap position and prerequisites
+Run after shared MON syntax and number/numeric semantics, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
 
-This plan runs after number/numeric semantics and before the HTML mixed JavaScript/Wasm backend.
+Required capabilities:
 
-Hard prerequisites:
+- one shared argument-list owner with named-only and compile-time policies, receiving-context diagnostics and recursive value parsing
+- parenthesised anonymous const records with folded field projection and public-value handling
+- ordinary nominal identity, resolved field types and field lookup in `TypeEnvironment`
+- ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
+- public-surface rejection of hidden runtime identities
+- accepted numeric type identity, including the delivered `Number` family
 
-- anonymous compile-time `|...|` records: one context-specific `name = value` parser, nested-list rejection, a shared compile-time marker `TypeId`, and folded public values
-- canonical `TypeEnvironment` nominal identity and ordinary struct field lookup
-- validated HIR struct construction and field access
-- borrow validation and lifetime-region/escape analysis for ordinary structs
-- public-surface validation that already names runtime anonymous-record types as prohibited exports
-- `Number` / `NumberN` identity so hidden field types are the post-numeric types
-
-Name those delivered capabilities. Do not cite a retired plan file.
+Use the activation tree's current APIs. Reuse delivered MON parsing rather than reconstructing a predecessor record parser.
 
 ## Required authorities
 
-- `docs/compiler-design-overview.md` for public-surface escape, TypeId ownership, const-record folding and HIR struct lowering
-- `docs/src/developer-docs/language/overview.mtf` plus `docs/src/docs/constants/const-records.mtf`, `docs/src/docs/structs/struct-declarations.mtf` and `docs/src/docs/structs/construction-and-fields.mtf`
-- memory-management design under `docs/src/developer-docs/memory-management/`
-- style, testing and validation guides
-- `docs/src/docs/progress/@page.moth`
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` as orientation only
+Read `AGENTS.md`, the full style guide, the language cheatsheet, both compiler/build architecture references and the complete testing guide. Follow the validation guide for each final gate.
 
-## Current compiler state
+Read `docs/src/developer-docs/language/overview.mtf`, `docs/src/docs/language-overview/mon-syntax.mtf`, `docs/src/docs/structs/anonymous-records.mtf` and the routed const-record, struct, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
 
-Do not add a second `|...|` grammar.
+The accepted runtime contract is already published in `docs/src/docs/structs/anonymous-records.mtf`, with a Basic companion and a section on the Structs page. Those references own semantics and explicitly label runtime support as deferred. Contract publication is complete, not a task to repeat. The progress matrices continue to report actual support.
 
-Already landed:
+## Published contract and implementation decisions
 
-- `|...|` is parameters syntax. Context decides what the list becomes: a compile-time receiving context (`#=`) is an anonymous const record; a named type shell `Name = | field Type |` is a struct, including empty `Name = | |`; a runtime receiving context currently reports `DeferredFeatureReason::RuntimeAnonymousRecord` for `| name = value |`
-- `parse_anonymous_const_record_expression` owns `name = value` fields. The expression dispatcher refuses the runtime arm before that parser runs
-- nested `|...|` is `InvalidExpressionReason::NestedAnonymousConstRecord`
-- the generic token scanner balances `|...|` regions without deciding struct versus record. `pipe_opens_value_record` in the AST owner uses binding mode: empty `#= | |` is a const record; empty ordinary `= | |` is a struct shell
-- `TypeDefinition::AnonymousConstRecordMarker` is one module-local compile-time `TypeId`. It is fieldless, public-surface-legal and never a runtime type. Semantic fields live on folded values
-- `ExpressionKind::AnonymousConstRecord` exists so lowering never treats a const record as `StructInstance`. HIR projects const-record fields only through the folded store
-- fixture `anonymous_const_record_runtime_rejected` is `stats = | count = 1 |` inside a function and expects `MOTH-DEFERRED-0001`
+Use the canonical runtime reference for construction, hidden identity, recursive local composition, prohibited boundaries and capability restrictions. Shared grammar is owned by the MON reference. Keep these implementation consequences explicit:
 
-This plan flips the runtime arm from deferred to accepted and registers a hidden nominal struct. It does not reuse the const-record marker, AST variant, public folded-value path or HIR special case.
+- Each static literal site owns one hidden nominal type per owning compiled body. Repeated execution reuses that type, while different sites remain distinct. Aliases and copies preserve type identity.
+- Qualify the source-site key by its module/body and concrete materialisation identity where required. Reuse current retained source-site and instantiated-body identities. Runtime execution counters, field shape and rendered type names are not keys. The exact local Rust representation is an implementation choice, not a new public identity contract.
+- Resolve children before registering ordered parent fields. An anonymous parent may store a hidden child directly or by an existing local reference. Explicit nominal children remain ordinary typed values.
+- The composition exception applies to compiler-generated anonymous parent fields. It does not permit hidden types in authored nominal declarations, function arguments/returns, exported surfaces, collections/maps or generic arguments.
+- Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
+- Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
+- Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
 
-Grouped project config may still compose compile-time records under its own schema contract. That work is out of this plan.
+The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.
 
-## Accepted source model
+## Semantic and representation ownership
 
-```moth
-start:
-    point = |
-        x = 10,
-        y = 20,
-    |
+Keep runtime structs and compile-time records separate after shared syntax parsing:
 
-    io.line(point.x)
-;
-```
+- A const record uses the existing compile-time marker and folded field store. Its complete value is not an ordinary runtime object.
+- A runtime record uses an ordinary hidden `Struct` type with ordered fields in `TypeEnvironment` and ordinary struct expression construction.
+- HIR receives the resolved nominal type and fields. No anonymous-specific HIR or backend node is added.
+- Public projection rejects hidden runtime identity rather than canonicalising it through the const-record marker path.
 
-Rules:
+Shared parsing retains the authored names, values and locations once. Runtime semantic construction registers field types using those results. No second named-field parser, synthetic callee signature or repeated source scan is needed.
 
-- Functions, structs, const records and runtime anonymous records share `|...|` parameters syntax. Context decides the meaning.
-- A runtime receiving context (`=`, mutable `~=` or another runtime receiver) turns the list into a runtime value.
-- Every parameter has a value. Types are inferred from those values. The list does not declare a source-visible constructable type.
-- Field values are ordinary runtime expressions. They do not have to fold. That is the opposite of a const record.
-- A parameter list is one `|...|` group. It does not contain another `|...|` list. Declare an inner record as its own local, then name that binding as a field value.
-- Runtime anonymous records require at least one named field. Empty `| |` in an ordinary `=` binding is a named struct shell. Empty `#= | |` remains an empty anonymous const record.
-- Each literal site creates one hidden nominal `TypeId`. Two sites with identical fields remain different types.
-- Reassignment is compatible only with that same site identity, not with another literal of the same shape.
-- Runtime anonymous records support local binding, shared access, explicit `copy` and field projection through ordinary struct semantics.
-- They have no source-visible type name, constructor name, receiver methods or conformance.
-- They cannot escape through public interfaces.
-- They cannot appear in function signatures, returns, aliases, struct/choice fields, trait evidence or exported constants. Passing one as a function argument is an escape: the parameter type cannot name the hidden identity.
-- The first implementation also rejects collection/map storage and generic instantiation involving runtime anonymous records.
-- After type assignment, AST and HIR see ordinary nominal struct construction and field access. No anonymous-specific HIR node survives AST.
-- Borrow and lifetime rules are exactly those of the lowered hidden nominal struct.
+Use ordinary field lookup without repeated shape scans. Diagnostics identify the anonymous record's source site and the first prohibited use. Nested type checks retain useful field/source context without exposing internal numeric IDs as user-facing identity.
 
-## Split from const records
-
-Keep these owners separate. Mixing them is a stop condition.
-
-- Compile-time `#=` produces `AnonymousConstRecord` and the shared marker `TypeId`. The complete value is not a runtime object and may export as folded fields.
-- Runtime `=` produces a per-site hidden `Struct` `TypeId`. The complete value is an ordinary runtime object and must not export.
-- Const-record fields live on folded values. Runtime-record fields live on a `TypeEnvironment` struct definition so `fields_for` works.
-- Const records needed an HIR special case because they are not structs. Runtime records must not.
-
-## Data ownership
-
-- AST assigns a hidden nominal `TypeId` from stable source-site identity. Phase 0 decides the exact key. Shape is not the key.
-- `TypeEnvironment` owns ordered fields through `StructTypeDefinition` and ordinary field lookup.
-- Diagnostic spelling identifies the anonymous record and source site without becoming semantic identity. It must not render as `anonymous const record`.
-- HIR consumes the resolved `TypeId` and ordinary struct fields.
-- Public-interface projection rejects the hidden identity rather than canonicalising it. Do not follow the const-record marker path, which public-surface validation currently allows.
-
-## Non-goals
-
-- no structural typing or shape unification
-- no named type extraction or inference across literal sites
-- no anonymous-record methods or conformance
-- no public or cross-module anonymous type
-- no anonymous record in generic arguments, collections or maps in the first implementation
-- no nested `|...|` lists
-- no pattern matching or destructuring syntax
-- no backend-specific representation
-- no changes to const-record marker, folding, export or `AnonymousConstRecord` AST/HIR
-- no treating a complete const record as a runtime value
+Borrow validation and lifetime topology apply to the actual retained graph. Inline nesting creates no escape exemption, copy-on-construction rule, new region or backend-specific legality. Explicit deep copy preserves internal alias topology under the existing copy contract. Backend lowering consumes validated ordinary struct facts.
 
 ## Implementation phases
 
-### Phase 0: Mandatory architecture review
+Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review. Commit accepted phases separately. Keep diagnostics and status truthful while backend support is incomplete.
 
-Before code:
+### Phase 0: Refresh ownership against the published contract
 
-- inventory expression delimiter ownership, `pipe_opens_value_record`, the runtime deferred arm, hidden nominal registration, ordinary struct construction, field access, HIR lowering of ordinary structs, copy semantics, borrow validation and lifetime escape checks
-- decide the exact stable source-site key for hidden identities
-- treat empty runtime `| |` as already decided: not a runtime record
-- enumerate every prohibited escape boundary, including private function signatures
-- decide whether to share one `name = value` field-list parser and branch on receiving context, or keep the const parser and add a thin runtime entry that produces `StructInstance`
-- prove ordinary struct HIR can represent the feature without a second runtime record IR and without `AnonymousConstRecord`
+1. Verify all prerequisites in the activation tree and record the baseline locally.
+2. Read the shared MON owner and existing const-record deferral boundary, ordinary nominal registration, HIR struct paths and recursive escape validators.
+3. Read the published runtime reference and confirm the current owner map. Identify remaining architecture, cheatsheet and status edits without rewriting the source contract or claiming runtime support.
+4. Select the existing source-site/body identities that implement the key above, including nested sites and concrete materialisations. Record the mapping locally. Inventory every prohibited boundary and its current recursive validation owner.
+5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR.
 
-Stop if the implementation needs structural type comparison, donor-local identity export, `AnonymousConstRecordMarker` reuse or anonymous-specific backend nodes.
+Exit: one identity rule, one shared parse path and explicit recursive boundary coverage.
 
-### Phase 1: Accept runtime record literals
+### Phase 1: Construct typed nested local records
 
-- Parse `| field = value, ... |` in a runtime receiving context through the existing `name = value` grammar.
-- Keep parameter, struct, choice, receiver and config grammar on existing paths.
-- Reject duplicate fields, nested `|...|`, malformed separators, missing values and unterminated literals with structured diagnostics.
-- Retarget `anonymous_const_record_runtime_rejected`. Accepted runtime syntax must not keep `MOTH-DEFERRED-0001`.
-- Leave compile-time `#=` on `AnonymousConstRecord`.
+1. Enable the runtime context in the shared MON argument path with named-only entries and ordinary runtime values.
+2. Register hidden nominal fields after child values resolve. Produce ordinary struct expressions for both outer and inner records.
+3. Support local binding, projection, compatible assignment and explicit copy, including mixed nominal children and references to existing anonymous children.
+4. Replace runtime deferral coverage with acceptance cases while retaining the complete const-record boundary and empty-runtime rejection.
+5. Enforce prohibited uses before a completed semantic artefact can be published. Implement construction and necessary rejection checks together rather than exposing unchecked intermediate support.
 
-### Phase 2: Register hidden nominal types
+Exit: nested local runtime values type-check correctly and unsupported escapes receive source diagnostics.
 
-- Create one hidden `StructTypeDefinition` per literal site.
-- Register ordered fields after their value types resolve.
-- Use a transient name index for duplicate detection and field lookup construction.
-- Do not unify or intern by shape.
-- Do not intern through `AnonymousConstRecordMarker`.
-- Add readable diagnostics for mismatched anonymous sites.
+### Phase 2: Complete recursive boundaries and ordinary lowering
 
-Review gate: verify identity is source-site-based and cannot cross a public boundary.
+1. Check hidden identity transitively at calls, returns, exports, aliases, authored fields, collections/maps, generic requests and capability-storage boundaries.
+2. Preserve legal extraction and use of ordinary leaves. Permit hidden child fields specifically in hidden anonymous parents.
+3. Lower through ordinary struct HIR and validate field/type relationships. Reuse existing source identity and remap machinery.
+4. Exercise nested mutable access, aliases, final use, deep copy and lifetime containment through the existing analyses.
 
-### Phase 3: Enforce the local-only surface
+Exit: anonymous syntax produces no anonymous-specific HIR/backend representation and has no path around ordinary access or escape rules.
 
-- Allow local declarations, assignments compatible with the same site identity, copy and field reads or writes through ordinary struct rules.
-- Reject returns, explicit signature use, aliases, receiver methods, conformances, exported surfaces, aggregate storage and generic requests.
-- Report the error at the first escaping use rather than during backend lowering.
+### Phase 3: Backend coverage, documentation and pruning
 
-### Phase 4: Lower through ordinary struct HIR
+1. Validate supported targets through ordinary struct lowering. Assert an explicit target/deferred rejection where a required ordinary capability is unavailable, rather than claiming executable parity from frontend-only tests.
+2. Add or consolidate end-to-end cases for nested output, mutation/copy, existing-child aliasing, duplicate inner labels, distinct-site mismatch and each materially different prohibited boundary.
+3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite.
+4. Update support notices in the published structs references and teaching page, then reconcile the cheatsheet, compiler/build authorities, Design Scope, progress matrices, comments and queued consumers. Preserve the precise local-composition boundary. Shared grammar remains with the delivered MON owner.
+5. Remove obsolete deferral paths, fixtures and temporary construction helpers. Rebuild generated docs.
 
-- Reuse ordinary nominal struct construction and field projection.
-- Preserve the hidden `TypeId` in the module-local type environment.
-- Add no anonymous-specific HIR expression or statement variant.
-- Do not lower a runtime-typed record as `AnonymousConstRecord`.
-- Validate HIR through existing nominal member checks.
+### Phase 4: Final validation and Slice review
 
-### Phase 5: Borrow, lifetime and copy validation
+Run the final gates and a focused read-only review of identity, nested fields, recursive escape, copy/borrow/lifetime facts and backend handoff. Review all touched and adjacent owners for duplicated grammar, stale comments and obsolete tests.
 
-- Reuse ordinary struct root/projection alias rules.
-- Validate mutable field access through the existing place model.
-- Ensure deep `copy` handles the record graph exactly as an ordinary struct.
-- Verify hidden records cannot escape module/public lifetime summaries.
+Update source locators and stale audit-log entries under repository policy. Delete this completed plan and its roadmap entry in the completion commit. Keep genuine remaining format, collection or public-type proposals in their durable owners rather than leaving a completed plan as documentation.
 
-Review gate: run a read-only memory and HIR audit before backend-facing acceptance.
+## Required test distinctions
 
-### Phase 6: Backend parity, tests and docs
+Tests should prove:
 
-- Confirm JS and Wasm lowerers consume only ordinary struct HIR/layout facts.
-- Add integration cases for construction, projection, copy, mutability, two-site mismatch, nested-list rejection, empty `| |`, `#=` remaining const-only and every escape rejection.
-- Update the cheatsheet deferred runtime-record section, the progress matrix and the compiler-design sentence that still calls runtime records deferred.
-- If a canonical language leaf is required, add it under structs. Do not fold runtime records into `const-records.mtf`.
-- Rebuild generated docs.
+- nested literal construction and an existing child reference both work
+- identical labels in different records are legal, while a duplicate within one record is diagnosed at the inner site
+- distinct sites remain different types and repeated execution does not create new semantic identities
+- copies preserve types and required internal alias topology without sharing mutable storage with the source
+- retained aliases constrain nested mutation under ordinary borrow rules
+- prohibited wrappers do not hide an anonymous identity from escape checks
+- ordinary extracted leaves retain their normal permitted uses
+- compile-time records remain compile-time-only and named nominal construction stays explicit
+- supported backend execution agrees with ordinary struct semantics, while unsupported targets reject explicitly
 
-## Stop conditions
+Use one primary owner per contract, structured diagnostic reasons/spans and observable results. Unit coverage is reserved for hidden identity, type-graph and handoff invariants that output cannot expose. Keep tests out of production implementation files.
 
-Pause when:
+## Stop conditions and validation
 
-- a second anonymous runtime representation appears necessary
-- field lookup requires repeated shape scans
-- hidden types enter public canonical identities
-- the const-record marker, folded-value export path or `AnonymousConstRecord` HIR arm is reused for runtime values
-- generic or collection support expands the phase unexpectedly
-- borrow/lifetime rules differ from ordinary structs
-- a backend needs source-level anonymous-record knowledge
+Revisit ownership before continuing if the implementation needs shape unification, public hidden identities, the const-record marker for runtime values, anonymous-specific HIR/backend nodes, repeated field-shape scans or weaker borrow/lifetime rules. Resolve the cause instead of adding a compatibility layer or silently widening the feature.
 
-## Validation
+Run `cargo fmt` and `just validate` for every accepted code-bearing phase. Run `moth build docs --release`, or the equivalent Cargo command, for documentation changes. Follow the current validation guide and report checks that failed or could not run.
 
-Every code-bearing phase runs:
-
-```bash
-cargo fmt
-just validate
-```
-
-Run the documentation release build when source docs change.
-
-## Final audit
-
-Before completion, verify:
-
-- each literal site owns one hidden nominal identity
-- no structural equality exists
-- no anonymous-specific HIR/backend path exists
-- runtime-typed records are not `AnonymousConstRecord` and do not use the const-record marker
-- every public and unsupported escape is diagnosed before HIR/backend handoff
-- nested `|...|` remains rejected
-- ordinary struct borrow, lifetime and copy owners are reused
-- compile-time `#=` records keep field-access-only const-record semantics
+Completion requires recursive local records, explicit nominal construction, transitive rejection at every prohibited boundary and reuse of ordinary struct semantics from AST through supported backends.

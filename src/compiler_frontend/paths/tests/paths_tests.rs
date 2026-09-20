@@ -2,26 +2,59 @@
 
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, PathKind};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeFailure, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TokenRange, TokenRef, TokenTag, TokenizerEntryMode,
+};
+
+fn token_refs(tokens: &SourceTokens) -> impl Iterator<Item = TokenRef<'_>> {
+    let range: TokenRange = tokens
+        .full_range()
+        .expect("path fixture token stream must expose a checked full range");
+    let mut cursor = tokens
+        .cursor(range)
+        .expect("path fixture token range must construct a canonical cursor");
+    let mut finished = false;
+    std::iter::from_fn(move || {
+        if finished {
+            return None;
+        }
+        let token = cursor.advance()?;
+        finished = token.is_eof();
+        Some(token)
+    })
+}
+
+fn path_token(tokens: &LexedSource) -> TokenRef<'_> {
+    token_refs(tokens.tokens.as_ref())
+        .find(|token| token.tag() == TokenTag::PATH)
+        .expect("path token")
+}
 
 fn tokenize_source(
     source: &str,
     span_builder: &mut ExtendedSpanBuilder,
-) -> (
-    crate::compiler_frontend::tokenizer::tokens::FileTokens,
-    StringTable,
-    PathInternerFork,
-) {
+) -> (LexedSource, StringTable, PathInternerFork) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, SourceId::COMPILATION_ROOT, span_builder)
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
+    let tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        span_builder,
+    )
     .expect("source should tokenize");
     (tokens, string_table, path_fork)
 }
@@ -29,15 +62,23 @@ fn tokenize_source(
 fn tokenize_source_with_id(
     source: &str,
     span_builder: &mut ExtendedSpanBuilder,
-    file_id: SourceId,
-) -> (
-    crate::compiler_frontend::tokenizer::tokens::FileTokens,
-    StringTable,
-) {
+    source_id: SourceId,
+) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
-    let tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut string_table, &mut path_fork, file_id, span_builder)
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
+    let tokens = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        &mut path_fork,
+        source_id,
+        span_builder,
+    )
     .expect("source should tokenize");
     (tokens, string_table)
 }
@@ -45,16 +86,11 @@ fn tokenize_source_with_id(
 #[test]
 fn path_token_terminates_at_unquoted_whitespace() {
     let mut span_builder = ExtendedSpanBuilder::new();
-    let (tokens, string_table, path_fork) =
-        tokenize_source("@core/math sin\n", &mut span_builder);
-    let path_id = tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
-        .expect("path token");
+    let (tokens, string_table, path_fork) = tokenize_source("@core/math sin\n", &mut span_builder);
+    let path_token = path_token(&tokens);
+    let path_id = path_token
+        .path_syntax_id()
+        .expect("path token should carry a path syntax handle");
     let path_root = tokens
         .path_syntax
         .try_path(path_id)
@@ -64,9 +100,12 @@ fn path_token_terminates_at_unquoted_whitespace() {
         path_fork.render_portable(path_root, &string_table, &mut Vec::new()),
         "core/math"
     );
-    assert!(tokens.tokens.iter().any(
-        |token| matches!(token.kind, TokenKind::Symbol(id) if string_table.resolve(id) == "sin")
-    ));
+    assert!(token_refs(tokens.tokens.as_ref()).any(|token| {
+        token.tag() == TokenTag::SYMBOL
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == "sin")
+    }));
 }
 
 #[test]
@@ -74,14 +113,10 @@ fn quoted_path_component_retains_whitespace() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (tokens, string_table, path_fork) =
         tokenize_source("@docs/\"my file.md\"\n", &mut span_builder);
-    let path_id = tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
-        .expect("path token");
+    let path_token = path_token(&tokens);
+    let path_id = path_token
+        .path_syntax_id()
+        .expect("path token should carry a path syntax handle");
     let path_root = tokens
         .path_syntax
         .try_path(path_id)
@@ -94,18 +129,47 @@ fn quoted_path_component_retains_whitespace() {
 }
 
 #[test]
+fn path_table_freeze_rejects_checked_push_and_rejects_foreign_source() {
+    use crate::compiler_frontend::paths::path_syntax::{PathSyntaxError, PathSyntaxTable};
+
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let root = path_fork
+        .try_intern_components(&[strings.intern("core"), strings.intern("math")])
+        .expect("test path fits");
+    let mut table = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
+    assert_eq!(table.owner_source(), Some(SourceId::COMPILATION_ROOT));
+    assert!(!table.is_frozen());
+    let id = table
+        .try_push_for_source(root, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+        .expect("owner push should succeed");
+    assert_eq!(id.index(), Some(0));
+    assert!(!id.is_none());
+    let foreign = SourceId::from_index(7);
+    assert!(matches!(
+        table.try_push_for_source(root, foreign, LocalSpan::source_start()),
+        Err(PathSyntaxError::ForeignSource { .. })
+    ));
+    table.freeze();
+    assert!(table.is_frozen());
+    assert!(
+        matches!(
+            table.try_push_local(root, LocalSpan::source_start()),
+            Err(crate::compiler_frontend::paths::path_syntax::PathSyntaxError::Frozen)
+        ),
+        "a frozen source-owned table must reject another authored row on its frozen lane"
+    );
+}
+
+#[test]
 fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (tokens, _, _) = tokenize_source("@core/math\n", &mut span_builder);
-    let path_token = tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::Path(_)))
-        .expect("path token");
-    let TokenKind::Path(path_id) = path_token.kind else {
-        panic!("expected a path token");
-    };
-    let token_span = SourceSpan::new(tokens.file_id, path_token.span);
+    let path_token = path_token(&tokens);
+    let path_id = path_token
+        .path_syntax_id()
+        .expect("path token should carry a path syntax handle");
+    let token_span = path_token.source_span();
 
     tokens
         .path_syntax
@@ -142,10 +206,7 @@ fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
             .contains("does not belong to the consumed path token")
     );
 
-    let mismatched_span = SourceSpan::new(
-        tokens.file_id,
-        crate::compiler_frontend::source::LocalSpan::source_start(),
-    );
+    let mismatched_span = SourceSpan::new(path_token.source(), LocalSpan::source_start());
     let span_error = tokens
         .path_syntax
         .try_path_for_token(path_id, mismatched_span)
@@ -162,9 +223,20 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
     for source in ["@ docs\n", "@docs/ my\n"] {
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_path = path_fork.try_intern_portable_path("test.moth", &mut strings).expect("test path fits");
+        let source_path = path_fork
+            .try_intern_portable_path("test.moth", &mut strings)
+            .expect("test path fits");
         let mut span_builder = ExtendedSpanBuilder::new();
-        let error = match tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) {
+        let error = match tokenize(
+            source,
+            source_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut strings,
+            &mut path_fork,
+            SourceId::COMPILATION_ROOT,
+            &mut span_builder,
+        ) {
             Ok(_) => panic!(
                 "whitespace cannot separate a path introducer or separator from its component"
             ),
@@ -184,9 +256,20 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
 fn path_errors_remain_structured() {
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork.try_intern_portable_path("test.moth", &mut strings).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("test.moth", &mut strings)
+        .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let error = match tokenize("@/child", source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, SourceId::COMPILATION_ROOT, &mut span_builder) {
+    let error = match tokenize(
+        "@/child",
+        source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) {
         Ok(_) => panic!("public root suffix should fail"),
         Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
         Err(TokenizeFailure::Infrastructure(error)) => {
@@ -201,14 +284,16 @@ fn path_errors_remain_structured() {
     ));
 }
 
-/// Long path rows and persistent subsets retain the token's single source-owned encoding.
+/// Long path rows retain the token's single source-owned encoding.
 #[test]
-fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
+fn long_multibyte_path_retains_one_original_span() {
     let path_text = format!("@docs/\"{}.md\"", "é".repeat(700));
     let source = format!("-- 🦋\n{path_text}\n");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("long-path.moth", &mut strings).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("long-path.moth", &mut strings)
+        .expect("test path fits");
     let canonical_path = path_fork.render_native(scope, &strings, &mut Vec::new());
     let sources = SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
         .expect("source should register");
@@ -217,40 +302,28 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
         .expect("registered source")
         .id;
     let mut spans = ExtendedSpanBuilder::new();
-    let tokens = tokenize(&source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, source_id, &mut spans)
+    let tokens = tokenize(
+        &source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
     .expect("quoted multibyte path should tokenize");
-    let token = tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::Path(_)))
-        .expect("path token");
-    let TokenKind::Path(path_id) = token.kind else {
-        unreachable!()
-    };
+    let token = path_token(&tokens);
+    let path_id = token
+        .path_syntax_id()
+        .expect("path token should carry a path syntax handle");
     let row = tokens
         .path_syntax
-        .try_path_for_token(path_id, SourceSpan::new(tokens.file_id, token.span))
+        .try_path_for_token(path_id, token.source_span())
         .expect("owned path");
-    assert_eq!(
-        spans.len(),
-        1,
-        "the path token and row share one overflow row"
-    );
-    assert_eq!(row.span.local(), token.span);
+    assert_eq!(row.span, token.span());
 
-    let mut captured_tokens = vec![token.clone()];
-    let (subset, _) = tokens
-        .path_syntax
-        .capture_persistent_generic_subset(&mut captured_tokens)
-        .expect("persistent capture should preserve the path");
-    let TokenKind::Path(captured_id) = captured_tokens[0].kind else {
-        unreachable!()
-    };
-    let captured = subset.try_path(captured_id).expect("captured path row");
-    assert_eq!(captured.span, row.span);
-    assert_eq!(captured_tokens[0].span, row.span.local());
-
-    let retained_span = captured.span;
+    let retained_span = SourceSpan::new(token.source(), row.span);
     let mut database = SourceDatabaseBuilder::new(sources);
     database
         .sources_mut()

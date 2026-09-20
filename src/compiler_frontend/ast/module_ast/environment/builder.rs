@@ -75,10 +75,10 @@ use crate::compiler_frontend::public_interface::{
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::{
@@ -186,7 +186,7 @@ impl DeclarationPassLanes {
             let header = sorted_headers
                 .get(ordered.header_index)
                 .ok_or_else(missing_declaration_id)?;
-            if header.tokens.src_path != ordered.path
+            if header.declaration_path != ordered.path
                 || !header_matches_ordered_kind(&header.kind, ordered.kind)
                 || covered_headers[ordered.header_index]
             {
@@ -308,6 +308,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     // Header-built dependency visibility is consumed directly; AST does not rebuild dependency bindings.
     pub(crate) binding_environment: HeaderBindingEnvironment,
+    /// One canonical token owner per source, used for bounded parser adapters.
+    pub(crate) source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
 
     // Mutable environment-building state.
     pub(crate) warnings: Vec<CompilerDiagnostic>,
@@ -338,11 +340,9 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
     pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) choice_source_by_path: FxHashMap<PathId, PathId>,
-    pub(crate) resolved_function_signatures_by_path:
-        FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
-    pub(crate) generic_parameter_lists_by_path:
-        FxHashMap<PathId, RegisteredGenericParameterList>,
+    pub(crate) generic_parameter_lists_by_path: FxHashMap<PathId, RegisteredGenericParameterList>,
 
     // Frontend semantic type identity built during environment construction.
     // WHY: parsed types are resolved into canonical TypeIds as declarations are processed.
@@ -380,6 +380,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             path_fork,
             module_symbols: ModuleSymbols::empty(),
             binding_environment: HeaderBindingEnvironment::default(),
+            source_token_owners: FxHashMap::default(),
             warnings: Vec::new(),
             declaration_table: Rc::new(TopLevelDeclarationTable::empty()),
             resolved_module_constants: Rc::new(ResolvedConstantSet::default()),
@@ -415,9 +416,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let AstEnvironmentInput {
             mut module_symbols,
             binding_environment,
+            source_token_owners,
         } = input;
-
         // Move header-owned data into the builder state.
+        self.source_token_owners = source_token_owners;
         let ordered_semantic_declarations =
             std::mem::take(&mut module_symbols.ordered_semantic_declarations);
         let compiler_owned_declarations =
@@ -622,6 +624,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
                 struct_source_by_path: &self.struct_source_by_path,
                 choice_source_by_path: &self.choice_source_by_path,
+                source_paths_by_source_id: &self.module_symbols.source_paths_by_source_id,
                 string_table,
             },
             &mut trait_evidence_environment,
@@ -735,7 +738,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(AstModuleEnvironment {
             lookups: Rc::new(AstModuleLookups {
                 module_symbols: self.module_symbols,
-                binding_environment: self.binding_environment,
+                binding_environment: Rc::new(self.binding_environment),
                 warnings: self.warnings,
                 declaration_table: self.declaration_table,
                 imported_functions_by_local_path: self.projected_imported_functions_by_local_path,
@@ -783,12 +786,35 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         string_table: &StringTable,
     ) -> Result<Arc<FileVisibility>, CompilerMessages> {
+        let source_path = self
+            .module_symbols
+            .source_path_for_header(header)
+            .ok_or_else(|| {
+                self.error_messages(
+                    CompilerError::compiler_error(
+                        "header body range has no prepared source-path identity",
+                    ),
+                    string_table,
+                )
+            })?;
         self.binding_environment
-            .visibility_for(&header.source_file)
+            .visibility_for(&source_path)
             .map(Arc::clone)
             .map_err(|error| self.error_messages(error, string_table))
     }
-
+    pub(crate) fn header_source_path(&self, header: &Header) -> PathId {
+        self.module_symbols
+            .source_path_for_header(header)
+            .expect("header body range has no prepared source-path identity")
+    }
+    pub(crate) fn token_owner(
+        &self,
+        source: SourceId,
+    ) -> Option<Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>> {
+        self.source_token_owners
+            .get(&source)
+            .map(|owner| Arc::clone(owner.tokens()))
+    }
     /// Resolve the declaration-site generic parameter scope for one declaration.
     ///
     /// WHAT: names every generic parameter the declaration introduces, gated by the file's
@@ -833,9 +859,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         self.generic_parameter_scope(
             generic_parameters,
             self.generic_parameter_lists_by_path
-                .get(&header.tokens.src_path)
+                .get(&header.declaration_path)
                 .map(|registered| &registered.canonical_by_local),
-            Some(header.tokens.file_id),
+            Some(header.tokens.source()),
             visibility,
             string_table,
         )
@@ -859,11 +885,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         _string_table: &mut StringTable,
     ) -> ScopeContext {
-        let source_file_scope = header.source_file;
+        let source_file_scope = self
+            .module_symbols
+            .source_path_for_header(header)
+            .expect("header body range has no prepared source-path identity");
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
-            header.tokens.src_path.to_owned(),
+            header.declaration_path.to_owned(),
             Rc::clone(&self.declaration_table),
             Arc::clone(&self.context.external_package_registry),
             vec![],
@@ -877,7 +906,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         .with_resolved_struct_fields_by_path(Rc::clone(&self.resolved_struct_fields_by_path))
         .with_nominal_type_ids_by_path(Rc::clone(&self.nominal_type_ids_by_path))
         .with_source_file_scope(source_file_scope)
-        .with_declaring_file_id(header.tokens.file_id);
+        .with_declaring_file_id(header.tokens.source());
         if let Some(services) = &self.context.file_value_resolution {
             context = context.with_file_value_resolution(Rc::clone(services));
         }
@@ -927,7 +956,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn register_builtin_structs_in_type_environment(
         &mut self,
         string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+    ) -> Result<(), CompilerMessages> {
         let builtin_paths = [builtin_error_type_path(self.path_fork, string_table)];
 
         for path in &builtin_paths {

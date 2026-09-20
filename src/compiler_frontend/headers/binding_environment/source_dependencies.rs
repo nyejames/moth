@@ -211,20 +211,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         registry.register(local_name, binding, local_name_span)?;
 
         if is_type_alias {
-            file_visibility.visible_type_alias_names.insert(
-                local_name,
-                SourceDeclarationTarget::Local(*symbol_path),
-            );
+            file_visibility
+                .visible_type_alias_names
+                .insert(local_name, SourceDeclarationTarget::Local(*symbol_path));
         } else if is_trait {
-            file_visibility.visible_trait_names.insert(
-                local_name,
-                SourceDeclarationTarget::Local(*symbol_path),
-            );
+            file_visibility
+                .visible_trait_names
+                .insert(local_name, SourceDeclarationTarget::Local(*symbol_path));
         } else {
-            file_visibility.visible_source_names.insert(
-                local_name,
-                SourceDeclarationTarget::Local(*symbol_path),
-            );
+            file_visibility
+                .visible_source_names
+                .insert(local_name, SourceDeclarationTarget::Local(*symbol_path));
         }
 
         // Binding a nominal receiver type also binds visible receiver methods

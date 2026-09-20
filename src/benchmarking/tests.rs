@@ -49,9 +49,32 @@ fn frontend_benchmark_runs_for_simple_file() {
     assert_eq!(report.error_count, 0);
 
     assert_eq!(
-        report.retention,
-        Default::default(),
-        "a clean benchmark result should skip frozen render storage entirely"
+        report.retention.source_snapshot_bytes, 0,
+        "a clean benchmark result should skip frozen source snapshots"
+    );
+    assert_eq!(
+        report.retention.extended_span_rows, 0,
+        "a clean benchmark result should skip frozen span storage"
+    );
+    assert_eq!(
+        report.retention.source_identity_slots, 0,
+        "a clean benchmark result should skip frozen source identity storage"
+    );
+    assert_eq!(
+        report.retention.diagnostic_records, 0,
+        "a clean benchmark result should have no diagnostic records"
+    );
+    assert_eq!(
+        report.retention.diagnostic_label_slots, 0,
+        "a clean benchmark result should have no diagnostic labels"
+    );
+    assert_eq!(
+        report.retention.retained_identity_contexts, 0,
+        "a clean benchmark result should not retain frozen identity contexts"
+    );
+    assert_eq!(
+        report.retention.path_table_count, 0,
+        "a clean benchmark result should not retain frozen path tables"
     );
     // Stage timings are collected when `timers` is enabled.
     #[cfg(feature = "timers")]

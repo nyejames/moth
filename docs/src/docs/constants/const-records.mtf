@@ -7,68 +7,60 @@ A fully folded struct instance stored in a constant may become a const record.
     |
 
     defaults #= Defaults("Moth", 2026)
-
     site_title #= defaults.title
 ]
 
 ### Contract
 
-A const record is a data-only compile-time member group.
+A const record is a data-only compile-time member group. Every supplied value
+must fold. Field projection may participate in another constant expression.
 
-Every constructor argument must fold.
+The complete record is unavailable as an ordinary runtime value. It cannot be
+assigned to a runtime binding, passed as a runtime argument, returned from a
+runtime function, stored in a collection or map or used through a runtime
+receiver method.
 
-Const-record field projection may participate in another constant expression.
-
-The complete const record cannot be used as an ordinary runtime value.
-
-It cannot be:
-
-- assigned to a runtime binding
-- passed as a runtime argument
-- returned from a runtime function
-- stored in a collection or map
-- used through a runtime receiver method
-
-Use one folded field when runtime code needs the value.
+Use a folded field when runtime code needs its ordinary value:
 
 [codeblock, $code("moth"):
     io.line(defaults.title)
 ]
 
-Const records preserve their struct-backed field names and types.
+A projection whose result is another const record retains the same restriction.
+Project further to an ordinary value before runtime use.
 
-They do not introduce structural typing or anonymous runtime record identity.
-Ordinary records retain the full language capability of ordinary compile-time values.
-Removing magic configuration record names does not change struct construction, field
-projection or the restrictions on using a complete const record at runtime. Explicit
-`$config` declarations are the accepted queued input-contract spelling, rather than
-special record names; Alpha currently uses `#Config of T`.
+Struct-backed const records preserve their named struct's fields and types.
+Anonymous const records retain named folded fields without declaring a
+constructable type or introducing structural runtime typing. Their existing
+folded export and provenance rules remain in force.
 
 ### Anonymous const records
 
-`|...|` is Moth's pipe-delimited member-list syntax. Context decides whether its
-entries are function parameters, typed struct fields or named const-record values.
+**Accepted queued design.** Parenthesised anonymous const records and inline
+nesting are queued for implementation. See @../progress (Progress) for support.
 
-A compile-time receiving context turns a parameter list into a const record:
+Anonymous construction uses the named-only form of
+@../language-overview/#mon-syntax (MON syntax):
 
 [codeblock, $code("moth"):
-    labels #= |
-        first = "a",
-        second = "b",
-    |
+    labels #= (
+        first = "Priya",
+        second = "Rob",
+    )
+
+    single #= (name = "Moth")
+    empty #= ()
 ]
 
-Every parameter must have a value. Types may be inferred from those values.
-The list does not declare a constructable type. A struct uses the same
-`|...|` list to declare a type that constructors can build.
+Every field has a unique name and an explicit initializer. Types are inferred
+from those values. Labels create fields, not local declarations or parameters.
+`#=` imposes the compile-time requirement. Ordinary `=` does not become a const
+record merely because its fields could fold.
 
-### Nested parameter lists
+### Nested values
 
-A parameter list is one `|...|` group. It does not contain another `|...|`
-list. That is the same composition rule as structs and function signatures.
-
-Declare a child struct or const record first, then name it as a parameter
-value:
+A field may contain an inline anonymous const record, an already declared const
+record or an explicitly constructed nominal value that satisfies constant rules.
 
 [codeblock, $code("moth"):
     Size = |
@@ -76,17 +68,21 @@ value:
         height Int,
     |
 
-    size #= Size(8, 4)
+    settings #= (
+        window = (
+            size = Size(width = 8, height = 4),
+            title = "Strategy",
+        ),
+    )
 
-    inner #= |
-        x = 3,
-    |
-
-    nested #= |
-        size = size,
-        inner = inner,
-    |
+    width #= settings.window.size.width
 ]
 
-A const record still adds compile-time folding and forbids using the complete
-record as a runtime value. Those rules do not change parameters syntax.
+All nested initializers must fold. Initializers use the surrounding scope,
+not names introduced by earlier fields. Nesting introduces neither arbitrary
+compile-time execution nor implicit construction of a named type.
+
+Input contracts belong to declarations rather than record entries. Exact
+configuration placement and processing rules are owned by
+@../project-structure/#build-inputs (Build configuration values).
+The MON format's serialisation domain is a separate future contract.

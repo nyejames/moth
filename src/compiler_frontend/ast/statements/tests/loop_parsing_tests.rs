@@ -6,15 +6,76 @@
 use super::*;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::RangeEndKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
+use std::sync::Arc;
+
+#[test]
+fn malformed_loop_header_payload_stays_infrastructure_error_while_scanning_for_colon() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    let mut owner = builder
+        .finish()
+        .expect("valid loop-header fixture should build a canonical source owner");
+    Arc::get_mut(&mut owner)
+        .expect("the test owner should remain uniquely owned")
+        .corrupt_payload_for_test(0, TokenTag::NUMERIC_LITERAL);
+    let range = owner
+        .full_range()
+        .expect("the canonical test owner should expose a full range");
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("the malformed canonical owner should still construct a cursor");
+
+    let error = super::find_loop_header_colon_index(&mut token_stream)
+        .expect_err("a malformed trusted payload must not become MissingColon");
+
+    assert!(matches!(error, ExpressionParseError::Infrastructure(_)));
+}
+
+#[test]
+fn malformed_loop_header_payload_stays_infrastructure_error_while_checking_empty_window() {
+    let source = SourceId::COMPILATION_ROOT;
+    let mut builder = TestSourceTokensBuilder::new(source);
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, true, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("valid loop-header fixture token should build");
+    let mut owner = builder
+        .finish()
+        .expect("valid loop-header fixture should build a canonical source owner");
+    Arc::get_mut(&mut owner)
+        .expect("the test owner should remain uniquely owned")
+        .corrupt_payload_for_test(0, TokenTag::NUMERIC_LITERAL);
+    let range = owner
+        .full_range()
+        .expect("the canonical test owner should expose a full range");
+    let mut window = AstCursor::from_source_tokens(&owner, range)
+        .expect("the malformed canonical owner should still construct a cursor");
+
+    let error = super::is_empty_header_window(&mut window)
+        .expect_err("a malformed trusted payload must not become EmptyHeader");
+
+    assert!(matches!(error, ExpressionParseError::Infrastructure(_)));
+}
 
 fn loop_fixture_source(loop_body_source: &str) -> String {
     let indented_body = loop_body_source
@@ -83,10 +144,9 @@ fn parses_range_loop_with_pipe_binding() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("i")
     );
     assert!(bindings.index.is_none());
@@ -112,17 +172,15 @@ fn parses_range_loop_with_value_and_index_bindings() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("value")
     );
     assert_eq!(
-        bindings
-            .index
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.index.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
@@ -167,10 +225,9 @@ fn parses_collection_loop_with_pipe_item_binding() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert!(bindings.index.is_none());
@@ -192,17 +249,15 @@ fn parses_collection_loop_with_item_and_index_pipe_bindings() {
     };
 
     assert_eq!(
-        bindings
-            .item
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.item.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("item")
     );
     assert_eq!(
-        bindings
-            .index
-            .as_ref()
-            .and_then(|binding| path_fork.component(binding.id).map(|id| string_table.resolve(id))),
+        bindings.index.as_ref().and_then(|binding| path_fork
+            .component(binding.id)
+            .map(|id| string_table.resolve(id))),
         Some("index")
     );
 }
@@ -299,6 +354,19 @@ fn rejects_range_loop_with_bare_dual_bindings() {
     ));
 }
 
+#[test]
+fn rejects_string_literal_as_range_binding() {
+    let payload =
+        parse_loop_fixture_diagnostic("loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;");
+
+    assert!(matches!(
+        payload,
+        DiagnosticPayload::InvalidLoopHeader {
+            reason: InvalidLoopHeaderReason::BindingMustBeSymbol,
+        }
+    ));
+}
+
 // --------------------------
 //  Loops without bindings
 // --------------------------
@@ -319,7 +387,8 @@ fn parses_collection_loop_without_bindings() {
 
 #[test]
 fn parses_range_loop_without_bindings() {
-    let (ast, path_fork, string_table) = parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
+    let (ast, path_fork, string_table) =
+        parse_loop_fixture("loop 0 to 10:\n    io.line([: [1]])\n;");
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::RangeLoop { bindings, .. } = &body[0].kind else {
@@ -455,7 +524,8 @@ fn parses_inclusive_range_loop_with_tight_ampersand() {
 
 #[test]
 fn parses_omitted_start_exclusive_range_loop() {
-    let (ast, path_fork, string_table) = parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
+    let (ast, path_fork, string_table) =
+        parse_loop_fixture("sum ~= 0\nloop to 5 |i|:\n    sum = sum + i\n;");
 
     let body = loop_function_body(&ast, &path_fork, &string_table);
 

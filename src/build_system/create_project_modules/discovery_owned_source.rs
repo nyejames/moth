@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
@@ -103,13 +104,12 @@ fn prepare_owned_source_text(
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
     let source = match kind {
         SourceFileKind::Moth => {
-            let path = source_files
+            let identity = source_files
                 .get(source_id)
-                .expect("owned source identity must be registered")
-                .logical_path;
-            let tokens = tokenize(
+                .expect("owned source identity must be registered");
+            let tokenized = tokenize(
                 text,
-                path,
+                identity.logical_path,
                 TokenizerEntryMode::SourceFile,
                 style_directives,
                 string_table,
@@ -125,12 +125,22 @@ fn prepare_owned_source_text(
                     SourceDiscoveryError::Infrastructure(error)
                 }
             })?;
+            if tokenized.logical_path != identity.logical_path || tokenized.file_id != source_id {
+                return Err(SourceDiscoveryError::Infrastructure(
+                    CompilerError::compiler_error(
+                        "lexer source identity does not match its registered owned-source identity",
+                    ),
+                ));
+            }
+            let owner = SourceTokenOwner::new(tokenized.tokens);
             PreparedSourceKind::Moth {
-                tokens: Box::new(tokens),
+                owner,
+                path_syntax: tokenized.path_syntax,
             }
         }
-        SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
-        SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
+        SourceFileKind::MothTemplate | SourceFileKind::PlainMarkdown => {
+            PreparedSourceKind::Deferred
+        }
     };
     Ok(PreparedSourceInput { source_id, source })
 }

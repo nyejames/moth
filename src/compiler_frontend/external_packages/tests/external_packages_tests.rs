@@ -329,7 +329,10 @@ fn package_prefix_lookup_supports_exact_namespace_bindings() {
         .expect("core math package should match");
 
     assert_eq!(matched.package_path, "@core/math");
-    assert_eq!(matched.matched_component_count, path_fork.depth(path) as usize);
+    assert_eq!(
+        matched.matched_component_count,
+        path_fork.depth(path) as usize
+    );
 }
 
 #[test]
@@ -339,21 +342,15 @@ fn virtual_package_detection_uses_symbol_suffixes() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let package_symbol =
-        import_path(&["core", "math", "sin"], &mut path_fork, &mut string_table);
-    let source_path =
-        import_path(&["core", "missing", "sin"], &mut path_fork, &mut string_table);
+    let package_symbol = import_path(&["core", "math", "sin"], &mut path_fork, &mut string_table);
+    let source_path = import_path(
+        &["core", "missing", "sin"],
+        &mut path_fork,
+        &mut string_table,
+    );
 
-    assert!(registry.is_virtual_package_dependency(
-        package_symbol,
-        &path_fork,
-        &string_table
-    ));
-    assert!(!registry.is_virtual_package_dependency(
-        source_path,
-        &path_fork,
-        &string_table
-    ));
+    assert!(registry.is_virtual_package_dependency(package_symbol, &path_fork, &string_table));
+    assert!(!registry.is_virtual_package_dependency(source_path, &path_fork, &string_table));
 }
 
 // ------------------------------------------------------------------

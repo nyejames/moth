@@ -19,14 +19,15 @@ use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyCla
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, HeaderBuildContext, HeaderKind, LocalDeclarationOrderingHint,
+    SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenCursor, TokenRange};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
@@ -156,7 +157,9 @@ pub(super) fn dependency_path_for_local_name(
     for dependency in file_dependency_clauses {
         let selections = dependency.selections(dependency_selections)?;
         if selections.is_empty() {
-        if dependency.effective_namespace_local_name(string_table, path_fork) == Some(local_name) {
+            if dependency.effective_namespace_local_name(string_table, path_fork)
+                == Some(local_name)
+            {
                 return Ok(Some(dependency.dependency.path));
             }
             continue;
@@ -194,6 +197,7 @@ pub(super) fn dependency_path_for_local_name(
 /// path handles and their prepared classification without parsing any expression.
 pub(super) fn collect_content_source_ordering_hints(
     headers: &mut [Header],
+    source_tokens: &SourceTokens,
     file_references: &PreparedFileReferenceTable,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
@@ -205,49 +209,78 @@ pub(super) fn collect_content_source_ordering_hints(
     for header in headers {
         let Header {
             kind,
-            tokens,
+            tokens: token_range,
             local_ordering_hints,
+            synthetic_content_payload,
             ..
         } = header;
 
         match kind {
             HeaderKind::Constant { declaration } => {
                 if declaration.config_qualifier.is_none() {
-                    scan_tokens_for_content_sources(
-                        &declaration.initializer_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if let Some(range) = declaration.initializer_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
+
+                    // Moth-template synthetic content keeps its body in `Header::tokens` while
+                    // leaving the declaration initializer range empty. Preserve that single body
+                    // range as the ordering-hint source.
+                    if declaration.initializer_range.is_none()
+                        && matches!(
+                            *synthetic_content_payload,
+                            Some(SyntheticContentPayload::MothTemplate { .. })
+                        )
+                        && !token_range.is_empty()
+                    {
+                        scan_token_range_for_content_sources(
+                            *token_range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
             // Const-template tokens cover both the template head and body, including the
             // top-level compile-time fragments folded before body emission.
             HeaderKind::ConstTemplate { .. } => {
-                scan_tokens_for_content_sources(
-                    &tokens.tokens,
+                scan_token_range_for_content_sources(
+                    *token_range,
+                    source_tokens,
                     &content_targets,
                     local_ordering_hints,
-                );
+                )?;
             }
 
             HeaderKind::Function { signature, .. } => {
                 for parameter in &signature.parameters {
-                    scan_tokens_for_content_sources(
-                        &parameter.default_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if let Some(range) = parameter.default_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
             HeaderKind::Struct { fields, .. } => {
                 for field in fields {
-                    scan_tokens_for_content_sources(
-                        &field.default_tokens,
-                        &content_targets,
-                        local_ordering_hints,
-                    );
+                    if let Some(range) = field.default_range {
+                        scan_token_range_for_content_sources(
+                            range,
+                            source_tokens,
+                            &content_targets,
+                            local_ordering_hints,
+                        )?;
+                    }
                 }
             }
 
@@ -257,11 +290,14 @@ pub(super) fn collect_content_source_ordering_hints(
                         continue;
                     };
                     for field in fields {
-                        scan_tokens_for_content_sources(
-                            &field.default_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        );
+                        if let Some(range) = field.default_range {
+                            scan_token_range_for_content_sources(
+                                range,
+                                source_tokens,
+                                &content_targets,
+                                local_ordering_hints,
+                            )?;
+                        }
                     }
                 }
             }
@@ -305,19 +341,41 @@ fn content_source_targets(
     Ok(targets)
 }
 
-/// Insert one content hint for every path token in the slice whose row is a content source.
-fn scan_tokens_for_content_sources(
-    tokens: &[Token],
+fn scan_token_range_for_content_sources(
+    range: TokenRange,
+    source_tokens: &SourceTokens,
+    content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
+    hints: &mut HashSet<LocalDeclarationOrderingHint>,
+) -> Result<(), CompilerError> {
+    if range.source() != source_tokens.source() {
+        return Err(CompilerError::compiler_error(
+            "content ordering range belongs to a different source token owner",
+        ));
+    }
+    let cursor = source_tokens.cursor(range).map_err(|_| {
+        CompilerError::compiler_error("content ordering range exceeds its source token owner")
+    })?;
+    scan_source_range_for_content_sources(cursor, content_targets, hints);
+    Ok(())
+}
+
+/// Insert one content hint for every path token in the range view whose row is a content source.
+///
+/// WHY: bounded cursor access keeps the per-shell scan allocation-free; path handles come
+/// from the shape and rows keep resolving through the existing prepared table lookup.
+fn scan_source_range_for_content_sources(
+    mut cursor: TokenCursor<'_>,
     content_targets: &FxHashMap<PathSyntaxId, LocalDeclarationOrderingHint>,
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
 ) {
-    for token in tokens {
-        let TokenKind::Path(path_id) = token.kind else {
-            continue;
-        };
-
-        if let Some(target) = content_targets.get(&path_id) {
+    while let Some(token) = cursor.advance() {
+        if let Some(path_id) = token.path_syntax_id()
+            && let Some(target) = content_targets.get(&path_id)
+        {
             hints.insert(target.clone());
+        }
+        if token.is_eof() {
+            break;
         }
     }
 }

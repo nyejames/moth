@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::function_calls::{
@@ -30,10 +31,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Accessed-symbol statement helper
@@ -43,7 +43,7 @@ fn push_accessed_symbol_statement(
     accessed_expression: Expression,
     ast: &mut Vec<AstNode>,
     context: &ScopeContext,
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     _symbol_id: StringId,
     _string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
@@ -76,7 +76,7 @@ fn push_accessed_symbol_statement(
 // --------------------------
 
 pub(crate) fn parse_this_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     ast: &mut Vec<AstNode>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -107,9 +107,9 @@ pub(crate) fn parse_this_statement(
         .into());
     };
 
-    match token_stream.peek_next_token() {
+    match token_stream.peek_next_tag() {
         // Direct reassignment of `this` is never allowed.
-        Some(next_token) if next_token.is_assignment_operator() => {
+        Some(next_tag) if next_tag.is_assignment_operator() => {
             Err(CompilerDiagnostic::invalid_this_usage(
                 InvalidThisUsageReason::Reassignment,
                 Some(token_stream.current_span()),
@@ -119,7 +119,7 @@ pub(crate) fn parse_this_statement(
 
         // Field access on `this`: may be a mutation (`this.x = ...`) or a
         // method/collection call (`this.x()`).
-        Some(TokenKind::Dot) => {
+        Some(TokenTag::DOT) => {
             token_stream.advance();
             let accessed_node = parse_field_access(
                 token_stream,
@@ -130,7 +130,7 @@ pub(crate) fn parse_this_statement(
                 path_fork,
             )?;
 
-            if token_stream.current_token_kind().is_assignment_operator() {
+            if token_stream.current_tag().is_assignment_operator() {
                 let Some(target) = place_expression_from_expression(&accessed_node) else {
                     return Err(CompilerDiagnostic::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
@@ -197,7 +197,7 @@ pub(crate) fn parse_this_statement(
 // --------------------------
 
 pub(crate) fn parse_symbol_statement(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     ast: &mut Vec<AstNode>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -205,7 +205,7 @@ pub(crate) fn parse_symbol_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
+    let Some(symbol_id) = token_stream.current_string_id_in(string_table)? else {
         return Err(CompilerDiagnostic::expected_symbol_statement(Some(
             token_stream.current_span(),
         ))
@@ -241,9 +241,13 @@ pub(crate) fn parse_symbol_statement(
         .into());
     }
 
-    if let Some(multi_bind_node) =
-        parse_multi_bind_statement(token_stream, context, type_interner, string_table, path_fork)?
-    {
+    if let Some(multi_bind_node) = parse_multi_bind_statement(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )? {
         ast.push(multi_bind_node);
         return Ok(());
     }
@@ -251,9 +255,9 @@ pub(crate) fn parse_symbol_statement(
     // If the symbol already names a visible local, treat it as a use
     // (assignment, field access, or expression) rather than a new declaration.
     if let Some(existing_reference) = context.get_reference(&symbol_id) {
-        match token_stream.peek_next_token() {
+        match token_stream.peek_next_tag() {
             // Direct reassignment of an existing local variable.
-            Some(next_token) if next_token.is_assignment_operator() => {
+            Some(next_tag) if next_tag.is_assignment_operator() => {
                 token_stream.advance();
                 let mutation_node = handle_mutation(
                     token_stream,
@@ -270,7 +274,7 @@ pub(crate) fn parse_symbol_statement(
             }
 
             // Field access on an existing local: may be a mutation or a call.
-            Some(TokenKind::Dot) => {
+            Some(TokenTag::DOT) => {
                 token_stream.advance();
                 let accessed_node = parse_field_access(
                     token_stream,
@@ -281,7 +285,7 @@ pub(crate) fn parse_symbol_statement(
                     path_fork,
                 )?;
 
-                if token_stream.current_token_kind().is_assignment_operator() {
+                if token_stream.current_tag().is_assignment_operator() {
                     let Some(target) = place_expression_from_expression(&accessed_node) else {
                         return Err(CompilerDiagnostic::invalid_assignment_target(
                             InvalidAssignmentTargetReason::TemporaryNotAssignable,
@@ -323,21 +327,18 @@ pub(crate) fn parse_symbol_statement(
 
             // A type keyword after an existing symbol means the user is trying to
             // redeclare it with an explicit type, which is a shadowing error.
-            Some(TokenKind::DatatypeInt)
-            | Some(TokenKind::DatatypeFloat)
-            | Some(TokenKind::DatatypeBool)
-            | Some(TokenKind::DatatypeString)
-            | Some(TokenKind::DatatypeChar)
-            | Some(TokenKind::Mutable) => {
+            Some(TokenTag::DATATYPE_INT)
+            | Some(TokenTag::DATATYPE_FLOAT)
+            | Some(TokenTag::DATATYPE_BOOL)
+            | Some(TokenTag::DATATYPE_STRING)
+            | Some(TokenTag::DATATYPE_CHAR)
+            | Some(TokenTag::MUTABLE) => {
                 let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
                     existing_reference.value.span,
                     Some(token_stream.current_span()),
                 );
-                diagnostic.primary_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.tokens[token_stream.index].span,
-                ));
+                diagnostic.primary_span = Some(token_stream.current_span());
                 return Err(diagnostic.into());
             }
 
@@ -367,7 +368,7 @@ pub(crate) fn parse_symbol_statement(
     if let Some((external_function_id, external_function_def)) =
         context.lookup_visible_external_function(symbol_id)
     {
-        if token_stream.peek_next_token() == Some(&TokenKind::TypeParameterBracket) {
+        if token_stream.peek_next_tag() == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
             // Explicit external imports retain the authored dependency span; prelude-injected
             // symbols intentionally have no source span to attach.
             let previous_span = context
@@ -413,7 +414,7 @@ pub(crate) fn parse_symbol_statement(
 
     // An open parenthesis after an unknown symbol means a call attempt.
     // Provide targeted diagnostics for receiver methods and external types.
-    if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
         if let Some(receiver_method_entry) =
             context.lookup_visible_receiver_method_by_name(symbol_id)
         {
@@ -446,7 +447,7 @@ pub(crate) fn parse_symbol_statement(
     // namespace symbol, but they are valid side-effect statements when the field access resolves
     // to a call. Route them through expression-statement validation before declaration parsing
     // interprets the leading symbol as a malformed declaration.
-    if token_stream.peek_next_token() == Some(&TokenKind::Dot) {
+    if token_stream.peek_next_tag() == Some(TokenTag::DOT) {
         let expression = parse_symbol_expression_statement_candidate(
             token_stream,
             context,

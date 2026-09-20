@@ -7,6 +7,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
@@ -25,10 +26,11 @@ use crate::compiler_frontend::ast::expressions::generic_nominal_inference::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
-    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch,
+    reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidChoiceVariantReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidChoiceVariantReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -36,10 +38,9 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Parse a `Choice::Variant` or `Choice::Variant(...)` construct expression.
@@ -51,7 +52,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// WHY: the caller has already verified the base symbol is a choice declaration
 /// and that `::` follows it.
 pub(super) fn parse_choice_construct(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     choice_declaration: &Declaration,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -93,7 +94,7 @@ pub(super) fn parse_choice_construct(
         .to_owned();
 
     token_stream.advance();
-    if token_stream.current_token_kind() != &TokenKind::DoubleColon {
+    if token_stream.current_tag() != TokenTag::DOUBLE_COLON {
         return Err(CompilerError::compiler_error(format!(
             "Choice construct parser expected '::' after choice name '{}'.",
             choice_name_str
@@ -104,16 +105,17 @@ pub(super) fn parse_choice_construct(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    let variant_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
-    let variant_name = match token_stream.current_token_kind() {
-        TokenKind::Symbol(name) => *name,
+    let variant_span = Some(token_stream.current_span());
+    let variant_name = match token_stream.current_tag() {
+        TokenTag::SYMBOL => token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                CompilerError::compiler_error("choice variant symbol had no string payload")
+            })?,
 
-        TokenKind::Must | TokenKind::TraitThis => {
-            let keyword = reserved_trait_keyword_or_dispatch_mismatch(
-                token_stream.current_token_kind(),
+        TokenTag::MUST | TokenTag::TRAIT_THIS => {
+            let keyword = reserved_trait_keyword_or_dispatch_mismatch_for_tag(
+                token_stream.current_tag(),
                 Some(token_stream.current_span()),
                 "Expression Parsing",
                 "choice variant expression parsing",
@@ -124,9 +126,18 @@ pub(super) fn parse_choice_construct(
             );
         }
 
-        found => {
-            return Err(CompilerDiagnostic::unexpected_token(
-                found.clone(),
+        _ => {
+            let found_token = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "choice variant diagnostic",
+                    )
+                })?
+                .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                found_token,
                 Some(token_stream.current_span()),
             )
             .into());
@@ -150,7 +161,7 @@ pub(super) fn parse_choice_construct(
     };
 
     let variant = &variant_definitions[variant_index];
-    let has_parens = token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis);
+    let has_parens = token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS);
     let mut parsed_payload_arguments = None;
     let mut constructor_span = variant_span;
 
@@ -244,7 +255,7 @@ pub(super) fn parse_choice_construct(
             if has_parens {
                 token_stream.advance(); // past '('
 
-                if token_stream.current_token_kind() == &TokenKind::CloseParenthesis {
+                if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
                     return Err(CompilerDiagnostic::invalid_choice_variant(
                         InvalidChoiceVariantReason::UnitVariantWithParentheses,
                         path_fork.component(choice_declaration.id),

@@ -2,9 +2,13 @@
 
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
-> **Status:** Accepted end-state architecture. Implementation is active under
-> `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`; user-facing
-> diagnostic improvement work remains paused until that plan completes.
+> **Status:** Accepted end-state architecture. Phase 3 fixed-token/source-owned implementation is
+> complete at checkpoint `6309adf6d`; R5 closeout corrections and exact final evidence are accepted
+> at `4cfd9d492`. The owning plan records constant and nominal fits within their locked budgets and
+> explicitly accepts the inherited generic `n^1.70` exception (`n^1.770`) without raising or
+> loosening that budget or claiming no worsening. The post-Phase-3 compiler tidy-up, then MON syntax,
+> MON Rust tooling, Wiring and native result-slot checkpoints precede explicit Phase 4 reactivation.
+> User-facing diagnostic improvement work remains paused until that gate.
 >
 > **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
 > `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
@@ -799,6 +803,66 @@ slices or another immutable dense owner. An array-of-structs experiment may plac
 span together, but only if it materially outperforms the split representation and still preserves the
 8-byte/4-byte contracts.
 
+**Slice 3A layout selection (2026-09-14):** the canonical production layout remains the split
+SoA `Vec`/`Box<[TokenShape]>` plus `Vec`/`Box<[LocalSpan]>` shown above. A short-lived Rust `-O`
+probe (not a second benchmark runner; no permanent probe added) compared it against compact AoS
+`TokenRecord { shape: TokenShape, span: LocalSpan }` at the required 12-byte layout with
+N=41,331 representative tokens (`TokenShape` 8 bytes, `LocalSpan` 4 bytes, AoS record 12 bytes;
+both layouts held 495,972 capacity bytes). The probe used a parser-cursor-shaped loop with
+current shape/span reads, adjacent peek checks and advance-style indexing, plus conditional flag
+reads to exercise cache-sensitive access patterns. Five independent invocations showed SoA faster
+in every parser-cursor mode: flags=false SoA ~5.681-5.804 ms vs AoS ~6.158-6.513 ms; flags=true
+SoA ~6.692-6.884 ms vs AoS ~8.161-8.515 ms. A repeated checked range/length validation loop ran
+12,399,300 checks per layout with SoA ~1.881-1.938 ms and AoS ~1.928-1.948 ms, with zero
+failures. This is a parser/cache/validation proxy rather than a full production parser benchmark;
+later Phase 3 benchmark evidence still owns end-to-end parser, retention and timing checks. AoS
+showed no repeatable material improvement at equal retained capacity, so the SoA baseline is
+preserved per the benchmark-selectable rule above.
+
+**Slice 3B taxonomy (2026-09-14, completed in 3H):** `src/compiler_frontend/tokenizer/schema.rs`
+owns the sole `token_schema!` row authority for the explicit token vocabulary, descriptor payload
+kinds, allowed flags and classification facts. It supplies the checked 8-byte `TokenShape` and
+schema-owned classification/precedence accessors. Every production and test parser consumer reads
+`TokenTag`, `TokenRef` and typed payload facts; no wide token enum or compatibility taxonomy remains.
+`DiagnosticToken` remains a separate 8-byte projection over the same `TokenTag` and descriptor
+payload facts. Dynamic values are extracted only at that projection boundary. Lexical spelling
+ownership remains in `keywords.rs` and the typed cold stores.
+
+**Slice 3C cold stores (2026-09-14, completed in 3H):** `NumericLiteralStore` in
+`src/compiler_frontend/numeric_text/store.rs` retains numeric lexical records outside the fixed
+token word and reuses the shared `numeric_text` grammar. Its one-based `NumericLiteralId` and the
+existing source-owned `PathSyntaxTable`'s one-based `PathSyntaxId` reject zero, out-of-range and
+foreign ownership at checked boundaries. The canonical path tag carries only that dense handle.
+Symbols, strings, booleans and scalar characters use validated direct `TokenShape` payloads.
+Numeric/path stores remap at their owner boundary, freeze at ordinary prepared-source publication,
+and persistent generic capture validates donor path handles against the source-owned path table
+without copying a per-generic path or numeric subset. Numeric payloads carry donor `StringId`s until
+the requester boundary translates them by spelling.
+
+**Slice 3D storage and cursor ownership (2026-09-14, completed in 3H):** `SourceTokens` is the one
+canonical immutable SoA owner for a source: boxed `TokenShape`/`LocalSpan` arrays, a typed numeric
+side-store, the source-owned `PathSyntaxTable` and the segmented sequence store. `TokenIndex(u32)`,
+checked half-open `TokenRange`, borrowed `TokenCursor` and copyable `TokenRef` expose bounded views
+without cloning cold payloads. Headers, declarations, templates and generic bodies retain ranges or
+sequence IDs, never token vectors. Cursor boundaries, stable EOF/peek, nested ranges, publication
+attachment and malformed cold-store rejection are covered by focused tokenizer tests.
+
+**3H final ownership boundary (2026-09-20):** `Header` retains `TokenRange` bodies and optional
+`TokenSequenceId` start syntax over the canonical owner. `SourceTokenOwner` carries only the
+canonical `Arc<SourceTokens>` and owns its final source-local sequence registration; source logical
+and OS paths resolve through their existing source/donor owners. `StableBodyOwner` retains one
+canonical source owner per generic body, while `SharedDonorIdentity` shares one frozen declaring
+string table per domain. Foreign donor path/string tables are explicit typed provenance; the parser
+borrows the donor range and translates only consumed payloads through `TokenPayloadOrigin`, so no
+rebased token window, copied numeric/path store or parser compatibility vector is retained or built.
+
+**3H-R3a construction ownership (2026-09-18):** the tokenizer's `SourceTokensBuilder` packs shapes,
+spans and typed cold-store handles in the lexing pass, so the canonical owner is never derived from
+a token vector. The resulting-length preflight rejects `u32::MAX + 1` before mutating builder
+arrays, statistics or staged numeric state and maps through the typed capacity diagnostic. The
+lexer and test source helper use this same forward construction owner.
+
+
 ### Token references and ranges
 
 ```rust
@@ -845,7 +909,7 @@ pub struct PathSyntaxTable {
 #[repr(C)]
 pub struct PathSyntax {
     root: PathId,
-    location: LocalSpan,
+    span: LocalSpan,
 }
 ```
 
@@ -863,9 +927,20 @@ Rules:
 - the table is owned by the source-owned token store and freezes with it
 - string-table remapping visits the table once for path roots
 - source identity rebinding updates table locations once
-- frozen generic bodies retain only the referenced path rows, and capture the matching resolved
-  file-reference entries in the same pass so a materialised body reaches its content or resource
-  target through generic-local handles instead of stale donor handles or a second filesystem lookup
+- frozen generic bodies copy no path rows. Capture walks the retained canonical range with a
+  `TokenCursor`, validates every donor path handle against the source-owned path table, and
+  retains the matching resolved file-reference entries in the same pass so a materialised body
+  reaches its content or resource target through stable facts instead of a second filesystem lookup
+- generic donor identity is one `SharedDonorIdentity` per declaring domain, frozen once and shared
+  across that domain's templates and every clone of the declaring preparation. `StableBodySyntax`
+  carries the donor/source identity, frozen identity handle, canonical `StableBodyOwner`, resolved
+  file-reference facts and the identity tables that issued payload IDs. `StableBodyOwner` retains
+  only the canonical `SourceTokens`; filesystem identity is resolved through its sibling syntax
+  fields and the `SourceDatabase`. Capture retains a frozen string owner, and a path table joins
+  it when path roots must be rebased. The parser borrows the retained donor range and translates
+  only consumed payloads through typed `TokenPayloadOrigin`; it never builds or retains a rebased
+  token window. The body constructor is the single owner of the rule that a donor path table is
+  invalid without its issuing string table.
 - no path row owns a vector-backed path or a global source span when the enclosing source is
   already known
 - path syntax rows stay syntax-only. Semantic resource identity, filesystem resolution, output
@@ -1648,6 +1723,16 @@ create a second optimisation report or a second benchmark runner.
 
 Raw allocator logs, profiler captures and per-run data remain uncommitted.
 
+The Phase 3 ledger extends this owner under the `data_layout_memory_probe` feature in
+`src/compiler_frontend/instrumentation/memory_ledger.rs`. It reports distinct live
+`SourceTokens` owners and shape/span, numeric/path/sequence storage bytes and capacities; cumulative
+and peak transient construction buffers; requester remap tables; distinct donor string/path tables;
+and generic source-owner live/peak bytes. Owner drop hooks retire live keys without retaining
+compiler-owned `Arc` handles, and the command-scoped reset/warm-up keeps ledger bookkeeping outside
+allocator deltas. Reports mark bounded-map overflow as incomplete rather than presenting an
+under-count as complete evidence. Clean success may retain no frozen report context; warning and
+diagnosed outcomes retain exactly the identity tables needed to render their records.
+
 ### Required baseline measurements
 
 Before changing representation, record with the exact CI toolchain:
@@ -1796,8 +1881,12 @@ Tests distinguish:
 ### Full gates
 
 Every code-bearing accepted slice runs the focused tests for its owner, formatting where Rust changed,
-the required benchmark check and the repository's full `just validate` gate. Each phase also performs
-a manual architecture and style-guide review.
+the required benchmark check and the repository's full `just validate` gate. The gate's Rust unit
+suite uses the memory-bounded `just validate-unit-tests` recipe; integration and performance lanes
+remain on their normal commands so their critical behaviour is still exercised. If a validation host
+cannot safely run the aggregate recipe, run the same required lanes sequentially and record the
+exact memory and thread settings. Each phase also performs a manual architecture and style-guide
+review.
 
 ## Extension rules
 

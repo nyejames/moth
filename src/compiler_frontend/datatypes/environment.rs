@@ -15,8 +15,8 @@ use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::traits::ids::TraitId;
 
@@ -1782,13 +1782,9 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Decimal | BuiltinTypeKey::Range | BuiltinTypeKey::None => None,
             },
 
-            TypeDefinition::Struct(definition) => {
-                Some(ReceiverKey::Struct(definition.path))
-            }
+            TypeDefinition::Struct(definition) => Some(ReceiverKey::Struct(definition.path)),
 
-            TypeDefinition::Choice(definition) => {
-                Some(ReceiverKey::Choice(definition.path))
-            }
+            TypeDefinition::Choice(definition) => Some(ReceiverKey::Choice(definition.path)),
 
             TypeDefinition::GenericInstance(instance) => {
                 let base_type_id = self.type_id_for_nominal_id(instance.base)?;
@@ -2178,10 +2174,7 @@ impl TypeEnvironment {
         }
     }
 
-    fn remap_variant_path_fields(
-        variants: &mut [ChoiceVariantDefinition],
-        remap: &PathIdRemap,
-    ) {
+    fn remap_variant_path_fields(variants: &mut [ChoiceVariantDefinition], remap: &PathIdRemap) {
         for variant in variants {
             if let ChoiceVariantPayloadDefinition::Record { fields } = &mut variant.payload {
                 Self::remap_path_fields(fields.as_mut(), remap);

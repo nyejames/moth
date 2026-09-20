@@ -1,4 +1,6 @@
 use super::*;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // ------------------------------
 //  Export block parsing tests
@@ -14,7 +16,7 @@ fn export_alone_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -32,7 +34,7 @@ fn legacy_inline_export_declaration_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -93,7 +95,7 @@ fn legacy_export_path_syntax_is_rejected() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -111,7 +113,7 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
         matches!(
             diagnostic.payload,
             DiagnosticPayload::ExpectedToken { expected, .. }
-                if expected == DiagnosticToken::from(TokenKind::Colon)
+                if expected == DiagnosticToken::from_static_tag(TokenTag::COLON)
         )
     }));
 }
@@ -299,8 +301,13 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/test.moth");
     let source = "make |items ~{capacity MyType}| -> Int:\n    return 1\n;\n";
-    let (output, mut span_builder) =
-        prepare_single_file_with_fork(source, &file_path, &file_path, &mut string_table, &mut path_fork);
+    let (output, mut span_builder) = prepare_single_file_with_fork(
+        source,
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
@@ -317,7 +324,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
         .headers
         .iter()
         .find(|h| {
-            matches!(h.kind, HeaderKind::Function { .. }) && h.tokens.src_path != PathId::ROOT
+            matches!(h.kind, HeaderKind::Function { .. }) && h.declaration_path != PathId::ROOT
         })
         .expect("make header should exist");
 

@@ -77,18 +77,23 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table,
-    "main",
-    vec![block],
-    function,
-    &[(LocalId(0), "loaded"), (LocalId(1), "copied")],);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "loaded"), (LocalId(1), "copied")],
+    );
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let loaded_name = expected_dev_local_name("loaded", 0);
@@ -174,15 +179,18 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
         return_type: types.unit,
     };
 
-    let mut module = build_module(&mut path_fork, &mut string_table,
-    "main",
-    vec![block],
-    function,
-    &[
-        (LocalId(0), "target"),
-        (LocalId(1), "copy_source"),
-        (LocalId(2), "load_source"),
-    ],);
+    let mut module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[
+            (LocalId(0), "target"),
+            (LocalId(1), "copy_source"),
+            (LocalId(2), "load_source"),
+        ],
+    );
 
     module.structs = vec![HirStruct {
         id: StructId(0),
@@ -200,19 +208,25 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
     }];
     module.side_table.bind_field_name(
         FieldId(0),
-        path_fork.try_intern_portable_path("copy_field", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("copy_field", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_field_name(
         FieldId(1),
-        path_fork.try_intern_portable_path("load_field", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("load_field", &mut string_table)
+            .expect("test path fits"),
     );
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let copy_source_name = expected_dev_local_name("copy_source", 1);
@@ -309,23 +323,33 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("main", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("main", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_function_name(
         FunctionId(1),
-        path_fork.try_intern_portable_path("callee", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("callee", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        path_fork.try_intern_portable_path("copy_source", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("copy_source", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        path_fork.try_intern_portable_path("result", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("result", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(2),
-        path_fork.try_intern_portable_path("load_source", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("load_source", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
@@ -334,12 +358,14 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         .function_origins
         .insert(FunctionId(1), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let copy_source_name = expected_dev_local_name("copy_source", 0);
@@ -415,18 +441,23 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
         return_type: types.unit,
     };
 
-    let module = build_module(&mut path_fork, &mut string_table,
-    "main",
-    vec![block],
-    function,
-    &[(LocalId(0), "loaded"), (LocalId(1), "copied")],);
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "loaded"), (LocalId(1), "copied")],
+    );
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let loaded_name = expected_dev_local_name("loaded", 0);
@@ -485,22 +516,28 @@ fn load_in_return_reads_value_without_cloning() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("identity", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("identity", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("value", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let param_name = expected_dev_local_name("value", 0);
@@ -561,22 +598,28 @@ fn copy_in_return_value_emits_clone_value() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("clone_return", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("clone_return", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        path_fork.try_intern_portable_path("value", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("value", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let param_name = expected_dev_local_name("value", 0);
@@ -644,26 +687,34 @@ fn tuple_return_preserves_return_value_handling_per_element() {
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("pair", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("pair", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(0),
-        path_fork.try_intern_portable_path("first", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("first", &mut string_table)
+            .expect("test path fits"),
     );
     module.side_table.bind_local_name(
         LocalId(1),
-        path_fork.try_intern_portable_path("second", &mut string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("second", &mut string_table)
+            .expect("test path fits"),
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
 
-    let output = lower_hir_to_js(&module,
-    &BorrowCheckReport::default(),
-    &string_table,
-    default_config(),
-    &type_environment,
-    &path_fork.snapshot_table())
+    let output = lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
     .expect("JS lowering should succeed");
 
     let first_name = expected_dev_local_name("first", 0);

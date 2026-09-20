@@ -288,8 +288,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             "Imported generic nominal has no canonical local path",
                         )
                     })?;
-                Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(internal_path, kind);
+                Rc::make_mut(&mut self.generic_declarations_by_path).insert(internal_path, kind);
 
                 if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
                     let fields = self
@@ -471,7 +470,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let field_path = self
                 .path_fork
                 .try_intern_child(nominal_path, string_table.intern(&field.name))
-                .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("Imported field path table exhausted")
+                })?;
             fields.push(FieldDefinition {
                 name: field_path,
                 type_id: field_type_id,
@@ -538,9 +539,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             .path_fork
                             .try_intern_child(nominal_path, string_table.intern(&field.name))
                             .ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "Imported field path table exhausted",
-                                )
+                                CompilerError::compiler_error("Imported field path table exhausted")
                             })?,
                         type_id: field_type_id,
                         span: None,

@@ -119,10 +119,7 @@ impl TopLevelDeclarationTable {
     }
 
     #[cfg(test)]
-    pub(crate) fn new(
-        declarations: Vec<Declaration>,
-        path_fork: &PathInternerFork,
-    ) -> Self {
+    pub(crate) fn new(declarations: Vec<Declaration>, path_fork: &PathInternerFork) -> Self {
         let ordered_declarations: Vec<_> = declarations
             .into_iter()
             .enumerate()

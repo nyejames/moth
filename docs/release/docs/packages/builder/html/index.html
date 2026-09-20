@@ -763,7 +763,7 @@ canvas <span class='moth-code-operator'>~=</span> <span class='moth-code-functio
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@html</code> provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from <code>packages/html/@mod.moth</code>. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@html</code> ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the standard library expands.</p><h3>Implicit scope for Moth template files</h3><p>Exported compile-time constants from <code>@html</code> are visible inside <code>.mtf</code> files without an explicit dependency clause. This is the primary way authors use the helpers.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/intro.mtf</span>
+    <p><code>@html</code> provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from <code>packages/html/@mod.moth</code>. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@html</code> ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the first-party packages expand.</p><h3>Implicit scope for Moth template files</h3><p>Exported compile-time constants from <code>@html</code> are visible inside <code>.mtf</code> files without an explicit dependency clause. This is the primary way authors use the helpers.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- docs/intro.mtf</span>
 <span class='moth-code-delimiter'>[</span>p<span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>A</span> paragraph built from the <span class='moth-code-string'>@html</span> p helper.<span class='moth-code-delimiter'>]</span>
 
 <span class='moth-code-delimiter'>[</span>codeblock, <span class='moth-code-directive'>$code</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;moth&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>:</span> value <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span><span class='moth-code-delimiter'>]</span></code></pre><p>A <code>.moth</code> file that needs specific <code>@html</code> symbols can bind them explicitly:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@html</span> <span class='moth-code-nominal'>table</span>, <span class='moth-code-nominal'>th</span>, <span class='moth-code-nominal'>td</span></code></pre><p>Same-directory module root constants and <code>@html</code> constants don&#39;t shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See <a href="../../../moth-templates/#template-scope">Template scope</a> for the full collision contract.</p><h3>Exported constants</h3><p>All helpers are compile-time <code>#String</code> constants that produce HTML strings. They fold at compile time and produce no runtime code.</p><h4>HTML tags</h4><table style="">
@@ -887,7 +887,7 @@ canvas <span class='moth-code-operator'>~=</span> <span class='moth-code-functio
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>set_fill_style</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><p>Both <code>get_canvas</code> and <code>get_canvas_context</code> return through <code>Error!</code> because the underlying <code>@web/canvas</code> functions can fail when the canvas element does not exist or the browser denies a 2D context.</p><h3>Backend behaviour</h3><p>The compile-time constants need no runtime assets. They fold into HTML strings during compilation.</p><p>The canvas wrapper functions call through to <code>@web/canvas</code>, which emits JavaScript runtime assets when reachable. See <a href="../canvas">@web/canvas</a> for the runtime asset contract.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@html/p</code> face rejection. Use direct selections or a namespace clause.</li><li><code>@html</code> does not expose opaque types of its own. <code>Canvas2d</code> comes from <code>@web/canvas</code>.</li><li>Only compile-time constants are visible inside <code>.mtf</code> files. Functions and types require an explicit dependency clause in <code>.moth</code> files.</li></ul><h3>Deferred surfaces</h3><p><code>@html</code> ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the standard library matures. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For <code>.mtf</code> implicit scope see <a href="../../../moth-templates/#template-scope">Template scope</a>.</li><li>For the <code>@web/canvas</code> runtime package see <a href="../canvas">@web/canvas</a>.</li></ul>
+<span class='moth-code-operator'>~</span>canvas.<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><p>Both <code>get_canvas</code> and <code>get_canvas_context</code> return through <code>Error!</code> because the underlying <code>@web/canvas</code> functions can fail when the canvas element does not exist or the browser denies a 2D context.</p><h3>Backend behaviour</h3><p>The compile-time constants need no runtime assets. They fold into HTML strings during compilation.</p><p>The canvas wrapper functions call through to <code>@web/canvas</code>, which emits JavaScript runtime assets when reachable. See <a href="../canvas">@web/canvas</a> for the runtime asset contract.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@html/p</code> face rejection. Use direct selections or a namespace clause.</li><li><code>@html</code> does not expose opaque types of its own. <code>Canvas2d</code> comes from <code>@web/canvas</code>.</li><li>Only compile-time constants are visible inside <code>.mtf</code> files. Functions and types require an explicit dependency clause in <code>.moth</code> files.</li></ul><h3>Deferred surfaces</h3><p><code>@html</code> ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the first-party packages mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For <code>.mtf</code> implicit scope see <a href="../../../moth-templates/#template-scope">Template scope</a>.</li><li>For the <code>@web/canvas</code> runtime package see <a href="../canvas">@web/canvas</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1099,99 +1099,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

@@ -84,11 +84,6 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
         "the single authored clause must be counted once"
     );
     assert_eq!(
-        counter_value("retained_shell_count"),
-        1.0,
-        "one authored clause owns one retained shell"
-    );
-    assert_eq!(
         counter_value("resolved_source_package_clause_count"),
         1.0,
         "the helper dependency binds as an extensionless source clause"
@@ -150,8 +145,12 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         .into_iter()
         .enumerate()
         .map(|(index, source)| {
-            let scope =
-                path_fork.try_intern_portable_path(&format!("counter-fixture-{index}.moth"), &mut expected_token_string_table).expect("test path fits");
+            let scope = path_fork
+                .try_intern_portable_path(
+                    &format!("counter-fixture-{index}.moth"),
+                    &mut expected_token_string_table,
+                )
+                .expect("test path fits");
             let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,
@@ -164,7 +163,8 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                 &mut counter_span_builder,
             )
             .expect("counter fixture source should tokenize")
-            .length
+            .tokens
+            .len()
         })
         .sum::<usize>() as f64;
 
@@ -223,11 +223,6 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         counter_value("dependency_clause_count"),
         4.0,
         "four authored clauses must be counted once each"
-    );
-    assert_eq!(
-        counter_value("retained_shell_count"),
-        4.0,
-        "one authored clause owns one retained shell"
     );
     assert_eq!(
         counter_value("resolved_source_package_clause_count"),

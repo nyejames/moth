@@ -97,10 +97,7 @@ pub(crate) struct HirDisplayContext<'a> {
 
 #[cfg(any(test, feature = "show_hir"))]
 impl<'a> HirDisplayContext<'a> {
-    pub(crate) fn new(
-        string_table: &'a StringTable,
-        path_fork: &'a PathInternerFork,
-    ) -> Self {
+    pub(crate) fn new(string_table: &'a StringTable, path_fork: &'a PathInternerFork) -> Self {
         Self {
             string_table,
             path_fork,
@@ -979,10 +976,9 @@ impl<'a> HirDisplayContext<'a> {
     }
 
     fn function_label(&self, function_id: FunctionId) -> String {
-        if let Some(name) = self
-            .side_table
-            .and_then(|side| side.resolve_function_name(function_id, self.path_fork, self.string_table))
-        {
+        if let Some(name) = self.side_table.and_then(|side| {
+            side.resolve_function_name(function_id, self.path_fork, self.string_table)
+        }) {
             return name.to_owned();
         }
 

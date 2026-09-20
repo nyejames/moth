@@ -233,6 +233,20 @@ impl FrozenStringTable {
     pub fn len(&self) -> usize {
         self.strings.len()
     }
+
+    /// Bytes occupied by the frozen string-table backing slice and string payloads.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn storage_bytes(&self) -> usize {
+        self.strings
+            .len()
+            .saturating_mul(std::mem::size_of::<Box<str>>())
+            .saturating_add(
+                self.strings
+                    .iter()
+                    .map(|string| string.len())
+                    .sum::<usize>(),
+            )
+    }
     /// Resolve an interned string ID back to its string content.
     ///
     /// # Panics
@@ -257,6 +271,12 @@ impl FrozenStringTable {
             .iter()
             .enumerate()
             .map(|(index, string)| (StringId(index as u32), string.as_ref()))
+    }
+}
+#[cfg(feature = "data_layout_memory_probe")]
+impl Drop for FrozenStringTable {
+    fn drop(&mut self) {
+        crate::compiler_frontend::instrumentation::release_donor_identity_string(self);
     }
 }
 

@@ -15,7 +15,9 @@ use super::expression::Expression;
 use super::expression_rpn::ExpressionRpnItem;
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
@@ -23,9 +25,9 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -64,15 +66,20 @@ pub(super) struct LiteralParseState<'a> {
 /// `next_number_negative` fallback keeps parser-owned unary negation and hand-built test streams
 /// on the same signed-i32 boundary policy as tokenizer-signed literals.
 pub(super) fn parse_literal_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut LiteralParseState<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    match token_stream.current_token_kind().to_owned() {
-        TokenKind::NumericLiteral(token) => {
+    match token_stream.current_tag() {
+        TokenTag::NUMERIC_LITERAL => {
+            let token = token_stream
+                .current_numeric_literal_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("numeric literal token had no payload")
+                })?;
             let span = Some(token_stream.current_span());
 
             let expression = if token.kind == NumericLiteralKind::WholeNumber {
@@ -121,7 +128,12 @@ pub(super) fn parse_literal_expression(
             Ok(())
         }
 
-        TokenKind::StringSliceLiteral(string) => {
+        TokenTag::STRING_SLICE_LITERAL => {
+            let string = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("string literal token had no payload")
+                })?;
             let span = Some(token_stream.current_span());
             let string_expr = Expression::string_slice(string, span, state.value_mode.to_owned());
             token_stream.advance();
@@ -138,7 +150,13 @@ pub(super) fn parse_literal_expression(
             Ok(())
         }
 
-        TokenKind::BoolLiteral(value) => {
+        TokenTag::BOOL_LITERAL => {
+            let value = token_stream
+                .current()
+                .and_then(|token| token.bool_value())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("boolean literal token had no payload")
+                })?;
             let span = Some(token_stream.current_span());
             let bool_expr = Expression::bool(value, span, state.value_mode.to_owned());
             token_stream.advance();
@@ -155,7 +173,13 @@ pub(super) fn parse_literal_expression(
             Ok(())
         }
 
-        TokenKind::CharLiteral(value) => {
+        TokenTag::CHAR_LITERAL => {
+            let value = token_stream
+                .current()
+                .and_then(|token| token.char_value())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("char literal token had no payload")
+                })?;
             let span = Some(token_stream.current_span());
             let char_expr = Expression::char(value, span, state.value_mode.to_owned());
             token_stream.advance();
@@ -172,7 +196,7 @@ pub(super) fn parse_literal_expression(
             Ok(())
         }
 
-        TokenKind::NoneLiteral => {
+        TokenTag::NONE_LITERAL => {
             let span = Some(token_stream.current_span());
             let (inner_type_id, inner_diagnostic_type) =
                 if let ExpectedType::Known(expected_type_id) = state.expected_type {
@@ -192,8 +216,8 @@ pub(super) fn parse_literal_expression(
                         diagnostic_type_spelling(inner_type_id, type_environment),
                     )
                 } else if none_literal_has_option_equality_context(token_stream) {
-                    // Comparisons like `value is none` and `none is value` infer the option
-                    // shape from the opposite operand during evaluation.
+                    // Comparisons like `value is none` and `none is value` infer the
+                    // option shape from the opposite operand during evaluation.
                     (type_interner.builtins().none, DataType::Inferred)
                 } else {
                     return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -235,14 +259,11 @@ pub(super) fn parse_literal_expression(
 /// even when there is no explicit `ExpectedType` context.
 /// WHY: the type of `none` can be inferred from the other operand during later
 /// type-checking, so rejecting it here would be overly strict.
-fn none_literal_has_option_equality_context(token_stream: &FileTokens) -> bool {
-    let follows_equality_operator = token_stream.index > 0
-        && matches!(
-            token_stream.previous_token(),
-            TokenKind::Is | TokenKind::Not
-        );
-    let leads_equality_operator = matches!(token_stream.peek_next_token(), Some(TokenKind::Is));
-
+fn none_literal_has_option_equality_context(token_stream: &AstCursor) -> bool {
+    let follows_equality_operator = token_stream
+        .previous()
+        .is_some_and(|token| matches!(token.tag(), TokenTag::IS | TokenTag::NOT));
+    let leads_equality_operator = token_stream.peek_next_tag() == Some(TokenTag::IS);
     follows_equality_operator || leads_equality_operator
 }
 

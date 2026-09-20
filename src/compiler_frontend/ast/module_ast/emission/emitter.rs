@@ -12,6 +12,7 @@
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
@@ -55,12 +56,13 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
 use rustc_hash::FxHashMap;
@@ -208,6 +210,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     context: &'context AstPhaseContext<'services>,
     path_fork: &'services mut PathInternerFork,
     environment: &'environment mut AstModuleEnvironment,
+    source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
@@ -217,18 +220,19 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     validated_generic_template_bodies: Vec<AstNode>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
 }
-
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
     pub(in crate::compiler_frontend::ast) fn new(
         context: &'context AstPhaseContext<'services>,
         environment: &'environment mut AstModuleEnvironment,
         header_count: usize,
         path_fork: &'services mut PathInternerFork,
+        source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     ) -> Self {
         let warnings = environment.lookups.warnings.clone();
         Self {
             context,
             path_fork,
+            source_token_owners,
             environment,
             ast: Vec::with_capacity(header_count * settings::TOKEN_TO_NODE_RATIO),
             warnings,
@@ -321,6 +325,49 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context
     }
 
+    fn source_path_for_header(&self, header: &Header) -> Result<PathId, CompilerError> {
+        let ownerless_synthetic_constant = matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::RenderedHtml(_))
+        ) && header.tokens.is_empty()
+            && header.token_sequence.is_none()
+            && header.name_span.is_none()
+            && matches!(header.kind, HeaderKind::Constant { .. });
+        if !self
+            .source_token_owners
+            .contains_key(&header.tokens.source())
+            && !ownerless_synthetic_constant
+        {
+            return Err(CompilerError::compiler_error(
+                "header source path has no canonical prepared source token owner",
+            ));
+        }
+        self.environment
+            .lookups
+            .module_symbols
+            .source_path_for_header(header)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "header source path was not retained by the prepared source identity",
+                )
+            })
+    }
+
+    fn canonical_owner_for_header(
+        &self,
+        header: &Header,
+    ) -> Result<Arc<SourceTokens>, CompilerError> {
+        let owner = self
+            .source_token_owners
+            .get(&header.tokens.source())
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "header body range has no canonical prepared source stream",
+                )
+            })?;
+        Ok(Arc::clone(owner.tokens()))
+    }
+
     pub(in crate::compiler_frontend::ast) fn emit(
         mut self,
         sorted_headers: Vec<Header>,
@@ -344,14 +391,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
 
         for header in sorted_headers {
+            let source_file_scope = self
+                .source_path_for_header(&header)
+                .map_err(|error| self.error_messages(error, string_table))?;
             let visibility = Arc::clone(
                 self.environment
                     .lookups
                     .binding_environment
-                    .visibility_for(&header.source_file)
+                    .visibility_for(&source_file_scope)
                     .map_err(|error| self.error_messages(error, string_table))?,
             );
-            let source_file_scope = header.source_file;
 
             match &header.kind {
                 HeaderKind::Function {
@@ -407,15 +456,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
                 // Constants and choices are fully handled during environment construction.
                 HeaderKind::Constant { .. } | HeaderKind::Choice { .. } => {}
-
                 HeaderKind::ConstTemplate { .. } => {
-                    let mut template_tokens = header.tokens;
+                    let template_path = header.declaration_path;
+                    let template_source = self
+                        .canonical_owner_for_header(&header)
+                        .map_err(|error| self.error_messages(error, string_table))?;
                     let context = self.build_base_scope_context(BaseScopeContextInput {
                         kind: ContextKind::Constant,
-                        scope: template_tokens.src_path.to_owned(),
+                        scope: template_path,
                         top_level_declarations: &top_level_declarations,
                         visibility,
-                        declaring_file_id: template_tokens.file_id,
+                        declaring_file_id: header.tokens.source(),
                         source_file_scope,
                         scope_frame_capacity: scope_frame_capacity_budget.next_root_capacity(),
                     });
@@ -423,7 +474,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     let template = timed_stage_attributed_opt!(
                         self.context.timing_metric_family.const_template_parse(),
                         self.context.timing_context,
-                        self.parse_const_template(&mut template_tokens, &context, string_table)?
+                        self.parse_const_template(
+                            &header,
+                            &template_source,
+                            &context,
+                            string_table
+                        )?
                     );
                     self.warnings.extend(context.take_emitted_warnings());
 
@@ -438,7 +494,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     }
 
                     self.const_templates_by_path
-                        .insert(template_tokens.src_path, folded_result);
+                        .insert(template_path, folded_result);
                 }
 
                 // --------------------------
@@ -670,7 +726,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.deferred_generic_requests.push(request);
             return Ok(());
         };
-        let mut token_stream = body.tokens().clone();
+        let parse_owner = body
+            .parse_owner()
+            .map_err(|error| self.error_messages(error, string_table))?;
+        let (mut body_cursor, body_source_id) = parse_owner
+            .cursor()
+            .map_err(|error| self.error_messages(error, string_table))?;
         let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
         let Some(mapping) = concrete_argument_mapping(
@@ -730,7 +791,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 // Materialised bodies carry their retained donor owner; the scope threads it so
                 // Stage 0 lookups validate against the frozen facts owner and never alias the
                 // requester call-site source.
-                declaring_file_id: token_stream.file_id,
+                declaring_file_id: body_source_id,
                 source_file_scope: template.source_file,
                 scope_frame_capacity: 0,
             })
@@ -758,18 +819,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = signature.error_return_type_id();
         context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
-
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
-        token_stream.src_path = request.instance_path;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let warning_start = self.warnings.len();
         let body = match function_body_to_ast(
-            &mut token_stream,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -848,7 +907,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .environment
             .lookups
             .resolved_function_signatures_by_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
             .cloned()
         else {
             return Err(self.error_messages(
@@ -863,7 +922,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .environment
             .lookups
             .generic_function_templates_by_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
             .cloned()
         else {
             return Err(self.error_messages(
@@ -885,10 +944,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let mut context = self
             .build_base_scope_context(BaseScopeContextInput {
                 kind: ContextKind::Function,
-                scope: header.tokens.src_path.to_owned(),
+                scope: header.declaration_path,
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
-                declaring_file_id: header.tokens.file_id,
+                declaring_file_id: header.tokens.source(),
                 source_file_scope,
                 scope_frame_capacity,
             })
@@ -902,7 +961,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context = context.with_active_generic_type_context(generic_type_context);
         context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.set_local_declarations(resolved_signature.signature.parameters.clone(), &*self.path_fork);
+        context.set_local_declarations(
+            resolved_signature.signature.parameters.clone(),
+            &*self.path_fork,
+        );
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -922,7 +984,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             kind: NodeKind::Function(template.function_path, resolved_signature.signature, body),
             // Generic body validation retains no consumer-local authored declaration range.
             span: None,
-            scope: header.tokens.src_path,
+            scope: header.declaration_path,
         });
         Ok(())
     }
@@ -942,7 +1004,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .environment
             .lookups
             .resolved_function_signatures_by_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
             .cloned()
         else {
             return Err(self.error_messages(
@@ -966,10 +1028,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let mut context = self
             .build_base_scope_context(BaseScopeContextInput {
                 kind: ContextKind::Function,
-                scope: header.tokens.src_path.to_owned(),
+                scope: header.declaration_path,
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
-                declaring_file_id: header.tokens.file_id,
+                declaring_file_id: header.tokens.source(),
                 source_file_scope,
                 scope_frame_capacity,
             })
@@ -979,20 +1041,33 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         context.current_function_return_type_ids = expected_result_type_ids.clone();
         context.expected_result_type_ids = expected_result_type_ids;
         context.expected_error_type = expected_error_type;
-        context.set_local_declarations(resolved_signature.signature.parameters.to_owned(), &*self.path_fork);
+        context.set_local_declarations(
+            resolved_signature.signature.parameters.to_owned(),
+            &*self.path_fork,
+        );
 
         // --------------------------
         //  Parse body and emit node
         // --------------------------
-        let mut token_stream = header.tokens;
+        // Direct canonical body cursor: share the prepared-source owner over the
+        // bounded canonical source-token range. Segmented headers use the retained
+        // sequence; contiguous headers use the range. Loop/template windows and
+        // explicit synthetic streams use their own explicit cursors.
+        let body_source = self
+            .canonical_owner_for_header(&header)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let function_scope = context.scope;
-
+        let mut body_cursor = match header.token_sequence {
+            Some(sequence) => AstCursor::from_source_sequence(&body_source, sequence),
+            None => AstCursor::from_source_tokens(&body_source, header.tokens),
+        }
+        .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let body_result = function_body_to_ast(
-            &mut token_stream,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -1006,7 +1081,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // AST symbol IDs are stored as complete PathId values and are unique
         // module-wide, not only within a local scope.
         self.ast.push(AstNode {
-            kind: NodeKind::Function(token_stream.src_path, resolved_signature.signature, body),
+            kind: NodeKind::Function(header.declaration_path, resolved_signature.signature, body),
             span: header.name_span,
             scope: function_scope,
         });
@@ -1031,23 +1106,30 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // --------------------------
         let context = self.build_base_scope_context(BaseScopeContextInput {
             kind: ContextKind::Module,
-            scope: header.tokens.src_path.to_owned(),
+            scope: header.declaration_path,
             top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
             visibility,
-            declaring_file_id: header.tokens.file_id,
+            declaring_file_id: header.tokens.source(),
             source_file_scope,
             scope_frame_capacity,
         });
 
-        let mut token_stream = header.tokens;
+        let start_source = self
+            .canonical_owner_for_header(&header)
+            .map_err(|error| self.error_messages(error, string_table))?;
         let start_scope = context.scope;
-
+        let start_src_path = header.declaration_path;
+        let mut body_cursor = match header.token_sequence {
+            Some(sequence) => AstCursor::from_source_sequence(&start_source, sequence),
+            None => AstCursor::from_source_tokens(&start_source, header.tokens),
+        }
+        .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let body_result = function_body_to_ast(
-            &mut token_stream,
+            &mut body_cursor,
             context,
             &mut type_interner,
             &mut self.warnings,
@@ -1060,11 +1142,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         // --------------------------
         //  Synthesize implicit start signature and emit node
-        // --------------------------
         let full_name = self
             .path_fork
             .try_intern_child(
-                token_stream.src_path,
+                start_src_path,
                 string_table.intern(IMPLICIT_START_FUNC_NAME),
             )
             .expect("path table exhausted while creating implicit start function path");
@@ -1115,7 +1196,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .environment
             .lookups
             .resolved_struct_fields_by_path
-            .get(&header.tokens.src_path)
+            .get(&header.declaration_path)
             .cloned()
             .ok_or_else(|| {
                 self.error_messages(
@@ -1127,9 +1208,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             })?;
 
         self.ast.push(AstNode {
-            kind: NodeKind::StructDefinition(header.tokens.src_path.to_owned(), fields),
+            kind: NodeKind::StructDefinition(header.declaration_path.to_owned(), fields),
             span: header.name_span,
-            scope: header.tokens.src_path,
+            scope: header.declaration_path,
         });
 
         Ok(())
@@ -1141,16 +1222,24 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     fn parse_const_template(
         &mut self,
-        template_tokens: &mut FileTokens,
+        header: &Header,
+        template_source: &Arc<SourceTokens>,
         context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
+        let source_path = context.scope;
+        let mut template_cursor = match header.token_sequence {
+            Some(sequence) => AstCursor::from_source_sequence(template_source, sequence),
+            None => AstCursor::from_source_tokens(template_source, header.tokens),
+        }
+        .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
         let template_result = Template::new_const_required_with_type_interner(
-            template_tokens,
+            &mut template_cursor,
+            source_path,
             context,
             &mut type_interner,
             vec![],

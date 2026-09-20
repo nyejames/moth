@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::statements::condition_validation::ensure_match_guard_condition;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     ChoicePayloadCapture, MatchPattern, ParsedChoicePattern, parse_choice_variant_pattern,
     parse_non_choice_pattern, parse_option_pattern,
@@ -31,12 +32,12 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 /// Parsed pattern header shared by full match arms and single-predicate value `if`.
 ///
@@ -78,7 +79,7 @@ type MatchHeaderResult<T> = Result<T, ExpressionParseError>;
 /// receivers before they consume `is`.
 /// WHY: each consumer previously reconstructed this `until([Is])` boundary.
 pub(crate) fn parse_scrutinee_until_is(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -96,7 +97,7 @@ pub(crate) fn parse_scrutinee_until_is(
         string_table,
         path_fork,
     });
-    create_expression_until(input, &[TokenKind::Is])
+    create_expression_until(input, &[TokenTag::IS])
 }
 
 /// Build an option-present capture arm scope and pattern.
@@ -169,10 +170,10 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
 /// pattern parser stays independent from the body grammar that follows it.
 pub(crate) fn parse_match_arm_header(
     scrutinee: &Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    guard_end_tokens: &[TokenKind],
+    guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchArmHeader> {
@@ -219,7 +220,7 @@ pub(crate) fn parse_match_arm_header(
 /// names as ordinary values; full match parsing is the owner of that semantics.
 pub(crate) fn parse_single_predicate_match_pattern(
     scrutinee: &Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -236,7 +237,7 @@ pub(crate) fn parse_single_predicate_match_pattern(
 
     // Colon starts the block body of a single-predicate value match. Full match
     // arms still reject it as legacy `pattern:` syntax through `parse_match_arm_header`.
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         reject_invalid_pattern_suffix(token_stream)?;
     }
 
@@ -246,14 +247,14 @@ pub(crate) fn parse_single_predicate_match_pattern(
     })
 }
 fn parse_match_guard(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    guard_end_tokens: &[TokenKind],
+    guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<Option<Expression>> {
-    if token_stream.current_token_kind() != &TokenKind::If {
+    if token_stream.current_tag() != TokenTag::IF {
         return Ok(None);
     }
 
@@ -283,7 +284,7 @@ fn parse_match_guard(
 
 fn parse_match_pattern_header(
     scrutinee: &Expression,
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -331,7 +332,7 @@ fn parse_match_pattern_header(
             // Optional scrutinees must use option-specific patterns.
             // Bare capture symbols are rejected because `|name|` is the only
             // valid capture form for optional values.
-            if let TokenKind::Symbol(_) = token_stream.current_token_kind()
+            if token_stream.current_tag() == TokenTag::SYMBOL
                 && !option_pattern_constructor_like(token_stream)
             {
                 return Err(CompilerDiagnostic::invalid_match_pattern(
@@ -390,8 +391,8 @@ fn parse_match_pattern_header(
     })
 }
 
-fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult<()> {
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+fn reject_invalid_pattern_suffix(token_stream: &AstCursor) -> MatchHeaderResult<()> {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
             Some(token_stream.current_span()),
@@ -399,7 +400,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::As {
+    if token_stream.current_tag() == TokenTag::AS {
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::AsNotValid,
             None,
@@ -409,7 +410,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Colon {
+    if token_stream.current_tag() == TokenTag::COLON {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
             Some(token_stream.current_span()),
@@ -417,7 +418,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
         .into());
     }
 
-    if token_stream.current_token_kind() == &TokenKind::Arrow {
+    if token_stream.current_tag() == TokenTag::ARROW {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
             Some(token_stream.current_span()),
@@ -433,18 +434,11 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
 /// WHY: bare capture symbols are rejected for optional scrutinees, but constructor-like
 /// syntax should continue into the pattern parser so it receives the more specific
 /// unsupported-pattern diagnostic instead of being mistaken for a capture.
-fn option_pattern_constructor_like(token_stream: &FileTokens) -> bool {
+fn option_pattern_constructor_like(token_stream: &AstCursor) -> bool {
     token_stream
-        .tokens
-        .get(token_stream.index + 1)
-        .is_some_and(|token| {
-            matches!(
-                token.kind,
-                TokenKind::OpenParenthesis | TokenKind::DoubleColon
-            )
-        })
+        .peek_next_tag()
+        .is_some_and(|tag| matches!(tag, TokenTag::OPEN_PARENTHESIS | TokenTag::DOUBLE_COLON))
 }
-
 /// Build a choice arm scope and final pattern with fully resolved capture binding paths.
 ///
 /// WHAT: clones the parent match context and adds `Declaration` entries for each parsed capture.

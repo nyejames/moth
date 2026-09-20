@@ -41,8 +41,8 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -136,19 +136,16 @@ pub(super) fn prepare_file_value_bundle(
             string_table,
         )
         .map_err(|error| match error {
-            SourceDatabaseError::Capacity(capacity) => {
-                CompilerMessages::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                    string_table.clone(),
-                )
-            }
+            SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                string_table.clone(),
+            ),
             SourceDatabaseError::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(error, string_table)
             }
         })?;
     let discovery_options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
-        project_path_resolver: Some(&path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -297,14 +294,19 @@ pub(super) fn prepare_file_value_bundle(
             let mut failure = None;
 
             for reference in structural_references {
-                let resolved =
-                    match resolver.resolve(&path, path_syntax_table, reference, string_table, &path_fork) {
-                        Ok(resolved) => resolved,
-                        Err(error) => {
-                            failure = Some(error);
-                            break;
-                        }
-                    };
+                let resolved = match resolver.resolve(
+                    &path,
+                    path_syntax_table,
+                    reference,
+                    string_table,
+                    &path_fork,
+                ) {
+                    Ok(resolved) => resolved,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                };
                 if let Err(error) = collect_content_candidate(
                     &resolved,
                     &mut sources.candidates,
@@ -610,10 +612,12 @@ fn finalize_known_sources(
                 )),
                 // The fork re-interns the authored source paths, so its exhaustion is a typed
                 // source-capacity rejection, not infrastructure.
-                Err(SourceDatabaseError::Capacity(capacity)) => Some(CompilerMessages::from_diagnostic(
-                    CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                    string_table.clone(),
-                )),
+                Err(SourceDatabaseError::Capacity(capacity)) => {
+                    Some(CompilerMessages::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                        string_table.clone(),
+                    ))
+                }
                 Err(SourceDatabaseError::Infrastructure(error)) => {
                     Some(CompilerMessages::from_error_ref(error, string_table))
                 }
@@ -641,7 +645,6 @@ fn finalize_known_sources(
                     .sources()
                     .source_logical_path(source_id)
                     .expect("transferred source must retain logical path"),
-                path,
                 path_fork,
             )?;
             prepared.freeze_path_syntax(string_table, path_fork)?;
@@ -923,16 +926,9 @@ fn prepare_one_source(
     source_code: &str,
     string_table: &mut StringTable,
 ) -> Result<SourcePreparationDelta, FileFrontendPrepareFailure> {
-    let source_path = context.entry_file_path;
     let source = match kind {
-        SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
-        SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
+        SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate { source_code },
+        SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown { source_code },
         SourceFileKind::Moth => {
             return Err(FileFrontendPrepareFailure::Infrastructure(
                 CompilerError::compiler_error(

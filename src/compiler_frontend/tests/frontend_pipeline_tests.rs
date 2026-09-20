@@ -17,9 +17,10 @@
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax, BoundModuleHeaders,
-    HeaderParseOptions,
+    BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -27,6 +28,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceDatabase;
@@ -35,18 +37,21 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, TemplateBodyMode, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEntryMode};
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+type TokenizedFile = (
+    (SourceTokenOwner, PathId, Arc<PathSyntaxTable>),
+    ExtendedSpanBuilder,
+);
 
 struct FrontendServices {
     options: crate::compiler_frontend::module_compilation::FrontendOptions,
@@ -154,12 +159,17 @@ impl FrontendProject {
         }
     }
 
-    fn tokenize_all(&mut self) -> Vec<(FileTokens, ExtendedSpanBuilder)> {
+    fn tokenize_all(&mut self) -> Vec<TokenizedFile> {
         let mut tokenized_files = Vec::with_capacity(self.files.len());
         self.frontend.with_compiler(|frontend| {
             for file in &self.files {
                 let source = fs::read_to_string(file).expect("should read source file");
                 let mut span_builder = ExtendedSpanBuilder::new();
+                let source_file = frontend
+                    .source_files
+                    .get_by_canonical_path(file)
+                    .expect("test source should have a registered identity")
+                    .logical_path;
                 tokenized_files.push(
                     tokenize_source_for_test(
                         frontend,
@@ -168,7 +178,7 @@ impl FrontendProject {
                         TokenizerEntryMode::SourceFile,
                         &mut span_builder,
                     )
-                    .map(|tokens| (tokens, span_builder))
+                    .map(|(owner, path_syntax)| ((owner, source_file, path_syntax), span_builder))
                     .expect("tokenization should succeed"),
                 );
             }
@@ -186,7 +196,6 @@ impl FrontendProject {
 
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.frontend.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
@@ -194,9 +203,11 @@ impl FrontendProject {
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
-        for (file_tokens, mut span_builder) in tokenized_files {
+        for ((owner, source_file, path_syntax), mut span_builder) in tokenized_files {
             let output = prepare_file_from_tokens(
-                file_tokens,
+                owner,
+                source_file,
+                path_syntax,
                 &self.entry_file,
                 &options,
                 &mut self.frontend.string_table,
@@ -224,7 +235,7 @@ impl FrontendProject {
             self.frontend.external_package_registry.as_ref(),
             &ExternalImportResolutionTable::default(),
             &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-            options.project_path_resolver,
+            self.frontend.project_path_resolver.as_ref(),
             self.frontend.source_files.as_ref(),
             &mut self.frontend.string_table,
             &mut self.frontend.path_fork,

@@ -221,7 +221,9 @@ pub(crate) fn is_project_globals_namespace(
     path_fork
         .resolve_components(dependency_path, &mut scratch)
         .first()
-        .is_some_and(|component| string_table.resolve(*component) == PROJECT_GLOBALS_DEPENDENCY_NAME)
+        .is_some_and(|component| {
+            string_table.resolve(*component) == PROJECT_GLOBALS_DEPENDENCY_NAME
+        })
 }
 
 #[cfg(test)]
@@ -362,14 +364,15 @@ mod tests {
     fn project_dependency_helper_matches_only_exact_one_component_root() {
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let project = path_fork.try_intern_portable_path("project", &mut strings).expect("test path fits");
-        let nested = path_fork
-            .try_intern_components(&[
-                strings.intern("project"),
-                strings.intern("details"),
-            ])
+        let project = path_fork
+            .try_intern_portable_path("project", &mut strings)
             .expect("test path fits");
-        let other = path_fork.try_intern_portable_path("projects", &mut strings).expect("test path fits");
+        let nested = path_fork
+            .try_intern_components(&[strings.intern("project"), strings.intern("details")])
+            .expect("test path fits");
+        let other = path_fork
+            .try_intern_portable_path("projects", &mut strings)
+            .expect("test path fits");
 
         assert!(is_project_globals_dependency(project, &path_fork, &strings));
         assert!(!is_project_globals_dependency(nested, &path_fork, &strings));

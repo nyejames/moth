@@ -88,16 +88,21 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
     let mut hir_module = create_test_hir_module();
     hir_module.side_table.bind_function_name(
         FunctionId(0),
-        path_fork.try_intern_portable_path("start_entry", string_table).expect("test path fits"),
+        path_fork
+            .try_intern_portable_path("start_entry", string_table)
+            .expect("test path fits"),
     );
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
 
     Module {
-        executable: ModuleExecutable { hir: hir_module,
-        resource_table: ModuleResourceTable::new(),
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(path_fork.snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: hir_module,
+            resource_table: ModuleResourceTable::new(),
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(path_fork.snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: vec![],

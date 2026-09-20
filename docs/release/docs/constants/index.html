@@ -880,8 +880,13 @@ image <span class='moth-code-operator'>#=</span> <span class='moth-code-delimite
     year <span class='moth-code-type'>Int</span>,
 <span class='moth-code-delimiter'>|</span>
 
-defaults <span class='moth-code-operator'>#=</span> <span class='moth-code-nominal'>Defaults</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Moth&quot;</span>, <span class='moth-code-number'>2026</span><span class='moth-code-delimiter'>)</span></code></pre><p>Read its fields during compilation or use one field in runtime code:</p><pre style=""><code class='codeblock'>site_title <span class='moth-code-operator'>#=</span> defaults.title
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>defaults.title<span class='moth-code-delimiter'>)</span></code></pre><p>The complete const record is not an ordinary runtime object. Use its fields instead.</p><p>An anonymous <code>| name = value |</code> const record uses the same <code>|...|</code> parameters syntax as structs and functions. Every parameter needs a value, and the list does not create a constructable type. Declare a child struct or record first, then name it as a parameter. Do not nest one <code>|...|</code> list inside another.</p>
+defaults <span class='moth-code-operator'>#=</span> <span class='moth-code-nominal'>Defaults</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Moth&quot;</span>, <span class='moth-code-number'>2026</span><span class='moth-code-delimiter'>)</span></code></pre><p>Read its fields during compilation or use an ordinary field in runtime code:</p><pre style=""><code class='codeblock'>site_title <span class='moth-code-operator'>#=</span> defaults.title
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>defaults.title<span class='moth-code-delimiter'>)</span></code></pre><p>The complete const record is not an ordinary runtime object. Use its fields instead. A field that is itself a const record keeps the same restriction.</p><h3>Anonymous records</h3><p><strong>Accepted queued design.</strong> Anonymous construction uses <a href="../language-overview/#mon-syntax">MON syntax</a> and requires all fields to fold. Parenthesised anonymous records and inline nesting are not yet implemented.</p><pre style=""><code class='codeblock'>settings <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+    window <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>,
+<span class='moth-code-delimiter'>)</span>
+
+width <span class='moth-code-operator'>#=</span> settings.window.width</code></pre><p>Every field needs a name and a value. Anonymous construction creates a value, not a named type. Use an explicit constructor for a named struct.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -891,25 +896,25 @@ defaults <span class='moth-code-operator'>#=</span> <span class='moth-code-nomin
 <span class='moth-code-delimiter'>|</span>
 
 defaults <span class='moth-code-operator'>#=</span> <span class='moth-code-nominal'>Defaults</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Moth&quot;</span>, <span class='moth-code-number'>2026</span><span class='moth-code-delimiter'>)</span>
+site_title <span class='moth-code-operator'>#=</span> defaults.title</code></pre><h3>Contract</h3><p>A const record is a data-only compile-time member group. Every supplied value must fold. Field projection may participate in another constant expression.</p><p>The complete record is unavailable as an ordinary runtime value. It cannot be assigned to a runtime binding, passed as a runtime argument, returned from a runtime function, stored in a collection or map or used through a runtime receiver method.</p><p>Use a folded field when runtime code needs its ordinary value:</p><pre style=""><code class='codeblock'><span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>defaults.title<span class='moth-code-delimiter'>)</span></code></pre><p>A projection whose result is another const record retains the same restriction. Project further to an ordinary value before runtime use.</p><p>Struct-backed const records preserve their named struct&#39;s fields and types. Anonymous const records retain named folded fields without declaring a constructable type or introducing structural runtime typing. Their existing folded export and provenance rules remain in force.</p><h3>Anonymous const records</h3><p><strong>Accepted queued design.</strong> Parenthesised anonymous const records and inline nesting are queued for implementation. See <a href="../progress">Progress</a> for support.</p><p>Anonymous construction uses the named-only form of <a href="../language-overview/#mon-syntax">MON syntax</a>:</p><pre style=""><code class='codeblock'>labels <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>,
+    second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Rob&quot;</span>,
+<span class='moth-code-delimiter'>)</span>
 
-site_title <span class='moth-code-operator'>#=</span> defaults.title</code></pre><h3>Contract</h3><p>A const record is a data-only compile-time member group.</p><p>Every constructor argument must fold.</p><p>Const-record field projection may participate in another constant expression.</p><p>The complete const record cannot be used as an ordinary runtime value.</p><p>It cannot be:</p><ul><li>assigned to a runtime binding</li><li>passed as a runtime argument</li><li>returned from a runtime function</li><li>stored in a collection or map</li><li>used through a runtime receiver method</li></ul><p>Use one folded field when runtime code needs the value.</p><pre style=""><code class='codeblock'><span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>defaults.title<span class='moth-code-delimiter'>)</span></code></pre><p>Const records preserve their struct-backed field names and types.</p><p>They do not introduce structural typing or anonymous runtime record identity. Ordinary records retain the full language capability of ordinary compile-time values. Removing magic configuration record names does not change struct construction, field projection or the restrictions on using a complete const record at runtime. Explicit <code>$config</code> declarations are the accepted queued input-contract spelling, rather than special record names; Alpha currently uses <code>#Config of T</code>.</p><h3>Anonymous const records</h3><p><code>|...|</code> is Moth&#39;s pipe-delimited member-list syntax. Context decides whether its entries are function parameters, typed struct fields or named const-record values.</p><p>A compile-time receiving context turns a parameter list into a const record:</p><pre style=""><code class='codeblock'>labels <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
-    first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;a&quot;</span>,
-    second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;b&quot;</span>,
-<span class='moth-code-delimiter'>|</span></code></pre><p>Every parameter must have a value. Types may be inferred from those values. The list does not declare a constructable type. A struct uses the same <code>|...|</code> list to declare a type that constructors can build.</p><h3>Nested parameter lists</h3><p>A parameter list is one <code>|...|</code> group. It does not contain another <code>|...|</code> list. That is the same composition rule as structs and function signatures.</p><p>Declare a child struct or const record first, then name it as a parameter value:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+single <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-delimiter'>)</span>
+empty <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>Every field has a unique name and an explicit initializer. Types are inferred from those values. Labels create fields, not local declarations or parameters. <code>#=</code> imposes the compile-time requirement. Ordinary <code>=</code> does not become a const record merely because its fields could fold.</p><h3>Nested values</h3><p>A field may contain an inline anonymous const record, an already declared const record or an explicitly constructed nominal value that satisfies constant rules.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     width <span class='moth-code-type'>Int</span>,
     height <span class='moth-code-type'>Int</span>,
 <span class='moth-code-delimiter'>|</span>
 
-size <span class='moth-code-operator'>#=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>8</span>, <span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span>
+settings <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    window <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>
+        size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>8</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span>,
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+    <span class='moth-code-delimiter'>)</span>,
+<span class='moth-code-delimiter'>)</span>
 
-inner <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>,
-<span class='moth-code-delimiter'>|</span>
-
-nested <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>|</span>
-    size <span class='moth-code-operator'>=</span> size,
-    inner <span class='moth-code-operator'>=</span> inner,
-<span class='moth-code-delimiter'>|</span></code></pre><p>A const record still adds compile-time folding and forbids using the complete record as a runtime value. Those rules do not change parameters syntax.</p>
+width <span class='moth-code-operator'>#=</span> settings.window.size.width</code></pre><p>All nested initializers must fold. Initializers use the surrounding scope, not names introduced by earlier fields. Nesting introduces neither arbitrary compile-time execution nor implicit construction of a named type.</p><p>Input contracts belong to declarations rather than record entries. Exact configuration placement and processing rules are owned by <a href="../project-structure/#build-inputs">Build configuration values</a>. The MON format&#39;s serialisation domain is a separate future contract.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1201,99 +1206,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

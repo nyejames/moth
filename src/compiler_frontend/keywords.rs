@@ -6,7 +6,7 @@
 //! WHY: keyword policy is user-visible and must not drift between the tokenizer,
 //! dependency alias validation, reserved-name diagnostics and code highlighting.
 
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
@@ -31,129 +31,119 @@ pub(crate) enum SourceWordClass {
 }
 
 /// Exact source-word classification result.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ClassifiedSourceWord {
-    pub(crate) token_kind: TokenKind,
+    pub(crate) token_tag: TokenTag,
+    pub(crate) bool_value: Option<bool>,
     pub(crate) class: SourceWordClass,
 }
 
 impl ClassifiedSourceWord {
-    fn keyword(token_kind: TokenKind) -> Self {
+    fn keyword(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::Keyword,
         }
     }
 
-    fn word_operator(token_kind: TokenKind) -> Self {
+    fn word_operator(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::WordOperator,
         }
     }
 
-    fn literal(token_kind: TokenKind) -> Self {
+    fn literal(token_tag: TokenTag, bool_value: Option<bool>) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value,
             class: SourceWordClass::Literal,
         }
     }
 
-    fn builtin_type(token_kind: TokenKind) -> Self {
+    fn builtin_type(token_tag: TokenTag) -> Self {
         Self {
-            token_kind,
+            token_tag,
+            bool_value: None,
             class: SourceWordClass::BuiltinType,
         }
     }
 }
 
-/// Returns the tokenizer token kind and neutral presentation class for an exact
-/// source keyword spelling, or `None` for ordinary identifiers.
+/// Returns the stable taxonomy tag and any typed literal payload for an exact source word.
 pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
     match text {
-        // Module and declaration keywords.
-        "export" => Some(ClassifiedSourceWord::keyword(TokenKind::Export)),
-        "type" => Some(ClassifiedSourceWord::keyword(TokenKind::Type)),
-        "of" => Some(ClassifiedSourceWord::keyword(TokenKind::Of)),
-        "as" => Some(ClassifiedSourceWord::keyword(TokenKind::As)),
-        "copy" => Some(ClassifiedSourceWord::keyword(TokenKind::Copy)),
-
-        // Control flow, blocks and casts.
-        "if" => Some(ClassifiedSourceWord::keyword(TokenKind::If)),
-        "return" => Some(ClassifiedSourceWord::keyword(TokenKind::Return)),
-        "catch" => Some(ClassifiedSourceWord::keyword(TokenKind::Catch)),
-        "then" => Some(ClassifiedSourceWord::keyword(TokenKind::Then)),
-        "else" => Some(ClassifiedSourceWord::keyword(TokenKind::Else)),
-        "checked" => Some(ClassifiedSourceWord::keyword(TokenKind::Checked)),
-        "cast" => Some(ClassifiedSourceWord::keyword(TokenKind::Cast)),
-        "break" => Some(ClassifiedSourceWord::keyword(TokenKind::Break)),
-        "continue" => Some(ClassifiedSourceWord::keyword(TokenKind::Continue)),
-
-        // Reserved receiver, trait and assertion syntax.
-        "must" => Some(ClassifiedSourceWord::keyword(TokenKind::Must)),
-        "this" => Some(ClassifiedSourceWord::keyword(TokenKind::This)),
-        "This" => Some(ClassifiedSourceWord::keyword(TokenKind::TraitThis)),
-        "assert" => Some(ClassifiedSourceWord::keyword(TokenKind::Assert)),
-
-        // Deferred async syntax uses the ordinary keyword class.
-        "async" => Some(ClassifiedSourceWord::keyword(TokenKind::Async)),
-        "yield" => Some(ClassifiedSourceWord::keyword(TokenKind::Yield)),
-
-        // Loops.
-        "loop" => Some(ClassifiedSourceWord::keyword(TokenKind::Loop)),
-        "to" => Some(ClassifiedSourceWord::keyword(TokenKind::ExclusiveRange)),
-        "by" => Some(ClassifiedSourceWord::keyword(TokenKind::By)),
-
-        // Word operators.
-        "is" => Some(ClassifiedSourceWord::word_operator(TokenKind::Is)),
-        "not" => Some(ClassifiedSourceWord::word_operator(TokenKind::Not)),
-        "and" => Some(ClassifiedSourceWord::word_operator(TokenKind::And)),
-        "or" => Some(ClassifiedSourceWord::word_operator(TokenKind::Or)),
-
-        // Value literals.
-        "true" => Some(ClassifiedSourceWord::literal(TokenKind::BoolLiteral(true))),
-        "false" => Some(ClassifiedSourceWord::literal(TokenKind::BoolLiteral(false))),
-        "none" => Some(ClassifiedSourceWord::literal(TokenKind::NoneLiteral)),
-
-        // Builtin and singleton type spellings.
-        "Int" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeInt)),
-        "Float" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeFloat)),
-        "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeBool)),
-        "String" => Some(ClassifiedSourceWord::builtin_type(
-            TokenKind::DatatypeString,
+        "export" => Some(ClassifiedSourceWord::keyword(TokenTag::EXPORT)),
+        "type" => Some(ClassifiedSourceWord::keyword(TokenTag::TYPE)),
+        "of" => Some(ClassifiedSourceWord::keyword(TokenTag::OF)),
+        "as" => Some(ClassifiedSourceWord::keyword(TokenTag::AS)),
+        "copy" => Some(ClassifiedSourceWord::keyword(TokenTag::COPY)),
+        "if" => Some(ClassifiedSourceWord::keyword(TokenTag::IF)),
+        "return" => Some(ClassifiedSourceWord::keyword(TokenTag::RETURN)),
+        "catch" => Some(ClassifiedSourceWord::keyword(TokenTag::CATCH)),
+        "then" => Some(ClassifiedSourceWord::keyword(TokenTag::THEN)),
+        "else" => Some(ClassifiedSourceWord::keyword(TokenTag::ELSE)),
+        "checked" => Some(ClassifiedSourceWord::keyword(TokenTag::CHECKED)),
+        "cast" => Some(ClassifiedSourceWord::keyword(TokenTag::CAST)),
+        "break" => Some(ClassifiedSourceWord::keyword(TokenTag::BREAK)),
+        "continue" => Some(ClassifiedSourceWord::keyword(TokenTag::CONTINUE)),
+        "must" => Some(ClassifiedSourceWord::keyword(TokenTag::MUST)),
+        "this" => Some(ClassifiedSourceWord::keyword(TokenTag::THIS)),
+        "This" => Some(ClassifiedSourceWord::keyword(TokenTag::TRAIT_THIS)),
+        "assert" => Some(ClassifiedSourceWord::keyword(TokenTag::ASSERT)),
+        "async" => Some(ClassifiedSourceWord::keyword(TokenTag::ASYNC)),
+        "yield" => Some(ClassifiedSourceWord::keyword(TokenTag::YIELD)),
+        "loop" => Some(ClassifiedSourceWord::keyword(TokenTag::LOOP)),
+        "to" => Some(ClassifiedSourceWord::keyword(TokenTag::EXCLUSIVE_RANGE)),
+        "by" => Some(ClassifiedSourceWord::keyword(TokenTag::BY)),
+        "is" => Some(ClassifiedSourceWord::word_operator(TokenTag::IS)),
+        "not" => Some(ClassifiedSourceWord::word_operator(TokenTag::NOT)),
+        "and" => Some(ClassifiedSourceWord::word_operator(TokenTag::AND)),
+        "or" => Some(ClassifiedSourceWord::word_operator(TokenTag::OR)),
+        "true" => Some(ClassifiedSourceWord::literal(
+            TokenTag::BOOL_LITERAL,
+            Some(true),
         )),
-        "Char" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeChar)),
-        "None" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeNone)),
-        "True" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeTrue)),
-        "False" => Some(ClassifiedSourceWord::builtin_type(TokenKind::DatatypeFalse)),
-
+        "false" => Some(ClassifiedSourceWord::literal(
+            TokenTag::BOOL_LITERAL,
+            Some(false),
+        )),
+        "none" => Some(ClassifiedSourceWord::literal(TokenTag::NONE_LITERAL, None)),
+        "Int" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_INT)),
+        "Float" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FLOAT)),
+        "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BOOL)),
+        "String" => Some(ClassifiedSourceWord::builtin_type(
+            TokenTag::DATATYPE_STRING,
+        )),
+        "Char" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_CHAR)),
+        "None" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_NONE)),
+        "True" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_TRUE)),
+        "False" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FALSE)),
         _ => None,
     }
 }
 
-/// Returns the tokenizer token kind for an exact source keyword spelling.
-pub(crate) fn keyword_token_kind(text: &str) -> Option<TokenKind> {
-    classify_source_word(text).map(|classified| classified.token_kind)
+/// Returns the stable taxonomy tag for an exact source keyword spelling.
+#[cfg(test)]
+pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
+    classify_source_word(text).map(|classified| classified.token_tag)
 }
 
-/// Returns the compound token for keyword forms that require an attached `!`.
-///
-/// WHAT: `return!` and `cast!` are lexical forms, not a keyword followed by a
-///       whitespace-sensitive postfix operator.
-/// WHY: keeping attachment in tokenization prevents AST parsing from having to
-///      reconstruct source adjacency from locations.
-pub(crate) fn attached_bang_keyword_token_kind(text: &str) -> Option<TokenKind> {
+/// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
+pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
     match text {
-        "return" => Some(TokenKind::ReturnBang),
-        "cast" => Some(TokenKind::CastBang),
+        "return" => Some(TokenTag::RETURN_BANG),
+        "cast" => Some(TokenTag::CAST_BANG),
         _ => None,
     }
 }
 
-/// True when `text` is an exact keyword spelling that lexes to a dedicated token.
+/// True when `text` is an exact source word with a dedicated tokenizer tag.
 #[cfg(test)]
 pub(crate) fn is_keyword(text: &str) -> bool {
-    keyword_token_kind(text).is_some()
+    classify_source_word(text).is_some()
 }
 
 /// True when a character can appear after the first character of an identifier.

@@ -22,11 +22,12 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
-use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::validation::{
     validate_catch_fallible_handler_binding, validate_catch_fallible_handler_conflict,
@@ -57,7 +58,7 @@ struct ParsedCatchErrorBinding {
 /// WHY: expression and call fallible handling both use this entrypoint when the user
 /// supplies an error variable.
 pub(crate) fn parse_catch_fallible_handler_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -71,8 +72,14 @@ pub(crate) fn parse_catch_fallible_handler_typed(
         None => &mut local_handler_warnings,
     };
 
-    let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
+    let error_binding = parse_catch_error_binding(
+        token_stream,
+        context,
+        &site,
+        warnings,
+        string_table,
+        path_fork,
+    )?;
 
     parse_catch_fallible_handler_body(
         token_stream,
@@ -88,7 +95,7 @@ pub(crate) fn parse_catch_fallible_handler_typed(
 
 /// Parses a `catch:` handler without an error binding.
 pub(crate) fn parse_catch_without_error_binding_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -119,14 +126,14 @@ pub(crate) fn parse_catch_without_error_binding_typed(
 /// WHAT: validates bracket tokens, extracts the handler identifier, runs naming and
 /// scope-conflict checks, and returns a `CatchErrorBinding`.
 fn parse_catch_error_binding(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
             Some(token_stream.current_span()),
@@ -136,7 +143,7 @@ fn parse_catch_error_binding(
 
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EmptyCatchHandlerBinding,
             Some(token_stream.current_span()),
@@ -144,7 +151,15 @@ fn parse_catch_error_binding(
         .into());
     }
 
-    let TokenKind::Symbol(handler_name) = token_stream.current_token_kind().to_owned() else {
+    if token_stream.current_tag() != TokenTag::SYMBOL {
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    let Some(handler_name) = token_stream.current_string_id_in(string_table)? else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
             Some(token_stream.current_span()),
@@ -165,7 +180,7 @@ fn parse_catch_error_binding(
 
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::Comma {
+    if token_stream.current_tag() == TokenTag::COMMA {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::MultipleCatchHandlerBindings,
             Some(token_stream.current_span()),
@@ -173,7 +188,7 @@ fn parse_catch_error_binding(
         .into());
     }
 
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerClosingPipe,
             Some(token_stream.current_span()),
@@ -203,7 +218,7 @@ fn parse_catch_error_binding(
     reason = "catch body parsing keeps the token stream, scope, mutable interner/string/path state, handler site, error binding, and warning sink as separate borrows"
 )]
 fn parse_catch_fallible_handler_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -212,7 +227,7 @@ fn parse_catch_fallible_handler_body(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
-    if token_stream.current_token_kind() != &TokenKind::Colon {
+    if token_stream.current_tag() != TokenTag::COLON {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerColon,
             Some(token_stream.current_span()),
@@ -280,7 +295,7 @@ fn parse_catch_fallible_handler_body(
 /// WHY: inline catch is only sugar at receiving sites; keeping the body as `ThenValue`
 /// lets AST/HIR reuse the value-block catch path without catch-specific fallback fields.
 pub(super) fn parse_inline_catch_without_error_binding_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -304,7 +319,7 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
 /// WHY: the inline shorthand must preserve the same scoping and conflict rules as
 /// block-form catch handlers.
 pub(super) fn parse_inline_catch_fallible_handler_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -317,8 +332,14 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
     };
-    let error_binding =
-        parse_catch_error_binding(token_stream, context, &site, warnings, string_table, path_fork)?;
+    let error_binding = parse_catch_error_binding(
+        token_stream,
+        context,
+        &site,
+        warnings,
+        string_table,
+        path_fork,
+    )?;
 
     parse_inline_catch_handler_body(
         token_stream,
@@ -331,7 +352,7 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
     )
 }
 fn parse_inline_catch_handler_body(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
@@ -339,7 +360,7 @@ fn parse_inline_catch_handler_body(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
@@ -347,7 +368,7 @@ fn parse_inline_catch_handler_body(
         .into());
     }
 
-    if token_stream.current_token_kind() != &TokenKind::Then {
+    if token_stream.current_tag() != TokenTag::THEN {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),
@@ -366,7 +387,7 @@ fn parse_inline_catch_handler_body(
     let then_span = Some(token_stream.current_span());
     token_stream.advance();
 
-    if token_stream.current_token_kind() == &TokenKind::Newline {
+    if token_stream.current_tag() == TokenTag::NEWLINE {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
             Some(token_stream.current_span()),
@@ -374,7 +395,7 @@ fn parse_inline_catch_handler_body(
         .into());
     }
 
-    if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
+    if is_missing_produced_value_boundary(token_stream.current_tag()) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ThenRequiresValues,
             Some(token_stream.current_span()),
@@ -421,7 +442,7 @@ fn parse_inline_catch_handler_body(
         path_fork,
     })?;
 
-    if token_stream.current_token_kind() == &TokenKind::Catch {
+    if token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
             Some(token_stream.current_span()),

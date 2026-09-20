@@ -28,7 +28,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
@@ -48,6 +47,7 @@ use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseBuilder, SourceId,
     SourceKind, SourceRegistrationIndex,
@@ -189,12 +189,10 @@ pub(crate) fn compile_moth_template_source(
                     string_table,
                 )
                 .map_err(|error| match error {
-                    SourceDatabaseError::Capacity(capacity) => {
-                        CompilerMessages::from_diagnostic(
-                            CompilerDiagnostic::source_table_capacity(capacity.resource()),
-                            string_table.clone(),
-                        )
-                    }
+                    SourceDatabaseError::Capacity(capacity) => CompilerMessages::from_diagnostic(
+                        CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                        string_table.clone(),
+                    ),
                     SourceDatabaseError::Infrastructure(error) => {
                         CompilerMessages::from_error_ref(error, string_table)
                     }
@@ -309,7 +307,6 @@ pub(crate) fn compile_moth_template_source(
                 .expect("standalone entry text was retained immediately before preparation");
             let delta = prepare_template_source(
                 sources,
-                &path_resolver,
                 &request,
                 source_code,
                 entry_file_id,
@@ -486,9 +483,7 @@ fn order_template_headers(
         HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
         ),
-        HeaderPreparationFailure::Infrastructure(error) => {
-            PremergeFailure::Infrastructure(error)
-        }
+        HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
     })?;
     let bound_headers = bind_module_headers(
         prepared_syntax,
@@ -646,11 +641,10 @@ fn attach_finalized_source_database(
 /// The preparation owner lends its split database and span-builder view for this one call, so
 #[allow(
     clippy::too_many_arguments,
-    reason = "template source preparation keeps the shared database, resolver, request, source text, entry id, mutable string/path state, and span builder as separate inputs"
+    reason = "template source preparation keeps the shared database, request, source text, entry id, mutable string/path state, and span builder as separate inputs"
 )]
 fn prepare_template_source(
     source_files: &Arc<SourceDatabase>,
-    path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
     source_code: &str,
     entry_file_id: SourceId,
@@ -660,7 +654,6 @@ fn prepare_template_source(
 ) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
-        project_path_resolver: Some(path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -671,10 +664,7 @@ fn prepare_template_source(
         options: &options,
     };
     let input = FrontendFilePrepareInput {
-        source: FrontendFilePrepareSource::MothTemplate {
-            source_code,
-            source_path: request.source_path.to_path_buf(),
-        },
+        source: FrontendFilePrepareSource::MothTemplate { source_code },
         source_id: entry_file_id,
         span_builder,
         const_template_offset: 0,
@@ -697,6 +687,7 @@ fn fold_template_ast(
     Ok(Ast::new(
         AstBuildInput {
             headers: sorted.headers,
+            source_token_owners: sorted.source_token_owners,
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,

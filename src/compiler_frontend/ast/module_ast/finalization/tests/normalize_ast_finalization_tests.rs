@@ -750,7 +750,9 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
 
             let dynamic_node = builder.push_dynamic_expression_node(
                 Expression::reference_with_type_id(
-                    path_fork.try_intern_portable_path("nested_dynamic", &mut string_table).expect("test path fits"),
+                    path_fork
+                        .try_intern_portable_path("nested_dynamic", &mut string_table)
+                        .expect("test path fits"),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
                     None,
@@ -771,7 +773,9 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             let branch_node = builder.push_branch_chain_node(
                 vec![TemplateIrBranch::new(
                     TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                        path_fork.try_intern_portable_path("nested_selector", &mut string_table).expect("test path fits"),
+                        path_fork
+                            .try_intern_portable_path("nested_selector", &mut string_table)
+                            .expect("test path fits"),
                         DataType::Bool,
                         builtin_type_ids::BOOL,
                         None,
@@ -795,7 +799,9 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             let loop_node = builder.push_loop_node(
                 TemplateLoopHeader::Conditional {
                     condition: Box::new(Expression::reference_with_type_id(
-                        path_fork.try_intern_portable_path("nested_loop", &mut string_table).expect("test path fits"),
+                        path_fork
+                            .try_intern_portable_path("nested_loop", &mut string_table)
+                            .expect("test path fits"),
                         DataType::Bool,
                         builtin_type_ids::BOOL,
                         None,

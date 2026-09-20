@@ -4,9 +4,10 @@
 //! WHY: functions, structs, and choices share exactly one generic-parameter syntax and
 //! should not grow parallel validation paths as generics expand.
 
+use super::DeclarationCursor;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDeclarationReason, InvalidGenericParameterReason,
+    CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidGenericParameterReason,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, GenericTraitBound,
@@ -16,7 +17,7 @@ use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashSet;
 
 /// Typed failure result for generic-parameter parsing.
@@ -27,16 +28,30 @@ use rustc_hash::FxHashSet;
 ///      through every successful header parse while losing the outer failure lane.
 type GenericParameterParseResult<T> = Result<T, HeaderParseFailure>;
 
+fn current_diagnostic_token(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> GenericParameterParseResult<Option<DiagnosticToken>> {
+    token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "generic-parameter diagnostic projection",
+            ))
+        })
+}
+
 /// Parse a generic parameter list after the current `type` keyword.
 ///
 /// The parser stops with the token stream positioned on the declaration delimiter
 /// (`|`, `=`, `::`, or `as`) so the owning header parser can continue normally.
 pub(crate) fn parse_generic_parameter_list_after_type_keyword(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     forbidden_names: &FxHashSet<StringId>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> GenericParameterParseResult<GenericParameterList> {
-    if token_stream.current_token_kind() != &TokenKind::Type {
+    if token_stream.current_tag() != TokenTag::TYPE {
         return Err(CompilerError::new(
             "Generic parameter parser was called when the current token was not `type`.",
             None,
@@ -52,8 +67,17 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     let mut expecting_parameter = true;
 
     loop {
-        match token_stream.current_token_kind().to_owned() {
-            TokenKind::Symbol(name) if expecting_parameter => {
+        match token_stream.current_tag() {
+            TokenTag::SYMBOL if expecting_parameter => {
+                let Some(name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
                 let span = current_source_span(token_stream);
                 parameters.push(GenericParameter {
                     id: TypeParameterId(parameters.len() as u32),
@@ -65,25 +89,35 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 expecting_parameter = false;
             }
 
-            TokenKind::Symbol(_) => {
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::unexpected_token(
-                        token_stream.current_token_kind().to_owned(),
-                        current_source_span(token_stream),
-                    ),
+            TokenTag::SYMBOL => {
+                let span = current_source_span(token_stream);
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_end_of_file(None, span),
+                    )
+                    .into());
+                };
+                return Err(with_token_span(
+                    span,
+                    CompilerDiagnostic::unexpected_token_from_tag(found, span),
                 )
                 .into());
             }
 
-            TokenKind::Comma => {
+            TokenTag::COMMA => {
                 if expecting_parameter {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            token_stream.current_token_kind().to_owned(),
-                            current_source_span(token_stream),
-                        ),
+                    let span = current_source_span(token_stream);
+                    let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                        return Err(with_token_span(
+                            span,
+                            CompilerDiagnostic::unexpected_end_of_file(None, span),
+                        )
+                        .into());
+                    };
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_token_from_tag(found, span),
                     )
                     .into());
                 }
@@ -92,7 +126,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 expecting_parameter = true;
             }
 
-            TokenKind::Is if !expecting_parameter => {
+            TokenTag::IS if !expecting_parameter => {
                 token_stream.advance();
                 parse_trait_bounds_for_current_parameter(
                     token_stream,
@@ -101,10 +135,10 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 )?;
             }
 
-            TokenKind::TypeParameterBracket
-            | TokenKind::Assign
-            | TokenKind::DoubleColon
-            | TokenKind::As => {
+            TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::ASSIGN
+            | TokenTag::DOUBLE_COLON
+            | TokenTag::AS => {
                 if parameters.is_empty() {
                     return Err(CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::EmptyParameterList,
@@ -114,12 +148,17 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 }
 
                 if expecting_parameter {
-                    return Err(with_current_token_span(
-                        token_stream,
-                        CompilerDiagnostic::unexpected_token(
-                            token_stream.current_token_kind().to_owned(),
-                            current_source_span(token_stream),
-                        ),
+                    let span = current_source_span(token_stream);
+                    let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+                        return Err(with_token_span(
+                            span,
+                            CompilerDiagnostic::unexpected_end_of_file(None, span),
+                        )
+                        .into());
+                    };
+                    return Err(with_token_span(
+                        span,
+                        CompilerDiagnostic::unexpected_token_from_tag(found, span),
                     )
                     .into());
                 }
@@ -138,7 +177,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 return Ok(parameter_list);
             }
 
-            TokenKind::Must => {
+            TokenTag::MUST => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -149,7 +188,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Colon => {
+            TokenTag::COLON => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -160,7 +199,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -171,7 +210,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            TokenKind::Eof | TokenKind::End => {
+            TokenTag::EOF | TokenTag::END => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
@@ -182,14 +221,19 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 .into());
             }
 
-            other => {
-                return Err(with_current_token_span(
-                    token_stream,
+            _other => {
+                let span = current_source_span(token_stream);
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generic-parameter diagnostic requested without a current token",
+                        )
+                    })?;
+                return Err(with_token_span(
+                    span,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken {
-                            found: other.into(),
-                        },
-                        current_source_span(token_stream),
+                        InvalidGenericParameterReason::InvalidToken { found },
+                        span,
                     ),
                 )
                 .into());
@@ -199,17 +243,22 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 }
 
 fn parse_trait_bounds_for_current_parameter(
-    token_stream: &mut FileTokens,
+    token_stream: &mut DeclarationCursor<'_>,
     parameters: &mut [GenericParameter],
-    string_table: &StringTable,
+    string_table: &mut StringTable,
 ) -> GenericParameterParseResult<()> {
     let Some(parameter) = parameters.last_mut() else {
-        return Err(with_current_token_span(
-            token_stream,
-            CompilerDiagnostic::unexpected_token(
-                token_stream.current_token_kind().to_owned(),
-                current_source_span(token_stream),
-            ),
+        let span = current_source_span(token_stream);
+        let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
+            return Err(with_token_span(
+                span,
+                CompilerDiagnostic::unexpected_end_of_file(None, span),
+            )
+            .into());
+        };
+        return Err(with_token_span(
+            span,
+            CompilerDiagnostic::unexpected_token_from_tag(found, span),
         )
         .into());
     };
@@ -217,8 +266,17 @@ fn parse_trait_bounds_for_current_parameter(
     let mut expecting_trait_name = true;
 
     loop {
-        match token_stream.current_token_kind().to_owned() {
-            TokenKind::Symbol(trait_name) if expecting_trait_name => {
+        match token_stream.current_tag() {
+            TokenTag::SYMBOL if expecting_trait_name => {
+                let Some(trait_name) = token_stream
+                    .current_string_id_in(string_table)
+                    .map_err(HeaderParseFailure::Infrastructure)?
+                else {
+                    return Err(CompilerError::compiler_error(
+                        "symbol token is missing its string payload",
+                    )
+                    .into());
+                };
                 let span = current_source_span(token_stream);
                 if let Err(diagnostic) =
                     ensure_trait_bound_name_is_all_caps(trait_name, span, string_table)
@@ -233,22 +291,22 @@ fn parse_trait_bounds_for_current_parameter(
                 expecting_trait_name = false;
             }
 
-            TokenKind::And if !expecting_trait_name => {
+            TokenTag::AND if !expecting_trait_name => {
                 token_stream.advance();
                 expecting_trait_name = true;
             }
 
-            TokenKind::Comma
-            | TokenKind::TypeParameterBracket
-            | TokenKind::Assign
-            | TokenKind::DoubleColon
-            | TokenKind::As
+            TokenTag::COMMA
+            | TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::ASSIGN
+            | TokenTag::DOUBLE_COLON
+            | TokenTag::AS
                 if !expecting_trait_name =>
             {
                 return Ok(());
             }
 
-            TokenKind::Must => {
+            TokenTag::MUST => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -259,7 +317,7 @@ fn parse_trait_bounds_for_current_parameter(
                 .into());
             }
 
-            TokenKind::Eof | TokenKind::End => {
+            TokenTag::EOF | TokenTag::END => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
@@ -269,14 +327,19 @@ fn parse_trait_bounds_for_current_parameter(
                 )
                 .into());
             }
-            other => {
-                return Err(with_current_token_span(
-                    token_stream,
+            _other => {
+                let span = current_source_span(token_stream);
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generic-parameter diagnostic requested without a current token",
+                        )
+                    })?;
+                return Err(with_token_span(
+                    span,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken {
-                            found: other.into(),
-                        },
-                        current_source_span(token_stream),
+                        InvalidGenericParameterReason::InvalidToken { found },
+                        span,
                     ),
                 )
                 .into());
@@ -301,7 +364,7 @@ fn ensure_trait_bound_name_is_all_caps(
 }
 
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &DeclarationCursor<'_>,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     with_token_span(current_source_span(token_stream), diagnostic)
@@ -318,16 +381,13 @@ fn with_token_span(
 }
 
 fn with_parameter_span(
-    _token_stream: &FileTokens,
+    _token_stream: &DeclarationCursor<'_>,
     _parameter_list: &GenericParameterList,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     diagnostic
 }
 
-fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    token_stream
-        .tokens
-        .get(token_stream.index)
-        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }

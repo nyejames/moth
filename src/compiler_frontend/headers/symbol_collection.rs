@@ -54,6 +54,9 @@ pub(super) fn build_module_symbols(
         module_symbols
             .source_ids_by_source
             .insert(file_output.source_file.to_owned(), file_output.file_id);
+        module_symbols
+            .source_paths_by_source_id
+            .insert(file_output.file_id, file_output.source_file);
 
         for header in &file_output.headers {
             if let Some(mut diagnostic) =
@@ -67,17 +70,21 @@ pub(super) fn build_module_symbols(
 
             // Header source paths are already the compiler's logical source identity. Keep that
             // identity in the module map instead of deriving a second filesystem path spelling.
-            module_symbols.canonical_source_by_symbol_path.insert(
-                header.tokens.src_path.to_owned(),
-                header.source_file,
-            );
+            module_symbols
+                .canonical_source_by_symbol_path
+                .insert(header.declaration_path.to_owned(), file_output.source_file);
             if let Some(name_span) = header.name_span {
                 module_symbols
                     .declaration_spans_by_symbol_path
-                    .insert(header.tokens.src_path.to_owned(), name_span);
+                    .insert(header.declaration_path.to_owned(), name_span);
             }
-
-            register_header_symbol(&mut module_symbols, header, string_table, path_fork);
+            register_header_symbol(
+                &mut module_symbols,
+                header,
+                file_output.source_file,
+                string_table,
+                path_fork,
+            );
         }
     }
 
@@ -114,7 +121,7 @@ fn validate_declared_name(
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Option<CompilerDiagnostic> {
-    let symbol_name = path_fork.component(header.tokens.src_path)?;
+    let symbol_name = path_fork.component(header.declaration_path)?;
 
     let symbol_name_text = string_table.resolve(symbol_name);
 
@@ -232,6 +239,7 @@ fn is_dependency_bindable_for_symbol_collection(header: &Header) -> bool {
 fn register_header_symbol(
     module_symbols: &mut ModuleSymbols,
     header: &Header,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) {
@@ -242,8 +250,8 @@ fn register_header_symbol(
         } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
@@ -256,14 +264,14 @@ fn register_header_symbol(
             if is_receiver_method_candidate(signature, string_table, &*path_fork) {
                 module_symbols
                     .receiver_method_paths
-                    .insert(header.tokens.src_path.to_owned());
+                    .insert(header.declaration_path.to_owned());
 
                 if let Some(receiver_name) =
                     receiver_method_receiver_name(signature, string_table, &*path_fork)
                 {
                     module_symbols
                         .receiver_method_receiver_names
-                        .insert(header.tokens.src_path.to_owned(), receiver_name);
+                        .insert(header.declaration_path.to_owned(), receiver_name);
                 }
             }
         }
@@ -273,14 +281,14 @@ fn register_header_symbol(
         } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
             module_symbols
                 .nominal_type_paths
-                .insert(header.tokens.src_path.to_owned());
+                .insert(header.declaration_path.to_owned());
             register_generic_declaration_kind(
                 module_symbols,
                 header,
@@ -294,14 +302,14 @@ fn register_header_symbol(
         } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
             module_symbols
                 .nominal_type_paths
-                .insert(header.tokens.src_path.to_owned());
+                .insert(header.declaration_path.to_owned());
             register_generic_declaration_kind(
                 module_symbols,
                 header,
@@ -313,38 +321,35 @@ fn register_header_symbol(
         HeaderKind::StartFunction => {
             // Register the compiler-owned implicit start function under its entry source file.
             let start_name = path_fork
-                .try_intern_child(
-                    header.source_file,
-                    string_table.intern(IMPLICIT_START_FUNC_NAME),
-                )
+                .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
                 .expect("path table exhausted while interning implicit start path");
-            register_declared_symbol(module_symbols, &start_name, &header.source_file, false, path_fork);
+            register_declared_symbol(module_symbols, &start_name, &source_file, false, path_fork);
         }
 
         HeaderKind::Constant { .. } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
             module_symbols
                 .constant_paths
-                .insert(header.tokens.src_path.to_owned());
+                .insert(header.declaration_path.to_owned());
         }
 
         HeaderKind::TypeAlias { .. } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
             module_symbols
                 .type_alias_paths
-                .insert(header.tokens.src_path.to_owned());
+                .insert(header.declaration_path.to_owned());
         }
 
         HeaderKind::ConstTemplate { .. } => {}
@@ -352,14 +357,12 @@ fn register_header_symbol(
         HeaderKind::Trait { .. } => {
             register_declared_symbol(
                 module_symbols,
-                &header.tokens.src_path,
-                &header.source_file,
+                &header.declaration_path,
+                &source_file,
                 is_dependency_bindable_for_symbol_collection(header),
                 path_fork,
             );
-            module_symbols
-                .trait_paths
-                .insert(header.tokens.src_path);
+            module_symbols.trait_paths.insert(header.declaration_path);
         }
 
         HeaderKind::TraitConformance { .. } => {
@@ -411,5 +414,5 @@ fn register_generic_declaration_kind(
     // arity are owned by TypeEnvironment once AST registers the declaration.
     module_symbols
         .generic_declarations_by_path
-        .insert(header.tokens.src_path.to_owned(), kind);
+        .insert(header.declaration_path.to_owned(), kind);
 }

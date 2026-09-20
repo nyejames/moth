@@ -4,6 +4,7 @@
 //! WHY: declaration parsing is the entrypoint for most AST values and must preserve type intent.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
@@ -18,15 +19,15 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -39,7 +40,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn parses_mutable_and_explicitly_typed_declarations() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -61,7 +63,8 @@ fn parses_mutable_and_explicitly_typed_declarations() {
 
 #[test]
 fn resolves_named_type_annotations_against_prior_structs() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -260,10 +263,12 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
 
 #[test]
 fn fixed_collection_alias_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     Names as {2 String}
     names Names = {"Priya"}
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -297,13 +302,15 @@ fn nested_fixed_collection_literal_is_accepted() {
 
 #[test]
 fn immutable_fixed_collection_from_function_call_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     make || -> {2 Int}:
         return {1}
     ;
     
     items {2 Int} = make()
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -320,14 +327,16 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
 
 #[test]
 fn generic_identity_preserves_fixed_collection_shape() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(r#"
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
     identity type Item |value Item| -> Item:
         return value
     ;
     
     items {2 Int} = {1}
     same = identity(items)
-    "#);
+    "#,
+    );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[1].kind else {
@@ -435,7 +444,9 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let source = format!("padding #= \"{padding}\"\nvalue {target}\n");
         let mut strings = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_path = path_fork.try_intern_portable_path("declarations.moth", &mut strings).expect("test path fits");
+        let source_path = path_fork
+            .try_intern_portable_path("declarations.moth", &mut strings)
+            .expect("test path fits");
         let canonical_path = PathBuf::from("declarations.moth");
         let mut sources =
             SourceDatabase::build([&canonical_path], &canonical_path, None, &mut strings)
@@ -446,17 +457,52 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .expect("the original source snapshot must load");
         let source = sources.retained_text(file_id).unwrap();
         let mut builder = ExtendedSpanBuilder::new();
-        let mut tokens = tokenize(source, source_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), &mut strings, &mut path_fork, file_id, &mut builder)
+        let lexed = tokenize(
+            source,
+            source_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut strings,
+            &mut path_fork,
+            file_id,
+            &mut builder,
+        )
         .expect("the source must tokenize");
         let name = strings.intern("value");
-        tokens.index = tokens
+        let declaration_position = (0..lexed.tokens.len())
+            .find_map(|index| {
+                let index = TokenIndex::try_from_index(index)?;
+                let token = lexed.tokens.token(index).ok()?;
+                (token.tag() == TokenTag::SYMBOL && token.string_id() == Some(name))
+                    .then_some(index.index() + 1)
+            })
+            .expect("the tokenized source must contain the declaration name");
+        let full_range = lexed
             .tokens
-            .iter()
-            .position(|token| token.kind == TokenKind::Symbol(name))
-            .unwrap()
-            + 1;
-        let declaration = parse_declaration_syntax(&mut tokens, name, &mut strings, &mut builder)
-            .expect("the authored declaration must produce its shell");
+            .full_range()
+            .expect("the tokenized source must expose a checked full range");
+        let mut canonical_cursor = lexed
+            .tokens
+            .cursor(full_range)
+            .expect("the tokenized source must expose canonical tokens");
+        canonical_cursor
+            .set_position(
+                TokenIndex::try_from_index(declaration_position)
+                    .expect("the declaration position must fit the canonical index domain"),
+            )
+            .expect("the canonical cursor must seek to the declaration position");
+        let (declaration, declaration_position) = {
+            let mut declaration_cursor =
+                crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
+                    canonical_cursor,
+                )
+                .expect("the tokenized source must expose canonical tokens");
+            let declaration =
+                parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
+                    .expect("the authored declaration must produce its shell");
+            let declaration_position = declaration_cursor.position();
+            (declaration, declaration_position)
+        };
         let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
         let expected_range = (
             expected_start,
@@ -477,41 +523,48 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             "the preceding long literal must use the original span table"
         );
 
-        tokens.freeze_path_syntax_for_test();
-        let context = ScopeContext::new_for_tests(
+        let _context = ScopeContext::new_for_tests(
             ContextKind::Function,
             source_path,
-            Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+            Rc::new(TopLevelDeclarationTable::new(
+                vec![],
+                &PathInternerFork::empty(),
+            )),
             Arc::new(ExternalPackageRegistry::new()),
             vec![],
             0,
         )
         .with_declaring_file_id(file_id);
-        let declaration_path = path_fork
-            .try_intern_child(source_path, name)
-            .expect("declaration path should intern");
-        let initializer = super::declaration_initializer_stream(
-            &declaration_path,
+
+        let source_owner = &lexed.tokens;
+        let source_range = source_owner
+            .full_range()
+            .expect("the tokenized source must expose a checked full range");
+        let mut owner = AstCursor::from_source_tokens(source_owner, source_range)
+            .expect("the tokenized source must expose an AST cursor");
+        owner
+            .set_position(declaration_position)
+            .expect("the canonical cursor must seek to the declaration position");
+        let mut initializer = super::declaration_initializer_stream(
+            Some(&owner),
+            declaration.initializer_range,
             declaration.span,
-            declaration.initializer_tokens,
-            &tokens.path_syntax,
-            &context,
-            &path_fork,
         )
         .expect("initializer must retain its declaration's source owner");
-        let terminator = initializer.tokens.last().unwrap();
-        assert_eq!(terminator.kind, TokenKind::Eof);
-        assert_eq!(initializer.file_id, file_id);
+        assert_eq!(initializer.source_id(), file_id);
+        let eof_position = initializer.length();
+        initializer
+            .set_position(eof_position)
+            .expect("initializer EOF position must be within its range");
+        assert_eq!(initializer.current_span(), declaration_span);
         sources
             .install_extended_spans(file_id, builder.freeze())
             .expect("the original table must install after the final span producer");
-        let range = SourceSpan::new(file_id, terminator.span).byte_range(&sources);
+        let range = initializer.current_span().byte_range(&sources);
         assert_eq!(
             (range.start(), range.end()),
             expected_range,
             "target {target}"
         );
-        let terminator_span = SourceSpan::new(file_id, terminator.span);
-        assert_eq!(terminator_span, declaration_span);
     }
 }

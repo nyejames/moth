@@ -16,6 +16,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
@@ -106,19 +107,30 @@ pub(crate) fn resolve_visible_named_type_path(
 pub(super) fn canonicalize_local_ordering_hints(
     headers: &mut [Header],
     binding_environment: &HeaderBindingEnvironment,
+    source_paths_by_source_id: &FxHashMap<SourceId, PathId>,
     file_dependency_clauses_by_source: &FxHashMap<PathId, Vec<RetainedDependencyClause>>,
     dependency_selections_by_source: &FxHashMap<PathId, Vec<DependencySelection>>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), HeaderPreparationFailure> {
     for header in headers.iter_mut() {
-        let visibility = match binding_environment.visibility_for(&header.source_file) {
+        let visibility = match binding_environment.visibility_for(
+            &source_paths_by_source_id
+                .get(&header.tokens.source())
+                .copied()
+                .expect("header body range has no prepared source-path identity"),
+        ) {
             Ok(visibility) => visibility,
             Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
         };
 
         let file_dependency_clauses = file_dependency_clauses_by_source
-            .get(&header.source_file)
+            .get(
+                &source_paths_by_source_id
+                    .get(&header.tokens.source())
+                    .copied()
+                    .expect("header body range has no prepared source-path identity"),
+            )
             .map(|dependencies| dependencies.as_slice())
             .unwrap_or(&[]);
 
@@ -127,7 +139,12 @@ pub(super) fn canonicalize_local_ordering_hints(
 
         for hint in header.local_ordering_hints.drain() {
             let selection_table = dependency_selections_by_source
-                .get(&header.source_file)
+                .get(
+                    &source_paths_by_source_id
+                        .get(&header.tokens.source())
+                        .copied()
+                        .expect("header body range has no prepared source-path identity"),
+                )
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             if hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling {
@@ -170,8 +187,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                 }
 
                 if let Some(selection) = selections.iter().find(|selection| {
-                    path_fork
-                        .try_intern_child(dependency.dependency.path, selection.source_name)
+                    path_fork.try_intern_child(dependency.dependency.path, selection.source_name)
                         == Some(hint.path())
                 }) {
                     matching_dependency = Some((dependency, selection.local_name()));

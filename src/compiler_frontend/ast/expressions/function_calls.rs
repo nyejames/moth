@@ -8,6 +8,7 @@
 //!      expression contract in statement and expression positions.
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
@@ -40,11 +41,11 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.
-pub struct FunctionCallParseInput<'a, 'b> {
-    pub token_stream: &'a mut FileTokens,
+pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub id: &'a PathId,
     pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
@@ -58,8 +59,8 @@ pub struct FunctionCallParseInput<'a, 'b> {
 }
 
 /// Input bundle for external function calls.
-pub struct ExternalFunctionCallParseInput<'a, 'b> {
-    pub token_stream: &'a mut FileTokens,
+pub struct ExternalFunctionCallParseInput<'a, 'b, 'tokens> {
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub external_function_id: ExternalFunctionId,
     pub external_function: &'a ExternalFunctionDef,
     pub call_span: Option<SourceSpan>,
@@ -80,8 +81,8 @@ struct ParsedExternalFunctionCall {
     span: Option<SourceSpan>,
 }
 
-struct CallFinishContext<'a, 'b> {
-    token_stream: &'a mut FileTokens,
+struct CallFinishContext<'a, 'b, 'tokens> {
+    token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     value_required: bool,
     allow_boundary_catch: bool,
@@ -98,7 +99,7 @@ struct CallFinishContext<'a, 'b> {
 /// WHY: call validation belongs here, while callers should consume the same
 /// expression contract in statement and expression positions.
 pub(crate) fn parse_function_call_expression(
-    input: FunctionCallParseInput<'_, '_>,
+    input: FunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let FunctionCallParseInput {
         token_stream,
@@ -190,7 +191,7 @@ pub(crate) fn parse_function_call_expression(
 fn finish_function_call_expression(
     call: HandledFallibleCall,
     error_return_type_id: Option<TypeId>,
-    finish: CallFinishContext<'_, '_>,
+    finish: CallFinishContext<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let CallFinishContext {
         token_stream,
@@ -204,16 +205,13 @@ fn finish_function_call_expression(
     } = finish;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(
-            token_stream.current_token_kind(),
-            TokenKind::Bang | TokenKind::Catch
-        ) {
+        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
             );
             return Err(CompilerDiagnostic::invalid_fallible_handling(
-                non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+                non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
                 Some(token_stream.current_span()),
             )
             .into());
@@ -283,7 +281,7 @@ fn resolve_user_function_call_arguments(
 /// WHY: statement and expression parsing both consume the expression-owned call
 /// payload, avoiding a statement-shaped call-node detour for host functions.
 pub(crate) fn parse_external_function_call_expression(
-    input: ExternalFunctionCallParseInput<'_, '_>,
+    input: ExternalFunctionCallParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let ExternalFunctionCallParseInput {
         token_stream,
@@ -330,7 +328,7 @@ pub(crate) fn parse_external_function_call_expression(
     reason = "external call parsing keeps the token stream, external identity and definition, call span, scope, and mutable interner/string/path state as separate borrows"
 )]
 fn parse_external_function_call_parts(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     external_function_id: ExternalFunctionId,
     external_function: &ExternalFunctionDef,
     span: Option<SourceSpan>,
@@ -427,7 +425,7 @@ fn parse_external_function_call_parts(
 
 fn finish_external_function_call_expression(
     parsed_call: ParsedExternalFunctionCall,
-    finish: CallFinishContext<'_, '_>,
+    finish: CallFinishContext<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let CallFinishContext {
         token_stream,
@@ -479,14 +477,11 @@ fn finish_external_function_call_expression(
         .into());
     }
 
-    if matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Bang | TokenKind::Catch
-    ) {
+    if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
         let operand_is_optional =
             call_success_is_optional(result_type_ids.as_slice(), type_interner.environment());
         return Err(CompilerDiagnostic::invalid_fallible_handling(
-            non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
+            non_fallible_handler_reason(token_stream.current_tag(), operand_is_optional),
             Some(token_stream.current_span()),
         )
         .into());

@@ -4,11 +4,12 @@
 //! WHY: `if`, match guards, and conditional `loop` headers should all emit the same
 //! typed diagnostic payload so that error messages and suggestions are consistent.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Stage-local result for condition-type validation helpers.
 ///
@@ -62,14 +63,14 @@ pub(crate) fn ensure_loop_condition(
 }
 
 /// Return whether the token after `if` is a boundary rather than a condition.
-pub(crate) fn if_condition_is_missing(token_stream: &FileTokens) -> bool {
+pub(crate) fn if_condition_is_missing(token_stream: &AstCursor) -> bool {
     matches!(
-        token_stream.current_token_kind(),
-        TokenKind::Colon
-            | TokenKind::Then
-            | TokenKind::Else
-            | TokenKind::Newline
-            | TokenKind::End
-            | TokenKind::Eof
+        token_stream.current_tag(),
+        TokenTag::COLON
+            | TokenTag::THEN
+            | TokenTag::ELSE
+            | TokenTag::NEWLINE
+            | TokenTag::END
+            | TokenTag::EOF
     )
 }

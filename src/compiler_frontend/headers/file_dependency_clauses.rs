@@ -4,15 +4,16 @@
 //!       selections.
 //! WHY: one authored clause owns one dependency shell. Stage 0 and later header stages must
 //!      consume that ownership instead of receiving one provider row per selected name.
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyClauseParseError, RetainedDependencyPath, ScannedDependencyBinding,
-    ScannedDependencyClause, parse_dependency_clause,
+    ScannedDependencyClause, parse_dependency_clause_at_source,
 };
 use crate::compiler_frontend::headers::dependency_paths::validate_dependency_path;
 use crate::compiler_frontend::headers::dependency_target::{
-    DependencyTargetKind, classify_dependency_target,
+    DependencyTargetKind, checked_provider_target, classify_dependency_target,
 };
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
@@ -24,13 +25,34 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex};
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
-/// Parse and record an ordinary private dependency clause.
+struct DependencyClauseRequest {
+    clause_span: SourceSpan,
+    clause_token_index: TokenIndex,
+    require_selection_clause: bool,
+}
+
+fn dependency_clause_token_index(
+    cursor: &TokenCursor<'_>,
+) -> FileDependencyClauseResult<TokenIndex> {
+    let index = cursor.position().index().checked_sub(1).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause token preceded the source token index",
+        ))
+    })?;
+    TokenIndex::try_from_index(index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause token exceeded its checked index domain",
+        ))
+    })
+}
+
 pub(super) fn parse_and_record_private_dependency(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     clause_span: SourceSpan,
@@ -44,48 +66,67 @@ pub(super) fn parse_and_record_private_dependency(
         .into());
     }
     parse_and_record_dependency_clause(
-        token_stream,
+        cursor,
+        file_id,
         state,
         context,
         HeaderExportMode::Private,
-        clause_span,
-        token_stream.index.saturating_sub(1),
-        false,
+        DependencyClauseRequest {
+            clause_span,
+            clause_token_index: dependency_clause_token_index(cursor)?,
+            require_selection_clause: false,
+        },
     )
 }
 
-/// Parse and record one public dependency clause inside the single `export:` block.
 pub(super) fn parse_and_record_public_dependency(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     parse_and_record_dependency_clause(
-        token_stream,
+        cursor,
+        file_id,
         state,
         context,
         HeaderExportMode::Public,
-        clause_span,
-        token_stream.index.saturating_sub(1),
-        true,
+        DependencyClauseRequest {
+            clause_span,
+            clause_token_index: dependency_clause_token_index(cursor)?,
+            require_selection_clause: true,
+        },
     )
 }
 
 fn parse_and_record_dependency_clause(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
+    file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
-    clause_span: SourceSpan,
-    clause_token_index: usize,
-    require_selection_clause: bool,
+    request: DependencyClauseRequest,
 ) -> FileDependencyClauseResult<()> {
-    let (parsed, next_index) = parse_dependency_clause(
-        &token_stream.tokens,
+    let DependencyClauseRequest {
+        clause_span,
         clause_token_index,
-        &token_stream.path_syntax,
-        token_stream.file_id,
+        require_selection_clause,
+    } = request;
+    let source_tokens = cursor.source_tokens();
+    if source_tokens.source() != file_id {
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "dependency clause source token owner does not match its file identity",
+            ),
+        ));
+    }
+    let path_syntax = &context.path_syntax;
+    let (parsed, next_index) = parse_dependency_clause_at_source(
+        source_tokens,
+        clause_token_index.index(),
+        path_syntax,
+        file_id,
     )
     .map_err(|scanner_error| match scanner_error {
         DependencyClauseParseError::Diagnostic(diagnostic) => {
@@ -97,7 +138,7 @@ fn parse_and_record_dependency_clause(
     })?;
 
     // Path validity is independent of the selected binding shape. Validate it first so an
-    // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic
+    // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic.
     validate_dependency_path(
         parsed.provider.path,
         &parsed.provider.path_span,
@@ -132,11 +173,22 @@ fn parse_and_record_dependency_clause(
         return Err(CompilerDiagnostic::invalid_export_target(Some(clause_span)).into());
     }
 
-    let file_id = token_stream.file_id;
-    let clause_shell_id = DependencyShellId::new(file_id, state.dependency_clause_count as u32);
-    state.dependency_clause_count += 1;
+    let ordinal = u32::try_from(state.dependency_clause_count).map_err(|_| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause ordinal exceeded its checked identity domain",
+        ))
+    })?;
+    let clause_shell_id = DependencyShellId::new(file_id, ordinal);
+    state.dependency_clause_count =
+        state
+            .dependency_clause_count
+            .checked_add(1)
+            .ok_or_else(|| {
+                HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                    "dependency clause count overflowed its source state",
+                ))
+            })?;
     add_frontend_counter(FrontendCounter::DependencyClauseCount, 1);
-    add_frontend_counter(FrontendCounter::RetainedShellCount, 1);
     let selection_count = match &parsed.binding {
         ScannedDependencyBinding::Namespace { .. } => 0,
         ScannedDependencyBinding::DirectSelections { selections } => selections.len(),
@@ -151,13 +203,23 @@ fn parse_and_record_dependency_clause(
         export_mode,
         context.string_table,
         &*context.path_fork,
-    );
+    )?;
 
-    token_stream.index = next_index;
+    let next_position = TokenIndex::try_from_index(next_index).ok_or_else(|| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "dependency clause follower exceeded its checked index domain",
+        ))
+    })?;
+    cursor.set_position(next_position).map_err(|error| {
+        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "dependency clause follower exceeded its source token cursor: {error:?}",
+        )))
+    })?;
     Ok(())
 }
 
-/// Convert one scanned clause into the file-owned retained tables.
+/// Convert one scanned clause into the file-owned retained tables, including its checked provider
+/// structure while the worker-local symbol stores are still available.
 fn retain_scanned_clause(
     state: &mut HeaderFileParseState,
     clause_shell_id: DependencyShellId,
@@ -166,7 +228,7 @@ fn retain_scanned_clause(
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) {
+) -> Result<(), HeaderParseFailure> {
     let binding = match scanned.binding {
         ScannedDependencyBinding::Namespace { alias } => {
             DependencyBindingSyntax::Namespace { alias }
@@ -195,11 +257,15 @@ fn retain_scanned_clause(
         }
     };
 
+    let provider_target =
+        checked_provider_target(scanned.provider.path, &target, path_fork, string_table)?;
     let dependency = RetainedDependencyPath {
         dependency_shell_id: clause_shell_id,
         path: scanned.provider.path,
         path_syntax: scanned.provider.path_syntax,
         target,
+        provider_target,
+        local_source_id: None,
         span: scanned.provider.path_span,
     };
 
@@ -208,13 +274,12 @@ fn retain_scanned_clause(
         binding,
         export_mode,
     };
-
-    if let Some(name) =
-        retained_clause.effective_namespace_local_name(string_table, path_fork)
+    if let Some(name) = retained_clause.effective_namespace_local_name(string_table, path_fork)
         && let Some(span) = retained_clause.namespace_binding_span()
     {
         state.encountered_symbols.entry(name).or_insert(*span);
     }
 
     state.file_dependency_clauses.push(retained_clause);
+    Ok(())
 }

@@ -100,9 +100,7 @@ impl StaticIfSpecialization {
         self.selection_count != 0
     }
 
-    pub(super) fn function_provenance(
-        &self,
-    ) -> &FxHashMap<PathId, SyntheticInterfaceProvenance> {
+    pub(super) fn function_provenance(&self) -> &FxHashMap<PathId, SyntheticInterfaceProvenance> {
         &self.function_provenance
     }
 
@@ -271,8 +269,7 @@ impl StaticIfSpecializer<'_> {
                 None
             }
             NodeKind::Function(function_path, _, body) => {
-                let previous_function_path =
-                    self.current_function_path.replace(*function_path);
+                let previous_function_path = self.current_function_path.replace(*function_path);
                 let mut function_environment = environment.clone();
                 let result = self.specialize_body(body, &mut function_environment);
                 self.current_function_path = previous_function_path;
@@ -457,15 +454,9 @@ impl StaticIfSpecializer<'_> {
                         else_provenance
                     });
                     let (body, scope) = if select_then {
-                        (
-                            std::mem::take(&mut value_if.then_body),
-                            value_if.then_scope,
-                        )
+                        (std::mem::take(&mut value_if.then_body), value_if.then_scope)
                     } else {
-                        (
-                            std::mem::take(&mut value_if.else_body),
-                            value_if.else_scope,
-                        )
+                        (std::mem::take(&mut value_if.else_body), value_if.else_scope)
                     };
                     Some(ValueLexicalScope {
                         body,
@@ -549,8 +540,7 @@ impl StaticIfSpecializer<'_> {
         &mut self,
         body: &mut [AstNode],
         environment: &mut ConstValueEnvironment,
-    ) -> Result<FxHashMap<PathId, SyntheticInterfaceProvenance>, TemplateNormalizationError>
-    {
+    ) -> Result<FxHashMap<PathId, SyntheticInterfaceProvenance>, TemplateNormalizationError> {
         let saved_provenance = std::mem::take(&mut self.function_provenance);
         let result = self.specialize_body(body, environment);
         let branch_provenance = std::mem::take(&mut self.function_provenance);

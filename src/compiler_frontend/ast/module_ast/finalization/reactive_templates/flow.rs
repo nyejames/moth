@@ -58,7 +58,7 @@ fn collect_initial_function_flows_from_node(
 ) {
     match &node.kind {
         NodeKind::Function(path, signature, body) => {
-flows.insert(*path, empty_flow_for_signature(signature));
+            flows.insert(*path, empty_flow_for_signature(signature));
             collect_initial_function_flows_from_nodes(body, flows);
         }
 

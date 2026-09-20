@@ -757,7 +757,7 @@ bounded <span class='moth-code-operator'>=</span> <span class='moth-code-functio
 <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>bounded<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>bounded<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><p>You can also bind the whole namespace and access members through field access.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/math</span>
 
 angle <span class='moth-code-operator'>=</span> math.PI <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2.0</span>
-result <span class='moth-code-operator'>=</span> math.<span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span>angle<span class='moth-code-delimiter'>)</span></code></pre><h3>Constants</h3><p><code>PI</code>, <code>TAU</code> and <code>E</code> form compile-time <code>Float</code> values. Use them directly in expressions.</p><h3>Common functions</h3><ul><li><code>sin</code>, <code>cos</code>, <code>tan</code> for trigonometry</li><li><code>atan2(y, x)</code> for arc tangent of two values</li><li><code>sqrt</code>, <code>pow</code>, <code>log</code> for powers and logarithms</li><li><code>abs</code>, <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>trunc</code> for rounding</li><li><code>min(a, b)</code>, <code>max(a, b)</code>, <code>clamp(x, min, max)</code> for comparisons</li></ul><p>All functions take <code>Float</code> values and return <code>Float</code>. For the full function list, backend behaviour and deferred surfaces, see <a href="./">Core math advanced</a>.</p>
+result <span class='moth-code-operator'>=</span> math.<span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span>angle<span class='moth-code-delimiter'>)</span></code></pre><h3>Constants</h3><p><code>PI</code>, <code>TAU</code>, <code>E</code>, <code>SQRT_2</code>, <code>LN_2</code> and <code>LN_10</code> form compile-time <code>Float</code> values. Use them directly in expressions.</p><h3>Common functions</h3><ul><li><code>sin</code>, <code>cos</code>, <code>tan</code> for trigonometry</li><li><code>atan2(y, x)</code> for arc tangent of two values</li><li><code>sqrt</code>, <code>pow</code>, <code>log</code> for powers and logarithms</li><li><code>abs</code>, <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>trunc</code> for rounding</li><li><code>asin</code>, <code>acos</code>, <code>atan</code> for inverse trigonometry</li><li><code>cbrt</code>, <code>hypot(x, y)</code> for roots and norms</li><li><code>expm1</code>, <code>log1p</code> for precise small-value helpers</li><li><code>sinh</code>, <code>cosh</code>, <code>tanh</code>, <code>asinh</code>, <code>acosh</code>, <code>atanh</code> for the hyperbolics</li><li><code>min(a, b)</code>, <code>max(a, b)</code>, <code>clamp(x, min, max)</code> for comparisons</li></ul><p>All functions take <code>Float</code> values and return <code>Float</code>. For the full function list, backend behaviour and deferred surfaces, see <a href="./">Core math advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -782,6 +782,12 @@ result <span class='moth-code-operator'>=</span> math.<span class='moth-code-fun
              <td style=""><p> <code>TAU</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> 2 * pi</p></td>
         </tr><tr style="">
              <td style=""><p> <code>E</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> Euler&#39;s number</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>SQRT_2</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> square root of 2</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>LN_2</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> natural log of 2</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>LN_10</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> natural log of 10</p></td>
         </tr>
             
 </table><p>Constants form compile-time <code>Float</code> values. They fold into expressions at compile time and do not produce runtime lookups.</p><h3>Functions</h3><p>All functions take <code>Float</code> parameters and return <code>Float</code>. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.</p><table style="">
@@ -830,9 +836,35 @@ result <span class='moth-code-operator'>=</span> math.<span class='moth-code-fun
              <td style=""><p> <code>max(a, b)</code></p></td> <td style=""><p> <code>Float, Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
         </tr><tr style="">
              <td style=""><p> <code>clamp(x, min, max)</code></p></td> <td style=""><p> <code>Float, Float, Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>asin(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>acos(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>atan(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>cbrt(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>hypot(x, y)</code></p></td> <td style=""><p> <code>Float, Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>expm1(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>log1p(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>sinh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>cosh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>tanh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>asinh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>acosh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>atanh(x)</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> <code>Float</code></p></td>
         </tr>
             
-</table><p>All functions keep infallible Moth signatures. A non-finite result still fails at the shared external <code>Float</code> boundary before ordinary Moth code observes it. The enclosing numeric failure mode decides what happens next: a function with builtin <code>Error!</code> recovers through that error channel, while a non-fallible function, a custom fallible channel or entry-selected root runtime code traps. <code>NaN</code>, positive infinity and negative infinity never become valid Moth <code>Float</code> values.</p><h3>Access and return contracts</h3><p>All parameters use shared access. No function requires mutable access. Every function returns a fresh <code>Float</code> value.</p><h3>Backend behaviour</h3><p>HTML-JS lowers each function to a JavaScript <code>Math</code> expression. <code>clamp</code> lowers to <code>Math.min(Math.max(x, min), max)</code>. Constants fold into the expression at compile time.</p><p>HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@core/math/sin</code> face rejection. Use direct selections or a namespace clause.</li><li>Named arguments lack support. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, opaque types or <code>Error!</code> channels.</li></ul><h3>Deferred surfaces</h3><p>Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For <code>Float</code> language semantics see <a href="../../../numbers">Numbers</a>.</li></ul>
+</table><p>All functions keep infallible Moth signatures. A non-finite result still fails at the shared external <code>Float</code> boundary before ordinary Moth code observes it. The enclosing numeric failure mode decides what happens next: a function with builtin <code>Error!</code> recovers through that error channel, while a non-fallible function, a custom fallible channel or entry-selected root runtime code traps. <code>NaN</code>, positive infinity and negative infinity never become valid Moth <code>Float</code> values.</p><h3>Numerical contract</h3><p>Angles are radians for <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>asin</code>, <code>acos</code>, <code>atan</code> and <code>atan2</code>. <code>PI</code> is the radian measure of a half turn and <code>TAU</code> of a full turn.</p><p>A mathematical result that is undefined or infinite produces no Moth <code>Float</code>. The shared external <code>Float</code> boundary rejects the non-finite host result with builtin error code 304 before source observes it. The functions with restricted domains are:</p><ul><li><code>sqrt(x)</code> requires <code>x &gt;= 0</code></li><li><code>log(x)</code>, <code>log2(x)</code> and <code>log10(x)</code> require <code>x &gt; 0</code></li><li><code>log1p(x)</code> requires <code>x &gt; -1</code></li><li><code>asin(x)</code> and <code>acos(x)</code> require <code>x</code> between <code>-1</code> and <code>1</code> inclusive</li><li><code>acosh(x)</code> requires <code>x &gt;= 1</code></li><li><code>atanh(x)</code> requires <code>x</code> strictly between <code>-1</code> and <code>1</code></li><li><code>pow(base, exponent)</code> requires <code>base &gt;= 0</code> when <code>exponent</code> is not a whole number, and <code>base</code> other than zero when <code>exponent</code> is negative</li></ul><p>Overflow to an infinite result, such as <code>exp</code>, <code>cosh</code> or <code>sinh</code> of a large argument, fails at the same boundary.</p><p><code>round(x)</code> breaks ties toward positive infinity. <code>round(3.5)</code> is <code>4</code>, <code>round(-3.5)</code> is <code>-3</code> and <code>round(-2.5)</code> is <code>-2</code>.</p><p><code>clamp(x, min, max)</code> is the composition <code>min(max(x, min), max)</code>. When <code>min</code> exceeds <code>max</code> the upper bound wins, so the result is <code>max</code>.</p><p><code>atan2(y, x)</code> returns the angle of the point <code>(x, y)</code> from the positive x axis, between negative <code>PI</code> and <code>PI</code>.</p><p><code>hypot(x, y)</code> returns the square root of <code>x * x + y * y</code> and avoids intermediate overflow.</p><p>The sign of a zero result is not part of this contract.</p><p>A result too small to be a normal <code>Float</code> stays finite. It becomes a subnormal value or zero and never fails the finite boundary. Which of the two occurs is unspecified.</p><p>Transcendental results are approximations with target-defined accuracy, so comparisons use a tolerance. These identities are exact: <code>exp(0)</code> is <code>1</code>, <code>log(1)</code> is <code>0</code>, <code>log2(8)</code> is <code>3</code>, <code>log10(100)</code> is <code>2</code> and <code>pow(2, 3)</code> is <code>8</code>. An approximating function may still round when its mathematical result is exactly representable, so a result that happens to be a whole number is not guaranteed exact: <code>hypot(20, 99)</code> need not be exactly <code>101</code>. Every constant is the nearest <code>Float</code> to its mathematical value.</p><h3>Access and return contracts</h3><p>All parameters use shared access. No function requires mutable access. Every function returns a fresh <code>Float</code> value.</p><h3>Backend behaviour</h3><p>HTML-JS lowers each function to a JavaScript <code>Math</code> expression. <code>clamp</code> lowers to <code>Math.min(Math.max(x, min), max)</code>. Constants fold into the expression at compile time.</p><p>HTML-Wasm lacks a Wasm lowering for these functions. See <a href="../../../progress">progress matrix</a> for current target availability.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@core/math/sin</code> face rejection. Use direct selections or a namespace clause.</li><li>Named arguments lack support. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, opaque types or <code>Error!</code> channels.</li></ul><h3>Deferred surfaces</h3><p>Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For <code>Float</code> language semantics see <a href="../../../numbers">Numbers</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
@@ -1044,99 +1076,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

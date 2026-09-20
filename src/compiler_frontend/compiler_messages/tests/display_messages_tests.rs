@@ -4,8 +4,8 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
 use crate::compiler_frontend::compiler_messages::render::{
-    relative_display_path_from_root, special_file_name_from_path, support_root_import_suggestion,
-    DiagnosticRenderContext,
+    DiagnosticRenderContext, relative_display_path_from_root, special_file_name_from_path,
+    support_root_import_suggestion,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -77,14 +77,20 @@ fn special_file_renderer_names_support_roots() {
         .expect("test path fits");
     let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
-    assert_eq!(special_file_name_from_path(extensionless_path, context), "+pkg.moth");
+    assert_eq!(
+        special_file_name_from_path(extensionless_path, context),
+        "+pkg.moth"
+    );
 
     let explicit_path = path_fork
         .try_intern_portable_path("input/+pkg.moth", &mut string_table)
         .expect("test path fits");
     let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
-    assert_eq!(special_file_name_from_path(explicit_path, context), "+pkg.moth");
+    assert_eq!(
+        special_file_name_from_path(explicit_path, context),
+        "+pkg.moth"
+    );
 }
 
 #[test]

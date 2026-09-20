@@ -94,6 +94,8 @@ pub(crate) struct ModuleMaterialisationContext {
     /// own strings while rebasing a published context.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
 }
+
+type RetainedIdentityArcs<'a> = Option<(&'a Arc<PathTable>, &'a Arc<FrozenStringTable>)>;
 impl ModuleMaterialisationContext {
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.semantic_closure.remap_path_ids(remap);
@@ -179,6 +181,37 @@ impl ModuleMaterialisationContext {
             )),
         }
     }
+    pub(crate) fn retained_identity_arcs(&self) -> Result<RetainedIdentityArcs<'_>, CompilerError> {
+        match (&self.path_table, &self.source_string_table) {
+            (Some(path_table), Some(source_strings)) => Ok(Some((path_table, source_strings))),
+            (None, None) => Ok(None),
+            _ => Err(CompilerError::compiler_error(
+                "published materialisation context has an incomplete identity table pair",
+            )),
+        }
+    }
+
+    /// Record the probe-only ownership that this retained context will carry to the render tail.
+    ///
+    /// The scan is pointer keyed in the ledger, so cloning context or owner `Arc`s does not
+    /// present as another allocation. Body-owned donor identity pairs are included because a
+    /// same-boundary context may intentionally have no context-level identity pair.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn record_memory_ledger(&self) {
+        crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+            self.path_table.as_deref(),
+            self.source_string_table.as_deref(),
+        );
+        for artefact in &self.artefacts {
+            crate::compiler_frontend::instrumentation::record_donor_identity_tables(
+                artefact.body.source_path_table.as_deref(),
+                artefact.body.source_string_table.as_deref(),
+            );
+            crate::compiler_frontend::instrumentation::observe_generic_source_tokens(
+                &artefact.body.source_owner.source_tokens,
+            );
+        }
+    }
 
     /// Rebase a published provider context into the requester's path/string identity domain using
     /// the tables that issued the retained provider paths.
@@ -214,6 +247,8 @@ impl ModuleMaterialisationContext {
                     "published materialisation context path table could not be re-interned",
                 )
             })?;
+        #[cfg(feature = "data_layout_memory_probe")]
+        crate::compiler_frontend::instrumentation::record_requester_remap(&path_remap);
         let mut rebased = self.clone();
         rebased.remap_path_ids(&path_remap);
         Ok(rebased)
@@ -266,9 +301,12 @@ impl GenericTemplateArtefact {
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
+        let identity_tables = context
+            .retained_identity_arcs()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let materialised_body = self
             .body
-            .materialise(source_file, path_fork, &mut string_table)
+            .materialise(source_file, path_fork, &mut string_table, identity_tables)
             .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
@@ -332,6 +370,7 @@ impl GenericTemplateArtefact {
                 AstEnvironmentInput {
                     module_symbols,
                     binding_environment,
+                    source_token_owners: FxHashMap::default(),
                 },
                 string_table_ref,
             )?;
@@ -436,6 +475,7 @@ impl GenericTemplateArtefact {
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
         let value_services = services;
+        let identity_tables = context.retained_identity_arcs()?;
         for nominal in &self.nominals {
             let type_id = intern_generated_canonical_type(
                 &nominal.identity,
@@ -483,9 +523,7 @@ impl GenericTemplateArtefact {
                 declarations
                     .entry(local_path)
                     .or_insert_with(|| kind.clone());
-                declarations
-                    .entry(generated_nominal_path)
-                    .or_insert(kind);
+                declarations.entry(generated_nominal_path).or_insert(kind);
             }
             if !lookups
                 .resolved_struct_fields_by_path
@@ -1001,17 +1039,19 @@ impl GenericTemplateArtefact {
             };
             let source_file = nested.source_file;
             let body = if nested.declaration_identity == self.declaration_identity {
-                materialised_self_body.take().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "generated materialisation consumed its root generic body more than once",
-                    )
-                })?
-                .into_generic_body()
+                materialised_self_body
+                    .take()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generated materialisation consumed its root generic body more than once",
+                        )
+                    })?
+                    .into_generic_body()?
             } else {
                 nested
                     .body
-                    .materialise(source_file, path_fork, string_table)?
-                    .into_generic_body()
+                    .materialise(source_file, path_fork, string_table, identity_tables)?
+                    .into_generic_body()?
             };
             let template = GenericFunctionTemplate {
                 function_path: nested_path,

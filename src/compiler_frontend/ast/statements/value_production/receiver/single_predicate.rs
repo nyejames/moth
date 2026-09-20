@@ -8,6 +8,7 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::if_headers::{
@@ -18,11 +19,12 @@ use crate::compiler_frontend::ast::statements::match_headers::{
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Shared facts after a committed single-predicate header.
 ///
@@ -41,8 +43,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Parse
 pub(in crate::compiler_frontend::ast::statements::value_production) struct SinglePredicateHeaderInput<
     'a,
     'b,
+    'tokens,
 > {
-    pub token_stream: &'a mut FileTokens,
+    pub token_stream: &'a mut AstCursor<'tokens>,
     pub context: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub string_table: &'a mut StringTable,
@@ -54,7 +57,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Singl
 ///
 /// Returns `None` only when an authored diagnostic still allows Bool fallback
 pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse_single_predicate_header(
-    input: SinglePredicateHeaderInput<'_, '_>,
+    input: SinglePredicateHeaderInput<'_, '_, '_>,
 ) -> Option<Result<ParsedSinglePredicateHeader, ExpressionParseError>> {
     let SinglePredicateHeaderInput {
         token_stream,
@@ -65,7 +68,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
         path_fork,
     } = input;
 
-    let start_index = token_stream.index;
+    let start_index = token_stream.position();
     let scrutinee_context =
         context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let scrutinee = match parse_scrutinee_until_is(
@@ -77,14 +80,18 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
     ) {
         Ok(expression) => expression,
         Err(ExpressionParseError::Diagnostic(_)) => {
-            token_stream.index = start_index;
+            if let Err(error) = token_stream.set_position(start_index) {
+                return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+            }
             return None;
         }
         Err(error @ ExpressionParseError::Infrastructure(_)) => return Some(Err(error)),
     };
 
-    if token_stream.current_token_kind() != &TokenKind::Is {
-        token_stream.index = start_index;
+    if token_stream.current_tag() != TokenTag::IS {
+        if let Err(error) = token_stream.set_position(start_index) {
+            return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+        }
         return None;
     }
 
@@ -94,7 +101,9 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
         &scrutinee,
         classification,
     ) {
-        token_stream.index = start_index;
+        if let Err(error) = token_stream.set_position(start_index) {
+            return Some(Err(ExpressionParseError::Infrastructure(Box::new(error))));
+        }
         return None;
     }
 
@@ -130,41 +139,67 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn try_parse
 /// because inline optional recovery must use present capture (`|value|`).
 /// WHY: these diagnostics stay receiver-only and must not rescan the header.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn unsupported_optional_single_predicate_reason(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
+    string_table: &mut StringTable,
     classification: IfHeaderClassification,
-) -> Option<InvalidControlFlowStatementReason> {
-    let is_index = classification.is_index?;
-    let pattern_index = classification.token_after_is?;
-
-    let TokenKind::Symbol(scrutinee_name) = token_stream.current_token_kind() else {
-        return None;
+) -> Result<Option<InvalidControlFlowStatementReason>, CompilerError> {
+    let Some(is_index) = classification.is_index else {
+        return Ok(None);
     };
-    if token_stream.index + 1 != is_index {
-        return None;
+    let Some(pattern_index) = classification.token_after_is else {
+        return Ok(None);
+    };
+
+    if token_stream.current_tag() != TokenTag::SYMBOL {
+        return Ok(None);
+    }
+    let Some(scrutinee_name) = token_stream.current_string_id_in(string_table)? else {
+        return Ok(None);
+    };
+    if token_stream.position() + 1 != is_index {
+        return Ok(None);
     }
 
-    let scrutinee_type_id = context.get_reference(scrutinee_name)?.value.type_id;
-    type_environment.option_inner_type(scrutinee_type_id)?;
-
-    let pattern_token = &token_stream.tokens[pattern_index].kind;
-
-    if matches!(pattern_token, TokenKind::NoneLiteral) {
-        return Some(InvalidControlFlowStatementReason::ValueIfOptionNonePredicate);
+    let Some(scrutinee_type_id) = context
+        .get_reference(&scrutinee_name)
+        .map(|reference| reference.value.type_id)
+    else {
+        return Ok(None);
+    };
+    if type_environment
+        .option_inner_type(scrutinee_type_id)
+        .is_none()
+    {
+        return Ok(None);
     }
 
-    if token_is_literal_pattern(pattern_token)
+    let Some(pattern_tag) = token_stream
+        .token_ref_at(pattern_index)
+        .map(|token| token.tag())
+    else {
+        return Ok(None);
+    };
+    if pattern_tag == TokenTag::NONE_LITERAL {
+        return Ok(Some(
+            InvalidControlFlowStatementReason::ValueIfOptionNonePredicate,
+        ));
+    }
+
+    if token_is_literal_pattern(pattern_tag)
         && classification.inline_then_is_on_same_line_as(token_stream, pattern_index)
     {
-        return Some(InvalidControlFlowStatementReason::ValueIfOptionLiteralPredicate);
+        return Ok(Some(
+            InvalidControlFlowStatementReason::ValueIfOptionLiteralPredicate,
+        ));
     }
 
-    None
+    Ok(None)
 }
 
 fn scrutinee_is_single_predicate_eligible(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     type_interner: &AstTypeInterner<'_>,
     scrutinee: &Expression,
     classification: IfHeaderClassification,
@@ -179,13 +214,13 @@ fn scrutinee_is_single_predicate_eligible(
     is_option_present_capture || is_choice_predicate
 }
 
-fn token_is_literal_pattern(token: &TokenKind) -> bool {
+fn token_is_literal_pattern(token: TokenTag) -> bool {
     matches!(
         token,
-        TokenKind::StringSliceLiteral(_)
-            | TokenKind::RawStringLiteral(_)
-            | TokenKind::NumericLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::BoolLiteral(_)
+        TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::RAW_STRING_LITERAL
+            | TokenTag::NUMERIC_LITERAL
+            | TokenTag::CHAR_LITERAL
+            | TokenTag::BOOL_LITERAL
     )
 }

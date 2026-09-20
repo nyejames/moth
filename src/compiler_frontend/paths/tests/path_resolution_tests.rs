@@ -191,7 +191,13 @@ fn source_package_dependency_resolves_to_package_root() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
@@ -241,7 +247,13 @@ fn source_package_prefix_takes_priority_over_entry_root() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(result.0, CompileTimePathBase::SourcePackageRoot);
@@ -426,12 +438,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
 
     let declaring_source = entry_root.join("index.moth");
     let error = resolver
-        .resolve_dependency_to_source_file(
-            path,
-            &path_fork,
-            &declaring_source,
-            &mut string_table,
-        )
+        .resolve_dependency_to_source_file(path, &path_fork, &declaring_source, &mut string_table)
         .expect_err("source resolution must not hide .mtf/folder ambiguity");
     let diagnostic = typed_dependency_diagnostic(&error);
 
@@ -524,7 +531,13 @@ fn package_scan_root_name_is_not_package_prefix() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
@@ -570,7 +583,13 @@ fn package_direct_child_is_package_prefix() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
@@ -608,7 +627,13 @@ fn entry_root_dependency_fallback_success() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("entry-root fallback dependency should resolve");
 
     assert_eq!(
@@ -657,7 +682,13 @@ fn source_package_prefix_wins_consistently() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let result = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect("source-backed package dependency should resolve");
 
     assert_eq!(
@@ -701,7 +732,13 @@ fn dependency_dotdot_rejected() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let err = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect_err("'..' in dependencies should be rejected");
     let rendered_msg = rendered_error_msg(&err, &string_table, &path_fork);
 
@@ -738,7 +775,13 @@ fn missing_dependency_target_is_typed_diagnostic() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let err = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect_err("missing dependency should be rejected");
     let diagnostic = typed_dependency_diagnostic(&err);
 
@@ -778,7 +821,13 @@ fn dependency_escape_project_root_rejected() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let err = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect_err("dependency escaping project root should be rejected");
     assert!(matches!(
         dependency_diagnostic_payload(&err),
@@ -831,7 +880,13 @@ fn dependency_escape_package_root_rejected() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let err = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table)
+    let err = resolver
+        .resolve_dependency_as_compile_time_path(
+            path,
+            &path_fork,
+            &declaring_source,
+            &mut string_table,
+        )
         .expect_err("dependency escaping package root should be rejected");
     assert!(matches!(
         dependency_diagnostic_payload(&err),
@@ -878,14 +933,12 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result =
-        resolver.resolve_dependency_to_source_file(
-            path,
-            &path_fork,
-            &declaring_source,
-            &mut string_table,
-        )
-        ;
+    let result = resolver.resolve_dependency_to_source_file(
+        path,
+        &path_fork,
+        &declaring_source,
+        &mut string_table,
+    );
 
     assert!(
         result.is_ok(),
@@ -962,7 +1015,12 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
         .expect("test path fits");
 
     let declaring_source = entry_root.join("index.moth");
-    let result = resolver.resolve_dependency_as_compile_time_path(path, &path_fork, &declaring_source, &mut string_table);
+    let result = resolver.resolve_dependency_as_compile_time_path(
+        path,
+        &path_fork,
+        &declaring_source,
+        &mut string_table,
+    );
 
     #[cfg(target_os = "macos")]
     {

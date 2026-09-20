@@ -6,6 +6,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
@@ -36,10 +37,10 @@ use crate::compiler_frontend::compiler_messages::{
     ReservedNameOwner,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings;
 
@@ -47,7 +48,7 @@ use crate::projects::settings;
 ///
 /// The module emitter is the reporting boundary: it renders diagnostics and forwards
 /// `CompilerError` values unchanged. Nested statement parsers therefore must not collapse this
-/// result back into a diagnostic while constructing temporary frozen-table substreams.
+/// result back into a diagnostic when a loop header meets a stream without canonical provenance.
 type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
 
 fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
@@ -66,16 +67,16 @@ fn reserved_keyword_as_name_error(
 /// If the keyword is followed by an assignment operator, treats it as an attempt to use the
 /// keyword as a variable name and reports a reserved-name error instead.
 fn deferred_block_error(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     string_table: &mut StringTable,
     keyword: &str,
     reason: DeferredFeatureReason,
 ) -> CompilerDiagnostic {
     let span = Some(token_stream.current_span());
-    if matches!(
-        token_stream.peek_next_token(),
-        Some(token) if token.is_assignment_operator()
-    ) {
+    let next_is_assignment = token_stream
+        .peek_next_tag()
+        .is_some_and(|tag| tag.is_assignment_operator());
+    if next_is_assignment {
         let keyword_id = string_table.intern(keyword);
         return reserved_keyword_as_name_error(keyword_id, span);
     }
@@ -84,7 +85,7 @@ fn deferred_block_error(
 }
 
 pub(crate) fn parse_function_body_statements(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     mut context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -92,23 +93,22 @@ pub(crate) fn parse_function_body_statements(
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<Vec<AstNode>> {
     let mut body_nodes: Vec<AstNode> =
-        Vec::with_capacity(token_stream.length / settings::TOKEN_TO_NODE_RATIO);
+        Vec::with_capacity(token_stream.length() / settings::TOKEN_TO_NODE_RATIO);
 
-    while token_stream.index < token_stream.length {
-        let current_token = token_stream.current_token_kind().to_owned();
+    while token_stream.position() < token_stream.length() {
+        let current_tag = token_stream.current_tag();
 
-        ast_log!("Parsing Token: ", #current_token);
+        ast_log!("Parsing Token: ", #current_tag);
 
         // Match-arm bodies end when the next line-initial arm header or `else` is reached.
         // Same-line accidental second arms are rejected here before statement dispatch.
         if context.kind == ContextKind::MatchArm {
             if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
-                debug_assert_eq!(candidate.start_index, token_stream.index);
-                debug_assert!(candidate.arrow_index > candidate.start_index);
+                debug_assert_eq!(candidate.start_index, token_stream.position());
                 break;
             }
 
-            if token_stream.current_token_kind() != &TokenKind::Else
+            if token_stream.current_tag() != TokenTag::ELSE
                 && current_line_contains_top_level_fat_arrow(token_stream)
             {
                 return Err(statement_dispatch_error(
@@ -124,14 +124,14 @@ pub(crate) fn parse_function_body_statements(
             return Err(statement_dispatch_error(diagnostic));
         }
 
-        match current_token {
+        match current_tag {
             // Module start marker
-            TokenKind::ModuleStart => {
+            TokenTag::MODULE_START => {
                 token_stream.advance();
             }
 
             // Symbol statements (declarations, assignments, calls)
-            TokenKind::Symbol(_) => parse_symbol_statement(
+            TokenTag::SYMBOL => parse_symbol_statement(
                 token_stream,
                 &mut body_nodes,
                 &mut context,
@@ -141,7 +141,7 @@ pub(crate) fn parse_function_body_statements(
                 path_fork,
             )?,
 
-            TokenKind::This => parse_this_statement(
+            TokenTag::THIS => parse_this_statement(
                 token_stream,
                 &mut body_nodes,
                 &mut context,
@@ -151,7 +151,7 @@ pub(crate) fn parse_function_body_statements(
             )?,
 
             // Deferred keyword-led semantic scopes
-            TokenKind::Checked => {
+            TokenTag::CHECKED => {
                 return Err(statement_dispatch_error(deferred_block_error(
                     token_stream,
                     &mut *string_table,
@@ -160,7 +160,7 @@ pub(crate) fn parse_function_body_statements(
                 )));
             }
 
-            TokenKind::Async => {
+            TokenTag::ASYNC => {
                 return Err(statement_dispatch_error(deferred_block_error(
                     token_stream,
                     &mut *string_table,
@@ -170,7 +170,7 @@ pub(crate) fn parse_function_body_statements(
             }
 
             // Control flow
-            TokenKind::Loop => {
+            TokenTag::LOOP => {
                 token_stream.advance();
 
                 body_nodes.push(create_loop(
@@ -183,7 +183,7 @@ pub(crate) fn parse_function_body_statements(
                 )?);
             }
 
-            TokenKind::If => {
+            TokenTag::IF => {
                 token_stream.advance();
 
                 body_nodes.extend(create_branch(
@@ -200,7 +200,7 @@ pub(crate) fn parse_function_body_statements(
                 )?);
             }
 
-            TokenKind::Else => {
+            TokenTag::ELSE => {
                 if context.kind == ContextKind::Branch || context.kind == ContextKind::MatchArm {
                     break;
                 } else {
@@ -214,12 +214,12 @@ pub(crate) fn parse_function_body_statements(
             }
 
             // Whitespace
-            TokenKind::Newline => {
+            TokenTag::NEWLINE => {
                 token_stream.advance();
             }
 
             // Return, loop control, and result handling
-            TokenKind::Assert => {
+            TokenTag::ASSERT => {
                 parse_assert_statement(
                     token_stream,
                     &mut body_nodes,
@@ -230,7 +230,7 @@ pub(crate) fn parse_function_body_statements(
                 )?;
             }
 
-            TokenKind::Return | TokenKind::ReturnBang => {
+            TokenTag::RETURN | TokenTag::RETURN_BANG => {
                 parse_return_statement(
                     token_stream,
                     &mut body_nodes,
@@ -241,7 +241,7 @@ pub(crate) fn parse_function_body_statements(
                 )?;
             }
 
-            TokenKind::Break => {
+            TokenTag::BREAK => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
@@ -259,7 +259,7 @@ pub(crate) fn parse_function_body_statements(
                 token_stream.advance();
             }
 
-            TokenKind::Continue => {
+            TokenTag::CONTINUE => {
                 if !context.is_inside_loop() {
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
@@ -277,7 +277,7 @@ pub(crate) fn parse_function_body_statements(
                 token_stream.advance();
             }
 
-            TokenKind::Then => {
+            TokenTag::THEN => {
                 let then_span = Some(token_stream.current_span());
                 token_stream.advance();
 
@@ -296,8 +296,8 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 };
 
-                if token_stream.current_token_kind() == &TokenKind::Newline
-                    || is_missing_produced_value_boundary(token_stream.current_token_kind())
+                if token_stream.current_tag() == TokenTag::NEWLINE
+                    || is_missing_produced_value_boundary(token_stream.current_tag())
                 {
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_fallible_handling(
@@ -340,7 +340,7 @@ pub(crate) fn parse_function_body_statements(
             }
 
             // Scope terminators
-            TokenKind::End => match context.kind {
+            TokenTag::END => match context.kind {
                 ContextKind::Expression => {
                     return Err(statement_dispatch_error(unexpected_scope_close(
                         UnexpectedScopeCloseContext::Expression,
@@ -367,7 +367,7 @@ pub(crate) fn parse_function_body_statements(
             // Top-level runtime template in the entry start() body.
             // Each template becomes a PushStartRuntimeFragment so the HIR builder can
             // push the evaluated string directly to the runtime fragment list.
-            TokenKind::TemplateHead => {
+            TokenTag::TEMPLATE_HEAD => {
                 if context.kind != ContextKind::Module {
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_standalone_statement(
@@ -380,6 +380,7 @@ pub(crate) fn parse_function_body_statements(
                 let fragment_span = Some(token_stream.current_span());
                 let template = Template::new_with_type_interner(
                     token_stream,
+                    context.scope,
                     &context,
                     type_interner,
                     vec![],
@@ -396,18 +397,18 @@ pub(crate) fn parse_function_body_statements(
             }
 
             // End of file
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 break;
             }
 
             // Expression statements
-            TokenKind::OpenParenthesis
-            | TokenKind::NumericLiteral(_)
-            | TokenKind::StringSliceLiteral(_)
-            | TokenKind::BoolLiteral(_)
-            | TokenKind::CharLiteral(_)
-            | TokenKind::Copy
-            | TokenKind::Mutable => {
+            TokenTag::OPEN_PARENTHESIS
+            | TokenTag::NUMERIC_LITERAL
+            | TokenTag::STRING_SLICE_LITERAL
+            | TokenTag::BOOL_LITERAL
+            | TokenTag::CHAR_LITERAL
+            | TokenTag::COPY
+            | TokenTag::MUTABLE => {
                 let expression = parse_expression_statement_candidate(
                     token_stream,
                     &context,
@@ -427,7 +428,7 @@ pub(crate) fn parse_function_body_statements(
             // Unrecognized tokens
             _ => {
                 if let Some(diagnostic) =
-                    check_statement_common_mistake(token_stream.current_token_kind(), token_stream)
+                    check_statement_common_mistake(token_stream.current_tag(), token_stream)
                 {
                     return Err(statement_dispatch_error(diagnostic));
                 }
@@ -435,7 +436,7 @@ pub(crate) fn parse_function_body_statements(
                 return Err(statement_dispatch_error(unexpected_statement_token(
                     token_stream,
                     string_table,
-                )));
+                )?));
             }
         }
     }

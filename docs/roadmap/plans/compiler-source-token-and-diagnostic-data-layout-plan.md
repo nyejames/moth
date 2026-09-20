@@ -6,18 +6,26 @@
 > **Architecture authority:**
 > `docs/compiler-data-layout-design.md`
 >
-> **Status:**
-> Phase 1 is delivered on main. Phase 2 complete-path interning is accepted at the continuation
-> checkpoint `c17672bb5` on `diagnostic-data-layout-changes` (diagnostic correction `e7d9a7ab5`
-> plus validation-lane stabilization). The bounded pre-Phase-3 validation restoration is complete:
-> warning-denied native Clippy and the integration suite are green, and the only remaining red gate
-> is the explicitly accepted inherited generic-instantiation scaling exception recorded below.
-> Phase 3 token-store work remains queued and has not started; Slice 3A is the next action only after
-> this capsule is accepted. Package work stays paused until accepted Phase 3. After Phase 3 this plan
-> pauses: Wiring V1, then native result slots and Core const evaluation run first, and Phase 4 resumes
-> only after a rebase and explicit reactivation. The roadmap retains those separate checkpoints.
-> Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
-> in `benchmarks/frontend-optimization-results.md`.
+**Status:**
+Phase 1 is delivered on main; Phase 2 is accepted at `c17672bb5`; the Phase 3 implementation
+cutover is recorded at `6309adf6d`, and the R5 closeout source corrections are accepted
+at `4cfd9d492`. The canonical `SourceTokens` owner, bounded parser views, typed payload stores and
+preparation lifecycle are complete; `Token`, `TokenKind` and `FileTokens` have been deleted.
+Phase 3 is accepted with the explicitly inherited generic-scaling exception recorded below; Phase 4
+remains gated behind the roadmap sequence and explicit reactivation.
+Validation provenance: the executable Phase 3 closeout is attached to its recorded code/evidence
+checkpoint. The manually dispatched `Validate and deploy` workflow at `7afdcc4e16` is the final
+pre-merge platform evidence and is intentionally not green: native and feature-configured Clippy
+configurations report the known `clippy::result_large_err` failures caused by the current
+`CompilerMessages` representation, including `Result` call sites whose `Err` variant is at least
+128 bytes. These are deferred diagnostic-layout failures owned by later phases; this closeout does
+not box `CompilerMessages` or suppress the lint. The other exercised validation families remain
+recorded as passed, and the generic scaling exception remains separately accepted without changing
+its budget. Detailed measurements and the complete disposition live in
+`benchmarks/frontend-optimization-results.md`.
+After the Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
+const evaluation, with Phase 4 resuming only after explicit reactivation.
 
 ## Purpose
 
@@ -72,62 +80,77 @@ from a compressed summary alone.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
-- Phase: the accepted Phase 2 continuation checkpoint is `c17672bb5` on
-  `diagnostic-data-layout-changes`; it carries the diagnostic correction `e7d9a7ab5` (path/string
-  attachment and remap ownership) and the merged-revision validation-lane stabilization.
-  Phase 2 complete-path interning is accepted, including final review corrections in `aed38042f`
-  (generated path/string pairing and report-owner path retention). The bounded pre-Phase-3
-  validation restoration is complete; Phase 3 Slice 3A token array layout selection remains queued
-  and has not started.
-- Goal: `PathId` is the only complete logical path identity. Tokenizer, headers, AST, HIR,
-  diagnostics and tests intern through `PathInternerFork`/`PathTable`. `InternedPath` is deleted.
-- Current code evidence: compilation clones `PathInternerBuilder` once per boundary, workers carry
-  `PathInternerFork`, merge tails merge strings then paths, publication remaps retained `PathId`s,
-  diagnosed lanes retain issuing path tables, imported nominals intern defining names, provider
-  materialisation keeps the live string/path pair through nested requests, and final report metrics
-  count only path tables reachable from diagnostic owners.
-- Validation evidence (dated 2026-09-14, current workspace): `just ci-clippy-native` passes on
-  Rust 1.97.1 with warnings denied; the integration suite passes `1973/1973`, including
-  individually filtered passes for all 21 previously failing case IDs (the facade case expands to
-  two backend executions); the repaired evidence-projection unit test passes in isolation; and
-  `just validate` reaches the complexity gate with feature-lane-check (0 findings), source audit
-  (1,389 files, 0 findings), first-party dependency audit (21 files, 80 JavaScript sources, 0
-  findings), 5,134 workspace tests, integration (1973/1973), docs (no errors or warnings), and
-  bench-ci shared preflight (82/82) successful.
-- The only remaining red result is the inherited generic-instantiation scaling series. The dedicated
-  `just bench-scaling` rerun measured `frontend.generated.materialise` at 79.917, 254.149, 897.235
-  and 3419.368 ms for sizes 20, 40, 80 and 160, fitting `n^1.81` against the unchanged `n^1.70`
-  budget. The subsequent full-validation rerun measured 81.078, 253.503, 908.907 and 3422.923 ms,
-  fitting `n^1.80`; both constant and nominal series stayed within budget. The recorded pre-cleanup
-  current-main comparison remains `n^1.77`. This is an explicitly accepted independent baseline
-  exception for Phase 3; do not raise or loosen the budget, and Phase 3 must prove no worsening.
+- Phase: Phase 3 fixed-token/source-owned implementation is accepted at checkpoint `6309adf6d` on
+  `diagnostic-data-layout-changes`; R5 source corrections are accepted at `4cfd9d492`.
+- Goal: `SourceTokens` is the canonical immutable token owner. Headers, AST and generic bodies
+  retain checked ranges and sequence IDs over that owner. The former `Token`, `TokenKind` and
+  `FileTokens` representations, compatibility cursors and copied parser windows are deleted.
+- Current code evidence: `src/compiler_frontend/tokenizer/` owns canonical `SourceTokens`, SoA
+  storage, typed cold stores and bounded `TokenCursor`/`TokenRef` views. Headers, prepared sources
+  and generic bodies retain canonical ranges or sequence IDs; `SourceTokenOwner` and
+  `StableBodyOwner` carry the required source and donor identity without cloned token vectors.
+- Validation provenance: executable R5 evidence is attached to `4cfd9d492`; the final manual
+  `Validate and deploy` workflow is recorded at `7afdcc4e16`. That workflow is intentionally red
+  only on the known `clippy::result_large_err` diagnostic-layout failures, including `Err` carriers
+  at least 128 bytes. Do not interpret the red Clippy/feature configurations as a Phase 3 token
+  ownership regression or fix them by boxing/suppression.
+- Scaling status: exact final-checkpoint constant and nominal fits are within `n^1.25`; generic
+  is `n^1.770` against the unchanged `n^1.70` budget. The generic exceedance is the explicitly
+  accepted inherited exception. No budget was raised or loosened and no no-worsening claim is made.
+- Retention status: the feature-gated owner ledger records source-token arrays, cold stores,
+  transient construction pressure, requester remaps, donor identity tables and generic owner
+  live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
+- Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
+  are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
+- NEXT_SUBSTEP: start the separate post-Phase-3 compiler tidy-up checkpoint, then follow the
+  roadmap's MON, MON Rust tooling, Wiring and native result-slot/Core const-eval sequence before
+  explicitly reactivating Phase 4.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`.
-- Non-goals: diagnostic compact-record work; package implementation (paused until accepted
-  Phase 3); Wiring V1 and native result-slot/Core const-eval work (separate plans that run after
-  this plan's Phase 3 and before Phase 4).
+  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
+  `4cfd9d492`.
+- Non-goals: diagnostic compact-record work; package implementation; compiler tidy-up, MON syntax
+  and nested const records, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
+  implementation before their owning roadmap checkpoints; Phase 4 reactivation before the explicit
+  gate.
 
 Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
-diagnostic correction `e7d9a7ab5`. Detailed implementation and review checkpoints remain in Git
-history; the summaries below retain only contracts and evidence needed by later phases.
+diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`, implementation
+checkpoint `6309adf6d` contains the completed code cutover, and R5 source corrections are accepted
+at `4cfd9d492`. Detailed implementation and review checkpoints remain in Git history, while the
+summaries below retain only contracts and evidence needed by later phases.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
-  retention metrics are accepted at `c17672bb5` with the diagnostic correction and
-  validation-lane stabilization; refreshed probe evidence is recorded. The bounded pre-Phase-3
-  restoration fixed the warning-denied native Clippy baseline, repaired the current integration
-  defects, and leaves no integration exceptions to carry forward.
-- The complete validation run passes every gate through bench-ci: feature coverage, source and
-  first-party audits, 5,134 workspace tests, all 1,973 integration executions, docs, and 82/82
-  benchmark preflight cases. It remains red only because the inherited generic-instantiation
-  series fits `n^1.81` in the dedicated baseline rerun (`n^1.80` in the later full-gate rerun)
-  against its unchanged `n^1.70` budget; the recorded current-main comparison was `n^1.77`.
-- Phase 3 fixed-token work is queued but not started. Slice 3A may begin only with this named
-  scaling exception consciously retained as its baseline; no Phase 3 code or benchmark work has
-  started in this restoration pass.
-- After Phase 3, this plan pauses. Wiring V1 runs, then native result slots and Core const
+  retention metrics are accepted at `c17672bb5` with the diagnostic correction and validation-lane
+  stabilisation; refreshed probe evidence is recorded.
+- Phase 3 fixed-token/source-owned implementation is accepted at `6309adf6d`, with R5 source
+  corrections and exact evidence accepted at `4cfd9d492`. `SourceTokens` is the only token owner;
+  retained ranges and sequence IDs, typed payload provenance, preparation ownership and diagnostic
+  projection provenance are final.
+- Exact final R5 evidence records constant and nominal fits within budget and an explicitly accepted
+  inherited generic `n^1.70` exception. No budget was raised or loosened and no no-worsening claim is
+  made.
+- Known deferred validation: the manual workflow at `7afdcc4e16` reports `result_large_err` in
+  current `CompilerMessages` result boundaries, including `Err` variants at least 128 bytes. The
+  later diagnostic-layout phases own the compact representation; no boxing or lint suppression is
+  accepted, and fresh validation is required when the next implementation checkpoint activates.
+- After Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+  syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
   reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
+
+MERGE_STATE:
+- branch: `diagnostic-data-layout-changes`
+- candidate HEAD: `7afdcc4e16fc72e8cb66c2139eabd4e23634f797`
+- current `main`: `b1d2d2f0edc09db8a9dca25df29d7a5669c06775`
+- merge base: `b1d2d2f0edc09db8a9dca25df29d7a5669c06775`
+- worktree: clean before this documentation-only closeout
+- post-implementation history: `7576bccb1` changed validation configuration/docs only;
+  `b79113ad2` carried the memory-safe validation closeout (31 Rust files plus 13 docs/benchmark
+  files); `34c1f45e5` merged MON documentation; `7c0d41ee2` regenerated docs; `4cfd9d492` changed
+  five R5 source files; `7afdcc4e1` changed twelve benchmark/authority/roadmap files.
+- this closeout adds documentation/roadmap changes only. No Rust source, tests, manifests, build
+  scripts, benchmark implementation or fixtures are in scope.
 
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main; Phase 2 is accepted on the continuation branch at
@@ -159,8 +182,9 @@ RELEVANT_CODE:
 - `src/build_system/create_project_modules/source_loading.rs`: current source IO and byte-loading owner
 - `src/build_system/create_project_modules/compilation.rs`: canonical module ordering, local identity forks and module-result merging
 - `src/build_system/create_project_modules/module_preparation.rs`: current source attachment and deterministic file-preparation merge. Stage 0 stops at prepared syntax; it owns no frontend stage.
-- `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the five
-  current source-kind/work-product variants keyed by final `SourceId`; paths and snapshots remain
+- `src/build_system/create_project_modules/prepared_source.rs::PreparedSourceInput`: the three
+  `PreparedSourceKind` variants keyed by final `SourceId` — canonical `Moth`, retained
+  `MothPrepared` output and deferred text; source kind, paths and snapshots remain
   `SourceDatabase`-owned
 - `src/compiler_frontend/module_compilation/service.rs::compile_module`: the one production owner of the local semantic sequence, and the consumer of whatever source identity representation this plan lands on
 - `src/compiler_frontend/pipeline.rs::CompilerFrontend`: stage facade with remaining immutable-service copies
@@ -168,12 +192,19 @@ RELEVANT_CODE:
 - `src/compiler_frontend/symbols/path_interner/`: current dense parent-linked path table owner
   (builder, fork, delta, remap, frozen lookup; complete-path identity since Phase 2)
 - `src/compiler_frontend/symbols/string_interning.rs`: existing immutable-base fork and deterministic delta merge to reuse
-- `src/compiler_frontend/tokenizer/tokens.rs`: current (pre-Phase-3) `Token`, wide 94-variant
-  `TokenKind` and `FileTokens`; Phase 3 replaces them
-- `src/compiler_frontend/headers/types.rs::Header`: current owned `FileTokens` body and repeated
-  source/path fields; Phase 3 replaces them
-- `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current
-  token-cloning body capture; Phase 3 replaces it
+- `src/compiler_frontend/tokenizer/`: canonical `SourceTokens` schema, SoA storage, typed cold
+  stores and bounded `TokenCursor`/`TokenRef` views; the former `Token`, `TokenKind` and `FileTokens`
+  representations are deleted
+- `src/compiler_frontend/headers/types.rs::Header`: retained `TokenRange` bodies, optional
+  `TokenSequenceId` start syntax and `SourceTokenOwner` containing only the canonical owner; logical
+  and OS paths resolve through `SourceDatabase`, with no cloned token vectors
+- `src/compiler_frontend/headers/header_dispatch.rs`: canonical header cursor range helpers and
+  bounded range capture, with no clone-based body capture
+- `src/compiler_frontend/ast/cursor.rs` and `src/compiler_frontend/declaration_syntax/mod.rs`:
+  canonical bounded cursor handoffs; no compatibility parser lane
+- `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs`:
+  `StableBodySyntax` owns donor/source identity, frozen identity tables and resolved file-reference
+  facts; `StableBodyOwner` retains only the canonical `Arc<SourceTokens>`
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
 - `src/lib.rs` and `xtask/src/benchmark_execution.rs`: activation-era lint-bridge locations retained only as historical removal records; current workspace status makes no validation claim
@@ -213,33 +244,50 @@ DECISIONS_ALREADY_MADE:
   - source/user/date: user interview, 2026-07-19
 
 BLOCKERS / RISKS:
-- earlier queued implementation work has landed; this plan is active
-- source/span migration touches nearly every frontend stage
-- Phase 1G/1H cutover and closeout are accepted; no local diagnostic boxing or lint-workaround guidance may be reintroduced
-- release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
-- compact-ID merge order must remain deterministic across file and module parallelism
+
+- Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
+  `4cfd9d492`; the separate post-Phase-3 compiler tidy-up checkpoint follows closeout.
+- User-facing diagnostic improvement remains paused until the Phase 4 reactivation gate is satisfied.
+- release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
+- compact-ID merge order must remain deterministic across file and module parallelism.
 - The first source-freeze experiment was deliberately rejected after mapping the final owner
   boundary: a `FrozenSourceDatabase` without an immediate render/identity consumer would create a
   dead parallel owner and warnings. Revisit source freezing together with that terminal owner.
-- Repeated canonical/check-only preparation now shares the original builder. Removing the repeated
-  syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
-
 VALIDATION_STATE:
-Phase 1 final closeout is `3c9c776a8` (2026-09-10); the Phase 2 continuation checkpoint is
-`c17672bb5` (2026-09-13) with diagnostic correction `e7d9a7ab5`. The accepted Phase 2 validation
-evidence and its approved red exceptions are recorded in CURRENT_SLICE above. Earlier per-slice
-validation is Git history, not a current workspace claim.
+
+Executable Phase 3 closeout provenance belongs to the recorded source/evidence checkpoint
+`4cfd9d492`, not to later documentation HEAD. The manually dispatched `Validate and deploy` workflow
+at `7afdcc4e16` is the final pre-merge platform evidence for that code checkpoint. It is intentionally
+not green: the blocking native and feature-configured Clippy failures are the known
+`clippy::result_large_err` failures from the current `CompilerMessages` representation, including
+call sites where the `Err` variant is at least 128 bytes.
+
+The workflow still exercised and recorded the successful feature coverage, source and first-party
+audits, workspace tests (`5210 + 17 + 839`), integration (`1973/1973`), docs and benchmark
+preflight/quick-sanity (`82/82`) families. Those results do not make the aggregate workflow green.
+Do not box `CompilerMessages`, add a lint allowance or suppress `result_large_err`; the later
+diagnostic-layout phases own the compact diagnostic/error-carrier migration. Fresh validation is
+required when the next implementation checkpoint activates.
+
+The exact release R5 evidence records constant `n^0.597`, nominal `n^0.919` and generic `n^1.770`;
+constant and nominal remain within budget, while the inherited generic `n^1.70` exception remains
+accepted without changing the budget or claiming no worsening. `just timers-erasure-check` passed
+separately with an `8,862,096`-byte no-timer binary. Earlier per-slice validation is Git history,
+not a current workspace claim. The plan pauses after Phase 3 through the roadmap order above; Phase
+4 reactivation remains gated.
 Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
 starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
 all-target Clippy gate before accepting a slice.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
-- current authorities and style rules describe exact `SourceSpan` ownership and the compact plain diagnosed boundary; the Phase 1 closeout evidence and status are now synchronized
-- authorized docs updates for this maintenance pass: the plan itself, the main roadmap's two
-  data-layout bullets, the package programme capsule/lifecycle paragraphs and the architecture
-  document's path-token and infrastructure-context wording are current
-- next action: Phase 3 Slice 3A token array layout selection
+- current authorities, implementation map and style/validation records now describe the accepted
+  canonical token owner, bounded parser views, preparation lifecycle and inherited generic-budget
+  exception
+- authorised docs updates for this 3H closeout: the plan, the architecture status, the compiler
+  implementation overview and the benchmark evidence
+- next action: start the separate post-Phase-3 compiler tidy-up checkpoint; preserve the roadmap
+  sequence before Phase 4
 - `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
   Phase 1 standing-contracts section).
 
@@ -392,10 +440,12 @@ before the first implementation phase that freezes reports.
 
 ### Current roadmap state
 
-Test Suite Hardening was delivered in `03168082d`. This plan is the sole active representation
-migration, accepted through Phase 2 at checkpoint `c17672bb5`; the bounded pre-Phase-3 validation
-restoration is complete, and Phase 3 remains queued rather than started. The diagnostics plan remains
-paused until the full migration completes.
+Test Suite Hardening was delivered in `03168082d`. This plan was the active representation migration
+through Phase 3, with implementation checkpoint `6309adf6d` and R5 closeout checkpoint `4cfd9d492`.
+The canonical `SourceTokens` owner, bounded parser views, typed payload stores and preparation
+lifecycle are complete; Phase 3 is accepted with its explicitly recorded inherited generic-scaling
+exception before the plan pauses through the roadmap sequence toward Phase 4. The diagnostics plan
+remains paused until that gate.
 
 ### Approved private discovery-finalization contract
 
@@ -609,9 +659,10 @@ from immutable lookup services; `finish` consumes the builder and returns an own
 `PathId`/legacy-path bridge ended at Slice 2D; it reconstructed transient components from table
 nodes, never rendered text, and no new consumer may adopt it. `ModuleSymbols` no longer copies
 canonical OS paths. `FileTokens.canonical_os_path` and `FileFrontendPrepareOutput.canonical_os_path`
-remain for 3D/3E1 with their agreement checks until the duplicated fields are removed. Renderers
-use retained snapshots rather than reopening files; per-diagnostic-range source contexts preserve
-package ownership; ambiguous display-path matches omit a frame rather than select the wrong file;
+remain as explicit preparation and adapter metadata until 3H removes the duplicated fields. The
+former canonical-path agreement check was removed with 3D.
+Renderers use retained snapshots rather than reopening files; per-diagnostic-range source contexts
+preserve package ownership; ambiguous display-path matches omit a frame rather than select the wrong file;
 the direct-template API retains its finalized per-document source context; the facade and module
 semantic context borrow immutable services.
 
@@ -691,8 +742,10 @@ tables are Git history.
 
 ### Standing correction contracts
 
-These remain in force for later phases. They do not reopen Phase 1; Phase 2 is accepted and
-Phase 3 is the next queued action after the named pre-Phase-3 validation baseline is retained.
+These remain in force for later phases. They do not reopen Phase 1, the accepted Phase 2 migration
+or the accepted Phase 3 migration; Phase 3 is complete at `4cfd9d492`, and 3H old-token deletion is
+closed. Current status and ownership are recorded in the active capsule and the completed 3H section
+below.
 
 #### Cold ownership
 
@@ -821,175 +874,96 @@ Delivered, in order:
 
 ## Phase 3 — Fixed tokens and source-owned retained syntax
 
-### Summary, reasoning and context
+### Accepted historical summary
 
-This phase replaces the wide token enum and the current cursor/storage mixture. It also removes token
-cloning from declaration shells by giving each source one immutable token store and representing
-retained syntax as ranges.
+Phase 3 replaced the wide token enum and cursor/storage mixture with one source-owned,
+data-oriented representation. The accepted contracts are:
 
-### Slice 3A — Select the token array layout before migration
+- the canonical production token layout is SoA `TokenShape` plus `LocalSpan`;
+- every tokenized source has exactly one canonical `SourceTokens` owner;
+- numeric and path payloads live in typed source-local cold stores;
+- retained syntax uses checked `TokenRange` and `TokenSequenceId` values, not copied token windows;
+- `TokenCursor` and `TokenRef` provide bounded borrowed views over canonical storage;
+- preparation loads, tokenizes and prepares each selected source exactly once, then shares that
+  move-owned result between reachability and semantic compilation;
+- generic syntax retains the canonical owner and persistent donor/requester identity contract, with
+  explicit typed provenance and no per-body identity-table copies;
+- `TokenPayloadOrigin` translates donor payloads only at consumption time;
+- `DiagnosticToken` is a durable independent projection and does not depend on source token storage;
+- malformed compact payloads remain compiler/infrastructure failures rather than source diagnostics;
+- `SourceTokenOwner` retains only the canonical owner, and old `Token`, `TokenKind`, `FileTokens`,
+  compatibility parser cursors and copied parser windows remain deleted.
 
-Evaluate only these production candidates:
+The implementation checkpoint is `6309adf6d`. R5 source corrections and exact evidence are accepted
+at `4cfd9d492`; the rejected shared path-source experiment is not part of the accepted architecture.
+The detailed 3A–3H and R0–R5 implementation diary, adapter inventories and correction narratives
+remain available in Git history. The durable benchmark distributions and owner-ledger observations
+remain in `benchmarks/frontend-optimization-results.md`.
 
-1. compact AoS `TokenRecord { shape: TokenShape, span: LocalSpan }` with a required 12-byte layout
-2. SoA `Vec<TokenShape>` plus `Vec<LocalSpan>`
+### Phase 3 evidence and merge disposition
 
-- [ ] prototype both behind benchmark-only code or short-lived branches
-- [ ] measure parser iteration, cache behaviour, retained capacity and validation overhead
-- [ ] preserve the layout authority's SoA baseline when results are materially tied
-- [ ] choose compact AoS only for a repeatable material improvement over SoA, as the authority requires
-- [ ] record the decision in the architecture document and remove the rejected implementation
+The exact final R5 fits are constant `n^0.597`, nominal `n^0.919` and generic `n^1.770`; the
+constant and nominal fits remain within `n^1.25`, while the inherited generic `n^1.70` exception
+is explicitly accepted without changing the budget or making a no-worsening claim.
 
-### Slice 3B — Introduce one token taxonomy and descriptor authority
+The executable closeout evidence is attached to the code/evidence checkpoint, not later
+documentation HEAD. The manual `Validate and deploy` workflow at `7afdcc4e16` is intentionally not
+green: the known `clippy::result_large_err` failures remain in current `CompilerMessages` result
+boundaries, including `Err` variants at least 128 bytes. This is deferred diagnostic-layout work
+owned by later phases. Do not box `CompilerMessages`, add lint allowances or suppress the lint.
+The other exercised validation families, the owner-ledger smokes and the separate timer-erasure
+result remain recorded as evidence; none changes the non-green workflow disposition.
 
-- [ ] define or reuse the final explicit `TokenTag(u16)`, flags and `TokenShape { tag, flags, data }`; when Phase 1 pulled the tag foundation forward, extend it rather than declaring another taxonomy
-- [ ] declare every tag once through a small internal `token_schema!`/const-table authority containing its explicit numeric tag and static descriptor facts; do not add a procedural macro or a second hand-maintained tag list
-- [ ] generate or validate assignment, expression-continuation, operand, keyword, delimiter, literal, precedence and diagnostic-name APIs from that one authority
-- [ ] keep dynamic token values in typed payload accessors rather than descriptor data
-- [ ] preserve exact source spelling and current lexical semantics
-- [ ] add all-tag coverage and reserved-bit/layout tests
+### Standing decisions for Phase 4 reactivation
 
-### Slice 3C — Evolve the file-owned path-syntax table into the final source-owned token cold store
-
-Evolve the existing file-owned `PathSyntaxTable` into the final source-owned token cold store; do not
-invent a generic path store. Path tokens use the canonical `TokenTag` plus a dense `PathSyntaxId` —
-one representation only.
-
-- [ ] move numeric literal retained data into a numeric store while reusing `numeric_text` parsing
-- [ ] evolve the existing file-owned `PathSyntaxTable` in place into the source-owned cold store;
-  path tokens carry canonical `TokenTag` plus `PathSyntaxId` with the row's `PathId` and
-  `LocalSpan`; keep dependency aliases under their retained clause owner and migrate only their
-  locations
-- [ ] encode symbol, string, bool and char payloads directly when they fit the token word
-- [ ] use checked `u32` indexes and typed capacity failures
-- [ ] add remap/freeze tests for every cold store
-
-### Slice 3D — Separate immutable storage from parser cursor
-
-- [ ] implement `SourceTokens` as the one immutable token owner for a source
-- [ ] implement `TokenCursor` as short-lived index/range state over a borrowed store
-- [ ] implement compact `TokenRef`/views without cloning cold payloads
-- [ ] use `u32` token indexes and checked range construction
-- [ ] remove source path, canonical OS path, `index` and `length` from token storage; this inherits 1B6's last sentence, so also drop `Header::canonical_source_file`'s re-derivation, its nine call sites' dependency on the token copy, and `validate_header`'s canonical-path agreement check
-- [ ] add cursor boundary, EOF, peek, nested-range and malformed-index tests
-
-### Slice group 3E — Make prepared syntax source-owned
-
-Each tokenized source is loaded, tokenized and prepared exactly once. Stage 0 borrows structural
-facts from the prepared result; semantic compilation consumes the prepared result; afterwards the
-storage is dropped or moved into an existing later owner such as persistent generic materialisation.
-Never a second tokenization and never a second store.
-
-- [ ] **3E1 — prepared-source store:** evolve `FileFrontendPrepareOutput` into one move-owned
-  `PreparedSource` slot per selected `SourceId`; it owns the source token store and syntax
-  preparation exactly once. Stage 0 borrows structural facts from the prepared result; semantic
-  compilation then consumes the prepared record, and the record's storage is dropped or moved into
-  an existing later owner (such as persistent generic materialisation) — without per-source `Arc`
-  or cloning and without a second tokenization or store
-- [ ] **3E2 — structural reachability reuse:** make prepared dependency shells expose final
-  local-source `SourceId` edges plus typed provider request records; Stage 0 traverses those facts
-  without reading token stores or rendered path text; keep provider mutation/resolution on its
-  serial owner after workers return structural references
-- [ ] **3E3 — consolidate retained preparation:** preserve the current exactly-once
-  load/tokenize/prepare path while moving both directory-token and synthetic-prepared variants into
-  the same build-lifetime `PreparedSource` store; module aggregation consumes the prepared result
-  once and never re-tokenizes, re-parses or adds a second store or cache
-- [ ] **3E4 — contiguous retained syntax:** add half-open `TokenRange { source, start, end }`,
-  replace contiguous `Header::tokens` bodies with ranges, remove repeated `Header::source_file` and
-  change function/template body capture to record boundaries instead of cloning tokens
-- [ ] **3E5 — segmented start-body syntax:** add `TokenSequenceId` into a source-local range-list
-  store whose entries are 8-byte `{ start, end }` token-index pairs and whose owner stores
-  `SourceId` once; expose one `TokenSequenceView` so contiguous and segmented bodies use the same
-  `TokenCursor`; never add a copied start stream or parallel parser path
-- [ ] **3E6 — source-kind adapters:** represent non-tokenized adapter payloads directly, preserve
-  plain Markdown's no-token path and keep declaration-shell parsing single-owner through
-  token/sequence views
-- [ ] **3E7 — persistent generic syntax:** generic templates and generated/materialised generic
-  bodies retain their ranges/sequences over the canonical immutable source token store, plus donor
-  identity/context, so nested and cross-package materialisation, donor diagnostics and retained
-  file-reference facts keep exact ownership. No generic-specific token representation: materialised
-  bodies reuse the same source-owned token/range/sequence model. This slice must not require a
-  second store before 3E7; if the final ownership needs the store to outlive one compilation
-  boundary, that owner is an existing later owner (persistent generic materialisation), not a new
-  framework
-
-### Slice group 3F — Migrate parser and semantic consumers
-
-Each checked batch is independently accepted and must remove the old token API from its owner.
-
-- [ ] **3F1 — Stage 0 and header cursor:** structural reachability, provider-reference collection,
-  header splitting, dependency clauses, declaration dispatch, retained dependency-fact reads and
-  source-kind preparation
-- [ ] **3F2 — declaration syntax:** signatures, declarations, types, structs, choices, traits and generic parameter parsers
-- [ ] **3F3 — AST core:** expression, statement, call, field, match, loop and assignment parsers
-- [ ] **3F4 — template parser:** template heads, TIR emission, slots, control flow and formatter-facing token reads
-- [ ] **3F5 — support surfaces:** token-based diagnostics, tests, debug/show-token output, `TokenStats` and benchmark classification; extend the owning test source helper with token-store construction rather than adding parser-specific fixture builders
-- [ ] in every batch, use short-lived token views only; no durable Rust reference or self-referential structure may be introduced
-
-### Slice 3G — Add the durable diagnostic token projection
-
-- [ ] implement exact 8-byte `DiagnosticToken`
-- [ ] reuse `TokenTag` and descriptor spelling; preserve only the one compact ID/immediate the
-  diagnostic needs (path category plus an optional `PathId`, numeric kind/text, string identity)
-  and never the complete tokenizer record
-- [ ] inventory every surviving diagnostic query against `Token`/`TokenKind` and map each one to
-  the facts the projection and its typed side stores must preserve (tag, spelling, path identity,
-  numeric text/kind, string identity); extend the typed side stores or the projection where a
-  needed fact would otherwise be lost
-- [ ] prove diagnostics render after source token/cold stores are gone, with equivalence tests
-  over the full surviving diagnostic set comparing old-model and projected rendering while the
-  source token/cold stores still exist and again after they are dropped
-
-### Slice 3H — Delete the old token architecture
-
-- [ ] delete `Token`, `TokenKind` and `FileTokens`
-- [ ] delete clone-based `current_token()` and body-capture helpers
-- [ ] delete duplicate token spelling/classification matches
-- [ ] delete token string/path remapping that the new stores no longer require
-- [x] delete the former tokenizing dependency-scanner path, provider-free classification/retry
-  scans and `ReachableSourceInventory::source_cache`; the dependency-clause plan replaced them with
-  `source_preparation.rs`, retained prepared facts and state-safe `PreparedSourceInput` variants
-- [ ] replace the transitional `PreparedSourceInput` variants only when the build-lifetime
-  `PreparedSource` store owns their data without reintroducing tokenization or preparation
-- [ ] update module docs, codebase index and style rules
+Phase 4 and later phases must preserve the canonical owner/range/sequence model, exactly-once
+preparation, donor/requester identity provenance, consumption-time payload translation and durable
+diagnostic-token independence. They must not restore compatibility parser lanes, copied token
+windows or a second token owner. The later diagnostic-layout phases own compact
+`CompilerMessages`/error-carrier representation and the associated `result_large_err` failures;
+Phase 3 closeout does not pull that work forward.
 
 ### Phase 3 — Audit / style-guide review / validation
 
-Complete the common phase close, plus:
-
-- [ ] audit one token store per tokenized source
-- [ ] audit retained syntax contains ranges/IDs only
-- [ ] audit descriptor data has one authority and no duplicate classification tables remain
-- [ ] audit token/cold-store indexes are checked and deterministic
-- [ ] audit source tokens drop after their final semantic/tooling owner and are never retained merely because a source snapshot remains renderable
-- [ ] run tokenizer, header, parser, template, diagnostic-token and lifecycle tests
-- [ ] run full integration output/diagnostic equivalence checks
-- [ ] record common/cold token bytes, clones, capacity and timing
+The accepted phase review confirmed one canonical source-token owner, checked bounded parser views,
+typed cold-store provenance, exactly-once preparation, generic donor/requester identity, independent
+diagnostic projections and deletion of the old token architecture. Validation evidence is
+checkpoint-scoped as described above; the generic scaling exception and deferred
+`result_large_err` failures are explicit dispositions, not green-gate claims.
 
 ### Phase 3 exit criteria
-- [ ] `TokenShape` and the selected source-token array layout are canonical
-- [ ] complex token data lives only in typed source-local stores
-- [ ] declaration shells use `TokenRange`
-- [ ] no wide token enum or cloned retained token vector remains
-- [ ] each tokenized source is prepared once and reused by reachability and module compilation
----
 
+- [x] `TokenShape`/`LocalSpan` SoA storage and typed cold stores are canonical.
+- [x] retained syntax uses checked ranges/sequences and bounded borrowed views.
+- [x] each tokenized source is prepared once and reused by reachability and compilation.
+- [x] generic bodies preserve canonical ownership and explicit donor/requester provenance.
+- [x] `DiagnosticToken` survives source-token storage release.
+- [x] `Token`, `TokenKind`, `FileTokens`, copied parser windows and compatibility cursor paths remain
+  deleted.
+- [x] constant and nominal R5 fits remain within budget; the inherited generic exception is
+  explicitly accepted without changing the budget.
+- [x] Phase 4 remains gated by the complete reactivation gate below and the roadmap sequence.
+
+---
 ## Phase 4 — Compact diagnostics, type snapshots and frozen reports
 
 ### Phase 4 reactivation gate
 
-Phase 4 starts only when all of the following are true. Until then the plan is paused after
-Phase 3, and Wiring V1 followed by native result slots/Core const evaluation run first.
+Phase 4 starts only when all of the following are true. Until then the plan pauses after accepted
+Phase 3 through the roadmap order: compiler tidy-up, then MON syntax and nested const records, MON
+Rust tooling, Wiring V1, then native result slots and Core const evaluation.
 
-- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted Wiring V1
-  checkpoint and then the accepted native result-slot/Core const-eval checkpoint
+- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted compiler
+  tidy-up checkpoint, then the accepted MON syntax and nested const records checkpoint, then the
+  accepted MON Rust tooling checkpoint, then the accepted Wiring V1 checkpoint and then the accepted
+  native result-slot and Core const-eval checkpoint
 - [ ] re-run the owning validation gate after the rebase
 - [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments and
   generated functions as they exist after those semantic checkpoints merged
 - [ ] stale name refresh: update schema inventories and slice wording for any diagnostic family,
   result shape or owner renamed or moved by the rebase
-- [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved;
-  no reactivation change may weaken a locked size, ownership or failure-lane contract
+- [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved.
+  No reactivation change may weaken a locked size, ownership or failure-lane contract
 
 ### Summary, reasoning and context
 

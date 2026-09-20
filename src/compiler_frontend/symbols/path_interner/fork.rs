@@ -5,13 +5,13 @@
 //! WHY:  parallel workers must share inherited source paths by numeric identity while keeping
 //!       their own append-only suffix, mirroring the string-table fork pattern.
 
+use super::NonUtf8PathComponent;
 use super::builder::{PathInternError, PathInternerBuilder, PathNode};
 use super::frozen::PathTable;
 use super::id::PathId;
 use super::remap::PathIdRemap;
-use super::NonUtf8PathComponent;
 use crate::compiler_frontend::instrumentation::{
-    add_frontend_counter, increment_frontend_counter, record_path_table_copy, FrontendCounter,
+    FrontendCounter, add_frontend_counter, increment_frontend_counter, record_path_table_copy,
 };
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringIdRemap, StringTable, StringTableResolver,

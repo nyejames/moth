@@ -12,6 +12,7 @@
 use super::directive_args::parse_optional_parenthesized_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
@@ -24,9 +25,8 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
     StyleDirectiveHandlerSpec,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -40,7 +40,7 @@ struct ParsedHandlerDirectiveArgument {
     reason = "handler directive application keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and handler spec as separate borrows"
 )]
 pub(super) fn apply_handler_style_directive(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
@@ -103,7 +103,7 @@ fn apply_style_directive_effects(
 /// accepts one. Early exits keep the no-argument and invalid-argument cases
 /// explicit.
 fn parse_optional_handler_style_argument(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     directive_name: &str,
@@ -242,11 +242,13 @@ fn normalize_provided_style_argument_value(
     }
 }
 
-fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
-    Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ))
+/// Read-only current-token span on the canonical cursor view.
+///
+/// WHAT: reports the exact authored span of the handler directive token
+/// without advancing the stream.
+/// WHY: the no-argument default span is pure token-local lookahead.
+fn current_token_source_span(token_stream: &AstCursor) -> Option<SourceSpan> {
+    Some(token_stream.current_span())
 }
 
 fn with_argument_span(

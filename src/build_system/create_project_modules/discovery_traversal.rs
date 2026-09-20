@@ -5,11 +5,11 @@ use super::discovery_provider_imports::{
 };
 use super::*;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
-use crate::compiler_frontend::symbols::path_interner::{
-    NonUtf8PathComponent, PathId, PathInternerFork,
-};
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
+};
+use crate::compiler_frontend::symbols::path_interner::{
+    NonUtf8PathComponent, PathId, PathInternerFork,
 };
 /// Resolve provider-backed and binding-backed dependency classes before indexed source resolution.
 ///
@@ -34,6 +34,7 @@ pub(crate) fn resolve_structural_provider_reference(
             dependency_span: Some(provider.span),
             clause_kind,
             target: &provider.target,
+            provider_target: provider.provider_target.as_ref(),
             canonical_file,
             project_path_resolver,
             path_fork,
@@ -77,6 +78,7 @@ struct ProviderCapableDependencyInput<'a> {
     dependency_span: Option<SourceSpan>,
     clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
+    provider_target: Option<&'a CheckedExternalProviderTarget>,
     canonical_file: &'a Path,
     project_path_resolver: &'a ProjectPathResolver,
     path_fork: &'a mut PathInternerFork,
@@ -406,6 +408,7 @@ fn walk_reachable_sources(
                 dependency_span: Some(provider.span),
                 clause_kind: clause.binding.clause_kind(),
                 target: &provider.target,
+                provider_target: provider.provider_target.as_ref(),
                 canonical_file: &canonical_file,
                 project_path_resolver,
                 path_fork: &mut *path_fork,
@@ -627,8 +630,7 @@ fn resolve_module_root_bare_dependency(
         return Ok(None);
     };
 
-    let root_candidate =
-        join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
+    let root_candidate = join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
     if let Some(root_file) = project_path_resolver.module_root_file_for_directory(&root_candidate) {
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
@@ -692,8 +694,6 @@ fn resolve_module_root_bare_dependency(
         )
         .map(Some)
         .map_err(SourceDiscoveryError::from)
-
-
 }
 fn handle_provider_capable_dependency(
     input: ProviderCapableDependencyInput<'_>,
@@ -704,6 +704,7 @@ fn handle_provider_capable_dependency(
         dependency_span,
         clause_kind,
         target,
+        provider_target,
         canonical_file,
         project_path_resolver,
         path_fork,
@@ -720,8 +721,9 @@ fn handle_provider_capable_dependency(
     // root out of filesystem discovery and external-package registration only for the owning
     // project boundary; source packages must receive the structured reserved-path diagnostic.
     if is_project_globals_namespace(dependency_path, path_fork, string_table) {
-        let is_owning_project_root =
-            resolution.as_ref().is_none_or(|resolution| resolution.is_project_boundary());
+        let is_owning_project_root = resolution
+            .as_ref()
+            .is_none_or(|resolution| resolution.is_project_boundary());
         if is_project_globals_dependency(dependency_path, path_fork, string_table)
             && is_owning_project_root
         {
@@ -740,12 +742,9 @@ fn handle_provider_capable_dependency(
         .external_packages
         .is_virtual_package_dependency(dependency_path, path_fork, string_table)
     {
-        if resolution
-            .as_ref()
-            .is_some_and(|resolution| {
-                resolution.has_binding_package_dependency(dependency_path, string_table)
-            })
-        {
+        if resolution.as_ref().is_some_and(|resolution| {
+            resolution.has_binding_package_dependency(dependency_path, string_table)
+        }) {
             return Ok(DependencyPolicyAction::QueueLocal);
         }
         // Extensionless binding-package clauses bind through the external package registry.
@@ -762,16 +761,17 @@ fn handle_provider_capable_dependency(
             unsupported_builder_package_error(package_path, dependency_span, string_table),
         ));
     }
-
-    // Consume the retained provider classification. Header syntax already identified the
-    // first explicit non-source extension, so Stage 0 must not rescan path components.
-    if let Some(decoded) =
-        decode_dependency_target(dependency_path, target, path_fork, string_table)
+    if matches!(target, DependencyTargetKind::ExternalProvider { .. }) {
+        let checked = provider_target.ok_or_else(|| {
+            SourceDiscoveryError::Infrastructure(CompilerError::compiler_error(
+                "retained provider classification is missing its checked target fact",
+            ))
+        })?;
+        let prefix_path = checked.prefix_path_id();
+        let extension = checked
+            .extension_spelling(string_table)
             .map_err(SourceDiscoveryError::from)?
-    {
-        let prefix_path = decoded.prefix_path_id();
-        let prefix_str = path_fork.render_portable(prefix_path, string_table, &mut Vec::new());
-        let extension = decoded.extension_spelling().to_owned();
+            .to_owned();
         if let Some(provider) = external_imports.providers.find_by_extension(&extension) {
             // Directory projects resolve provider-owned targets through the same boundary-aware
             // namespace as compiler-semantic dependencies; the scoped immutable reborrow finishes
@@ -793,15 +793,20 @@ fn handle_provider_capable_dependency(
                 import_path: dependency_path,
                 source_span: dependency_span,
                 prefix_path,
-                raw_prefix: &prefix_str,
+                raw_prefix: checked.raw_prefix(),
                 provider,
                 project_path_resolver,
                 path_fork,
             };
             // The single-file traversal has no directory namespace; target resolution falls
             // through to the filesystem lane inside `resolve_provider_backed_import`.
-            resolve_provider_backed_import(request, directory_target, external_imports, string_table)
-                .map_err(|error| with_provider_dependency_error(error, dependency_span))?;
+            resolve_provider_backed_import(
+                request,
+                directory_target,
+                external_imports,
+                string_table,
+            )
+            .map_err(|error| with_provider_dependency_error(error, dependency_span))?;
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             // Explicit-extension registered-provider clauses bind through the provider registry.
             add_frontend_counter(FrontendCounter::ResolvedProviderClauseCount, 1);

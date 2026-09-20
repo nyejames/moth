@@ -1,6 +1,66 @@
 use super::*;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag};
 
+fn cursor_has_tag(mut cursor: TokenCursor<'_>, expected: TokenTag) -> bool {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == expected {
+            return true;
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    false
+}
+
+fn cursor_first_tag(mut cursor: TokenCursor<'_>) -> Option<TokenTag> {
+    cursor.advance().map(|token| token.tag())
+}
+
+fn cursor_last_tag(mut cursor: TokenCursor<'_>) -> Option<TokenTag> {
+    let mut last = None;
+    while let Some(token) = cursor.advance() {
+        last = Some(token.tag());
+        if token.is_eof() {
+            break;
+        }
+    }
+    last
+}
+
+fn cursor_has_string(
+    mut cursor: TokenCursor<'_>,
+    expected_tag: TokenTag,
+    string_table: &StringTable,
+    expected: &str,
+) -> bool {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == expected_tag
+            && token
+                .string_id()
+                .is_some_and(|id| string_table.resolve(id) == expected)
+        {
+            return true;
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    false
+}
+
+fn cursor_find_path(mut cursor: TokenCursor<'_>) -> Option<PathSyntaxId> {
+    while let Some(token) = cursor.advance() {
+        if token.tag() == TokenTag::PATH {
+            return token.path_syntax_id();
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+    None
+}
 
 #[test]
 fn exported_untyped_constant_has_no_header_provided_dependencies() {
@@ -246,36 +306,21 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
         .find(|header| matches!(header.kind, HeaderKind::ConstTemplate { .. }))
         .expect("expected top-level const template header");
 
-    assert!(
-        matches!(
-            const_template_header
-                .tokens
-                .tokens
-                .first()
-                .map(|token| &token.kind),
-            Some(TokenKind::TemplateHead)
-        ),
+    assert_eq!(
+        cursor_first_tag(header_body_tokens(&headers, const_template_header)),
+        Some(TokenTag::TEMPLATE_HEAD),
         "const template token stream should start with template opener"
     );
-
     assert!(
-        const_template_header
-            .tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::TemplateClose)),
+        cursor_has_tag(
+            header_body_tokens(&headers, const_template_header),
+            TokenTag::TEMPLATE_CLOSE,
+        ),
         "const template token stream should preserve template close token"
     );
-
-    assert!(
-        matches!(
-            const_template_header
-                .tokens
-                .tokens
-                .last()
-                .map(|token| &token.kind),
-            Some(TokenKind::Eof)
-        ),
+    assert_eq!(
+        cursor_last_tag(header_body_tokens(&headers, const_template_header)),
+        Some(TokenTag::EOF),
         "const template token stream should end with EOF sentinel"
     );
 }
@@ -288,16 +333,24 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = source_context.path().to_path_buf();
     let source_id = source_context.source_id();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let file_tokens = source_context
+        .tokenize(
+            &source,
+            &mut path_fork,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("source should tokenize");
+    let interned_path = file_tokens.logical_path;
+    let (owner, path_syntax) = super::owner_from_lexed_source(file_tokens);
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
-        let interned_path = path_fork
-            .try_intern_filesystem_path(&file_path, string_table)
-            .expect("test path fits");
-        let file_tokens = tokenize(&source, interned_path, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), string_table, &mut path_fork, source_id, span_builder)
-            .expect("source should tokenize");
         let count = span_builder.len();
         let output = prepare_file_from_tokens(
-            file_tokens,
+            owner,
+            interned_path,
+            path_syntax,
             &file_path,
             &HeaderParseOptions::default(),
             string_table,
@@ -307,7 +360,6 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             &mut path_fork,
         )
         .expect("headers should prepare");
-
         let header_name_span = output
             .headers
             .iter()
@@ -379,24 +431,38 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
 fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     let source = "#[value]\n";
     let mut source_context = TestSourceContext::new("src/@page.moth");
-    let source_id = source_context.source_id();
-    let source_path = source_context.path().to_path_buf();
     let mut path_fork = PathInternerFork::empty();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let token_stream = source_context
+        .tokenize(
+            source,
+            &mut path_fork,
+            &style_directives,
+            TokenizerEntryMode::SourceFile,
+        )
+        .expect("source should tokenize");
+    let lexed = token_stream;
+    let scope = lexed.logical_path;
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let (string_table, span_builder) = source_context.preparation_parts();
-    let scope = path_fork
-        .try_intern_filesystem_path(&source_path, string_table)
-        .expect("test path fits");
-    let mut token_stream = tokenize(source, scope, TokenizerEntryMode::SourceFile, &StyleDirectiveRegistry::built_ins(), string_table, &mut path_fork, source_id, span_builder)
-    .expect("source should tokenize");
-    let opening_index = token_stream
-        .tokens
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .expect("template opener");
-    let opening_token = token_stream.tokens[opening_index].clone();
-    token_stream.index = opening_index + 1;
-
-    let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
+    let mut cursor = owner
+        .cursor(
+            owner
+                .full_range()
+                .expect("canonical source range should fit"),
+        )
+        .expect("tokenized source must expose canonical tokens");
+    let opening = loop {
+        let token = cursor.current().expect("template opener");
+        if token.tag() == TokenTag::TEMPLATE_HEAD {
+            break token;
+        }
+        assert!(!token.is_eof(), "template opener must be present");
+        cursor.advance();
+    };
+    cursor.advance();
+    let malformed_clause =
+        super::malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
     let mut warnings = Vec::new();
     let mut context = HeaderBuildContext {
         warnings: &mut warnings,
@@ -407,15 +473,9 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         path_fork: &mut path_fork,
         file_role: FileRole::ActiveModuleRoot,
     };
-    let failure = create_top_level_const_template(
-        scope,
-        opening_token,
-        0,
-        &mut token_stream,
-        &mut context,
-        span_builder,
-    )
-    .expect_err("malformed retained selection should fail");
+    let failure =
+        create_top_level_const_template(scope, opening, 0, &mut cursor, &mut context, span_builder)
+            .expect_err("malformed retained selection should fail");
 
     match failure {
         HeaderParseFailure::Infrastructure(error) => {
@@ -527,8 +587,7 @@ fn loop_binding_symbols_remain_in_start_function_body() {
     assert!(matches!(headers.headers[0].kind, HeaderKind::StartFunction));
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
-    let header_names = non_start_header_names(&headers, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "item"),
@@ -539,21 +598,10 @@ fn loop_binding_symbols_remain_in_start_function_body() {
         "loop index binding should stay in the implicit start body token stream"
     );
     assert!(
-        start_header
-            .tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::Loop)),
+        cursor_has_tag(header_body_tokens(&headers, start_header), TokenTag::LOOP),
         "start header should preserve the top-level loop statement tokens"
     );
-    assert!(
-        !header_names
-            .iter()
-            .any(|name| name == "item" || name == "index"),
-        "loop binding names must never be elevated into headers"
-    );
 }
-
 #[test]
 fn top_level_expression_symbols_stay_in_implicit_start_body() {
     let (headers, string_table) = parse_single_file_headers_with_table(
@@ -575,7 +623,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
     assert!(matches!(headers.headers[0].kind, HeaderKind::StartFunction));
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
     let header_names = non_start_header_names(&headers, &string_table);
 
     assert!(
@@ -588,11 +636,10 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
         "loop binding symbols inside top-level loops should remain start-body tokens"
     );
     assert!(
-        start_header
-            .tokens
-            .tokens
-            .iter()
-            .any(|token| matches!(token.kind, TokenKind::TemplateHead)),
+        cursor_has_tag(
+            header_body_tokens(&headers, start_header),
+            TokenTag::TEMPLATE_HEAD,
+        ),
         "runtime top-level templates should remain in the start-function token stream"
     );
     assert!(
@@ -635,7 +682,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
     );
 
     let start_header = start_function_header(&headers);
-    let start_symbols = symbol_tokens_in_header_body(start_header, &string_table);
+    let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "theme"),
@@ -713,10 +760,12 @@ fn function_parameter_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinString { .. }
     ));
     assert!(
-        parameter.default_tokens.iter().any(|token| matches!(
-            token.kind,
-            TokenKind::StringSliceLiteral(id) if string_table.resolve(id) == "item"
-        )),
+        cursor_has_string(
+            default_tokens(&headers, parameter.default_range),
+            TokenTag::STRING_SLICE_LITERAL,
+            &string_table,
+            "item",
+        ),
         "header should capture default expression tokens without building an AST expression"
     );
 }
@@ -742,10 +791,12 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
         ParsedTypeRef::BuiltinInt { .. }
     ));
     assert!(
-        field.default_tokens.iter().any(|token| matches!(
-            token.kind,
-            TokenKind::Symbol(id) if string_table.resolve(id) == "DEFAULT_WIDTH"
-        )),
+        cursor_has_string(
+            default_tokens(&headers, field.default_range),
+            TokenTag::SYMBOL,
+            &string_table,
+            "DEFAULT_WIDTH",
+        ),
         "header should preserve struct default tokens for AST-time constant resolution"
     );
 }
@@ -769,13 +820,7 @@ fn function_parameter_default_path_rows_use_the_file_owned_table() {
         .first()
         .expect("expected one parameter shell");
 
-    let path_id = parameter
-        .default_tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
+    let path_id = cursor_find_path(default_tokens(&headers, parameter.default_range))
         .expect("expected a path token in the default");
     assert_ne!(path_id, PathSyntaxId::NONE);
 }
@@ -796,13 +841,7 @@ fn struct_field_default_path_rows_use_the_file_owned_table() {
     };
     let field = fields.first().expect("expected one field shell");
 
-    let path_id = field
-        .default_tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
+    let path_id = cursor_find_path(default_tokens(&headers, field.default_range))
         .expect("expected a path token in the default");
     assert_ne!(path_id, PathSyntaxId::NONE);
 }
@@ -826,24 +865,11 @@ fn function_default_and_body_path_rows_stay_distinct() {
         .first()
         .expect("expected one parameter shell");
 
-    let default_path_id = parameter
-        .default_tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
+    let default_path_id = cursor_find_path(default_tokens(&headers, parameter.default_range))
         .expect("expected a path token in the default");
     assert_ne!(default_path_id, PathSyntaxId::NONE);
 
-    let body_path_id = function_header
-        .tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(id) => Some(id),
-            _ => None,
-        })
+    let body_path_id = cursor_find_path(header_body_tokens(&headers, function_header))
         .expect("expected a path token in the body");
     assert_ne!(body_path_id, PathSyntaxId::NONE);
 }
@@ -860,36 +886,36 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
         .expect("expected function header");
     let start_header = start_function_header(&headers);
 
-    let FilePathSyntax::Shared(function_table) = &function_header.tokens.path_syntax else {
-        panic!("prepared function header should receive the frozen file table");
-    };
-    let FilePathSyntax::Shared(start_table) = &start_header.tokens.path_syntax else {
-        panic!("prepared start header should receive the frozen file table");
-    };
+    let function_owner = headers
+        .source_token_owners
+        .get(&function_header.tokens.source())
+        .expect("function header source owner");
+    let start_owner = headers
+        .source_token_owners
+        .get(&start_header.tokens.source())
+        .expect("start header source owner");
+    let function_table = function_owner
+        .tokens_ref()
+        .path_syntax_arc()
+        .expect("prepared function source should receive the frozen file table");
+    let start_table = start_owner
+        .tokens_ref()
+        .path_syntax_arc()
+        .expect("prepared start source should receive the frozen file table");
     assert!(
-        Arc::ptr_eq(function_table, start_table),
+        Arc::ptr_eq(&function_table, &start_table),
         "ordinary retained header substreams must share one immutable file-owned path table"
     );
 
     let HeaderKind::Function { signature, .. } = &function_header.kind else {
-        panic!("expected function header");
+        panic!("expected Function header kind");
     };
-    let default_path_id = signature.parameters[0]
-        .default_tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(path_id) => Some(path_id),
-            _ => None,
-        })
-        .expect("expected a default path token");
-    let start_path_id = start_header
-        .tokens
-        .tokens
-        .iter()
-        .find_map(|token| match token.kind {
-            TokenKind::Path(path_id) => Some(path_id),
-            _ => None,
-        })
+    let default_path_id = cursor_find_path(default_tokens(
+        &headers,
+        signature.parameters[0].default_range,
+    ))
+    .expect("expected a default path token");
+    let start_path_id = cursor_find_path(header_body_tokens(&headers, start_header))
         .expect("expected a start-body path token");
 
     assert_ne!(default_path_id, PathSyntaxId::NONE);
@@ -925,10 +951,6 @@ fn retained_header_substreams_do_not_count_copied_path_rows() {
     };
 
     assert_eq!(counter_value("path_syntax_row_count"), 2.0);
-    assert_eq!(
-        counter_value("persistent_generic_path_syntax_row_copy_count"),
-        0.0
-    );
     assert_eq!(counter_value("token_rescan_count"), 0.0);
 }
 

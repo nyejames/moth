@@ -7,8 +7,9 @@
 //! span builder and local preparation result on the same owner. Loading and registration failures
 //! precede that owner; later preparation failures retain the loaded snapshot.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
 };
@@ -82,7 +83,7 @@ pub(super) fn prepare_discovery_source_text(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<PreparedDiscoverySource, SourceDiscoveryError> {
-    // Register the file before tokenization because `FileTokens` is minted with the traversal-local
+    // Register the file before tokenization so the lexer handoff carries the traversal-local
     // source identity. Discovery rebinds every prepared result to the final sorted database once
     // the closure is complete, and this table dies with the traversal.
     let source_id = source_files.insert(
@@ -121,12 +122,17 @@ pub(super) fn prepare_discovery_source_text(
             });
         }
     };
-
+    if tokenized.logical_path != logical_path || tokenized.file_id != source_id {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            "lexer source identity does not match its registered discovery identity",
+        )));
+    }
+    let owner = SourceTokenOwner::new(tokenized.tokens);
     let prepared_output = prepare_discovery_output(
         FrontendFilePrepareInput {
             source: FrontendFilePrepareSource::Moth {
-                source_path: file_path.to_path_buf(),
-                tokens: Box::new(tokenized),
+                owner,
+                path_syntax: tokenized.path_syntax,
             },
             source_id,
             span_builder,
@@ -134,7 +140,6 @@ pub(super) fn prepare_discovery_source_text(
             runtime_fragment_offset: 0,
         },
         style_directives,
-        project_path_resolver,
         entry_file_path,
         source_files,
         path_fork,
@@ -172,7 +177,6 @@ pub(super) fn prepare_discovery_template_source(
         FrontendFilePrepareInput {
             source: FrontendFilePrepareSource::MothTemplate {
                 source_code: source.as_str(),
-                source_path: file_path.to_path_buf(),
             },
             source_id,
             span_builder: ExtendedSpanBuilder::new(),
@@ -180,7 +184,6 @@ pub(super) fn prepare_discovery_template_source(
             runtime_fragment_offset: 0,
         },
         style_directives,
-        project_path_resolver,
         entry_file_path,
         source_files,
         path_fork,
@@ -196,7 +199,6 @@ pub(super) fn prepare_discovery_template_source(
 fn prepare_discovery_output(
     input: FrontendFilePrepareInput<'_>,
     style_directives: &StyleDirectiveRegistry,
-    project_path_resolver: &Option<ProjectPathResolver>,
     entry_file_path: &Path,
     source_files: &mut SourceDatabase,
     path_fork: &mut PathInternerFork,
@@ -216,7 +218,6 @@ fn prepare_discovery_output(
         .map(|identity| identity.id);
     let options = HeaderParseOptions {
         entry_file_id,
-        project_path_resolver: project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

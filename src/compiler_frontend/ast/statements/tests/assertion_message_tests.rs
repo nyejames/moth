@@ -34,11 +34,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_node, node, test_source_location,
 };
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn propagated_expression(_line: i32) -> Expression {

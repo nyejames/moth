@@ -1,37 +1,76 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn fresh_marks_template_to_skip_parent_child_wrappers() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut wrapper_tokens =
-        template_tokens_from_source("[: inherited]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(wrapper_tokens.src_path.to_owned(), &path_fork);
-    let wrapper =
-        Template::new(&mut wrapper_tokens, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("inherited wrapper should parse");
+    let wrapper_file_tokens = template_tokens_from_source(
+        "[: inherited]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let wrapper_source_path = wrapper_file_tokens.source_path;
+    let canonical_owner = wrapper_file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut wrapper_tokens = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    wrapper_tokens
+        .set_position(wrapper_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(wrapper_source_path, &path_fork);
+    let wrapper = Template::new(
+        &mut wrapper_tokens,
+        wrapper_source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("inherited wrapper should parse");
     let inherited_wrapper = {
         let reference = &wrapper.tir_reference;
         TemplateWrapperReference::new(reference.root, reference.phase, reference.context)
     };
 
-    let mut token_stream = template_tokens_from_source("[$fresh, $md:\n# Hello\n]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$fresh, $md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
     let template = Template::new(
         &mut token_stream,
+        source_path,
         &context,
         vec![inherited_wrapper],
         &mut string_table,
@@ -55,14 +94,35 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[$children([:prefix]): [: child]]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$children([:prefix]): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
-    let template =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("template should parse");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("template should parse");
 
     // The $children directive attaches a wrapper-context overlay carrying
     // one inherited wrapper set for the direct child occurrence.
@@ -87,7 +147,9 @@ fn children_directive_accepts_const_string_reference() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = path_fork.try_intern_portable_path("main.moth/#const_template0", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
+        .expect("test path fits");
     let prefix_name = string_table.intern("prefix");
     let declarations = vec![Declaration {
         id: path_fork
@@ -102,14 +164,35 @@ fn children_directive_accepts_const_string_reference() {
         config_qualifier: None,
     }];
 
-    let mut token_stream = template_tokens_from_source("[$children(prefix): [: child]]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = constant_template_context(&token_stream.src_path, &declarations, &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$children(prefix): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = constant_template_context(&source_path, &declarations, &path_fork);
 
-    let template =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect("children directive should accept const-folded references");
+    let template = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("children directive should accept const-folded references");
 
     // Resolve the wrapper reference through the TIR overlay system.
     let store = context.template_ir_store.borrow();
@@ -164,14 +247,35 @@ fn children_directive_rejects_runtime_values() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream = template_tokens_from_source("[$children(value): [: child]]",
-    &mut string_table,
-    &mut span_builder, &mut path_fork);
-    let context = runtime_template_context(&token_stream.src_path, &mut string_table, &mut path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$children(value): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
 
-    let error =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect_err("children directive should reject runtime values");
+    let error = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("children directive should reject runtime values");
     let error = expect_template_diagnostic(error);
 
     match &error.payload {
@@ -265,13 +369,35 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let mut token_stream =
-        template_tokens_from_source("[$children(]", &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path.to_owned(), &path_fork);
+    let file_tokens = template_tokens_from_source(
+        "[$children(]",
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    );
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
-    let error =
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-        .expect_err("empty $children argument at a template boundary should fail to parse");
+    let error = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("empty $children argument at a template boundary should fail to parse");
     let error = expect_template_diagnostic(error);
 
     match &error.payload {

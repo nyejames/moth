@@ -10,10 +10,11 @@ mod parser;
 mod success_types;
 mod validation;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Re-exports
@@ -37,11 +38,11 @@ const EXPRESSION_STAGE: &str = "Expression Parsing";
 ///       and generic expression result handling.
 /// WHY: these entrypoints construct fallible carriers in different parser modules, but the
 ///      syntax that consumes those carriers must stay identical.
-pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &FileTokens) -> bool {
-    token_stream.current_token_kind() == &TokenKind::Bang
-        || token_stream.current_token_kind() == &TokenKind::Catch
-        || (matches!(token_stream.current_token_kind(), TokenKind::Symbol(_))
-            && token_stream.peek_next_token() == Some(&TokenKind::Bang))
+pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &AstCursor) -> bool {
+    token_stream.current_tag() == TokenTag::BANG
+        || token_stream.current_tag() == TokenTag::CATCH
+        || (token_stream.current_tag() == TokenTag::SYMBOL
+            && token_stream.peek_next_tag() == Some(TokenTag::BANG))
 }
 /// Selects the precise reason for applying `!` or `catch` to a non-fallible operand.
 ///
@@ -50,11 +51,11 @@ pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &FileTo
 /// WHY: the old umbrella `NotResultExpression` reason hardcoded `!` wording and called every
 ///      carrier a result, so each construction site needs the exact handler and carrier pair.
 pub(crate) fn non_fallible_handler_reason(
-    handler_token: &TokenKind,
+    handler_tag: TokenTag,
     operand_is_optional: bool,
 ) -> InvalidFallibleHandlingReason {
-    match handler_token {
-        TokenKind::Catch => {
+    match handler_tag {
+        TokenTag::CATCH => {
             if operand_is_optional {
                 InvalidFallibleHandlingReason::CatchOnOptional
             } else {

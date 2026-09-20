@@ -179,7 +179,8 @@ fn collects_and_strips_top_level_doc_comment_templates() {
 
 #[test]
 fn collects_doc_comment_with_site_root_markdown_link() {
-    let (ast, _path_fork, string_table) = parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
+    let (ast, _path_fork, string_table) =
+        parse_single_file_ast("[$doc: See @/docs (Docs)]\n[:runtime]");
 
     assert_eq!(ast.doc_fragments.len(), 1);
     assert_eq!(
@@ -190,7 +191,8 @@ fn collects_doc_comment_with_site_root_markdown_link() {
 
 #[test]
 fn collects_top_level_doc_fragments_in_source_order() {
-    let (ast, _path_fork, string_table) = parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
+    let (ast, _path_fork, string_table) =
+        parse_single_file_ast("[$doc:first]\n[$doc:second]\n[$doc:third]");
     let doc_fragments = ast.doc_fragments;
 
     assert_eq!(doc_fragments.len(), 3);
@@ -285,7 +287,9 @@ fn formatted_doc_template_with_direct_tir(
 fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let entry_dir = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let entry_dir = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let entry_scope = entry_dir.to_owned();
 
     let (doc_template, store) =
@@ -339,7 +343,9 @@ doc body
 fn collects_const_top_level_fragments_from_tir_result_record() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let value = string_table.intern("const html");
 
     let mut results = FxHashMap::default();
@@ -366,7 +372,9 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 fn collects_const_top_level_fragments_from_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
     let value = string_table.intern("folded html");
 
     let mut results = FxHashMap::default();
@@ -393,8 +401,12 @@ fn collects_const_top_level_fragments_from_folded_value() {
 fn collects_mixed_const_top_level_fragments_in_source_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let first_path = path_fork.try_intern_portable_path("first.moth", &mut string_table).expect("test path fits");
-    let second_path = path_fork.try_intern_portable_path("second.moth", &mut string_table).expect("test path fits");
+    let first_path = path_fork
+        .try_intern_portable_path("first.moth", &mut string_table)
+        .expect("test path fits");
+    let second_path = path_fork
+        .try_intern_portable_path("second.moth", &mut string_table)
+        .expect("test path fits");
 
     let first_value = string_table.intern("first");
     let second_value = string_table.intern("second");
@@ -456,9 +468,15 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
     //      and the builder's final-text boundary.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let piece_path = path_fork.try_intern_portable_path("piece.moth", &mut string_table).expect("test path fits");
-    let all_text_path = path_fork.try_intern_portable_path("all-text.moth", &mut string_table).expect("test path fits");
-    let text_path = path_fork.try_intern_portable_path("text.moth", &mut string_table).expect("test path fits");
+    let piece_path = path_fork
+        .try_intern_portable_path("piece.moth", &mut string_table)
+        .expect("test path fits");
+    let all_text_path = path_fork
+        .try_intern_portable_path("all-text.moth", &mut string_table)
+        .expect("test path fits");
+    let text_path = path_fork
+        .try_intern_portable_path("text.moth", &mut string_table)
+        .expect("test path fits");
     let prefix = string_table.intern("before");
     let suffix = string_table.intern("after");
     let all_text_prefix = string_table.intern("all-text-before");
@@ -531,7 +549,9 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
 fn missing_const_top_level_fragment_result_returns_compiler_error() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("main.moth", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
 
     let results = FxHashMap::<PathId, FoldedConstTemplateResult>::default();
     let fragments = vec![TopLevelConstFragment {

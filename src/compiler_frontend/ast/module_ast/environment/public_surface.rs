@@ -47,7 +47,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 if let HeaderKind::TraitIncompatibility { incompatibility } = &header.kind {
                     self.validate_public_trait_incompatibility_surface(
                         incompatibility,
-                        &header.source_file,
+                        &self.header_source_path(header),
                         trait_environment,
                         string_table,
                     )?;
@@ -59,25 +59,30 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            let exported_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
-                self.error_messages(
-                    CompilerError::compiler_error("Public export header had no source-path name."),
-                    string_table,
-                )
-            })?;
+            let exported_name = self
+                .path_fork
+                .component(header.declaration_path)
+                .ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "Public export header had no source-path name.",
+                        ),
+                        string_table,
+                    )
+                })?;
 
             match &header.kind {
                 HeaderKind::Function { .. } => {
                     let Some(resolved_signature) = self
                         .resolved_function_signatures_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
                     self.validate_public_function_surface(
                         exported_name,
                         &resolved_signature.signature,
-                        &header.source_file,
+                        &self.header_source_path(header),
                         header_name_span(header),
                         trait_environment,
                         string_table,
@@ -87,7 +92,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Struct { .. } => {
                     let Some(fields) = self
                         .resolved_struct_fields_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -96,7 +101,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         self.validate_public_type_id(
                             exported_name,
                             field.value.type_id,
-                            &header.source_file,
+                            &self.header_source_path(header),
                             field.value.span,
                             trait_environment,
                             string_table,
@@ -107,7 +112,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Choice { .. } => {
                     let Some(variants) = self
                         .choice_variant_shells_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -124,7 +129,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             self.validate_public_type_id(
                                 exported_name,
                                 field.value.type_id,
-                                &header.source_file,
+                                &self.header_source_path(header),
                                 field.value.span,
                                 trait_environment,
                                 string_table,
@@ -136,7 +141,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::TypeAlias { .. } => {
                     let Some(alias) = self
                         .resolved_type_aliases_by_path
-                        .get(&header.tokens.src_path)
+                        .get(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -144,7 +149,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.validate_public_type_id(
                         exported_name,
                         alias.target_type_id,
-                        &header.source_file,
+                        &self.header_source_path(header),
                         header_name_span(header),
                         trait_environment,
                         string_table,
@@ -153,7 +158,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                 HeaderKind::Constant { declaration, .. } => {
                     let Some(resolved_declaration) =
-                        self.declaration_table.get_by_path(&header.tokens.src_path)
+                        self.declaration_table.get_by_path(&header.declaration_path)
                     else {
                         continue;
                     };
@@ -161,7 +166,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     self.validate_public_type_id(
                         exported_name,
                         resolved_declaration.value.type_id,
-                        &header.source_file,
+                        &self.header_source_path(header),
                         declaration.span,
                         trait_environment,
                         string_table,
@@ -335,11 +340,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
     }
 
-    fn nominal_id_is_public(
-        &self,
-        nominal_id: NominalTypeId,
-        public_root_file: &PathId,
-    ) -> bool {
+    fn nominal_id_is_public(&self, nominal_id: NominalTypeId, public_root_file: &PathId) -> bool {
         self.type_environment
             .nominal_path_by_id(nominal_id)
             .is_some_and(|path| self.source_path_is_public_from_root_file(path, public_root_file))

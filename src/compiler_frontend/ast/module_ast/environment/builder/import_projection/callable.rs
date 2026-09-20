@@ -408,8 +408,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .imported_receiver_method_paths_by_origin
             .get(&method_origin)
             .is_none_or(|existing| {
-                self.path_fork.render_portable(method_path, string_table, &mut Vec::new())
-                    < self.path_fork.render_portable(*existing, string_table, &mut Vec::new())
+                self.path_fork
+                    .render_portable(method_path, string_table, &mut Vec::new())
+                    < self
+                        .path_fork
+                        .render_portable(*existing, string_table, &mut Vec::new())
             });
         if replace {
             self.imported_receiver_method_paths_by_origin

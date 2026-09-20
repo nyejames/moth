@@ -13,16 +13,15 @@
 //! WHY: these are construction invariants owned by `compiler_frontend::public_interface::export_projection`,
 //! so they own a focused test beside the module rather than an end-to-end case.
 
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::{
-    prepare_single_file_with_fork,
-};
+use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::prepare_single_file_with_fork;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    bind_module_headers, prepare_header_syntax, BoundModuleHeaders, FileRole, Header, HeaderKind,
+    BoundModuleHeaders, FileRole, Header, HeaderKind, bind_module_headers, prepare_header_syntax,
 };
 use crate::compiler_frontend::public_interface::{
     DirectExportSeed, PublicExportDiagnosticProvenance, PublicSemanticInterface,
@@ -37,7 +36,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
-use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -53,13 +51,8 @@ fn parse_single_file_headers_with_fork(
     path_fork: &mut PathInternerFork,
 ) -> BoundModuleHeaders {
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork(
-        source,
-        &file_path,
-        &file_path,
-        string_table,
-        path_fork,
-    );
+    let (output, _span_builder) =
+        prepare_single_file_with_fork(source, &file_path, &file_path, string_table, path_fork);
     let mut prepared_outputs = vec![output];
     let prepared = prepare_header_syntax(
         &mut prepared_outputs,
@@ -92,11 +85,8 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         String::new(),
         ModuleRootRole::Normal,
     );
-    let mut headers = parse_single_file_headers_with_fork(
-        source,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let mut headers =
+        parse_single_file_headers_with_fork(source, &mut string_table, &mut path_fork);
 
     // Build a source file table for the single synthetic test file and set the retained
     // file identity on every header so the origin projection can resolve the active root
@@ -114,7 +104,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         .expect("the synthetic test file should be in the source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         header.name_span = header
             .name_span
             .map(|span| SourceSpan::new(file_id, span.local()));
@@ -215,8 +205,11 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
             .get_by_canonical_path(path)
             .expect("every prepared projection source should have a file identity")
             .id;
+        module_symbols
+            .source_paths_by_source_id
+            .insert(file_id, source_file);
         for mut header in output.headers {
-            header.tokens.file_id = file_id;
+            header.tokens = header.tokens.rebind_source(file_id);
             header.name_span = header
                 .name_span
                 .map(|span| SourceSpan::new(file_id, span.local()));
@@ -245,7 +238,7 @@ fn header_named<'a>(
         .iter()
         .find(|header| {
             path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         })
@@ -255,11 +248,7 @@ fn header_named<'a>(
 fn authored_span(source: &str, public_name: &str) -> Option<SourceSpan> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let headers = parse_single_file_headers_with_fork(
-        source,
-        &mut string_table,
-        &mut path_fork,
-    );
+    let headers = parse_single_file_headers_with_fork(source, &mut string_table, &mut path_fork);
     let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -380,10 +369,19 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         ],
         "same-module-reexport",
     );
-    let target_header =
-        header_named(&fixture.headers, "value", &fixture.string_table, &fixture.path_fork);
-    let target_path = target_header.tokens.src_path;
-    let target_source = target_header.source_file;
+    let target_header = header_named(
+        &fixture.headers,
+        "value",
+        &fixture.string_table,
+        &fixture.path_fork,
+    );
+    let target_path = target_header.declaration_path;
+    let target_source = fixture
+        .module_symbols
+        .source_paths_by_source_id
+        .get(&target_header.tokens.source())
+        .copied()
+        .expect("target header source path should be prepared");
     let expected_span = target_header.name_span;
 
     fixture
@@ -612,7 +610,7 @@ fn active_origin_missing_from_table_fails_internally() {
         .expect("file should be in source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     // Build a table where every file maps to None (simulating a source-package file outside the
@@ -667,7 +665,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
         .expect("file should be in source file table")
         .id;
     for header in &mut headers.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     let module_origin = StableModuleOriginIdentity::from_portable_path(
@@ -754,11 +752,11 @@ fn conflicting_public_header_ownership_fails_internally() {
     let mut constant_index = 0usize;
     for header in &mut headers.headers {
         if matches!(header.kind, HeaderKind::Constant { .. }) {
-            header.tokens.file_id = if constant_index == 1 {
+            header.tokens = header.tokens.rebind_source(if constant_index == 1 {
                 other_file_id
             } else {
                 active_file_id
-            };
+            });
             constant_index += 1;
         }
     }
@@ -792,11 +790,7 @@ fn zero_public_exports_still_validates_active_origin() {
     // None must still fail, proving lookup and validation run before any header is inspected.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let headers = parse_single_file_headers_with_fork(
-        "",
-        &mut string_table,
-        &mut path_fork,
-    );
+    let headers = parse_single_file_headers_with_fork("", &mut string_table, &mut path_fork);
 
     let file_path = PathBuf::from("src/@page.moth");
     let source_files = SourceDatabase::build(
@@ -854,11 +848,11 @@ fn struct_header_path(
     for header in headers {
         if matches!(header.kind, HeaderKind::Struct { .. })
             && path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         {
-            return header.tokens.src_path;
+            return header.declaration_path;
         }
     }
     panic!("no public struct header named `{name}` in test headers")
@@ -874,11 +868,11 @@ fn trait_header_path(
     for header in headers {
         if matches!(header.kind, HeaderKind::Trait { .. })
             && path_fork
-                .try_component(header.tokens.src_path)
+                .try_component(header.declaration_path)
                 .map(|component| string_table.resolve(component) == name)
                 .unwrap_or(false)
         {
-            return header.tokens.src_path;
+            return header.declaration_path;
         }
     }
     panic!("no trait header named `{name}` in test headers")
@@ -908,9 +902,7 @@ fn module_symbols_with_module_root_export_targets(
         .filter_map(|target| {
             Some(PublicExportEntry {
                 export_name: path_fork.try_component(*target)?,
-                target: PublicExportTarget::SourceDeclaration {
-                    path: *target,
-                },
+                target: PublicExportTarget::SourceDeclaration { path: *target },
             })
         })
         .collect();
@@ -930,9 +922,7 @@ fn add_source_package_export_target(
 ) {
     let entry = PublicExportEntry {
         export_name,
-        target: PublicExportTarget::SourceDeclaration {
-            path: *target,
-        },
+        target: PublicExportTarget::SourceDeclaration { path: *target },
     };
     module_symbols
         .source_package_public_exports
@@ -950,8 +940,20 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 
     // The active root is the entry file; the imported root is a normal module-root file compiled only to
     // validate its public declaration surface.
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    Local = | value Int |\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (imported_output, _span_builder) = prepare_single_file_with_fork("export:\n    Imported = | value Int |\n;\n", &imported_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Local = | value Int |\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Imported = | value Int |\n;\n",
+        &imported_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(imported_output.file_role, FileRole::ImportedModuleRoot);
@@ -974,11 +976,11 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
-        header.tokens.file_id = imported_file_id;
+        header.tokens = header.tokens.rebind_source(imported_file_id);
         headers.push(header);
     }
 
@@ -1004,7 +1006,11 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     // the AST `source_path_is_public_from_root_file` nameability owner.
     let local_path = struct_header_path(&headers, "Local", &string_table, &path_fork);
     let imported_path_decl = struct_header_path(&headers, "Imported", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(&[local_path, imported_path_decl], &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        &[local_path, imported_path_decl],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_nominal_origin_index(
         &source_module_origins,
@@ -1047,8 +1053,20 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     let active_path = PathBuf::from("src/@page.moth");
     let imported_path = PathBuf::from("src/@mod.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    Local = | value Int |\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (imported_output, _span_builder) = prepare_single_file_with_fork("export:\n    Imported = | value Int |\n;\n", &imported_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Local = | value Int |\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Imported = | value Int |\n;\n",
+        &imported_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1080,13 +1098,13 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
         // Deliberately retain the compilation-root identity from the unregistered preparation
         // stream.
-        header.tokens.file_id = SourceId::COMPILATION_ROOT;
+        header.tokens = header.tokens.rebind_source(SourceId::COMPILATION_ROOT);
         headers.push(header);
     }
 
@@ -1094,8 +1112,11 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     // it; its compilation-root identity is then an internal invariant violation rather than a
     // silent skip.
     let imported_path_decl = struct_header_path(&headers, "Imported", &string_table, &path_fork);
-    let module_symbols =
-        module_symbols_with_module_root_export_targets(&[imported_path_decl], &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        &[imported_path_decl],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let result = build_public_source_nominal_origin_index(
         &source_module_origins,
@@ -1117,10 +1138,22 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let active_path = PathBuf::from("src/@page.moth");
     let package_path = PathBuf::from("src/@pkg.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    Local = | value Int |\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Local = | value Int |\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
-    let (package_output, _span_builder) = prepare_single_file_with_fork("export:\n    Pkg = | value Int |\n;\n", &package_path, &active_path, &mut string_table, &mut path_fork);
+    let (package_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Pkg = | value Int |\n;\n",
+        &package_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), package_path.clone()],
@@ -1151,11 +1184,11 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in package_output.headers {
-        header.tokens.file_id = package_file_id;
+        header.tokens = header.tokens.rebind_source(package_file_id);
         headers.push(header);
     }
 
@@ -1164,7 +1197,11 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     // to None ownership, so it is skipped rather than given a fabricated origin).
     let local_path = struct_header_path(&headers, "Local", &string_table, &path_fork);
     let pkg_path = struct_header_path(&headers, "Pkg", &string_table, &path_fork);
-    let mut module_symbols = module_symbols_with_module_root_export_targets(std::slice::from_ref(&local_path), &mut string_table, &mut path_fork);
+    let mut module_symbols = module_symbols_with_module_root_export_targets(
+        std::slice::from_ref(&local_path),
+        &mut string_table,
+        &mut path_fork,
+    );
     add_source_package_export_target(
         &mut module_symbols,
         "pkg",
@@ -1207,8 +1244,20 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
     // private struct in the normal file `impl.moth` and has no public export of its own. A
     // module-root public alias (`PublicCounter as Counter`) re-exports it, so the retained
     // module-root public export entry targets `Counter`'s canonical source path.
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    placeholder #= 1\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (impl_output, _span_builder) = prepare_single_file_with_fork("Counter = | count Int |\n", &impl_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    placeholder #= 1\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (impl_output, _span_builder) = prepare_single_file_with_fork(
+        "Counter = | count Int |\n",
+        &impl_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
@@ -1230,11 +1279,11 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1252,7 +1301,11 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
         SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_canonical_path);
 
     let counter_path = struct_header_path(&headers, "Counter", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(std::slice::from_ref(&counter_path), &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        std::slice::from_ref(&counter_path),
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_nominal_origin_index(
         &source_module_origins,
@@ -1286,8 +1339,20 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 
     // The active root exports `Local` publicly; `Counter` is a private struct in the normal file
     // with no public export targeting it.
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    Local = | value Int |\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (impl_output, _span_builder) = prepare_single_file_with_fork("Counter = | count Int |\n", &impl_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    Local = | value Int |\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (impl_output, _span_builder) = prepare_single_file_with_fork(
+        "Counter = | count Int |\n",
+        &impl_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), impl_path.clone()],
@@ -1307,11 +1372,11 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1330,7 +1395,11 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
     let counter_path = struct_header_path(&headers, "Counter", &string_table, &path_fork);
     // Only `Local` is targeted by a retained module-root public export; `Counter` is private
     // and has no export target.
-    let module_symbols = module_symbols_with_module_root_export_targets(std::slice::from_ref(&local_path), &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        std::slice::from_ref(&local_path),
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_nominal_origin_index(
         &source_module_origins,
@@ -1360,7 +1429,13 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork("export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n", &file_path, &file_path, &mut string_table, &mut path_fork);
+    let (output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -1374,7 +1449,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
         .expect("active root file should be present")
         .id;
     for header in &mut headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
     }
 
     let active_origin = StableModuleOriginIdentity::from_portable_path(
@@ -1388,7 +1463,11 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
         SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_canonical_path);
 
     let trait_path = trait_header_path(&headers, "RENDERABLE", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(std::slice::from_ref(&trait_path), &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        std::slice::from_ref(&trait_path),
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_trait_origin_index(
         &source_module_origins,
@@ -1413,8 +1492,20 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
     let active_path = PathBuf::from("src/@page.moth");
     let imported_path = PathBuf::from("src/@mod.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (imported_output, _span_builder) = prepare_single_file_with_fork("export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n", &imported_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
+        &imported_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1450,17 +1541,22 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in imported_output.headers {
-        header.tokens.file_id = imported_file_id;
+        header.tokens = header.tokens.rebind_source(imported_file_id);
         headers.push(header);
     }
 
     let local_trait_path = trait_header_path(&headers, "RENDERABLE", &string_table, &path_fork);
-    let imported_trait_path = trait_header_path(&headers, "IMPORTED_TRAIT", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(&[local_trait_path, imported_trait_path], &mut string_table, &mut path_fork);
+    let imported_trait_path =
+        trait_header_path(&headers, "IMPORTED_TRAIT", &string_table, &path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        &[local_trait_path, imported_trait_path],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_trait_origin_index(
         &source_module_origins,
@@ -1497,8 +1593,20 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
     // The active root carries an unrelated public constant; `DRAWABLE` is a private trait in the
     // normal file with no public export of its own. A module-root public alias targets it, so the
     // retained module-root public export entry targets `DRAWABLE`'s canonical source path.
-    let (active_output, _span_builder) = prepare_single_file_with_fork("export:\n    placeholder #= 1\n;\n", &active_path, &active_path, &mut string_table, &mut path_fork);
-    let (impl_output, _span_builder) = prepare_single_file_with_fork("DRAWABLE must:\n    draw |This| -> String\n;\n", &impl_path, &active_path, &mut string_table, &mut path_fork);
+    let (active_output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    placeholder #= 1\n;\n",
+        &active_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let (impl_output, _span_builder) = prepare_single_file_with_fork(
+        "DRAWABLE must:\n    draw |This| -> String\n;\n",
+        &impl_path,
+        &active_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
@@ -1520,11 +1628,11 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in active_output.headers {
-        header.tokens.file_id = active_file_id;
+        header.tokens = header.tokens.rebind_source(active_file_id);
         headers.push(header);
     }
     for mut header in impl_output.headers {
-        header.tokens.file_id = impl_file_id;
+        header.tokens = header.tokens.rebind_source(impl_file_id);
         headers.push(header);
     }
 
@@ -1540,7 +1648,11 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
         SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_canonical_path);
 
     let trait_path = trait_header_path(&headers, "DRAWABLE", &string_table, &path_fork);
-    let module_symbols = module_symbols_with_module_root_export_targets(std::slice::from_ref(&trait_path), &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        std::slice::from_ref(&trait_path),
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let index = build_public_source_trait_origin_index(
         &source_module_origins,
@@ -1565,7 +1677,13 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
 
-    let (output, _span_builder) = prepare_single_file_with_fork("RENDERABLE must:\n    show |This| -> String\n;\n", &file_path, &file_path, &mut string_table, &mut path_fork);
+    let (output, _span_builder) = prepare_single_file_with_fork(
+        "RENDERABLE must:\n    show |This| -> String\n;\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -1580,7 +1698,7 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
         .id;
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         headers.push(header);
     }
 
@@ -1619,7 +1737,13 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
     let mut path_fork = PathInternerFork::empty();
     let package_path = PathBuf::from("src/@pkg.moth");
 
-    let (output, _span_builder) = prepare_single_file_with_fork("export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n", &package_path, &package_path, &mut string_table, &mut path_fork);
+    let (output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
+        &package_path,
+        &package_path,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let source_files = SourceDatabase::build(
         std::iter::once(package_path.clone()),
@@ -1635,7 +1759,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 
     let mut headers: Vec<Header> = Vec::new();
     for mut header in output.headers {
-        header.tokens.file_id = file_id;
+        header.tokens = header.tokens.rebind_source(file_id);
         headers.push(header);
     }
 
@@ -1652,7 +1776,6 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
         &trait_path,
         string_table.intern("PKG_TRAIT"),
     );
-
 
     let index = build_public_source_trait_origin_index(
         &source_module_origins,
@@ -1674,7 +1797,13 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork("export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n", &file_path, &file_path, &mut string_table, &mut path_fork);
+    let (output, _span_builder) = prepare_single_file_with_fork(
+        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        &file_path,
+        &file_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -1695,12 +1824,15 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
         SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_canonical_path);
 
     let trait_path = trait_header_path(&headers, "RENDERABLE", &string_table, &path_fork);
-    let module_symbols =
-        module_symbols_with_module_root_export_targets(&[trait_path], &mut string_table, &mut path_fork);
+    let module_symbols = module_symbols_with_module_root_export_targets(
+        &[trait_path],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     for source in [SourceId::COMPILATION_ROOT] {
         for header in &mut headers {
-            header.tokens.file_id = source;
+            header.tokens = header.tokens.rebind_source(source);
         }
         let error = build_public_source_trait_origin_index(
             &source_module_origins,

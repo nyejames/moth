@@ -70,6 +70,22 @@ impl PathIdRemap {
         self.mapped_suffix.len()
     }
 
+    /// Return bytes occupied by the mapped suffix rows.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn mapped_bytes(&self) -> usize {
+        self.mapped_suffix
+            .len()
+            .saturating_mul(std::mem::size_of::<PathId>())
+    }
+
+    /// Return bytes reserved by the mapped suffix backing vector.
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn mapped_capacity_bytes(&self) -> usize {
+        self.mapped_suffix
+            .capacity()
+            .saturating_mul(std::mem::size_of::<PathId>())
+    }
+
     /// Return whether every source ID maps to the same numeric ID in the destination.
     pub fn is_identity(&self) -> bool {
         self.is_identity

@@ -1180,19 +1180,13 @@ fn materialisation_nominal_path(
     match identity {
         CanonicalTypeIdentity::SourceNominal(origin) => {
             push_component("source")?;
-            append_materialisation_module_origin(
-                origin.module_origin(),
-                &mut push_component,
-            )?;
+            append_materialisation_module_origin(origin.module_origin(), &mut push_component)?;
             push_component(origin.defining_name())?;
             push_component(origin_type_category_name(origin.category()))?;
         }
         CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
             push_component("private")?;
-            append_materialisation_module_origin(
-                identity.module_origin(),
-                &mut push_component,
-            )?;
+            append_materialisation_module_origin(identity.module_origin(), &mut push_component)?;
             push_component(identity.defining_path())?;
             push_component(origin_type_category_name(identity.category()))?;
         }
@@ -1239,9 +1233,9 @@ fn origin_type_category_name(category: OriginTypeCategory) -> &'static str {
     }
 }
 
-fn intern_materialisation_nominal(
+fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
     identity: &CanonicalTypeIdentity,
-    nominal_source: &impl MaterialisationNominalSource,
+    nominal_source: &N,
     type_environment: &mut TypeEnvironment,
     external_registry: &ExternalPackageRegistry,
     string_table: &mut StringTable,
@@ -1255,7 +1249,8 @@ fn intern_materialisation_nominal(
         .cloned()
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
-                "Generated request nominal {identity:?} is absent from its requester artefact"
+                "Generated request nominal {identity:?} is absent from {}",
+                N::SOURCE_LABEL
             ))
         })?;
 
@@ -1342,14 +1337,15 @@ fn intern_materialisation_nominal(
 
     match &blueprint.definition {
         NominalMaterialisationDefinition::Struct { fields, .. } => {
-            let nominal_path = type_environment
-                .nominal_path(type_id)
-                .copied()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated struct nominal shell has no local path",
-                    )
-                })?;
+            let nominal_path =
+                type_environment
+                    .nominal_path(type_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated struct nominal shell has no local path",
+                        )
+                    })?;
             let fields = fields
                 .iter()
                 .map(|field| {
@@ -1378,14 +1374,15 @@ fn intern_materialisation_nominal(
             type_environment.update_struct_fields(type_id, fields);
         }
         NominalMaterialisationDefinition::Choice { variants } => {
-            let nominal_path = type_environment
-                .nominal_path(type_id)
-                .copied()
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated choice nominal shell has no local path",
-                    )
-                })?;
+            let nominal_path =
+                type_environment
+                    .nominal_path(type_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated choice nominal shell has no local path",
+                        )
+                    })?;
             let variants = variants
                 .iter()
                 .map(|variant| {

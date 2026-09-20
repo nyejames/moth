@@ -292,7 +292,9 @@ impl DataType {
                     arg_str.push_str(&format!(
                         "{}: {}, ",
                         name,
-                        arg.value.diagnostic_type.display_with_table(string_table, path_table)
+                        arg.value
+                            .diagnostic_type
+                            .display_with_table(string_table, path_table)
                     ));
                 }
                 format!("Parameters({arg_str})")
@@ -338,7 +340,9 @@ impl DataType {
                     arg_str.push_str(&format!(
                         "{}: {}, ",
                         name,
-                        arg.value.diagnostic_type.display_with_table(string_table, path_table)
+                        arg.value
+                            .diagnostic_type
+                            .display_with_table(string_table, path_table)
                     ));
                 }
 
@@ -354,9 +358,15 @@ impl DataType {
             DataType::Range => "Range".to_string(),
             DataType::Option(inner_type) => {
                 if displays_better_in_generic_surface(inner_type) {
-                    format!("{}?", inner_type.display_with_table(string_table, path_table))
+                    format!(
+                        "{}?",
+                        inner_type.display_with_table(string_table, path_table)
+                    )
                 } else {
-                    format!("Option({})", inner_type.display_with_table(string_table, path_table))
+                    format!(
+                        "Option({})",
+                        inner_type.display_with_table(string_table, path_table)
+                    )
                 }
             }
             DataType::FallibleCarrier { success, error } => {

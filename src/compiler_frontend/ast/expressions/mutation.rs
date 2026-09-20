@@ -49,6 +49,7 @@ use crate::compiler_frontend::ast::statements::value_production::receiver::try_p
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
     TypeMismatchContext,
@@ -58,7 +59,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -89,21 +90,22 @@ fn validate_assignment_value_type(
     .into())
 }
 
-/// Map a compound-assignment token to its arithmetic operator and diagnostic label.
+/// Map a canonical compound-assignment tag to its arithmetic operator and label.
 ///
 /// WHAT: converts `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=` into the corresponding
 ///       `Operator` variant and a human-readable label used in diagnostics.
 /// WHY: compound assignments are desugared into `target = target op rhs`;
-///      this mapping is needed both for the desugaring and for error messages.
-fn compound_assignment_operator(token_kind: &TokenKind) -> Option<(Operator, &'static str)> {
-    match token_kind {
-        TokenKind::AddAssign => Some((Operator::Add, "Compound assignment '+='")),
-        TokenKind::SubtractAssign => Some((Operator::Subtract, "Compound assignment '-='")),
-        TokenKind::MultiplyAssign => Some((Operator::Multiply, "Compound assignment '*='")),
-        TokenKind::DivideAssign => Some((Operator::Divide, "Compound assignment '/='")),
-        TokenKind::IntDivideAssign => Some((Operator::IntDivide, "Compound assignment '//='")),
-        TokenKind::ModulusAssign => Some((Operator::Modulus, "Compound assignment '%='")),
-        TokenKind::ExponentAssign => Some((Operator::Exponent, "Compound assignment '^='")),
+///      the stable `TokenTag` taxonomy is the canonical operator authority, so
+///      the cursor classifies the operator tag directly.
+fn compound_assignment_operator_for_tag(tag: TokenTag) -> Option<(Operator, &'static str)> {
+    match tag {
+        TokenTag::ADD_ASSIGN => Some((Operator::Add, "Compound assignment '+='")),
+        TokenTag::SUBTRACT_ASSIGN => Some((Operator::Subtract, "Compound assignment '-='")),
+        TokenTag::MULTIPLY_ASSIGN => Some((Operator::Multiply, "Compound assignment '*='")),
+        TokenTag::DIVIDE_ASSIGN => Some((Operator::Divide, "Compound assignment '/='")),
+        TokenTag::INT_DIVIDE_ASSIGN => Some((Operator::IntDivide, "Compound assignment '//='")),
+        TokenTag::MODULUS_ASSIGN => Some((Operator::Modulus, "Compound assignment '%='")),
+        TokenTag::EXPONENT_ASSIGN => Some((Operator::Exponent, "Compound assignment '^='")),
         _ => None,
     }
 }
@@ -130,7 +132,7 @@ struct CompoundAssignmentInput<'a> {
 /// WHY: compound assignments must behave exactly as the equivalent binary
 ///      expression for type rules and for constant propagation.
 fn evaluate_compound_assignment_value(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     input: CompoundAssignmentInput<'_>,
     type_interner: &mut AstTypeInterner<'_>,
@@ -207,7 +209,7 @@ fn evaluate_compound_assignment_value(
     reason = "mutation building keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
 )]
 fn build_mutation_from_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     target: PlaceExpression,
     declaration_span: Option<SourceSpan>,
@@ -216,10 +218,7 @@ fn build_mutation_from_target(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<AstNode, ExpressionParseError> {
-    let span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let span = Some(token_stream.current_span());
     let target_type_id = target.type_id;
 
     ast_log!(
@@ -263,8 +262,8 @@ fn build_mutation_from_target(
     //  Determine mutation kind
     // -----------------------
 
-    let value = match token_stream.current_token_kind() {
-        TokenKind::Assign => {
+    let value = match token_stream.current_tag() {
+        TokenTag::ASSIGN => {
             // Simple mutation: variable = new_value. Parse-time context is
             // preserved only for context-sensitive literals. Compound
             // assignments below use Inferred because that context does not
@@ -315,7 +314,7 @@ fn build_mutation_from_target(
             // later statement parser does not report the trailing `else` as an
             // unrelated branch error.
             token_stream.skip_newlines();
-            if token_stream.current_token_kind() == &TokenKind::Else
+            if token_stream.current_tag() == TokenTag::ELSE
                 && type_interner
                     .environment()
                     .option_inner_type(rhs.type_id)
@@ -323,10 +322,7 @@ fn build_mutation_from_target(
             {
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -336,8 +332,9 @@ fn build_mutation_from_target(
             coerce_expression_to_declared_type(rhs, target_type_id, type_interner.environment())
         }
 
-        compound_token => {
-            let Some((operator, _label)) = compound_assignment_operator(compound_token) else {
+        compound_tag => {
+            let Some((operator, _label)) = compound_assignment_operator_for_tag(compound_tag)
+            else {
                 return Err(CompilerDiagnostic::invalid_assignment_target(
                     InvalidAssignmentTargetReason::ExpectedAssignmentOperator,
                     path_fork.component(variable_declaration.id),
@@ -386,7 +383,7 @@ fn build_mutation_from_target(
     reason = "mutation handling keeps the token stream, declaration, place target, span, scope, and mutable interner/string/path state as separate borrows"
 )]
 pub(crate) fn handle_mutation_target(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     target: PlaceExpression,
     declaration_span: Option<SourceSpan>,
@@ -412,7 +409,7 @@ pub(crate) fn handle_mutation_target(
 /// WHAT: parses field-access chains on the variable, then builds the mutation
 ///       node through `build_mutation_from_target`.
 pub fn handle_mutation(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
@@ -437,10 +434,7 @@ pub fn handle_mutation(
             None,
             None,
             None,
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            )),
+            Some(token_stream.current_span()),
         )
         .into());
     };

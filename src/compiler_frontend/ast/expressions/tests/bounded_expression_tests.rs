@@ -5,6 +5,7 @@
 //!      prove the cap behaves correctly for delimiters, nesting, and EOF boundaries.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
@@ -21,7 +22,9 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TestSourceTokensBuilder, TokenTag,
+};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -32,7 +35,9 @@ fn test_scope(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> (PathId, ScopeContext) {
-    let scope = path_fork.try_intern_portable_path("test.moth", string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", string_table)
+        .expect("test path fits");
     let mut scratch = Vec::new();
     assert_eq!(
         path_fork.render_portable(scope, string_table, &mut scratch),
@@ -42,7 +47,7 @@ fn test_scope(
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], path_fork) ),
+        Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -50,23 +55,37 @@ fn test_scope(
     (scope, context)
 }
 
-fn numeric_token(value: &str, _scope: &PathId, string_table: &mut StringTable) -> Token {
-    Token::new(
-        TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        LocalSpan::source_start(),
-    )
+fn numeric_token(
+    builder: &mut TestSourceTokensBuilder,
+    value: &str,
+    string_table: &mut StringTable,
+) {
+    builder
+        .push_numeric(
+            NumericLiteralToken::test_new(value, string_table),
+            LocalSpan::source_start(),
+        )
+        .expect("numeric fixture token should build");
 }
 
-fn token(kind: TokenKind, _scope: &PathId) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+fn static_token(builder: &mut TestSourceTokensBuilder, tag: TokenTag) {
+    builder
+        .push_static(tag, LocalSpan::source_start())
+        .expect("static fixture token should build");
+}
+
+fn finish_tokens(builder: TestSourceTokensBuilder) -> std::sync::Arc<SourceTokens> {
+    builder
+        .finish()
+        .expect("canonical fixture tokens should build")
 }
 
 fn create_expression_until_for_test(
-    stream: &mut FileTokens,
+    stream: &mut AstCursor,
     context: &ScopeContext,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
-    stop_tokens: &[TokenKind],
+    stop_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<crate::compiler_frontend::ast::expressions::expression::Expression, ExpressionParseError>
@@ -92,13 +111,17 @@ fn create_expression_until_for_test(
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
-    let tokens = vec![
-        token(TokenKind::Comma, &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    static_token(&mut builder, TokenTag::COMMA);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -106,7 +129,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -123,7 +146,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from(TokenKind::Comma)
+            if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
     ));
 }
 
@@ -131,14 +154,18 @@ fn bounded_expression_empty_at_delimiter_errors() {
 fn bounded_expression_parses_simple_literal() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
-    let tokens = vec![
-        numeric_token("42", &scope, &mut string_table),
-        token(TokenKind::Comma, &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    numeric_token(&mut builder, "42", &mut string_table);
+    static_token(&mut builder, TokenTag::COMMA);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -146,7 +173,7 @@ fn bounded_expression_parses_simple_literal() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -155,28 +182,32 @@ fn bounded_expression_parses_simple_literal() {
     assert!(matches!(expression.kind, ExpressionKind::Int(42)));
 
     // The stop token (comma) should not be consumed.
-    assert_eq!(stream.index, 1);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.position(), 1);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
 fn bounded_expression_nested_parentheses() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
-    let tokens = vec![
-        numeric_token("1", &scope, &mut string_table),
-        token(TokenKind::Add, &scope),
-        token(TokenKind::OpenParenthesis, &scope),
-        numeric_token("2", &scope, &mut string_table),
-        token(TokenKind::Add, &scope),
-        numeric_token("3", &scope, &mut string_table),
-        token(TokenKind::CloseParenthesis, &scope),
-        token(TokenKind::Comma, &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    numeric_token(&mut builder, "1", &mut string_table);
+    static_token(&mut builder, TokenTag::ADD);
+    static_token(&mut builder, TokenTag::OPEN_PARENTHESIS);
+    numeric_token(&mut builder, "2", &mut string_table);
+    static_token(&mut builder, TokenTag::ADD);
+    numeric_token(&mut builder, "3", &mut string_table);
+    static_token(&mut builder, TokenTag::CLOSE_PARENTHESIS);
+    static_token(&mut builder, TokenTag::COMMA);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -184,7 +215,7 @@ fn bounded_expression_nested_parentheses() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -194,28 +225,32 @@ fn bounded_expression_nested_parentheses() {
     assert!(matches!(expression.kind, ExpressionKind::Int(6)));
 
     // Stop token should remain unconsumed.
-    assert_eq!(stream.index, 7);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.position(), 7);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
 fn bounded_expression_nested_curly_braces() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
     // A collection literal `{2, 3}` followed by a comma.
     // The comma inside the collection must not terminate the bounded expression.
-    let tokens = vec![
-        token(TokenKind::OpenCurly, &scope),
-        numeric_token("2", &scope, &mut string_table),
-        token(TokenKind::Comma, &scope),
-        numeric_token("3", &scope, &mut string_table),
-        token(TokenKind::CloseCurly, &scope),
-        token(TokenKind::Comma, &scope),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    static_token(&mut builder, TokenTag::OPEN_CURLY);
+    numeric_token(&mut builder, "2", &mut string_table);
+    static_token(&mut builder, TokenTag::COMMA);
+    numeric_token(&mut builder, "3", &mut string_table);
+    static_token(&mut builder, TokenTag::CLOSE_CURLY);
+    static_token(&mut builder, TokenTag::COMMA);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -223,7 +258,7 @@ fn bounded_expression_nested_curly_braces() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -231,23 +266,27 @@ fn bounded_expression_nested_curly_braces() {
 
     // Should parse as a collection expression.
     assert!(matches!(expression.kind, ExpressionKind::Collection(_)));
-    assert_eq!(stream.index, 5);
-    assert_eq!(stream.current_token_kind(), &TokenKind::Comma);
+    assert_eq!(stream.position(), 5);
+    assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
 
 #[test]
 fn bounded_expression_missing_delimiter_reaches_eof() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
-    let tokens = vec![
-        numeric_token("1", &scope, &mut string_table),
-        token(TokenKind::Add, &scope),
-        numeric_token("2", &scope, &mut string_table),
-        token(TokenKind::Eof, &scope),
-    ];
-    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    numeric_token(&mut builder, "1", &mut string_table);
+    static_token(&mut builder, TokenTag::ADD);
+    numeric_token(&mut builder, "2", &mut string_table);
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -255,7 +294,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         &context,
         &mut data_type,
         &ValueMode::ImmutableOwned,
-        &[TokenKind::Comma],
+        &[TokenTag::COMMA],
         &mut string_table,
         &mut path_fork,
     )
@@ -272,6 +311,6 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken { found }
-            if found == DiagnosticToken::from(TokenKind::Eof)
+            if found == DiagnosticToken::from_static_tag(TokenTag::EOF)
     ));
 }

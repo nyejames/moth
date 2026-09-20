@@ -10,24 +10,45 @@
 //! expected malformed-surface behavior without relying on internal TIR IDs.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use std::sync::Arc;
 
-/// Parses a template that is expected to fail and returns the diagnostic.
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("template opener position must remain in the canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
     expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("template source should fail to parse"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("template source should fail to parse"),
     )
 }
 
@@ -37,22 +58,45 @@ fn parse_template_diagnostic_with_replaced_body_token(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     // Normal template-body lexing emits text, newline, nested-template, and close tokens only.
-    // Replace the retained text token to exercise the parser's defensive unexpected-token lane
-    // while keeping its authored UTF-8 span and source identity intact.
-    let body_token = token_stream
-        .tokens
-        .iter_mut()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+    // Corrupt the canonical payload in place so the parser exercises its defensive
+    // unexpected-token lane without falling back to a compatibility token vector.
+    let opener_index = file_tokens.opener_index;
+    let source_path = file_tokens.source_path;
+    let mut canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    drop(file_tokens);
+    let body_index = canonical_owner
+        .shapes()
+        .iter()
+        .position(|shape| shape.tag() == TokenTag::STRING_SLICE_LITERAL)
         .expect("template source should contain a body token");
-    body_token.kind = TokenKind::Comma;
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    Arc::get_mut(&mut canonical_owner)
+        .expect("canonical owner should be uniquely mutable before cursor construction")
+        .corrupt_payload_for_test(body_index, TokenTag::COMMA);
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(opener_index)
+        .expect("template opener position must remain in the canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("template source should fail to parse"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)
 }
@@ -63,13 +107,32 @@ fn parse_template_diagnostic_with_span_builder(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut token_stream =
+    let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = new_constant_context(token_stream.src_path, &path_fork);
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("template opener position must remain in the canonical range");
+    let context = new_constant_context(source_path, &path_fork);
 
     let diagnostic = expect_template_diagnostic(
-        Template::new(&mut token_stream, &context, vec![], &mut string_table, &mut path_fork)
-            .expect_err("template source should fail to parse"),
+        Template::new(
+            &mut token_stream,
+            source_path,
+            &context,
+            vec![],
+            &mut string_table,
+            &mut path_fork,
+        )
+        .expect_err("template source should fail to parse"),
     );
     (diagnostic, span_builder)
 }
@@ -249,7 +312,7 @@ fn children_directive_truncated_argument_template_reports_eof_with_meaningful_sp
     let has_expected_payload = match &diagnostic.payload {
         DiagnosticPayload::UnexpectedEndOfFile { .. } => true,
         DiagnosticPayload::ExpectedToken { expected, .. } => {
-            *expected == DiagnosticToken::from(TokenKind::CloseParenthesis)
+            *expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS)
         }
         _ => false,
     };

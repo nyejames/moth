@@ -22,7 +22,7 @@ use crate::compiler_frontend::headers::constant_dependencies::{
     ConstantDependencyInput, add_constant_initializer_dependencies,
 };
 use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize_local_ordering_hints;
-use crate::compiler_frontend::headers::file_parser::parse_headers_in_file;
+use crate::compiler_frontend::headers::file_parser::{finish_file_output, parse_headers_in_file};
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
@@ -32,14 +32,20 @@ pub use crate::compiler_frontend::headers::types::{
     LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, PreparedHeaderSyntax,
     RetainedDependencyClause, TopLevelConstFragment,
 };
-use crate::compiler_frontend::headers::types::{HeaderParseContext, HeaderParseFailure};
+use crate::compiler_frontend::headers::types::{
+    HeaderParseContext, HeaderParseFailure, SourceTokenOwner,
+};
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the
 // header field, so this re-export is only reached from test modules.
-use crate::compiler_frontend::declaration_syntax::build_config_contract::normalize_source_build_config_contract;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    normalize_source_build_config_contract_from_token,
+    normalize_source_build_config_contract_non_primitive,
+};
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
@@ -47,9 +53,13 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TokenCursor, TokenRange, TokenTag,
+};
+use rustc_hash::FxHashMap;
 use std::mem;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Parse one tokenized file using the supplied string table.
 ///
@@ -61,37 +71,41 @@ use std::path::Path;
 /// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
 #[allow(
     clippy::too_many_arguments,
-    reason = "header parsing keeps the token stream, entry path, options, mutable string/path/span state, and the two fragment offsets as separate borrows"
+    reason = "header parsing keeps the canonical source owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub fn parse_file_headers_with_table(
-    file_tokens: &mut FileTokens,
+    owner: SourceTokenOwner,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
+    path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
-    options: &HeaderParseOptions<'_>,
+    options: &HeaderParseOptions,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let file_id = file_tokens.file_id;
+    let file_id = owner.source_id();
+    #[cfg(feature = "data_layout_memory_probe")]
+    crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
+        owner.tokens_ref(),
+        &path_syntax,
+    );
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
         || {
             let mut scratch = Vec::new();
-            path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
-                == entry_file_path
+            path_fork.render_native(source_file, string_table, &mut scratch) == entry_file_path
         },
         |expected_id| expected_id == file_id,
     );
 
-    let source_path = file_tokens.canonical_os_path.as_deref().map(Path::to_path_buf).unwrap_or_else(|| {
-        let mut scratch = Vec::new();
-        path_fork.render_native(file_tokens.src_path, string_table, &mut scratch)
-    });
-    // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
-    // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
-    // a `+*.moth` support-package root remains export-capable in those contexts too.
+    let mut scratch = Vec::new();
+    let source_path = path_fork.render_native(source_file, string_table, &mut scratch);
+    // Stage 0's module-root inventory admits only canonical `@*.moth`/`+*.moth` root names.
+    // Keep the filename check here as the provider-independent role classifier; filesystem root
+    // identity remains owned by Stage 0 and is not reconstructed from a relative logical path.
     let is_module_root_file_by_name = source_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -100,9 +114,6 @@ pub fn parse_file_headers_with_table(
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(file_name_is_config_file);
-    let is_prepared_module_root = options
-        .project_path_resolver
-        .is_some_and(|resolver| resolver.is_module_root_file(&source_path));
 
     let file_role = if is_entry_file {
         options
@@ -113,7 +124,7 @@ pub fn parse_file_headers_with_table(
                     FileRole::ActiveApiOnlyModuleRoot
                 }
             })
-    } else if is_prepared_module_root || is_module_root_file_by_name {
+    } else if is_module_root_file_by_name {
         FileRole::ImportedModuleRoot
     } else {
         FileRole::Normal
@@ -125,10 +136,46 @@ pub fn parse_file_headers_with_table(
         string_table,
         path_fork,
         span_builder,
+        path_syntax: Arc::clone(&path_syntax),
         const_template_offset,
         runtime_fragment_offset,
     };
-    let file_output = parse_headers_in_file(file_tokens, file_id, &mut parse_context);
+    let parsed = {
+        let canonical = owner.tokens_ref();
+        if canonical.source() != file_id {
+            return Err(FileFrontendPrepareFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "header parse source token owner does not match its file identity",
+                ),
+            ));
+        }
+        let range = owner
+            .full_range()
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        let mut cursor = owner
+            .cursor(range)
+            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+        parse_headers_in_file(
+            &mut cursor,
+            file_id,
+            source_file,
+            owner.len(),
+            &mut parse_context,
+        )
+        .map(|state| (state, cursor.position()))
+    };
+    let file_output = match parsed {
+        Ok((state, end_index)) => finish_file_output(
+            owner,
+            source_file,
+            path_syntax,
+            file_id,
+            end_index,
+            &mut parse_context,
+            state,
+        ),
+        Err(error) => Err(error),
+    };
     capture_preparation_spans(file_output, file_id)
 }
 
@@ -177,12 +224,14 @@ fn capture_preparation_spans(
 ///      ranges, then retains that same builder for later retained-token span resolution.
 #[allow(
     clippy::too_many_arguments,
-    reason = "file preparation keeps owned tokens, the entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "file preparation keeps the canonical owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub(crate) fn prepare_file_from_tokens(
-    mut file_tokens: FileTokens,
+    owner: SourceTokenOwner,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
+    path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
-    options: &HeaderParseOptions<'_>,
+    options: &HeaderParseOptions,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
@@ -190,14 +239,14 @@ pub(crate) fn prepare_file_from_tokens(
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     // Preflight the public preparation boundary: every PathId this function dereferences through
-    // the supplied fork must have been issued by it (or its inherited base). A stream carrying a
-    // foreign file-owned path table would otherwise reach unchecked depth/parent/component reads
-    // and panic on out-of-domain indices instead of reporting infrastructure failure.
-    if path_fork.try_depth(file_tokens.src_path).is_none() {
+    // the supplied fork must have been issued by it (or its inherited base). A caller carrying a
+    // foreign file-owned path identity would otherwise reach unchecked depth/parent/component
+    // reads and panic on out-of-domain indices.
+    if path_fork.try_depth(source_file).is_none() {
         return Err(FileFrontendPrepareFailure::Infrastructure(
             CompilerError::compiler_error(format!(
                 "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
-                src = file_tokens.src_path,
+                src = source_file,
             )),
         ));
     }
@@ -207,7 +256,9 @@ pub(crate) fn prepare_file_from_tokens(
     let mut local_path_fork = path_fork_source.fork_for_module();
 
     let file_output = parse_file_headers_with_table(
-        &mut file_tokens,
+        owner,
+        source_file,
+        path_syntax,
         entry_file_path,
         options,
         &mut local_string_table,
@@ -276,10 +327,10 @@ pub fn prepare_header_syntax(
 ) -> Result<PreparedHeaderSyntax, HeaderPreparationFailure> {
     let source_build_config_contracts =
         collect_source_build_config_contracts(prepared_files, string_table, capture, path_fork)?;
-    let module_symbols =
-        build_module_symbols(prepared_files, string_table, capture, path_fork)?;
-
+    let module_symbols = build_module_symbols(prepared_files, string_table, capture, path_fork)?;
     let mut headers: Vec<Header> = Vec::new();
+    let mut source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners =
+        FxHashMap::default();
     let mut top_level_const_fragments = Vec::new();
     let mut runtime_fragment_count = 0usize;
     let mut has_non_trivial_root_body = false;
@@ -287,9 +338,25 @@ pub fn prepare_header_syntax(
 
     for output in prepared_files {
         token_stats.add(&output.token_stats);
+        if let Some(stream) = output.source_token_stream.take() {
+            let owner = crate::compiler_frontend::headers::SourceTokenOwner::new(stream);
+            if source_token_owners.insert(output.file_id, owner).is_some() {
+                return Err(HeaderPreparationFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "multiple canonical source token streams were prepared for one SourceId",
+                    ),
+                ));
+            }
+        }
         headers.extend(mem::take(&mut output.headers));
         top_level_const_fragments.extend(mem::take(&mut output.top_level_const_fragments));
-        runtime_fragment_count += output.runtime_fragment_count;
+        runtime_fragment_count = runtime_fragment_count
+            .checked_add(output.runtime_fragment_count)
+            .ok_or_else(|| {
+                HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                    "runtime fragment count overflowed header aggregation",
+                ))
+            })?;
         has_non_trivial_root_body |= output.has_non_trivial_root_body;
     }
 
@@ -298,6 +365,7 @@ pub fn prepare_header_syntax(
 
     Ok(PreparedHeaderSyntax {
         headers,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
@@ -308,69 +376,181 @@ pub fn prepare_header_syntax(
         module_symbols,
     })
 }
-
-/// Find retained parameter/field defaults and body tokens carrying `#Config`.
+/// Find a `#Config` marker in source-owned declaration/default ranges.
 ///
-/// Header preparation has already parsed declaration shells for signatures and record payloads,
-/// while function/start bodies remain token slices. Inspecting both retained representations keeps
-/// illegal nested placements ahead of AST without adding a recursive expression walk.
-pub(super) fn find_config_qualifier_marker_in_header(
+/// Declaration shells retain only checked ranges; this pass reads those ranges through the
+/// canonical owner and never recreates a declaration-owned token vector.
+pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
     header: &Header,
+    source_tokens: &SourceTokens,
     string_table: &StringTable,
-) -> Option<(SourceSpan, bool)> {
-    fn marker_in_tokens(
-        tokens: &[crate::compiler_frontend::tokenizer::tokens::Token],
-        file_id: SourceId,
+) -> Result<Option<SourceSpan>, CompilerError> {
+    fn marker_in_cursor(
+        mut cursor: TokenCursor<'_>,
         string_table: &StringTable,
     ) -> Option<SourceSpan> {
-        tokens.windows(2).find_map(|pair| {
-            if pair[0].kind == TokenKind::Hash
-                && matches!(
-                    pair[1].kind,
-                    TokenKind::Symbol(name) if string_table.resolve(name) == "Config"
-                )
+        let mut previous = cursor.advance()?;
+        loop {
+            let crosses_segment = cursor.is_at_segment_start();
+            let Some(current) = cursor.advance() else {
+                break;
+            };
+            if !crosses_segment
+                && previous.tag() == TokenTag::HASH
+                && current.tag() == TokenTag::SYMBOL
+                && current
+                    .string_id()
+                    .is_some_and(|name| string_table.resolve(name) == "Config")
             {
-                Some(SourceSpan::new(file_id, pair[0].span))
-            } else {
-                None
+                return Some(previous.source_span());
             }
-        })
+            if current.is_eof() {
+                break;
+            }
+            previous = current;
+        }
+        None
     }
 
-    let marker = match &header.kind {
-        HeaderKind::Constant { declaration } => {
-            marker_in_tokens(&declaration.initializer_tokens, header.tokens.file_id, string_table)
-        }
-        HeaderKind::Function { signature, .. } => signature.parameters.iter().find_map(|parameter| {
-            marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
-        }),
-        HeaderKind::Struct { fields, .. } => fields.iter().find_map(|field| {
-            marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
-        }),
-        HeaderKind::Choice { variants, .. } => variants.iter().find_map(|variant| {
-            let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
-                fields,
-            } = &variant.payload
-            else {
-                return None;
-            };
-            fields.iter().find_map(|field| {
-                marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
-            })
-        }),
-        HeaderKind::Trait { declaration } => declaration
-            .requirements
-            .iter()
-            .flat_map(|requirement| requirement.signature.parameters.iter())
-            .find_map(|parameter| {
-                marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
-            }),
-        _ => None,
+    let marker_in_range = |range: Option<TokenRange>| -> Result<Option<SourceSpan>, CompilerError> {
+        let Some(range) = range else {
+            return Ok(None);
+        };
+        let cursor = source_tokens.cursor(range).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "declaration marker range could not be resolved through its source owner: {error:?}"
+            ))
+        })?;
+        Ok(marker_in_cursor(cursor, string_table))
     };
 
-    marker
-        .or_else(|| marker_in_tokens(&header.tokens.tokens, header.tokens.file_id, string_table))
-        .map(|span| (span, true))
+    match &header.kind {
+        HeaderKind::Constant { declaration } => marker_in_range(declaration.initializer_range),
+        HeaderKind::Function { signature, .. } => {
+            for parameter in &signature.parameters {
+                if let Some(marker) = marker_in_range(parameter.default_range)? {
+                    return Ok(Some(marker));
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Struct { fields, .. } => {
+            for field in fields {
+                if let Some(marker) = marker_in_range(field.default_range)? {
+                    return Ok(Some(marker));
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Choice { variants, .. } => {
+            for variant in variants {
+                let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
+                    fields,
+                } = &variant.payload
+                else {
+                    continue;
+                };
+                for field in fields {
+                    if let Some(marker) = marker_in_range(field.default_range)? {
+                        return Ok(Some(marker));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        HeaderKind::Trait { declaration } => {
+            for requirement in &declaration.requirements {
+                for parameter in &requirement.signature.parameters {
+                    if let Some(marker) = marker_in_range(parameter.default_range)? {
+                        return Ok(Some(marker));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Find retained declaration/body `#Config` markers through the canonical source owner.
+///
+/// Contiguous declaration ranges use `Header::tokens`; the active start body uses its checked
+/// `TokenSequenceId`. No body vector is materialized solely to inspect this two-token marker.
+pub(super) fn find_config_qualifier_marker_in_header(
+    header: &Header,
+    source_tokens: Option<&SourceTokens>,
+    string_table: &StringTable,
+) -> Result<Option<(SourceSpan, bool)>, CompilerError> {
+    let Some(source_tokens) = source_tokens else {
+        if header.token_sequence.is_some() || !header.tokens.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "retained header marker scan has no source token owner",
+            ));
+        }
+        return Ok(None);
+    };
+    if header.tokens.source() != source_tokens.source() {
+        return Err(CompilerError::compiler_error(
+            "retained header marker scan does not match its source token owner",
+        ));
+    }
+
+    if let Some(marker) =
+        find_config_qualifier_marker_in_declaration_defaults(header, source_tokens, string_table)?
+    {
+        return Ok(Some((marker, true)));
+    }
+    let body_cursor = if let Some(sequence) = header.token_sequence {
+        let view = source_tokens.token_sequence(sequence).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not resolve its token sequence: {error:?}"
+            ))
+        })?;
+        Some(view.cursor().map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not construct its token sequence cursor: {error:?}"
+            ))
+        })?)
+    } else if header.tokens.is_empty() {
+        None
+    } else {
+        Some(source_tokens.cursor(header.tokens).map_err(|error| {
+            CompilerError::compiler_error(format!(
+                "retained header marker scan could not construct its token range cursor: {error:?}"
+            ))
+        })?)
+    };
+
+    fn marker_in_cursor(
+        mut cursor: TokenCursor<'_>,
+        string_table: &StringTable,
+    ) -> Option<SourceSpan> {
+        let mut previous = cursor.advance()?;
+        loop {
+            let crosses_segment = cursor.is_at_segment_start();
+            let Some(current) = cursor.advance() else {
+                break;
+            };
+            if !crosses_segment
+                && previous.tag() == TokenTag::HASH
+                && current.tag() == TokenTag::SYMBOL
+                && current
+                    .string_id()
+                    .is_some_and(|name| string_table.resolve(name) == "Config")
+            {
+                return Some(previous.source_span());
+            }
+            if current.is_eof() {
+                break;
+            }
+            previous = current;
+        }
+        None
+    }
+
+    Ok(body_cursor
+        .and_then(|cursor| marker_in_cursor(cursor, string_table))
+        .map(|marker| (marker, true)))
 }
 
 /// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
@@ -396,11 +576,22 @@ fn collect_source_build_config_contracts(
             continue;
         }
 
+        let source_tokens = output.source_token_stream.as_deref();
+        if let Some(source_tokens) = source_tokens
+            && source_tokens.source() != output.file_id
+        {
+            return Err(HeaderPreparationFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "config marker scan source token owner does not match its file identity",
+                ),
+            ));
+        }
+
         for header in &output.headers {
             let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
                     CompilerDiagnostic::invalid_config_reason(
-                        path_fork.component(header.tokens.src_path),
+                        path_fork.component(header.declaration_path),
                         InvalidConfigReason::ConfigQualifierInvalidPlacement,
                         Some(span),
                     )
@@ -413,7 +604,8 @@ fn collect_source_build_config_contracts(
             };
 
             if let Some((location, adjacent)) =
-                find_config_qualifier_marker_in_header(header, string_table)
+                find_config_qualifier_marker_in_header(header, source_tokens, string_table)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?
             {
                 let mut diagnostic = report_marker(location, adjacent);
                 capture(output.file_id, &mut diagnostic)
@@ -428,7 +620,7 @@ fn collect_source_build_config_contracts(
             let Some(qualifier) = &declaration.config_qualifier else {
                 continue;
             };
-            let Some(name) = path_fork.component(header.tokens.src_path) else {
+            let Some(name) = path_fork.component(header.declaration_path) else {
                 let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
@@ -443,18 +635,58 @@ fn collect_source_build_config_contracts(
                 continue;
             };
 
-            match normalize_source_build_config_contract(
-                name,
-                name_span,
-                qualifier,
-                &declaration.initializer_tokens,
-                string_table,
-            ) {
+            let normalized = if let Some(range) = declaration.initializer_range {
+                let source = source_tokens.ok_or_else(|| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        "source config initializer has no canonical source token owner",
+                    ))
+                })?;
+                let mut cursor = source.cursor(range).map_err(|error| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        format!("source config initializer range is invalid: {error:?}"),
+                    ))
+                })?;
+                let token = cursor.advance().ok_or_else(|| {
+                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
+                        "source config initializer range is empty",
+                    ))
+                })?;
+                if range.len() == 1 {
+                    normalize_source_build_config_contract_from_token(
+                        name,
+                        name_span,
+                        qualifier,
+                        Some(token),
+                        string_table,
+                    )
+                } else {
+                    normalize_source_build_config_contract_non_primitive(
+                        name,
+                        name_span,
+                        qualifier,
+                        token.source_span(),
+                        string_table,
+                    )
+                }
+            } else {
+                normalize_source_build_config_contract_from_token(
+                    name,
+                    name_span,
+                    qualifier,
+                    None,
+                    string_table,
+                )
+            };
+
+            match normalized {
                 Ok(contract) => contracts.push(contract),
-                Err(mut diagnostic) => {
+                Err(HeaderParseFailure::Diagnostic(mut diagnostic)) => {
                     capture(output.file_id, &mut diagnostic)
                         .map_err(HeaderPreparationFailure::Infrastructure)?;
                     diagnostics.push(diagnostic);
+                }
+                Err(HeaderParseFailure::Infrastructure(error)) => {
+                    return Err(HeaderPreparationFailure::Infrastructure(error));
                 }
             }
         }
@@ -493,6 +725,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 ) -> Result<BoundModuleHeaders, HeaderPreparationFailure> {
     let PreparedHeaderSyntax {
         mut headers,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -502,7 +735,6 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         header_stats,
         mut module_symbols,
     } = prepared;
-
     validate_prelude_declaration_shells(
         &headers,
         external_package_registry,
@@ -553,6 +785,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     canonicalize_local_ordering_hints(
         &mut headers,
         &binding_environment,
+        &module_symbols.source_paths_by_source_id,
         &module_symbols.file_dependency_clauses_by_source,
         &module_symbols.dependency_selections_by_source,
         string_table,
@@ -569,6 +802,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
 
     Ok(BoundModuleHeaders {
         headers,
+        source_token_owners,
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
@@ -595,7 +829,7 @@ fn validate_prelude_declaration_shells(
 ) -> Result<(), DiagnosticBag> {
     let mut collision_bag = DiagnosticBag::new();
     for header in headers {
-        if let Some(name) = path_fork.component(header.tokens.src_path)
+        if let Some(name) = path_fork.component(header.declaration_path)
             && external_package_registry.is_prelude_function(string_table.resolve(name))
         {
             collision_bag.push(CompilerDiagnostic::reserved_builtin_name(

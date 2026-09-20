@@ -10,6 +10,7 @@ use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::fallible_handling::token_stream_starts_fallible_handling_suffix;
@@ -23,9 +24,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Helpers
@@ -47,7 +48,7 @@ fn fallible_map_result(
 // --------------------------
 
 pub(super) fn parse_map_builtin_member_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -81,7 +82,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
     // Property-style `length` requires no parentheses.
     if builtin.is_property() {
-        if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis) {
+        if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::MapLengthIsProperty,
                 Some(member_name),
@@ -108,7 +109,7 @@ pub(super) fn parse_map_builtin_member_typed(
 
         // `length` is a property, not a call, so there are no arguments to parse.
         // Reject assignment through `map.length`.
-        if token_stream.current_token_kind().is_assignment_operator() {
+        if token_stream.current_tag().is_assignment_operator() {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::ReadOnlyMapProperty,
                 None,
@@ -142,7 +143,7 @@ pub(super) fn parse_map_builtin_member_typed(
     }
 
     // All other map builtins require parentheses.
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::MissingParentheses,
             Some(member_name),
@@ -266,9 +267,7 @@ pub(super) fn parse_map_builtin_member_typed(
     };
 
     // Reject assignment through `map.get(...)`.
-    if matches!(builtin, MapBuiltinOp::Get)
-        && token_stream.current_token_kind().is_assignment_operator()
-    {
+    if matches!(builtin, MapBuiltinOp::Get) && token_stream.current_tag().is_assignment_operator() {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::MapGetTargetNotWritable,
             None,

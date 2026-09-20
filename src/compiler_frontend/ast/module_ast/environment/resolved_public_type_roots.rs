@@ -131,8 +131,7 @@ pub(crate) struct ResolvedPublicTypeRootTable {
 pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     pub sorted_headers: &'a [Header],
     pub resolved_struct_fields_by_path: &'a FxHashMap<PathId, Vec<Declaration>>,
-    pub resolved_function_signatures_by_path:
-        &'a FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub resolved_function_signatures_by_path: &'a FxHashMap<PathId, ResolvedFunctionSignature>,
     pub nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
     pub resolved_type_aliases_by_path: &'a FxHashMap<PathId, ResolvedTypeAlias>,
     pub declaration_table: &'a TopLevelDeclarationTable,
@@ -189,7 +188,7 @@ pub(crate) fn build_resolved_public_type_roots(
             continue;
         }
 
-        let path = &header.tokens.src_path;
+        let path = &header.declaration_path;
 
         match &header.kind {
             HeaderKind::Function { .. } => {
@@ -307,7 +306,7 @@ pub(crate) fn build_resolved_public_type_roots(
     // header-built public export maps already resolved the re-export target paths, so this pass
     // joins them into the root table using the same resolved AST environment facts.
     for header in sorted_headers {
-        if !reexport_target_paths.contains(&header.tokens.src_path) {
+        if !reexport_target_paths.contains(&header.declaration_path) {
             continue;
         }
 
@@ -318,7 +317,7 @@ pub(crate) fn build_resolved_public_type_roots(
             continue;
         }
 
-        let path = &header.tokens.src_path;
+        let path = &header.declaration_path;
 
         match &header.kind {
             HeaderKind::Function { .. } => {
@@ -441,7 +440,7 @@ pub(crate) fn build_resolved_public_type_roots(
             continue;
         }
 
-        let path = &header.tokens.src_path;
+        let path = &header.declaration_path;
         // AST environment construction resolves every function signature before this table, so
         // a function whose receiver is selected below must have a resolved signature.
         let Some(resolved) = resolved_function_signatures_by_path.get(path) else {

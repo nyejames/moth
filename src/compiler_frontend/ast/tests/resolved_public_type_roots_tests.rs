@@ -39,7 +39,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenRange};
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -48,7 +48,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn path(name: &str, string_table: &mut StringTable, path_fork: &mut PathInternerFork) -> PathId {
-    path_fork.try_intern_portable_path(name, string_table).expect("test path fits")
+    path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits")
 }
 
 fn header(
@@ -56,17 +58,22 @@ fn header(
     src_path: PathId,
     file_role: FileRole,
     export_mode: HeaderExportMode,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
+    _string_table: &mut StringTable,
+    _path_fork: &mut PathInternerFork,
 ) -> Header {
+    let token_index =
+        TokenIndex::try_from_raw(0).expect("zero token index should be representable");
     Header {
         kind,
         file_role,
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
         name_span: None,
-        tokens: FileTokens::new(src_path, SourceId::COMPILATION_ROOT, Vec::new()),
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        synthetic_content_payload: None,
+        tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
+            .expect("equal token indexes always form a valid range"),
+        declaration_path: src_path,
+        token_sequence: None,
         capacity_references: Vec::new(),
     }
 }
@@ -105,7 +112,7 @@ fn constant_kind() -> HeaderKind {
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
             config_qualifier: None,
-            initializer_tokens: Vec::new(),
+            initializer_range: None,
             initializer_references: Vec::new(),
         },
     }
@@ -184,7 +191,9 @@ fn receiver_entry(
     ReceiverMethodEntry {
         function_path,
         receiver,
-        source_file: path_fork.try_intern_portable_path("root.moth", string_table).expect("test path fits"),
+        source_file: path_fork
+            .try_intern_portable_path("root.moth", string_table)
+            .expect("test path fits"),
         receiver_mutable: false,
         signature,
     }
@@ -934,7 +943,9 @@ fn register_source_trait(
     let definition = ResolvedTraitDefinition {
         id: trait_id,
         name: string_table.intern(trait_name),
-        canonical_path: path_fork.try_intern_portable_path(trait_name, string_table).expect("test path fits"),
+        canonical_path: path_fork
+            .try_intern_portable_path(trait_name, string_table)
+            .expect("test path fits"),
         source_file: PathId::ROOT,
         this_type,
         requirements: Vec::new(),
@@ -1007,7 +1018,9 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     )
     .expect("a generic struct with a source trait bound should retain its root and facts");
 
-    let source_path = path_fork.try_intern_portable_path("RENDERABLE", &mut string_table).expect("test path fits");
+    let source_path = path_fork
+        .try_intern_portable_path("RENDERABLE", &mut string_table)
+        .expect("test path fits");
     assert_eq!(
         table.trait_source_facts.get(&source_trait_id),
         Some(&ResolvedTraitSourceFact::Source(source_path)),

@@ -16,24 +16,26 @@ use super::parse_expression_input::{
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticToken, InvalidReturnShapeReason,
+};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
-use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
+use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // WHAT: parses a comma-separated expression list against already-known expected result types.
 // WHY: function calls and multi-return contexts must preserve arity and per-slot type
 //      expectations while still sharing the normal expression parser.
 pub fn create_multiple_expressions(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     _context_label: &str,
@@ -52,7 +54,7 @@ pub fn create_multiple_expressions(
 }
 
 fn create_multiple_expressions_inner(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     consume_closing_parenthesis: bool,
@@ -98,13 +100,13 @@ fn create_multiple_expressions_inner(
         // Newlines are expression terminators almost everywhere else. Only normalize
         // them here when we're inside a parenthesized list so multiline calls like
         // `io.line(\n value\n)` leave us positioned on the comma or `)`.
-        if consume_closing_parenthesis && token_stream.current_token_kind() == &TokenKind::Newline {
+        if consume_closing_parenthesis && token_stream.current_tag() == TokenTag::NEWLINE {
             token_stream.skip_newlines();
         }
 
         // Comma check: every slot except the last must be followed by a comma.
         if type_index + 1 < context.expected_result_type_ids.len() {
-            if token_stream.current_token_kind() != &TokenKind::Comma {
+            if token_stream.current_tag() != TokenTag::COMMA {
                 return Err(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count: context.expected_result_type_ids.len(),
@@ -120,10 +122,18 @@ fn create_multiple_expressions_inner(
     }
 
     if consume_closing_parenthesis {
-        if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
-            return Err(CompilerDiagnostic::expected_token(
-                TokenKind::CloseParenthesis,
-                Some(token_stream.current_token_kind().to_owned()),
+        if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
+            let found = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "expression closing-delimiter diagnostic",
+                    )
+                })?;
+            return Err(CompilerDiagnostic::expected_token_from_tags(
+                TokenTag::CLOSE_PARENTHESIS,
+                found,
                 Some(token_stream.current_span()),
             )
             .into());
@@ -143,7 +153,7 @@ fn create_multiple_expressions_inner(
     reason = "expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
 )]
 pub fn create_expression(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_type: &mut ExpectedType,
@@ -177,7 +187,7 @@ pub fn create_expression(
     reason = "nested expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
 )]
 pub(crate) fn create_expression_without_boundary_catch(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expected_type: &mut ExpectedType,
@@ -207,7 +217,7 @@ pub(crate) fn create_expression_without_boundary_catch(
 // WHY: callers parsing comma-separated lists outside parentheses (for example
 //      fallback/return lists) must preserve line boundaries between statements.
 pub(crate) fn create_expression_with_trailing_newline_policy(
-    input: ExpressionParseInput<'_, '_>,
+    input: ExpressionParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
     let mut expression: Vec<ExpressionRpnItem> = Vec::new();
 
@@ -221,8 +231,8 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
     // Build the flat infix AST fragment first. `evaluate_expression` is the stage that turns
     // this fragment into precedence-ordered RPN, resolves the final type, and folds constants.
     let mut next_number_negative = false;
-    while input.token_stream.index < input.token_stream.length {
-        let token = input.token_stream.current_token_kind().to_owned();
+    while input.token_stream.position() < input.token_stream.length() {
+        let token = input.token_stream.current_tag();
         ast_log!("Parsing expression: ", #token);
         let mut dispatch_state = ExpressionDispatchState {
             expected_type: input.expected_type,
@@ -270,15 +280,15 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
 // WHY: some parent parsers need normal expression semantics while reserving a delimiter for the
 //      surrounding grammar layer to inspect and consume itself.
 pub(crate) fn create_expression_until(
-    input: ExpressionParseInput<'_, '_>,
-    stop_tokens: &[TokenKind],
+    input: ExpressionParseInput<'_, '_, '_>,
+    stop_tokens: &[TokenTag],
 ) -> Result<Expression, ExpressionParseError> {
     create_expression_until_with_policy(input, stop_tokens)
 }
 
 fn create_expression_until_with_policy(
-    input: ExpressionParseInput<'_, '_>,
-    stop_tokens: &[TokenKind],
+    input: ExpressionParseInput<'_, '_, '_>,
+    stop_tokens: &[TokenTag],
 ) -> Result<Expression, ExpressionParseError> {
     let allow_boundary_catch = input.trailing_policy.allow_boundary_catch;
     let allow_expected_result_evidence = input.trailing_policy.allow_expected_result_evidence;
@@ -299,13 +309,34 @@ fn create_expression_until_with_policy(
     // ------------------------
     //  Locate expression window
     // ------------------------
-    let start_index = input.token_stream.index;
-    let end_index = find_expression_end_index(&input.token_stream.tokens, start_index, stop_tokens);
+    let start_index = input.token_stream.position();
+    // The boundary scan walks the live cursor and restores the entry position:
+    // indexed reads re-scan segment prefixes on every step.
+    let mut depth = ExpressionBoundaryDepth::default();
+    while !input.token_stream.is_at_end() {
+        if depth.is_top_level() && stop_tokens.contains(&input.token_stream.current_tag()) {
+            break;
+        }
+        depth.step_tag(input.token_stream.current_tag());
+        // A malformed payload is surfaced by typed readers at the consuming parser boundary.
+        if input.token_stream.current_tag() == TokenTag::EOF {
+            break;
+        }
+        input.token_stream.advance();
+    }
+    let end_index = input.token_stream.position();
+    let end_tag =
+        (end_index < input.token_stream.length()).then(|| input.token_stream.current_tag());
+    let end_span = input.token_stream.span_at(end_index);
+    input
+        .token_stream
+        .set_position(start_index)
+        .expect("expression boundary resume stays inside the active parser view");
 
     // ------------------------
     //  Validate window bounds
     // ------------------------
-    if end_index >= input.token_stream.length {
+    if end_index >= input.token_stream.length() {
         let formatted_stop_tokens: Vec<String> = stop_tokens
             .iter()
             .map(|token| format!("{token:?}"))
@@ -320,27 +351,33 @@ fn create_expression_until_with_policy(
         .into());
     }
 
+    let Some(end_tag) = end_tag else {
+        let formatted_stop_tokens: Vec<String> = stop_tokens
+            .iter()
+            .map(|token| format!("{token:?}"))
+            .collect();
+        let expected_tokens = formatted_stop_tokens.join(", ");
+
+        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        return Err(CompilerDiagnostic::unexpected_end_of_file(
+            Some(expected_delimiter),
+            Some(input.token_stream.current_span()),
+        )
+        .into());
+    };
+
     if end_index == start_index {
-        return Err(CompilerDiagnostic::unexpected_token(
-            input.token_stream.tokens[end_index].kind.to_owned(),
-            Some(SourceSpan::new(
-                input.token_stream.file_id,
-                input.token_stream.tokens[end_index].span,
-            )),
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(end_tag),
+            end_span,
         )
         .into());
     }
 
-    if !stop_tokens
-        .iter()
-        .any(|stop| input.token_stream.tokens[end_index].kind == *stop)
-    {
-        return Err(CompilerDiagnostic::unexpected_token(
-            input.token_stream.tokens[end_index].kind.to_owned(),
-            Some(SourceSpan::new(
-                input.token_stream.file_id,
-                input.token_stream.tokens[end_index].span,
-            )),
+    if !stop_tokens.contains(&end_tag) {
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(end_tag),
+            end_span,
         )
         .into());
     }
@@ -356,9 +393,8 @@ fn create_expression_until_with_policy(
     );
 
     // Narrow the visible token stream so the inner parser stops at the stop token
-    // without needing to copy the slice. The original length is restored after parsing.
-    let original_length = input.token_stream.length;
-    input.token_stream.length = end_index;
+    // without needing to copy the slice. The original limit is restored after parsing.
+    let previous_limit = input.token_stream.set_limit(end_index)?;
 
     let inner_input = ExpressionParseInput::new(
         ExpressionParseResources {
@@ -384,8 +420,8 @@ fn create_expression_until_with_policy(
     // Restore the full stream and position the cursor on the stop token.
     // `input` was never moved, only its fields were reborrowed for `inner_input`,
     // so the token stream reference is still available here.
-    input.token_stream.length = original_length;
-    input.token_stream.index = end_index;
+    input.token_stream.restore_limit(previous_limit);
+    input.token_stream.set_position(end_index)?;
     result
 }
 

@@ -103,7 +103,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, _source_tree_index, _source_files, _string_table) =
+    let (modules, graph, _source_tree_index, source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let entry_root = graph.entry_modules().to_vec();
@@ -115,6 +115,28 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     assert_eq!(
         modules.waves().iter().map(|wave| wave.len()).sum::<usize>(),
         1
+    );
+
+    let helper_path =
+        fs::canonicalize(src.join("helper.moth")).expect("helper source should canonicalize");
+    let helper_source_id = source_files
+        .get_by_canonical_path(&helper_path)
+        .expect("helper source should be in the boundary database")
+        .id;
+    let local_source_ids: Vec<_> = modules.waves()[0][0]
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .file_dependency_clauses_by_source
+        .values()
+        .flat_map(|dependencies| dependencies.iter())
+        .filter_map(|dependency| dependency.dependency.local_source_id)
+        .collect();
+    assert_eq!(
+        local_source_ids,
+        vec![helper_source_id],
+        "same-module retained edge should own its final compiler SourceId"
     );
 
     // The inventory preserves wave boundaries: the single no-edge entry is the sole module in

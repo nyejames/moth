@@ -92,338 +92,361 @@ fn host_function_call_node(
 }
 
 #[test]
-fn public_call_summaries_cover_zero_parameter_and_parameter_effects() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
+fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let summary_target = symbol("summary_target", &mut path_fork, &mut string_table);
-let summary_target_name = summary_target;
-let shared_parameter = symbol("shared_parameter", &mut path_fork, &mut string_table);
-let mutable_parameter = symbol("mutable_parameter", &mut path_fork, &mut string_table);
-let untouched_mutable_parameter = symbol("untouched_mutable_parameter", &mut path_fork, &mut string_table);
-let reactive_parameter = symbol("reactive_parameter", &mut path_fork, &mut string_table);
-let mut reactive_parameter_declaration = param_with_type_id(
-    reactive_parameter,
-    builtin_type_ids::INT,
-    false,
-    None,
-);
-reactive_parameter_declaration.value.reactive_source = Some(ReactiveSource {
-    path: reactive_parameter,
-    kind: ReactiveSourceKind::Parameter,
-});
+    let summary_target = symbol("summary_target", &mut path_fork, &mut string_table);
+    let summary_target_name = summary_target;
+    let shared_parameter = symbol("shared_parameter", &mut path_fork, &mut string_table);
+    let mutable_parameter = symbol("mutable_parameter", &mut path_fork, &mut string_table);
+    let untouched_mutable_parameter = symbol(
+        "untouched_mutable_parameter",
+        &mut path_fork,
+        &mut string_table,
+    );
+    let reactive_parameter = symbol("reactive_parameter", &mut path_fork, &mut string_table);
+    let mut reactive_parameter_declaration =
+        param_with_type_id(reactive_parameter, builtin_type_ids::INT, false, None);
+    reactive_parameter_declaration.value.reactive_source = Some(ReactiveSource {
+        path: reactive_parameter,
+        kind: ReactiveSourceKind::Parameter,
+    });
 
-let target = function_node(
-    summary_target,
-    FunctionSignature {
-        parameters: vec![
-            param_with_datatype(
-                shared_parameter,
-                DataType::Int,
-                builtin_type_ids::INT,
-                false,
-                test_source_location(1),
-            ),
-            param_with_datatype(
-                mutable_parameter,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-            param_with_datatype(
-                untouched_mutable_parameter,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-            reactive_parameter_declaration,
-        ],
-        returns: vec![],
-    },
-    vec![node(
-        NodeKind::Assignment {
-            target: assignment_target(
-                mutable_parameter,
-                DataType::Int,
-                builtin_type_ids::INT,
-                test_source_location(2),
-            ),
-            value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
-        },
-        test_source_location(2),
-    )],
-    None,
-);
-
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![target, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("public call summary construction should succeed");
-
-assert_eq!(
-    report.analysis.public_call_summaries.len(),
-    hir.functions.len()
-);
-
-let target_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == summary_target_name)
-    })
-    .expect("summary target should lower to HIR")
-    .id;
-let target_summary = report
-    .analysis
-    .public_call_summaries
-    .get(&target_id)
-    .expect("every local function should have one retained summary");
-
-assert_eq!(target_summary.parameters.len(), 4);
-assert_eq!(
-    target_summary.parameters[0].access,
-    PublicCallParameterAccess::Shared
-);
-assert_eq!(
-    target_summary.parameters[0].mutation,
-    PublicCallMutationEffect::NoWrite
-);
-assert_eq!(
-    target_summary.parameters[0].transfer_eligibility,
-    PublicCallTransferEligibility::Eligible
-);
-assert_eq!(
-    target_summary.parameters[0].transfer_effect,
-    PublicCallTransferEffect::MayConsume
-);
-
-assert_eq!(
-    target_summary.parameters[1].access,
-    PublicCallParameterAccess::Mutable
-);
-assert_eq!(
-    target_summary.parameters[1].mutation,
-    PublicCallMutationEffect::Writes
-);
-assert_eq!(
-    target_summary.parameters[1].transfer_effect,
-    PublicCallTransferEffect::MayConsume
-);
-
-assert_eq!(
-    target_summary.parameters[2].access,
-    PublicCallParameterAccess::Mutable
-);
-assert_eq!(
-    target_summary.parameters[2].mutation,
-    PublicCallMutationEffect::NoWrite
-);
-
-assert_eq!(
-    target_summary.parameters[3].access,
-    PublicCallParameterAccess::Reactive
-);
-assert_eq!(
-    target_summary.parameters[3].transfer_eligibility,
-    PublicCallTransferEligibility::Ineligible
-);
-assert_eq!(
-    target_summary.parameters[3].transfer_effect,
-    PublicCallTransferEffect::NeverConsumes
-);
-assert_eq!(
-    target_summary.parameters[3].reactive_effect,
-    PublicCallReactiveEffect::None
-);
-
-let start_id = hir
-    .start_function
-    .expect("normal test module should have start");
-let start_summary = report
-    .analysis
-    .public_call_summaries
-    .get(&start_id)
-    .expect("the zero-parameter start function should have a summary");
-assert!(start_summary.parameters.is_empty());
-assert_eq!(
-    start_summary.return_alias,
-    FunctionReturnAliasSummary::Fresh
-);
-
-let rendered = format!("{target_summary:?}");
-assert!(!rendered.contains("LocalId"));
-assert!(!rendered.contains("BlockId"));
-assert!(!rendered.contains("SourceSpan"));
-assert!(!rendered.contains("PathId")); }
-
-#[test]
-fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let mut hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-hir.functions[0].params.push(LocalId(999_999));
-
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("partial parameter metadata should fail summary construction");
-assert_infrastructure_error_contains(
-    &error,
-    ErrorType::Compiler,
-    &["could not resolve mutability for parameter local"],
-); }
-
-#[test]
-fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let mutator_name = symbol("mutator", &mut path_fork, &mut string_table);
-let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
-let wrapper_name_for_lookup = wrapper_name;
-let parameter_name = symbol("value", &mut path_fork, &mut string_table);
-
-let mutator = function_node(
-    mutator_name,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            symbol("input", &mut path_fork, &mut string_table),
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
-            test_source_location(1),
-        )],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-let wrapper = function_node(
-    wrapper_name,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            parameter_name,
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
-            test_source_location(2),
-        )],
-        returns: vec![],
-    },
-    vec![node(
-        function_call_node(
-            mutator_name,
-            vec![CallArgument::positional(
-                reference_expr_with_datatype(
-                    parameter_name,
+    let target = function_node(
+        summary_target,
+        FunctionSignature {
+            parameters: vec![
+                param_with_datatype(
+                    shared_parameter,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_source_location(3),
+                    false,
+                    test_source_location(1),
                 ),
-                CallAccessMode::Mutable,
-                test_source_location(3),
-            )],
-            vec![],
-            test_source_location(3),
-        ),
-        test_source_location(3),
-    )],
-    None,
-);
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
+                param_with_datatype(
+                    mutable_parameter,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    true,
+                    test_source_location(1),
+                ),
+                param_with_datatype(
+                    untouched_mutable_parameter,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    true,
+                    test_source_location(1),
+                ),
+                reactive_parameter_declaration,
+            ],
+            returns: vec![],
+        },
+        vec![node(
+            NodeKind::Assignment {
+                target: assignment_target(
+                    mutable_parameter,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    test_source_location(2),
+                ),
+                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+            },
+            test_source_location(2),
+        )],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![mutator, wrapper, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("mutable parameter call path should validate");
-let wrapper_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == wrapper_name_for_lookup)
-    })
-    .expect("wrapper function should lower to HIR")
-    .id;
-let summary = report
-    .analysis
-    .public_call_summaries
-    .get(&wrapper_id)
-    .expect("wrapper should have a retained call summary");
-assert_eq!(
-    summary.parameters[0].mutation,
-    PublicCallMutationEffect::NoWrite
-); }
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![target, start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("public call summary construction should succeed");
+
+    assert_eq!(
+        report.analysis.public_call_summaries.len(),
+        hir.functions.len()
+    );
+
+    let target_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == summary_target_name)
+        })
+        .expect("summary target should lower to HIR")
+        .id;
+    let target_summary = report
+        .analysis
+        .public_call_summaries
+        .get(&target_id)
+        .expect("every local function should have one retained summary");
+
+    assert_eq!(target_summary.parameters.len(), 4);
+    assert_eq!(
+        target_summary.parameters[0].access,
+        PublicCallParameterAccess::Shared
+    );
+    assert_eq!(
+        target_summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    assert_eq!(
+        target_summary.parameters[0].transfer_eligibility,
+        PublicCallTransferEligibility::Eligible
+    );
+    assert_eq!(
+        target_summary.parameters[0].transfer_effect,
+        PublicCallTransferEffect::MayConsume
+    );
+
+    assert_eq!(
+        target_summary.parameters[1].access,
+        PublicCallParameterAccess::Mutable
+    );
+    assert_eq!(
+        target_summary.parameters[1].mutation,
+        PublicCallMutationEffect::Writes
+    );
+    assert_eq!(
+        target_summary.parameters[1].transfer_effect,
+        PublicCallTransferEffect::MayConsume
+    );
+
+    assert_eq!(
+        target_summary.parameters[2].access,
+        PublicCallParameterAccess::Mutable
+    );
+    assert_eq!(
+        target_summary.parameters[2].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+
+    assert_eq!(
+        target_summary.parameters[3].access,
+        PublicCallParameterAccess::Reactive
+    );
+    assert_eq!(
+        target_summary.parameters[3].transfer_eligibility,
+        PublicCallTransferEligibility::Ineligible
+    );
+    assert_eq!(
+        target_summary.parameters[3].transfer_effect,
+        PublicCallTransferEffect::NeverConsumes
+    );
+    assert_eq!(
+        target_summary.parameters[3].reactive_effect,
+        PublicCallReactiveEffect::None
+    );
+
+    let start_id = hir
+        .start_function
+        .expect("normal test module should have start");
+    let start_summary = report
+        .analysis
+        .public_call_summaries
+        .get(&start_id)
+        .expect("the zero-parameter start function should have a summary");
+    assert!(start_summary.parameters.is_empty());
+    assert_eq!(
+        start_summary.return_alias,
+        FunctionReturnAliasSummary::Fresh
+    );
+
+    let rendered = format!("{target_summary:?}");
+    assert!(!rendered.contains("LocalId"));
+    assert!(!rendered.contains("BlockId"));
+    assert!(!rendered.contains("SourceSpan"));
+    assert!(!rendered.contains("PathId"));
+}
 
 #[test]
-fn public_call_summary_tracks_mixed_argument_access_by_position() { let source = r#"mutator |shared Int, mutable ~Int|:
+fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    hir.functions[0].params.push(LocalId(999_999));
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("partial parameter metadata should fail summary construction");
+    assert_infrastructure_error_contains(
+        &error,
+        ErrorType::Compiler,
+        &["could not resolve mutability for parameter local"],
+    );
+}
+
+#[test]
+fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let mutator_name = symbol("mutator", &mut path_fork, &mut string_table);
+    let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
+    let wrapper_name_for_lookup = wrapper_name;
+    let parameter_name = symbol("value", &mut path_fork, &mut string_table);
+
+    let mutator = function_node(
+        mutator_name,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                symbol("input", &mut path_fork, &mut string_table),
+                DataType::Int,
+                builtin_type_ids::INT,
+                true,
+                test_source_location(1),
+            )],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+    let wrapper = function_node(
+        wrapper_name,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                parameter_name,
+                DataType::Int,
+                builtin_type_ids::INT,
+                true,
+                test_source_location(2),
+            )],
+            returns: vec![],
+        },
+        vec![node(
+            function_call_node(
+                mutator_name,
+                vec![CallArgument::positional(
+                    reference_expr_with_datatype(
+                        parameter_name,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(3),
+                    ),
+                    CallAccessMode::Mutable,
+                    test_source_location(3),
+                )],
+                vec![],
+                test_source_location(3),
+            ),
+            test_source_location(3),
+        )],
+        None,
+    );
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![mutator, wrapper, start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("mutable parameter call path should validate");
+    let wrapper_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == wrapper_name_for_lookup)
+        })
+        .expect("wrapper function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&wrapper_id)
+        .expect("wrapper should have a retained call summary");
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+}
+
+#[test]
+fn public_call_summary_tracks_mixed_argument_access_by_position() {
+    let source = r#"mutator |shared Int, mutable ~Int|:
 ;
 
 wrapper |shared Int, mutable ~Int|:
 mutator(shared, ~mutable)
 ;"#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let entry_path = ast.entry_path;
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let wrapper_name = path_fork
-    .try_intern_child(entry_path, string_table.intern("wrapper"))
-    .expect("test path fits");
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("mixed shared and mutable call arguments should validate");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = ast.entry_path;
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let wrapper_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("wrapper"))
+        .expect("test path fits");
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("mixed shared and mutable call arguments should validate");
 
-let wrapper_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == wrapper_name)
-    })
-    .expect("wrapper function should lower to HIR")
-    .id;
-let summary = report
-    .analysis
-    .public_call_summaries
-    .get(&wrapper_id)
-    .expect("wrapper should have a retained call summary");
+    let wrapper_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == wrapper_name)
+        })
+        .expect("wrapper function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&wrapper_id)
+        .expect("wrapper should have a retained call summary");
 
-assert_eq!(
-    summary.parameters[0].mutation,
-    PublicCallMutationEffect::NoWrite
-);
-assert_eq!(
-    summary.parameters[1].mutation,
-    PublicCallMutationEffect::NoWrite
-); }
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    assert_eq!(
+        summary.parameters[1].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+}
 
 fn local_call_mutation_summary_in_order(
     callee_body: &str,
@@ -488,129 +511,143 @@ fn local_call_mutation_summary_in_order(
 }
 
 #[test]
-fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() { for callee_declared_first in [true, false] {
-    let (mutator_mutation, wrapper_mutation) =
-        local_call_mutation_summary_in_order("", callee_declared_first);
-    assert_eq!(mutator_mutation, PublicCallMutationEffect::NoWrite);
-    assert_eq!(wrapper_mutation, PublicCallMutationEffect::NoWrite);
-} }
+fn local_mutation_summary_keeps_unwritten_mutable_callee_order_independent() {
+    for callee_declared_first in [true, false] {
+        let (mutator_mutation, wrapper_mutation) =
+            local_call_mutation_summary_in_order("", callee_declared_first);
+        assert_eq!(mutator_mutation, PublicCallMutationEffect::NoWrite);
+        assert_eq!(wrapper_mutation, PublicCallMutationEffect::NoWrite);
+    }
+}
 
 #[test]
-fn local_mutation_summary_propagates_writes_order_independently() { for callee_declared_first in [true, false] {
-    let (mutator_mutation, wrapper_mutation) =
-        local_call_mutation_summary_in_order("    input = 1", callee_declared_first);
-    assert_eq!(mutator_mutation, PublicCallMutationEffect::Writes);
-    assert_eq!(wrapper_mutation, PublicCallMutationEffect::Writes);
-} }
+fn local_mutation_summary_propagates_writes_order_independently() {
+    for callee_declared_first in [true, false] {
+        let (mutator_mutation, wrapper_mutation) =
+            local_call_mutation_summary_in_order("    input = 1", callee_declared_first);
+        assert_eq!(mutator_mutation, PublicCallMutationEffect::Writes);
+        assert_eq!(wrapper_mutation, PublicCallMutationEffect::Writes);
+    }
+}
 
 #[test]
-fn public_call_summary_map_set_only_writes_receiver_parameter() { let source = r#"mutate |scores ~{String = String}, key String, value String|:
+fn public_call_summary_map_set_only_writes_receiver_parameter() {
+    let source = r#"mutate |scores ~{String = String}, key String, value String|:
 ~scores.set(key, value) catch:
 ;
 ;"#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let entry_path = ast.entry_path;
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let mutate_name = path_fork
-    .try_intern_child(entry_path, string_table.intern("mutate"))
-    .expect("test path fits");
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("map set with mutable receiver should validate");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = ast.entry_path;
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let mutate_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("mutate"))
+        .expect("test path fits");
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("map set with mutable receiver should validate");
 
-let function_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == mutate_name)
-    })
-    .expect("map mutator function should lower to HIR")
-    .id;
-let summary = report
-    .analysis
-    .public_call_summaries
-    .get(&function_id)
-    .expect("map mutator should have a retained call summary");
+    let function_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == mutate_name)
+        })
+        .expect("map mutator function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&function_id)
+        .expect("map mutator should have a retained call summary");
 
-assert_eq!(
-    summary.parameters[0].mutation,
-    PublicCallMutationEffect::Writes
-);
-assert_eq!(
-    summary.parameters[1].mutation,
-    PublicCallMutationEffect::NoWrite
-);
-assert_eq!(
-    summary.parameters[2].mutation,
-    PublicCallMutationEffect::NoWrite
-); }
+    assert_eq!(
+        summary.parameters[0].mutation,
+        PublicCallMutationEffect::Writes
+    );
+    assert_eq!(
+        summary.parameters[1].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+    assert_eq!(
+        summary.parameters[2].mutation,
+        PublicCallMutationEffect::NoWrite
+    );
+}
 
 #[test]
-fn immutable_shared_parameter_optional_transfer_remains_legal() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let reader_name = symbol("reader", &mut path_fork, &mut string_table);
-let value_name = symbol("value", &mut path_fork, &mut string_table);
+fn immutable_shared_parameter_optional_transfer_remains_legal() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let reader_name = symbol("reader", &mut path_fork, &mut string_table);
+    let value_name = symbol("value", &mut path_fork, &mut string_table);
 
-let reader = function_node(
-    reader_name,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            symbol("input", &mut path_fork, &mut string_table),
-            DataType::Int,
-            builtin_type_ids::INT,
-            false,
-            test_source_location(1),
-        )],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                value_name,
-                Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
-            )),
-            test_source_location(2),
-        ),
-        node(
-            function_call_node(
-                reader_name,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        value_name,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+    let reader = function_node(
+        reader_name,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                symbol("input", &mut path_fork, &mut string_table),
+                DataType::Int,
+                builtin_type_ids::INT,
+                false,
+                test_source_location(1),
+            )],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    value_name,
+                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                )),
+                test_source_location(2),
+            ),
+            node(
+                function_call_node(
+                    reader_name,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            value_name,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(3),
+                        ),
+                        CallAccessMode::Shared,
                         test_source_location(3),
-                    ),
-                    CallAccessMode::Shared,
+                    )],
+                    vec![],
                     test_source_location(3),
-                )],
-                vec![],
+                ),
                 test_source_location(3),
             ),
-            test_source_location(3),
-        ),
-    ],
-    None,
-);
+        ],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![reader, start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("optional transfer of an immutable shared parameter should fall back to borrowing"); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![reader, start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("optional transfer of an immutable shared parameter should fall back to borrowing");
+}
 
 #[test]
-fn path_dependent_optional_call_records_transfer_or_borrow_without_invalidating_source() { let source = r#"inspect |value String|:
+fn path_dependent_optional_call_records_transfer_or_borrow_without_invalidating_source() {
+    let source = r#"inspect |value String|:
 ;
 
 optional_transfer |flag Bool, op_name String|:
@@ -623,36 +660,40 @@ else
 sentinel = 0
 ;
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("path-dependent optional transfer should fall back to borrowing");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("path-dependent optional transfer should fall back to borrowing");
 
-let op_name_local = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.locals.iter())
-    .find(|local| hir.side_table.resolve_local_name(local.id, &path_fork, &string_table) == Some("op_name"))
-    .map(|local| local.id)
-    .expect("should locate the path-dependent parameter");
+    let op_name_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.locals.iter())
+        .find(|local| {
+            hir.side_table
+                .resolve_local_name(local.id, &path_fork, &string_table)
+                == Some("op_name")
+        })
+        .map(|local| local.id)
+        .expect("should locate the path-dependent parameter");
 
-assert!(
-    report.analysis.value_facts.values().any(|fact| {
-        fact.optional_transfer == OptionalTransferStatus::Transfer
-            && fact.roots.contains(&op_name_local)
-    }),
-    "the final-use branch should record advisory transfer"
-);
-assert!(
-    report.analysis.value_facts.values().any(|fact| {
-        fact.optional_transfer == OptionalTransferStatus::Borrow
-            && fact.roots.contains(&op_name_local)
-    }),
-    "the retaining branch should record a borrow fallback"
-);
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Transfer
+                && fact.roots.contains(&op_name_local)
+        }),
+        "the final-use branch should record advisory transfer"
+    );
+    assert!(
+        report.analysis.value_facts.values().any(|fact| {
+            fact.optional_transfer == OptionalTransferStatus::Borrow
+                && fact.roots.contains(&op_name_local)
+        }),
+        "the retaining branch should record a borrow fallback"
+    );
 
-let sentinel_statement = hir
+    let sentinel_statement = hir
     .blocks
     .iter()
     .flat_map(|block| block.statements.iter())
@@ -666,28 +707,30 @@ let sentinel_statement = hir
         )
     })
     .expect("should locate the post-join sentinel assignment");
-let op_name_snapshot = report
-    .analysis
-    .statement_entry_states
-    .get(&sentinel_statement.id)
-    .and_then(|state| {
-        state
-            .locals
-            .iter()
-            .find(|local| local.local == op_name_local)
-    })
-    .expect("post-join state should include the parameter");
-assert!(
-    !op_name_snapshot.mode.is_definitely_uninit(),
-    "optional transfer must not make the parameter unavailable at the join"
-);
-assert!(
-    op_name_snapshot.mode.contains(LocalMode::SLOT),
-    "post-join source state should retain its initialized slot"
-); }
+    let op_name_snapshot = report
+        .analysis
+        .statement_entry_states
+        .get(&sentinel_statement.id)
+        .and_then(|state| {
+            state
+                .locals
+                .iter()
+                .find(|local| local.local == op_name_local)
+        })
+        .expect("post-join state should include the parameter");
+    assert!(
+        !op_name_snapshot.mode.is_definitely_uninit(),
+        "optional transfer must not make the parameter unavailable at the join"
+    );
+    assert!(
+        op_name_snapshot.mode.contains(LocalMode::SLOT),
+        "post-join source state should retain its initialized slot"
+    );
+}
 
 #[test]
-fn unused_alias_before_final_shared_call_falls_back_to_borrow() { let source = r#"
+fn unused_alias_before_final_shared_call_falls_back_to_borrow() {
+    let source = r#"
 inspect |value String|:
 ;
 
@@ -696,140 +739,153 @@ alias = source
 inspect(source)
 ;
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("an unused alias must not make a final shared call invalid");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("an unused alias must not make a final shared call invalid");
 
-let source_local = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.locals.iter())
-    .find(|local| hir.side_table.resolve_local_name(local.id, &path_fork, &string_table) == Some("source"))
-    .map(|local| local.id)
-    .expect("should locate the source parameter");
-let call_argument = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .find_map(|statement| {
-        let HirStatementKind::Call { args, .. } = &statement.kind else {
-            return None;
-        };
-        let argument = args.first()?;
-        matches!(
-            &argument.kind,
-            crate::compiler_frontend::hir::expressions::HirExpressionKind::Load(
-                HirPlace::Local(local)
-            ) if *local == source_local
-        )
-        .then_some(argument.id)
-    })
-    .expect("should locate the final shared call argument");
+    let source_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.locals.iter())
+        .find(|local| {
+            hir.side_table
+                .resolve_local_name(local.id, &path_fork, &string_table)
+                == Some("source")
+        })
+        .map(|local| local.id)
+        .expect("should locate the source parameter");
+    let call_argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| {
+            let HirStatementKind::Call { args, .. } = &statement.kind else {
+                return None;
+            };
+            let argument = args.first()?;
+            matches!(
+                &argument.kind,
+                crate::compiler_frontend::hir::expressions::HirExpressionKind::Load(
+                    HirPlace::Local(local)
+                ) if *local == source_local
+            )
+            .then_some(argument.id)
+        })
+        .expect("should locate the final shared call argument");
 
-assert_eq!(
-    report
-        .analysis
-        .value_fact(call_argument)
-        .expect("the call argument should have a borrow fact")
-        .optional_transfer,
-    OptionalTransferStatus::Borrow,
-    "failed transfer exclusivity must fall back to an ordinary shared borrow"
-); }
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(call_argument)
+            .expect("the call argument should have a borrow fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "failed transfer exclusivity must fall back to an ordinary shared borrow"
+    );
+}
 
 #[test]
-fn user_function_returning_param_alias_allows_caller_rebinding() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
+fn user_function_returning_param_alias_allows_caller_rebinding() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let alias_fn = symbol("alias_fn", &mut path_fork, &mut string_table);
-let p = symbol("p", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
+    let alias_fn = symbol("alias_fn", &mut path_fork, &mut string_table);
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
 
-let callee = function_node(
-    alias_fn,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            false,
-            test_source_location(1),
-        )],
-        returns: vec![ReturnSlot {
-            value: DataType::Int,
-            type_id: Some(builtin_type_ids::INT),
-            reactive_template: None,
-            channel: ReturnChannel::Success,
-        }],
-    },
-    vec![node(
-        NodeKind::Return(vec![reference_expr_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
+    let callee = function_node(
+        alias_fn,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
+                DataType::Int,
+                builtin_type_ids::INT,
+                false,
+                test_source_location(1),
+            )],
+            returns: vec![ReturnSlot {
+                value: DataType::Int,
+                type_id: Some(builtin_type_ids::INT),
+                reactive_template: None,
+                channel: ReturnChannel::Success,
+            }],
+        },
+        vec![node(
+            NodeKind::Return(vec![reference_expr_with_datatype(
+                p,
+                DataType::Int,
+                builtin_type_ids::INT,
+                test_source_location(2),
+            )]),
             test_source_location(2),
-        )]),
-        test_source_location(2),
-    )],
-    None,
-);
+        )],
+        None,
+    );
 
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                Expression::function_call(
-                    alias_fn,
-                    vec![reference_expr_with_datatype(
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
+                    Expression::function_call(
+                        alias_fn,
+                        vec![reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        )],
+                        vec![builtin_type_ids::INT],
+                        test_source_location(11),
+                    ),
+                )),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_source_location(11),
-                    )],
-                    vec![builtin_type_ids::INT],
-                    test_source_location(11),
-                ),
-            )),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
-                ),
-                value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
-            },
-            test_source_location(12),
-        ),
-    ],
-    None,
-);
+                        test_source_location(12),
+                    ),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                },
+                test_source_location(12),
+            ),
+        ],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("reassigning the source binding should detach it from the returned alias"); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("reassigning the source binding should detach it from the returned alias");
+}
 
 #[test]
-fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() { let source = r#"Point = |
+fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() {
+    let source = r#"Point = |
 x Int,
 |
 
@@ -845,404 +901,165 @@ other_returned ~= identity(other)
 returned = other_returned
 original.x = 4
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("slot-backed result rebinding should detach its previous allocation root"); }
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("slot-backed result rebinding should detach its previous allocation root");
+}
 
 #[test]
-fn fallible_alias_return_propagation_validates_success_alias_metadata() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
+fn fallible_alias_return_propagation_validates_success_alias_metadata() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let source_fn = symbol("source_fn", &mut path_fork, &mut string_table);
-let source_param = symbol("source_param", &mut path_fork, &mut string_table);
-let source_unused = symbol("source_unused", &mut path_fork, &mut string_table);
-let forward_fn = symbol("forward_fn", &mut path_fork, &mut string_table);
-let forward_param = symbol("forward_param", &mut path_fork, &mut string_table);
-let source_fn_name_for_lookup = source_fn;
-let forward_fn_name_for_lookup = forward_fn;
+    let source_fn = symbol("source_fn", &mut path_fork, &mut string_table);
+    let source_param = symbol("source_param", &mut path_fork, &mut string_table);
+    let source_unused = symbol("source_unused", &mut path_fork, &mut string_table);
+    let forward_fn = symbol("forward_fn", &mut path_fork, &mut string_table);
+    let forward_param = symbol("forward_param", &mut path_fork, &mut string_table);
+    let source_fn_name_for_lookup = source_fn;
+    let forward_fn_name_for_lookup = forward_fn;
 
-let source = function_node(
-    source_fn,
-    FunctionSignature {
-        parameters: vec![
-            param_with_datatype(
-                source_param,
-                DataType::StringSlice,
-                builtin_type_ids::STRING,
-                false,
-                test_source_location(20),
-            ),
-            param_with_datatype(
+    let source = function_node(
+        source_fn,
+        FunctionSignature {
+            parameters: vec![
+                param_with_datatype(
+                    source_param,
+                    DataType::StringSlice,
+                    builtin_type_ids::STRING,
+                    false,
+                    test_source_location(20),
+                ),
+                param_with_datatype(
+                    source_unused,
+                    DataType::StringSlice,
+                    builtin_type_ids::STRING,
+                    false,
+                    test_source_location(20),
+                ),
+            ],
+            returns: vec![
+                ReturnSlot {
+                    value: DataType::StringSlice,
+                    type_id: Some(builtin_type_ids::STRING),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::StringSlice,
+                    type_id: Some(builtin_type_ids::STRING),
+                    reactive_template: None,
+                    channel: ReturnChannel::Error,
+                },
+            ],
+        },
+        vec![node(
+            NodeKind::Return(vec![reference_expr_with_datatype(
                 source_unused,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
-                false,
-                test_source_location(20),
-            ),
-        ],
-        returns: vec![
-            ReturnSlot {
-                value: DataType::StringSlice,
-                type_id: Some(builtin_type_ids::STRING),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::StringSlice,
-                type_id: Some(builtin_type_ids::STRING),
-                reactive_template: None,
-                channel: ReturnChannel::Error,
-            },
-        ],
-    },
-    vec![node(
-        NodeKind::Return(vec![reference_expr_with_datatype(
-            source_unused,
-            DataType::StringSlice,
-            builtin_type_ids::STRING,
+                test_source_location(21),
+            )]),
             test_source_location(21),
-        )]),
-        test_source_location(21),
-    )],
-    None,
-);
+        )],
+        None,
+    );
 
-let mut expression_types = TypeEnvironment::new();
-let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-    source_fn,
-    vec![
-        CallArgument::positional(
-            Expression::string_slice(
-                string_table.intern("unused"),
+    let mut expression_types = TypeEnvironment::new();
+    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
+        source_fn,
+        vec![
+            CallArgument::positional(
+                Expression::string_slice(
+                    string_table.intern("unused"),
+                    test_source_location(30),
+                    ValueMode::ImmutableOwned,
+                ),
+                CallAccessMode::Shared,
                 test_source_location(30),
-                ValueMode::ImmutableOwned,
             ),
-            CallAccessMode::Shared,
-            test_source_location(30),
-        ),
-        CallArgument::positional(
-            reference_expr_with_datatype(
+            CallArgument::positional(
+                reference_expr_with_datatype(
+                    forward_param,
+                    DataType::StringSlice,
+                    builtin_type_ids::STRING,
+                    test_source_location(30),
+                ),
+                CallAccessMode::Shared,
+                test_source_location(30),
+            ),
+        ],
+        vec![builtin_type_ids::STRING],
+        FallibleExpressionHandling::Propagate,
+        &mut expression_types,
+        None,
+    );
+
+    let forward = function_node(
+        forward_fn,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
                 forward_param,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
-                test_source_location(30),
-            ),
-            CallAccessMode::Shared,
-            test_source_location(30),
-        ),
-    ],
-    vec![builtin_type_ids::STRING],
-    FallibleExpressionHandling::Propagate,
-    &mut expression_types,
-    None,
-);
-
-let forward = function_node(
-    forward_fn,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            forward_param,
-            DataType::StringSlice,
-            builtin_type_ids::STRING,
-            false,
-            test_source_location(29),
-        )],
-        returns: vec![
-            ReturnSlot {
-                value: DataType::StringSlice,
-                type_id: Some(builtin_type_ids::STRING),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::StringSlice,
-                type_id: Some(builtin_type_ids::STRING),
-                reactive_template: None,
-                channel: ReturnChannel::Error,
-            },
-        ],
-    },
-    vec![node(
-        NodeKind::Return(vec![propagated_call]),
-        test_source_location(30),
-    )],
-    None,
-);
-
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![node(NodeKind::Return(vec![]), test_source_location(40))],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![source, forward, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("fallible alias forwarding should validate declared success alias metadata");
-
-for (function_name, expected_alias) in [
-    (
-        &source_fn_name_for_lookup,
-        FunctionReturnAliasSummary::AliasParams(vec![1]),
-    ),
-    (
-        &forward_fn_name_for_lookup,
-        FunctionReturnAliasSummary::AliasParams(vec![0]),
-    ),
-] {
-    let function_id = hir
-        .functions
-        .iter()
-        .find(|function| {
-            hir.side_table
-                .function_name_path(function.id)
-                .is_some_and(|path| path == *function_name)
-        })
-        .expect("fallible alias function should lower to HIR")
-        .id;
-    let summary = report
-        .analysis
-        .public_call_summaries
-        .get(&function_id)
-        .expect("fallible alias function should have a retained call summary");
-    assert_eq!(summary.return_alias, expected_alias);
-} }
-
-#[test]
-fn fresh_user_return_does_not_alias_caller_roots() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let fresh_fn = symbol("fresh_fn", &mut path_fork, &mut string_table);
-let fresh_fn_name_for_lookup = fresh_fn;
-let p = symbol("p", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    fresh_fn,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            false,
-            test_source_location(1),
-        )],
-        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-    },
-    vec![node(
-        NodeKind::Return(vec![Expression::int(
-            42,
-            test_source_location(2),
-            ValueMode::ImmutableOwned,
-        )]),
-        test_source_location(2),
-    )],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                Expression::function_call(
-                    fresh_fn,
-                    vec![reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(11),
-                    )],
-                    vec![builtin_type_ids::INT],
-                    test_source_location(11),
-                ),
-            )),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
-                ),
-                value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
-            },
-            test_source_location(12),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("fresh callee returns should not alias caller roots");
-let fresh_function_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == fresh_fn_name_for_lookup)
-    })
-    .expect("fresh function should lower to HIR")
-    .id;
-let fresh_summary = report
-    .analysis
-    .public_call_summaries
-    .get(&fresh_function_id)
-    .expect("fresh function should have a retained call summary");
-assert_eq!(
-    fresh_summary.return_alias,
-    FunctionReturnAliasSummary::Fresh
-); }
-
-#[test]
-fn multi_return_fallible_external_retains_unknown_alias_summary() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let external_id = Arc::make_mut(&mut external_package_registry)
-    .register_function(ExternalFunctionDef {
-        name: "imprecise_external".to_owned(),
-        parameters: vec![],
-        returns: vec![
-            ExternalReturnSlot::fresh(RegistryAbiType::I32),
-            ExternalReturnSlot::fresh(RegistryAbiType::I32),
-        ],
-        error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::I32)),
-        lowerings: ExternalFunctionLowerings::default(),
-    })
-    .expect("fallible external fixture registration should succeed");
-
-let imprecise_return_name = symbol("imprecise_return", &mut path_fork, &mut string_table);
-let mut expression_types = TypeEnvironment::new();
-let fallible_external_call =
-    Expression::handled_fallible_host_function_call_with_typed_arguments(
-        HandledFallibleHostFunctionCallInput {
-            id: external_id,
-            args: vec![],
-            result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
-            error_type_id: builtin_type_ids::INT,
-            handling: FallibleExpressionHandling::Propagate,
-            span: None,
+                false,
+                test_source_location(29),
+            )],
+            returns: vec![
+                ReturnSlot {
+                    value: DataType::StringSlice,
+                    type_id: Some(builtin_type_ids::STRING),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::StringSlice,
+                    type_id: Some(builtin_type_ids::STRING),
+                    reactive_template: None,
+                    channel: ReturnChannel::Error,
+                },
+            ],
         },
-        &mut expression_types,
+        vec![node(
+            NodeKind::Return(vec![propagated_call]),
+            test_source_location(30),
+        )],
+        None,
     );
-let imprecise_return = function_node(
-    imprecise_return_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Error,
-            },
-        ],
-    },
-    vec![node(
-        NodeKind::Return(vec![fallible_external_call]),
-        test_source_location(2),
-    )],
-    None,
-);
-let forward_name = symbol("forward_imprecise_return", &mut path_fork, &mut string_table);
-let mut forward_expression_types = TypeEnvironment::new();
-let forwarded_call = Expression::handled_fallible_function_call_with_typed_arguments(
-    imprecise_return_name,
-    vec![],
-    vec![builtin_type_ids::INT, builtin_type_ids::INT],
-    FallibleExpressionHandling::Propagate,
-    &mut forward_expression_types,
-    None,
-);
-let forward = function_node(
-    forward_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            },
-            ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
-                channel: ReturnChannel::Error,
-            },
-        ],
-    },
-    vec![node(
-        NodeKind::Return(vec![forwarded_call]),
-        test_source_location(3),
-    )],
-    None,
-);
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
 
-let hir = lower_hir(build_ast_with_registered_types(vec![imprecise_return, forward, start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("fallible external return should validate");
-let mut reversed_hir = hir.clone();
-reversed_hir.functions.reverse();
-let reversed_report =
-    run_borrow_checker(&reversed_hir, &external_package_registry, &path_fork, &string_table)
-        .expect("reversed fallible external return should validate");
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), test_source_location(40))],
+        None,
+    );
 
-for analysis in [&report.analysis, &reversed_report.analysis] {
-    for function_name in [&imprecise_return_name, &forward_name] {
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![source, forward, start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("fallible alias forwarding should validate declared success alias metadata");
+
+    for (function_name, expected_alias) in [
+        (
+            &source_fn_name_for_lookup,
+            FunctionReturnAliasSummary::AliasParams(vec![1]),
+        ),
+        (
+            &forward_fn_name_for_lookup,
+            FunctionReturnAliasSummary::AliasParams(vec![0]),
+        ),
+    ] {
         let function_id = hir
             .functions
             .iter()
@@ -1251,86 +1068,360 @@ for analysis in [&report.analysis, &reversed_report.analysis] {
                     .function_name_path(function.id)
                     .is_some_and(|path| path == *function_name)
             })
-            .expect("imprecise return function should lower to HIR")
+            .expect("fallible alias function should lower to HIR")
             .id;
-        let summary = analysis
+        let summary = report
+            .analysis
             .public_call_summaries
             .get(&function_id)
-            .expect("forwarded imprecise function should have a retained call summary");
-        assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Unknown);
+            .expect("fallible alias function should have a retained call summary");
+        assert_eq!(summary.return_alias, expected_alias);
     }
-} }
+}
 
 #[test]
-fn checked_numeric_return_local_retains_fresh_alias_summary() { let source = r#"
+fn fresh_user_return_does_not_alias_caller_roots() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let fresh_fn = symbol("fresh_fn", &mut path_fork, &mut string_table);
+    let fresh_fn_name_for_lookup = fresh_fn;
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
+
+    let callee = function_node(
+        fresh_fn,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
+                DataType::Int,
+                builtin_type_ids::INT,
+                false,
+                test_source_location(1),
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+        },
+        vec![node(
+            NodeKind::Return(vec![Expression::int(
+                42,
+                test_source_location(2),
+                ValueMode::ImmutableOwned,
+            )]),
+            test_source_location(2),
+        )],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
+                    Expression::function_call(
+                        fresh_fn,
+                        vec![reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        )],
+                        vec![builtin_type_ids::INT],
+                        test_source_location(11),
+                    ),
+                )),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                },
+                test_source_location(12),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("fresh callee returns should not alias caller roots");
+    let fresh_function_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == fresh_fn_name_for_lookup)
+        })
+        .expect("fresh function should lower to HIR")
+        .id;
+    let fresh_summary = report
+        .analysis
+        .public_call_summaries
+        .get(&fresh_function_id)
+        .expect("fresh function should have a retained call summary");
+    assert_eq!(
+        fresh_summary.return_alias,
+        FunctionReturnAliasSummary::Fresh
+    );
+}
+
+#[test]
+fn multi_return_fallible_external_retains_unknown_alias_summary() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let external_id = Arc::make_mut(&mut external_package_registry)
+        .register_function(ExternalFunctionDef {
+            name: "imprecise_external".to_owned(),
+            parameters: vec![],
+            returns: vec![
+                ExternalReturnSlot::fresh(RegistryAbiType::I32),
+                ExternalReturnSlot::fresh(RegistryAbiType::I32),
+            ],
+            error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::I32)),
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("fallible external fixture registration should succeed");
+
+    let imprecise_return_name = symbol("imprecise_return", &mut path_fork, &mut string_table);
+    let mut expression_types = TypeEnvironment::new();
+    let fallible_external_call =
+        Expression::handled_fallible_host_function_call_with_typed_arguments(
+            HandledFallibleHostFunctionCallInput {
+                id: external_id,
+                args: vec![],
+                result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
+                error_type_id: builtin_type_ids::INT,
+                handling: FallibleExpressionHandling::Propagate,
+                span: None,
+            },
+            &mut expression_types,
+        );
+    let imprecise_return = function_node(
+        imprecise_return_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Error,
+                },
+            ],
+        },
+        vec![node(
+            NodeKind::Return(vec![fallible_external_call]),
+            test_source_location(2),
+        )],
+        None,
+    );
+    let forward_name = symbol(
+        "forward_imprecise_return",
+        &mut path_fork,
+        &mut string_table,
+    );
+    let mut forward_expression_types = TypeEnvironment::new();
+    let forwarded_call = Expression::handled_fallible_function_call_with_typed_arguments(
+        imprecise_return_name,
+        vec![],
+        vec![builtin_type_ids::INT, builtin_type_ids::INT],
+        FallibleExpressionHandling::Propagate,
+        &mut forward_expression_types,
+        None,
+    );
+    let forward = function_node(
+        forward_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: DataType::Int,
+                    type_id: Some(builtin_type_ids::INT),
+                    reactive_template: None,
+                    channel: ReturnChannel::Error,
+                },
+            ],
+        },
+        vec![node(
+            NodeKind::Return(vec![forwarded_call]),
+            test_source_location(3),
+        )],
+        None,
+    );
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![imprecise_return, forward, start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("fallible external return should validate");
+    let mut reversed_hir = hir.clone();
+    reversed_hir.functions.reverse();
+    let reversed_report = run_borrow_checker(
+        &reversed_hir,
+        &external_package_registry,
+        &path_fork,
+        &string_table,
+    )
+    .expect("reversed fallible external return should validate");
+
+    for analysis in [&report.analysis, &reversed_report.analysis] {
+        for function_name in [&imprecise_return_name, &forward_name] {
+            let function_id = hir
+                .functions
+                .iter()
+                .find(|function| {
+                    hir.side_table
+                        .function_name_path(function.id)
+                        .is_some_and(|path| path == *function_name)
+                })
+                .expect("imprecise return function should lower to HIR")
+                .id;
+            let summary = analysis
+                .public_call_summaries
+                .get(&function_id)
+                .expect("forwarded imprecise function should have a retained call summary");
+            assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Unknown);
+        }
+    }
+}
+
+#[test]
+fn checked_numeric_return_local_retains_fresh_alias_summary() {
+    let source = r#"
 increment |input Int| -> Int, Error!:
 return input + 1
 ;
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let entry_path = ast.entry_path;
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let increment_name = path_fork
-    .try_intern_child(entry_path, string_table.intern("increment"))
-    .expect("test path fits");
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("checked numeric return should validate");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = ast.entry_path;
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let increment_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("increment"))
+        .expect("test path fits");
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("checked numeric return should validate");
 
-let function_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == increment_name)
-    })
-    .expect("numeric return function should lower to HIR")
-    .id;
-let summary = report
-    .analysis
-    .public_call_summaries
-    .get(&function_id)
-    .expect("numeric return function should have a call summary");
+    let function_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == increment_name)
+        })
+        .expect("numeric return function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&function_id)
+        .expect("numeric return function should have a call summary");
 
-assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh); }
+    assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
+}
 
 #[test]
-fn map_remove_return_local_retains_fresh_alias_summary() { let source = r#"
+fn map_remove_return_local_retains_fresh_alias_summary() {
+    let source = r#"
 remove_value |scores ~{String = String}| -> String, Error!:
 return ~scores.remove("key")!
 ;
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let entry_path = ast.entry_path;
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let remove_value_name = path_fork
-    .try_intern_child(entry_path, string_table.intern("remove_value"))
-    .expect("test path fits");
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("map remove return should validate");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = ast.entry_path;
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let remove_value_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("remove_value"))
+        .expect("test path fits");
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("map remove return should validate");
 
-let function_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path == remove_value_name)
-    })
-    .expect("map return function should lower to HIR")
-    .id;
-let summary = report
-    .analysis
-    .public_call_summaries
-    .get(&function_id)
-    .expect("map return function should have a call summary");
+    let function_id = hir
+        .functions
+        .iter()
+        .find(|function| {
+            hir.side_table
+                .function_name_path(function.id)
+                .is_some_and(|path| path == remove_value_name)
+        })
+        .expect("map return function should lower to HIR")
+        .id;
+    let summary = report
+        .analysis
+        .public_call_summaries
+        .get(&function_id)
+        .expect("map return function should have a call summary");
 
-assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh); }
+    assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
+}
 
 #[test]
-fn multi_return_alias_summary_conservatively_unions_returned_elements() { let source = r#"
+fn multi_return_alias_summary_conservatively_unions_returned_elements() {
+    let source = r#"
 Point = |
 x Int,
 |
@@ -1347,1146 +1438,1258 @@ copy_one |value Point| -> Point, Point:
 return value, copy value
 ;
 "#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("multi-return alias summaries should validate");
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("multi-return alias summaries should validate");
 
-let summary_for = |name: &str| {
-    let function = hir
+    let summary_for = |name: &str| {
+        let function = hir
+            .functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .is_some_and(|path| {
+                        path_fork
+                            .component(path)
+                            .is_some_and(|component| string_table.resolve(component) == name)
+                    })
+            })
+            .expect("multi-return function should lower to HIR");
+        report
+            .analysis
+            .public_call_summaries
+            .get(&function.id)
+            .expect("multi-return function should have a call summary")
+            .return_alias
+            .clone()
+    };
+
+    assert_eq!(
+        summary_for("pair"),
+        FunctionReturnAliasSummary::AliasParams(vec![0, 1])
+    );
+    assert_eq!(
+        summary_for("duplicate"),
+        FunctionReturnAliasSummary::AliasParams(vec![0])
+    );
+    assert_eq!(
+        summary_for("copy_one"),
+        FunctionReturnAliasSummary::AliasParams(vec![0])
+    );
+}
+
+#[test]
+fn recursive_return_summary_stays_unknown() {
+    let source = r#"
+recursive |value Int| -> Int:
+return recursive(value)
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("recursive summary cycle should remain a valid conservative analysis");
+    let recursive_id = hir
         .functions
         .iter()
         .find(|function| {
             hir.side_table
                 .function_name_path(function.id)
-                .is_some_and(|path| path_fork.component(path).is_some_and(|component| string_table.resolve(component) == name))
+                .is_some_and(|path| {
+                    path_fork
+                        .component(path)
+                        .is_some_and(|component| string_table.resolve(component) == "recursive")
+                })
         })
-        .expect("multi-return function should lower to HIR");
-    report
-        .analysis
-        .public_call_summaries
-        .get(&function.id)
-        .expect("multi-return function should have a call summary")
-        .return_alias
-        .clone()
-};
+        .expect("recursive function should lower to HIR")
+        .id;
 
-assert_eq!(
-    summary_for("pair"),
-    FunctionReturnAliasSummary::AliasParams(vec![0, 1])
-);
-assert_eq!(
-    summary_for("duplicate"),
-    FunctionReturnAliasSummary::AliasParams(vec![0])
-);
-assert_eq!(
-    summary_for("copy_one"),
-    FunctionReturnAliasSummary::AliasParams(vec![0])
-); }
+    assert_eq!(
+        report
+            .analysis
+            .public_call_summaries
+            .get(&recursive_id)
+            .expect("recursive function should have a call summary")
+            .return_alias,
+        FunctionReturnAliasSummary::Unknown
+    );
+}
 
 #[test]
-fn recursive_return_summary_stays_unknown() { let source = r#"
-recursive |value Int| -> Int:
-return recursive(value)
-;
-"#;
-let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-let hir = lower_hir(ast, &mut string_table, &mut path_fork);
-let external_package_registry = default_external_package_registry(&mut string_table);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("recursive summary cycle should remain a valid conservative analysis");
-let recursive_id = hir
-    .functions
-    .iter()
-    .find(|function| {
-        hir.side_table
-            .function_name_path(function.id)
-            .is_some_and(|path| path_fork.component(path).is_some_and(|component| string_table.resolve(component) == "recursive"))
-    })
-    .expect("recursive function should lower to HIR")
-    .id;
+fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-assert_eq!(
-    report
-        .analysis
-        .public_call_summaries
-        .get(&recursive_id)
-        .expect("recursive function should have a call summary")
-        .return_alias,
-    FunctionReturnAliasSummary::Unknown
-); }
+    let unknown_fn = symbol("unknown_fn", &mut path_fork, &mut string_table);
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let q = symbol("q", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
 
-#[test]
-fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let unknown_fn = symbol("unknown_fn", &mut path_fork, &mut string_table);
-let p = symbol("p", &mut path_fork, &mut string_table);
-let q = symbol("q", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    unknown_fn,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            false,
-            test_source_location(1),
-        )],
-        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                q,
-                reference_expr_with_datatype(
-                    p,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(2),
-                ),
-            )),
-            test_source_location(2),
-        ),
-        node(
-            NodeKind::Return(vec![reference_expr_with_datatype(
-                q,
-                DataType::Int,
-                builtin_type_ids::INT,
-                test_source_location(3),
-            )]),
-            test_source_location(3),
-        ),
-    ],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                Expression::function_call(
-                    unknown_fn,
-                    vec![reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(11),
-                    )],
-                    vec![builtin_type_ids::INT],
-                    test_source_location(11),
-                ),
-            )),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
-                ),
-                value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
-            },
-            test_source_location(12),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("reassigning the source binding should preserve the returned allocation alias"); }
-
-#[test]
-fn mutable_user_argument_is_accepted_without_false_shared_conflict() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let mut_sink = symbol("mut_sink", &mut path_fork, &mut string_table);
-let p = symbol("p", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    mut_sink,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
-            test_source_location(1),
-        )],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                mut_sink,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(11),
-                    ),
-                    CallAccessMode::Shared,
-                    test_source_location(11),
-                )],
-                vec![],
-                test_source_location(11),
-            ),
-            test_source_location(11),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("single mutable argument call should be accepted"); }
-
-#[test]
-fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argument() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
-let a = symbol("a", &mut path_fork, &mut string_table);
-let b = symbol("b", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    mut2,
-    FunctionSignature {
-        parameters: vec![
-            param_with_datatype(
-                a,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-            param_with_datatype(
-                b,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-        ],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                mut2,
-                vec![
-                    CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    ),
-                    CallArgument::positional(
-                        Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    )
-                    .with_passing_mode(CallPassingMode::FreshMutableValue),
-                ],
-                vec![],
-                test_source_location(11),
-            ),
-            test_source_location(11),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
-    "fresh mutable call args should be treated as independent locals, not aliases of other args",
-); }
-
-#[test]
-fn host_mutable_parameter_requires_mutable_access() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let host_fn = register_external_function(
-    &mut external_package_registry,
-    "host_mut",
-    vec![ExternalAccessKind::Mutable],
-    ExternalReturnAlias::Fresh,
-    ExternalAbiType::Void,
-);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
-            )),
-            test_source_location(1),
-        ),
-        node(
-            host_function_call_node(
-                host_fn,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(2),
-                    ),
-                    CallAccessMode::Shared,
-                    test_source_location(2),
-                )],
-                vec![],
-                test_source_location(2),
-            ),
-            test_source_location(2),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("mutable host parameter should enforce mutable access");
-assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace); }
-
-#[test]
-fn host_mutable_parameter_accepts_mutable_local_argument() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let host_fn = register_external_function(
-    &mut external_package_registry,
-    "host_mut_ok",
-    vec![ExternalAccessKind::Mutable],
-    ExternalReturnAlias::Fresh,
-    ExternalAbiType::Void,
-);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
-            )),
-            test_source_location(1),
-        ),
-        node(
-            host_function_call_node(
-                host_fn,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(2),
-                    ),
-                    CallAccessMode::Shared,
-                    test_source_location(2),
-                )],
-                vec![],
-                test_source_location(2),
-            ),
-            test_source_location(2),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("mutable host parameter should accept mutable local argument"); }
-
-#[test]
-fn host_shared_parameter_is_shared_only() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let host_fn = register_external_function(
-    &mut external_package_registry,
-    "host_shared",
-    vec![ExternalAccessKind::Shared],
-    ExternalReturnAlias::Fresh,
-    ExternalAbiType::Void,
-);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
-            )),
-            test_source_location(1),
-        ),
-        node(
-            host_function_call_node(
-                host_fn,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(2),
-                    ),
-                    CallAccessMode::Shared,
-                    test_source_location(2),
-                )],
-                vec![],
-                test_source_location(2),
-            ),
-            test_source_location(2),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("shared host parameter should not force mutable access"); }
-
-#[test]
-fn two_mutable_args_to_same_root_are_rejected() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
-let a = symbol("a", &mut path_fork, &mut string_table);
-let b = symbol("b", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    mut2,
-    FunctionSignature {
-        parameters: vec![
-            param_with_datatype(
-                a,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-            param_with_datatype(
-                b,
-                DataType::Int,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(1),
-            ),
-        ],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                mut2,
-                vec![
-                    CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    ),
-                    CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    ),
-                ],
-                vec![],
-                test_source_location(11),
-            ),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                reference_expr_with_datatype(
-                    x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
-                ),
-            )),
-            test_source_location(12),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("two mutable args to the same root should fail");
-assert_borrow_error_kind(&error, BorrowDiagnosticKind::MultipleMutableBorrows); }
-
-#[test]
-fn shared_then_mutable_args_to_same_root_are_rejected() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let read_then_mut = symbol("read_then_mut", &mut path_fork, &mut string_table);
-let read = symbol("read", &mut path_fork, &mut string_table);
-let mutate = symbol("mutate", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    read_then_mut,
-    FunctionSignature {
-        parameters: vec![
-            param_with_datatype(
-                read,
+    let callee = function_node(
+        unknown_fn,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
                 DataType::Int,
                 builtin_type_ids::INT,
                 false,
                 test_source_location(1),
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    q,
+                    reference_expr_with_datatype(
+                        p,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(2),
+                    ),
+                )),
+                test_source_location(2),
             ),
-            param_with_datatype(
-                mutate,
+            node(
+                NodeKind::Return(vec![reference_expr_with_datatype(
+                    q,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    test_source_location(3),
+                )]),
+                test_source_location(3),
+            ),
+        ],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
+                    Expression::function_call(
+                        unknown_fn,
+                        vec![reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        )],
+                        vec![builtin_type_ids::INT],
+                        test_source_location(11),
+                    ),
+                )),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                },
+                test_source_location(12),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("reassigning the source binding should preserve the returned allocation alias");
+}
+
+#[test]
+fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let mut_sink = symbol("mut_sink", &mut path_fork, &mut string_table);
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+
+    let callee = function_node(
+        mut_sink,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
                 DataType::Int,
                 builtin_type_ids::INT,
                 true,
                 test_source_location(1),
+            )],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    mut_sink,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(11),
+                    )],
+                    vec![],
+                    test_source_location(11),
+                ),
+                test_source_location(11),
             ),
         ],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
+        None,
+    );
 
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                read_then_mut,
-                vec![
-                    CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    ),
-                    CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
-                        CallAccessMode::Shared,
-                        test_source_location(11),
-                    ),
-                ],
-                vec![],
-                test_source_location(11),
-            ),
-            test_source_location(11),
-        ),
-    ],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("shared then mutable access to same root in a call must fail");
-let payload = assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
-let DiagnosticPayload::SharedMutableConflict {
-    existing_access,
-    requested_access,
-    ..
-} = payload
-else {
-    panic!("expected shared/mutable conflict payload, found {payload:?}");
-};
-assert_eq!(
-    (*existing_access, *requested_access),
-    (BorrowAccessKind::Shared, BorrowAccessKind::Mutable)
-); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("single mutable argument call should be accepted");
+}
 
 #[test]
-fn external_alias_args_result_stays_slot_backed_after_rebinding() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let host_alias = register_external_function(
-    &mut external_package_registry,
-    "alias_arg_result",
-    vec![ExternalAccessKind::Shared],
-    ExternalReturnAlias::AliasArgs(vec![0]),
-    ExternalAbiType::I32,
-);
-let original = symbol("original", &mut path_fork, &mut string_table);
-let returned = symbol("returned", &mut path_fork, &mut string_table);
+fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argument() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let returned_call = Expression::host_function_call_with_arguments(
-    host_alias,
-    vec![CallArgument::positional(
-        reference_expr_with_datatype(
-            original,
-            DataType::Int,
-            builtin_type_ids::INT,
-            test_source_location(11),
-        ),
-        CallAccessMode::Shared,
-        test_source_location(11),
-    )],
-    vec![builtin_type_ids::INT],
-    None,
-);
+    let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
+    let a = symbol("a", &mut path_fork, &mut string_table);
+    let b = symbol("b", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
 
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                original,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(returned, returned_call)),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    returned,
+    let callee = function_node(
+        mut2,
+        FunctionSignature {
+            parameters: vec![
+                param_with_datatype(
+                    a,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_source_location(12),
+                    true,
+                    test_source_location(1),
                 ),
-                value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
-            },
-            test_source_location(12),
-        ),
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    original,
+                param_with_datatype(
+                    b,
                     DataType::Int,
                     builtin_type_ids::INT,
-                    test_source_location(13),
+                    true,
+                    test_source_location(1),
                 ),
-                value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
-            },
-            test_source_location(13),
-        ),
-    ],
-    None,
-);
+            ],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("external AliasArgs result should remain rebindable as a caller slot");
-let original_local = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .find_map(|statement| match &statement.kind {
-        HirStatementKind::Assign {
-            target: HirPlace::Local(local),
-            ..
-        } if hir.side_table.resolve_local_name(*local, &path_fork, &string_table) == Some("original") => {
-            Some(*local)
-        }
-        _ => None,
-    })
-    .expect("should locate the original binding");
-let returned_local = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .find_map(|statement| match &statement.kind {
-        HirStatementKind::Assign {
-            target: HirPlace::Local(local),
-            ..
-        } if hir.side_table.resolve_local_name(*local, &path_fork, &string_table) == Some("returned") => {
-            Some(*local)
-        }
-        _ => None,
-    })
-    .expect("should locate the returned binding");
-let returned_rebinding = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .rfind(|statement| {
-        matches!(
-            &statement.kind,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
-                ..
-            } if *local == returned_local
-        )
-    })
-    .expect("should locate the result rebinding statement");
-let returned_before_rebinding = report
-    .analysis
-    .statement_entry_states
-    .get(&returned_rebinding.id)
-    .expect("result rebinding should have an entry snapshot")
-    .locals
-    .iter()
-    .find(|local| local.local == returned_local)
-    .expect("result rebinding snapshot should include the external result");
-
-assert!(
-    returned_before_rebinding.mode.contains(LocalMode::SLOT),
-    "external AliasArgs result should use a caller slot before rebinding, got mode {:?} with roots {:?}",
-    returned_before_rebinding.mode,
-    returned_before_rebinding.alias_roots
-);
-assert!(!returned_before_rebinding.mode.contains(LocalMode::ALIAS));
-assert!(
-    returned_before_rebinding
-        .alias_roots
-        .contains(&original_local),
-    "external AliasArgs result should retain the argument root before rebinding, got mode {:?} with roots {:?}",
-    returned_before_rebinding.mode,
-    returned_before_rebinding.alias_roots
-);
-
-let original_assignment = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .rfind(|statement| {
-        matches!(
-            &statement.kind,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
-                ..
-            } if *local == original_local
-        )
-    })
-    .expect("should locate the source rebinding statement");
-let snapshot = report
-    .analysis
-    .statement_entry_states
-    .get(&original_assignment.id)
-    .expect("source rebinding should have an entry snapshot");
-let returned_snapshot = snapshot
-    .locals
-    .iter()
-    .find(|local| local.local == returned_local)
-    .expect("source rebinding snapshot should include the external result");
-
-assert!(returned_snapshot.mode.contains(LocalMode::SLOT));
-assert!(!returned_snapshot.mode.contains(LocalMode::ALIAS));
-assert!(returned_snapshot.alias_roots.is_empty()); }
-
-#[test]
-fn unresolved_or_mismatched_host_signature_errors() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let one_arg = register_external_function(
-    &mut external_package_registry,
-    "one_arg",
-    vec![ExternalAccessKind::Shared],
-    ExternalReturnAlias::Fresh,
-    ExternalAbiType::Void,
-);
-
-let missing_host =
-    crate::compiler_frontend::external_packages::ExternalFunctionId::Synthetic(9999);
-
-let start_missing = function_node(
-    symbol("start_missing", &mut path_fork, &mut string_table),
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![node(
-        host_function_call_node(missing_host, vec![], vec![], test_source_location(1)),
-        test_source_location(1),
-    )],
-    None,
-);
-
-let start_mismatch = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![node(
-        host_function_call_node(one_arg, vec![], vec![], test_source_location(2)),
-        test_source_location(2),
-    )],
-    None,
-);
-
-let hir = lower_hir(build_ast_with_registered_types(vec![start_missing, start_mismatch], entry_path), &mut string_table, &mut path_fork);
-
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("missing host or mismatched signature should fail");
-assert_infrastructure_error_contains(
-    &error,
-    ErrorType::Compiler,
-    &["host call target", "argument count mismatch"],
-); }
-
-#[test]
-fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
-
-let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
-let p = symbol("p", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
-
-let callee = function_node(
-    mut_user,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
-            test_source_location(1),
-        )],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
-
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                mut_user,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(11),
-                    ),
-                    CallAccessMode::Shared,
-                    test_source_location(11),
-                )],
-                vec![],
-                test_source_location(11),
-            ),
-            test_source_location(11),
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                reference_expr_with_datatype(
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    mut2,
+                    vec![
+                        CallArgument::positional(
+                            reference_expr_with_datatype(
+                                x,
+                                DataType::Int,
+                                builtin_type_ids::INT,
+                                test_source_location(11),
+                            ),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        ),
+                        CallArgument::positional(
+                            Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        )
+                        .with_passing_mode(CallPassingMode::FreshMutableValue),
+                    ],
+                    vec![],
+                    test_source_location(11),
                 ),
-            )),
-            test_source_location(12),
-        ),
-    ],
-    None,
-);
+                test_source_location(11),
+            ),
+        ],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("immutable argument passed to mutable user param and reused must fail");
-assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
+    "fresh mutable call args should be treated as independent locals, not aliases of other args",
+);
+}
 
 #[test]
-fn out_of_range_return_alias_metadata_is_reported_at_call_site() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let mut external_package_registry = default_external_package_registry(&mut string_table);
-let bad_alias_host = register_external_function(
-    &mut external_package_registry,
-    "bad_alias_host",
-    vec![ExternalAccessKind::Shared],
-    ExternalReturnAlias::AliasArgs(vec![1]),
-    ExternalAbiType::I32,
-);
-let x = symbol("x", &mut path_fork, &mut string_table);
+fn host_mutable_parameter_requires_mutable_access() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let host_fn = register_external_function(
+        &mut external_package_registry,
+        "host_mut",
+        vec![ExternalAccessKind::Mutable],
+        ExternalReturnAlias::Fresh,
+        ExternalAbiType::Void,
+    );
+    let x = symbol("x", &mut path_fork, &mut string_table);
 
-let start = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            host_function_call_node(
-                bad_alias_host,
-                vec![CallArgument::positional(
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                )),
+                test_source_location(1),
+            ),
+            node(
+                host_function_call_node(
+                    host_fn,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(2),
+                    )],
+                    vec![],
+                    test_source_location(2),
+                ),
+                test_source_location(2),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("mutable host parameter should enforce mutable access");
+    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
+#[test]
+fn host_mutable_parameter_accepts_mutable_local_argument() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let host_fn = register_external_function(
+        &mut external_package_registry,
+        "host_mut_ok",
+        vec![ExternalAccessKind::Mutable],
+        ExternalReturnAlias::Fresh,
+        ExternalAbiType::Void,
+    );
+    let x = symbol("x", &mut path_fork, &mut string_table);
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                )),
+                test_source_location(1),
+            ),
+            node(
+                host_function_call_node(
+                    host_fn,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(2),
+                    )],
+                    vec![],
+                    test_source_location(2),
+                ),
+                test_source_location(2),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("mutable host parameter should accept mutable local argument");
+}
+
+#[test]
+fn host_shared_parameter_is_shared_only() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let host_fn = register_external_function(
+        &mut external_package_registry,
+        "host_shared",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::Fresh,
+        ExternalAbiType::Void,
+    );
+    let x = symbol("x", &mut path_fork, &mut string_table);
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                )),
+                test_source_location(1),
+            ),
+            node(
+                host_function_call_node(
+                    host_fn,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(2),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(2),
+                    )],
+                    vec![],
+                    test_source_location(2),
+                ),
+                test_source_location(2),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("shared host parameter should not force mutable access");
+}
+
+#[test]
+fn two_mutable_args_to_same_root_are_rejected() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
+    let a = symbol("a", &mut path_fork, &mut string_table);
+    let b = symbol("b", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
+
+    let callee = function_node(
+        mut2,
+        FunctionSignature {
+            parameters: vec![
+                param_with_datatype(
+                    a,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    true,
+                    test_source_location(1),
+                ),
+                param_with_datatype(
+                    b,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    true,
+                    test_source_location(1),
+                ),
+            ],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    mut2,
+                    vec![
+                        CallArgument::positional(
+                            reference_expr_with_datatype(
+                                x,
+                                DataType::Int,
+                                builtin_type_ids::INT,
+                                test_source_location(11),
+                            ),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        ),
+                        CallArgument::positional(
+                            reference_expr_with_datatype(
+                                x,
+                                DataType::Int,
+                                builtin_type_ids::INT,
+                                test_source_location(11),
+                            ),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        ),
+                    ],
+                    vec![],
+                    test_source_location(11),
+                ),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
                     reference_expr_with_datatype(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_source_location(11),
+                        test_source_location(12),
                     ),
-                    CallAccessMode::Shared,
-                    test_source_location(11),
-                )],
-                vec![],
-                test_source_location(11),
+                )),
+                test_source_location(12),
             ),
-            test_source_location(11),
-        ),
-    ],
-    None,
-);
+        ],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![start], entry_path), &mut string_table, &mut path_fork);
-
-let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect_err("out-of-range return alias metadata should fail at call site");
-assert_infrastructure_error_contains(
-    &error,
-    ErrorType::Compiler,
-    &["out-of-range return-alias index"],
-); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("two mutable args to the same root should fail");
+    assert_borrow_error_kind(&error, BorrowDiagnosticKind::MultipleMutableBorrows);
+}
 
 #[test]
-fn same_line_mutable_call_then_reuse_uses_order_keys() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
+fn shared_then_mutable_args_to_same_root_are_rejected() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
-let p = symbol("p", &mut path_fork, &mut string_table);
-let x = symbol("x", &mut path_fork, &mut string_table);
-let y = symbol("y", &mut path_fork, &mut string_table);
+    let read_then_mut = symbol("read_then_mut", &mut path_fork, &mut string_table);
+    let read = symbol("read", &mut path_fork, &mut string_table);
+    let mutate = symbol("mutate", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
 
-let callee = function_node(
-    mut_user,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            p,
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
+    let callee = function_node(
+        read_then_mut,
+        FunctionSignature {
+            parameters: vec![
+                param_with_datatype(
+                    read,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    false,
+                    test_source_location(1),
+                ),
+                param_with_datatype(
+                    mutate,
+                    DataType::Int,
+                    builtin_type_ids::INT,
+                    true,
+                    test_source_location(1),
+                ),
+            ],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    read_then_mut,
+                    vec![
+                        CallArgument::positional(
+                            reference_expr_with_datatype(
+                                x,
+                                DataType::Int,
+                                builtin_type_ids::INT,
+                                test_source_location(11),
+                            ),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        ),
+                        CallArgument::positional(
+                            reference_expr_with_datatype(
+                                x,
+                                DataType::Int,
+                                builtin_type_ids::INT,
+                                test_source_location(11),
+                            ),
+                            CallAccessMode::Shared,
+                            test_source_location(11),
+                        ),
+                    ],
+                    vec![],
+                    test_source_location(11),
+                ),
+                test_source_location(11),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("shared then mutable access to same root in a call must fail");
+    let payload = assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    let DiagnosticPayload::SharedMutableConflict {
+        existing_access,
+        requested_access,
+        ..
+    } = payload
+    else {
+        panic!("expected shared/mutable conflict payload, found {payload:?}");
+    };
+    assert_eq!(
+        (*existing_access, *requested_access),
+        (BorrowAccessKind::Shared, BorrowAccessKind::Mutable)
+    );
+}
+
+#[test]
+fn external_alias_args_result_stays_slot_backed_after_rebinding() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let host_alias = register_external_function(
+        &mut external_package_registry,
+        "alias_arg_result",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::AliasArgs(vec![0]),
+        ExternalAbiType::I32,
+    );
+    let original = symbol("original", &mut path_fork, &mut string_table);
+    let returned = symbol("returned", &mut path_fork, &mut string_table);
+
+    let returned_call = Expression::host_function_call_with_arguments(
+        host_alias,
+        vec![CallArgument::positional(
+            reference_expr_with_datatype(
+                original,
+                DataType::Int,
+                builtin_type_ids::INT,
+                test_source_location(11),
+            ),
+            CallAccessMode::Shared,
+            test_source_location(11),
+        )],
+        vec![builtin_type_ids::INT],
+        None,
+    );
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    original,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(returned, returned_call)),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        returned,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
+                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                },
+                test_source_location(12),
+            ),
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        original,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(13),
+                    ),
+                    value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
+                },
+                test_source_location(13),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("external AliasArgs result should remain rebindable as a caller slot");
+    let original_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                ..
+            } if hir
+                .side_table
+                .resolve_local_name(*local, &path_fork, &string_table)
+                == Some("original") =>
+            {
+                Some(*local)
+            }
+            _ => None,
+        })
+        .expect("should locate the original binding");
+    let returned_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                ..
+            } if hir
+                .side_table
+                .resolve_local_name(*local, &path_fork, &string_table)
+                == Some("returned") =>
+            {
+                Some(*local)
+            }
+            _ => None,
+        })
+        .expect("should locate the returned binding");
+    let returned_rebinding = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .rfind(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(local),
+                    ..
+                } if *local == returned_local
+            )
+        })
+        .expect("should locate the result rebinding statement");
+    let returned_before_rebinding = report
+        .analysis
+        .statement_entry_states
+        .get(&returned_rebinding.id)
+        .expect("result rebinding should have an entry snapshot")
+        .locals
+        .iter()
+        .find(|local| local.local == returned_local)
+        .expect("result rebinding snapshot should include the external result");
+
+    assert!(
+        returned_before_rebinding.mode.contains(LocalMode::SLOT),
+        "external AliasArgs result should use a caller slot before rebinding, got mode {:?} with roots {:?}",
+        returned_before_rebinding.mode,
+        returned_before_rebinding.alias_roots
+    );
+    assert!(!returned_before_rebinding.mode.contains(LocalMode::ALIAS));
+    assert!(
+        returned_before_rebinding
+            .alias_roots
+            .contains(&original_local),
+        "external AliasArgs result should retain the argument root before rebinding, got mode {:?} with roots {:?}",
+        returned_before_rebinding.mode,
+        returned_before_rebinding.alias_roots
+    );
+
+    let original_assignment = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .rfind(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(local),
+                    ..
+                } if *local == original_local
+            )
+        })
+        .expect("should locate the source rebinding statement");
+    let snapshot = report
+        .analysis
+        .statement_entry_states
+        .get(&original_assignment.id)
+        .expect("source rebinding should have an entry snapshot");
+    let returned_snapshot = snapshot
+        .locals
+        .iter()
+        .find(|local| local.local == returned_local)
+        .expect("source rebinding snapshot should include the external result");
+
+    assert!(returned_snapshot.mode.contains(LocalMode::SLOT));
+    assert!(!returned_snapshot.mode.contains(LocalMode::ALIAS));
+    assert!(returned_snapshot.alias_roots.is_empty());
+}
+
+#[test]
+fn unresolved_or_mismatched_host_signature_errors() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let one_arg = register_external_function(
+        &mut external_package_registry,
+        "one_arg",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::Fresh,
+        ExternalAbiType::Void,
+    );
+
+    let missing_host =
+        crate::compiler_frontend::external_packages::ExternalFunctionId::Synthetic(9999);
+
+    let start_missing = function_node(
+        symbol("start_missing", &mut path_fork, &mut string_table),
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(
+            host_function_call_node(missing_host, vec![], vec![], test_source_location(1)),
             test_source_location(1),
         )],
-        returns: vec![],
-    },
-    vec![],
-    None,
-);
+        None,
+    );
 
-// WHAT: both statements intentionally share one source line.
-// WHY: validates that borrow/move classification uses statement order keys, not line numbers.
-let same_line = None;
-let caller = function_node(
-    start_name,
-    FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    },
-    vec![
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
-            )),
-            test_source_location(10),
-        ),
-        node(
-            function_call_node(
-                mut_user,
-                vec![CallArgument::positional(
+    let start_mismatch = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(
+            host_function_call_node(one_arg, vec![], vec![], test_source_location(2)),
+            test_source_location(2),
+        )],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start_missing, start_mismatch], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("missing host or mismatched signature should fail");
+    assert_infrastructure_error_contains(
+        &error,
+        ErrorType::Compiler,
+        &["host call target", "argument count mismatch"],
+    );
+}
+
+#[test]
+fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
+
+    let callee = function_node(
+        mut_user,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
+                DataType::Int,
+                builtin_type_ids::INT,
+                true,
+                test_source_location(1),
+            )],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    mut_user,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(11),
+                    )],
+                    vec![],
+                    test_source_location(11),
+                ),
+                test_source_location(11),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
+                    reference_expr_with_datatype(
+                        x,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        test_source_location(12),
+                    ),
+                )),
+                test_source_location(12),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("immutable argument passed to mutable user param and reused must fail");
+    assert_invalid_mutable_access_reason(&error, InvalidMutableAccessReason::ImmutablePlace);
+}
+
+#[test]
+fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut external_package_registry = default_external_package_registry(&mut string_table);
+    let bad_alias_host = register_external_function(
+        &mut external_package_registry,
+        "bad_alias_host",
+        vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::AliasArgs(vec![1]),
+        ExternalAbiType::I32,
+    );
+    let x = symbol("x", &mut path_fork, &mut string_table);
+
+    let start = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                host_function_call_node(
+                    bad_alias_host,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            test_source_location(11),
+                        ),
+                        CallAccessMode::Shared,
+                        test_source_location(11),
+                    )],
+                    vec![],
+                    test_source_location(11),
+                ),
+                test_source_location(11),
+            ),
+        ],
+        None,
+    );
+
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![start], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect_err("out-of-range return alias metadata should fail at call site");
+    assert_infrastructure_error_contains(
+        &error,
+        ErrorType::Compiler,
+        &["out-of-range return-alias index"],
+    );
+}
+
+#[test]
+fn same_line_mutable_call_then_reuse_uses_order_keys() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
+    let p = symbol("p", &mut path_fork, &mut string_table);
+    let x = symbol("x", &mut path_fork, &mut string_table);
+    let y = symbol("y", &mut path_fork, &mut string_table);
+
+    let callee = function_node(
+        mut_user,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                p,
+                DataType::Int,
+                builtin_type_ids::INT,
+                true,
+                test_source_location(1),
+            )],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+
+    // WHAT: both statements intentionally share one source line.
+    // WHY: validates that borrow/move classification uses statement order keys, not line numbers.
+    let same_line = None;
+    let caller = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    x,
+                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                )),
+                test_source_location(10),
+            ),
+            node(
+                function_call_node(
+                    mut_user,
+                    vec![CallArgument::positional(
+                        reference_expr_with_datatype(
+                            x,
+                            DataType::Int,
+                            builtin_type_ids::INT,
+                            same_line,
+                        ),
+                        CallAccessMode::Shared,
+                        same_line,
+                    )],
+                    vec![],
+                    same_line,
+                ),
+                same_line,
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    y,
                     reference_expr_with_datatype(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,
                         same_line,
                     ),
-                    CallAccessMode::Shared,
-                    same_line,
-                )],
-                vec![],
+                )),
                 same_line,
             ),
-            same_line,
-        ),
-        node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                y,
-                reference_expr_with_datatype(
-                    x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    same_line,
-                ),
-            )),
-            same_line,
-        ),
-    ],
-    None,
-);
+        ],
+        None,
+    );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![callee, caller], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
-    "same-line mutable call + later reuse should borrow (not move) when ordered by statement",
-); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
+        "same-line mutable call + later reuse should borrow (not move) when ordered by statement",
+    );
+}
 
 #[test]
-fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving() { let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty(); let mut string_table = StringTable::new();
-let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
-let external_package_registry = default_external_package_registry(&mut string_table);
+fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving() {
+    let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let external_package_registry = default_external_package_registry(&mut string_table);
 
-let rhs_name = symbol("rhs_short", &mut path_fork, &mut string_table);
-let calls = symbol("calls", &mut path_fork, &mut string_table);
-let lhs = symbol("lhs", &mut path_fork, &mut string_table);
-let value = symbol("value", &mut path_fork, &mut string_table);
-let sink = symbol("sink", &mut path_fork, &mut string_table);
-let param_calls = symbol("param_calls", &mut path_fork, &mut string_table);
+    let rhs_name = symbol("rhs_short", &mut path_fork, &mut string_table);
+    let calls = symbol("calls", &mut path_fork, &mut string_table);
+    let lhs = symbol("lhs", &mut path_fork, &mut string_table);
+    let value = symbol("value", &mut path_fork, &mut string_table);
+    let sink = symbol("sink", &mut path_fork, &mut string_table);
+    let param_calls = symbol("param_calls", &mut path_fork, &mut string_table);
 
-let rhs_function = function_node(
+    let rhs_function = function_node(
     rhs_name,
     FunctionSignature {
         parameters: vec![param_with_datatype(
@@ -2548,7 +2751,7 @@ let rhs_function = function_node(
     None,
 );
 
-let short_circuit_value = Expression::runtime(
+    let short_circuit_value = Expression::runtime(
     ExpressionRpn {
         items: vec![
             ExpressionRpnItem::Operand(Expression::reference_with_type_id(
@@ -2583,7 +2786,7 @@ let short_circuit_value = Expression::runtime(
     ValueMode::ImmutableOwned,
 );
 
-let start_function = function_node(
+    let start_function = function_node(
     start_name,
     FunctionSignature {
         parameters: vec![],
@@ -2630,6 +2833,11 @@ let start_function = function_node(
     None,
 );
 
-let hir = lower_hir(build_ast_with_registered_types(vec![rhs_function, start_function], entry_path), &mut string_table, &mut path_fork);
-run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-    .expect("rhs-only mutable short-circuit call with later merge use should stay borrowed"); }
+    let hir = lower_hir(
+        build_ast_with_registered_types(vec![rhs_function, start_function], entry_path),
+        &mut string_table,
+        &mut path_fork,
+    );
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("rhs-only mutable short-circuit call with later merge use should stay borrowed");
+}

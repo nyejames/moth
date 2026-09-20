@@ -50,10 +50,13 @@ fn origin(path: &str) -> StableResourceOriginId {
 
 fn module_with_resource_table(resources: ModuleResourceTable) -> Module {
     Module {
-        executable: ModuleExecutable { hir: HirModule::new(),
-        resource_table: resources,
-        type_environment: TypeEnvironment::new(),
-        borrow_analysis: BorrowCheckReport::default(), path_table: Arc::new(PathInternerFork::empty().snapshot_table()), },
+        executable: ModuleExecutable {
+            hir: HirModule::new(),
+            resource_table: resources,
+            type_environment: TypeEnvironment::new(),
+            borrow_analysis: BorrowCheckReport::default(),
+            path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
+        },
         link_facts: ModuleLinkFacts {
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             external_import_candidates: Vec::new(),

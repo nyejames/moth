@@ -1,8 +1,8 @@
 //! Imported aliases, constants, defaults, and folded values.
 
 use super::*;
-use std::cell::RefCell;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use std::cell::RefCell;
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};

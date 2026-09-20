@@ -22,7 +22,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use std::path::Path;
 
 fn compile_project_source(
@@ -37,7 +37,6 @@ fn compile_project_source(
     let outcome = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
@@ -64,7 +63,6 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
     let compiled = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code:
                 "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
@@ -115,7 +113,6 @@ fn projects_authored_anonymous_const_records() {
     let compiled = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= |\n    first = \"a\",\n|\n",
             style_directives: &style_directives,
@@ -176,27 +173,51 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
     let source_code = source_files
         .retained_text(file_id)
         .expect("the snapshot should remain owned");
-    let authored_scope = path_fork.try_intern_filesystem_path(authored_path, &mut string_table)
+    let authored_scope = path_fork
+        .try_intern_filesystem_path(authored_path, &mut string_table)
         .expect("the authored path should be UTF-8");
     // A reference lexer pass captures the literal's local span; the span rows land in a
     // throwaway reference builder, so the service's independent builder must re-encode the
     // same bytes for the retained-span assertion below.
     let mut reference_builder = ExtendedSpanBuilder::new();
-    let reference_tokens = tokenize(source_code, authored_scope, TokenizerEntryMode::SourceFile, &style_directives, &mut string_table, &mut path_fork, file_id, &mut reference_builder)
+    let reference_tokens = tokenize(
+        source_code,
+        authored_scope,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        file_id,
+        &mut reference_builder,
+    )
     .expect("the config should tokenize before its later dialect rejection");
-    let literal_span = reference_tokens
-        .tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("the reference lexer should produce the long literal")
-        .span;
+    let literal_span = (0..reference_tokens.tokens.len())
+        .filter_map(|index| {
+            let token_index =
+                TokenIndex::try_from_index(index).expect("the reference token index should fit");
+            let token = reference_tokens
+                .tokens
+                .token(token_index)
+                .expect("the reference token index should resolve");
+            if token.tag() != TokenTag::STRING_SLICE_LITERAL {
+                return None;
+            }
+            assert_eq!(
+                token
+                    .string_spelling(&string_table)
+                    .expect("the string literal payload should resolve"),
+                Some(long_value.as_str())
+            );
+            Some(token.span())
+        })
+        .next()
+        .expect("the reference lexer should produce the long literal");
     drop(reference_tokens);
     drop(reference_builder);
 
     let outcome = compile_config_source(
         ConfigCompilationRequest {
             authored_path,
-            canonical_path,
             file_id,
             source_code,
             style_directives: &style_directives,
@@ -245,7 +266,6 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
     let messages = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "Inner = |\n    x Int,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
             style_directives: &style_directives,
@@ -287,7 +307,6 @@ fn rejects_authored_plain_bindings_inside_the_service() {
     let messages = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
             style_directives: &style_directives,
@@ -331,7 +350,6 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
     let messages = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    child = | value = 1 |,\n|\n",
             style_directives: &style_directives,
@@ -374,7 +392,6 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
     let messages = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    alias = name,\n|\n",
             style_directives: &style_directives,
@@ -416,7 +433,6 @@ fn rejects_config_qualifier_on_builder_section_fields() {
     let messages = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
-            canonical_path: Path::new("/project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "html #= |\n    origin #Config of String = \"/docs\",\n|\n",
             style_directives: &style_directives,
@@ -1025,7 +1041,6 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
         let outcome = compile_config_source(
             ConfigCompilationRequest {
                 authored_path,
-                canonical_path,
                 file_id,
                 source_code: &source,
                 style_directives: &directives,

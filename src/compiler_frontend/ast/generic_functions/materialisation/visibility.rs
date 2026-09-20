@@ -431,11 +431,10 @@ impl StableFileVisibility {
             materialise_bindings(&self.trait_names, &mut visibility.visible_trait_names);
         }
 
-        let error_path =
-            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-                path_fork,
-                string_table,
-            );
+        let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+            path_fork,
+            string_table,
+        );
         let error_name =
             string_table.intern(crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME);
         visible_declaration_paths.insert(error_path);
@@ -479,9 +478,7 @@ impl StableFileVisibility {
 
         Ok(visibility)
     }
-    pub(super) fn materialised_selected_paths(
-        &self,
-    ) -> FxHashSet<PathId> {
+    pub(super) fn materialised_selected_paths(&self) -> FxHashSet<PathId> {
         let mut selected = self
             .source_names
             .iter()
@@ -516,5 +513,4 @@ impl StableFileVisibility {
             Self::collect_namespace_source_paths(&child.record, selected);
         }
     }
-
 }

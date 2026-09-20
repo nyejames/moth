@@ -44,6 +44,8 @@ pub(crate) struct ValidateTraitEvidenceInput<'a> {
     pub(crate) nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
     pub(crate) struct_source_by_path: &'a FxHashMap<PathId, PathId>,
     pub(crate) choice_source_by_path: &'a FxHashMap<PathId, PathId>,
+    pub(crate) source_paths_by_source_id:
+        &'a FxHashMap<crate::compiler_frontend::source::SourceId, PathId>,
     pub(crate) string_table: &'a mut StringTable,
 }
 
@@ -94,9 +96,13 @@ pub(crate) fn validate_trait_evidence(
             ));
         }
 
+        let conformance_source_file = *input
+            .source_paths_by_source_id
+            .get(&header.tokens.source())
+            .expect("header body range has no prepared source-path identity");
         let visibility = input
             .binding_environment
-            .visibility_for(&header.source_file)
+            .visibility_for(&conformance_source_file)
             .map_err(|_| {
                 invalid_conformance(
                     conformance.target.name,
@@ -106,8 +112,6 @@ pub(crate) fn validate_trait_evidence(
                     Vec::new(),
                 )
             })?;
-        let conformance_source_file = header.source_file;
-
         let target_context = ResolveConformanceTargetContext {
             conformance_source_file: &conformance_source_file,
             visibility,

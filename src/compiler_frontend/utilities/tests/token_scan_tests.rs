@@ -1,264 +1,376 @@
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
-use crate::compiler_frontend::utilities::token_scan::{
-    OpenConstruct, TokenScanFailure, collect_declaration_initializer_tokens,
-    collect_symbol_references, consume_balanced_template_region, find_expression_end_index,
-    has_top_level_comma_before_statement_end, innermost_open_construct,
+use crate::compiler_frontend::tokenizer::tokens::{
+    SourceTokens, TestSourceTokensBuilder, TokenCursor, TokenIndex, TokenRange, TokenTag,
 };
+use crate::compiler_frontend::utilities::token_scan::{
+    InitializerReference, OpenConstruct, TokenFactView, TokenScanFailure,
+    collect_declaration_initializer_range, collect_scanned_symbol_references,
+    consume_balanced_template_region_from_source, has_top_level_comma_before_statement_end,
+    innermost_open_construct,
+};
+use std::sync::Arc;
 
-fn token(kind: TokenKind) -> Token {
-    Token::new(kind, LocalSpan::source_start())
+enum FixturePart {
+    Static(TokenTag),
+    Symbol(crate::compiler_frontend::symbols::string_interning::StringId),
+    Numeric(NumericLiteralToken),
+    StringSlice(crate::compiler_frontend::symbols::string_interning::StringId),
 }
 
-fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> FileTokens {
-    let mut path_fork = PathInternerFork::empty();
-    let tokens = kinds.into_iter().map(token).collect();
-    FileTokens::new(
-        path_fork.try_intern_portable_path("token_scan_tests", string_table).expect("test path fits"),
-        SourceId::COMPILATION_ROOT,
-        tokens,
+fn source_tokens_from_parts(source: SourceId, parts: Vec<FixturePart>) -> Arc<SourceTokens> {
+    let mut builder = TestSourceTokensBuilder::new(source);
+    for part in parts {
+        match part {
+            FixturePart::Static(tag) => builder
+                .push_static(tag, LocalSpan::source_start())
+                .expect("static fixture token should build"),
+            FixturePart::Symbol(value) => builder
+                .push_symbol(TokenTag::SYMBOL, value, LocalSpan::source_start())
+                .expect("symbol fixture token should build"),
+            FixturePart::Numeric(literal) => builder
+                .push_numeric(literal, LocalSpan::source_start())
+                .expect("numeric fixture token should build"),
+            FixturePart::StringSlice(value) => builder
+                .push_symbol(
+                    TokenTag::STRING_SLICE_LITERAL,
+                    value,
+                    LocalSpan::source_start(),
+                )
+                .expect("string fixture token should build"),
+        }
+    }
+    builder
+        .finish()
+        .expect("canonical fixture tokens should build")
+}
+
+fn full_cursor(owner: &SourceTokens) -> TokenCursor<'_> {
+    owner
+        .cursor(owner.full_range().expect("test owner range should fit"))
+        .expect("test cursor range should fit")
+}
+
+fn scan_initializer(
+    owner: &SourceTokens,
+    string_table: &mut StringTable,
+) -> Result<(TokenRange, Vec<InitializerReference>), TokenScanFailure> {
+    let mut cursor = full_cursor(owner);
+    collect_declaration_initializer_range(&mut cursor, string_table)
+}
+
+fn tags_in_range(owner: &SourceTokens, range: TokenRange) -> Vec<TokenTag> {
+    let mut cursor = owner.cursor(range).expect("checked range should fit");
+    (0..range.len() as usize)
+        .filter_map(|_| cursor.advance())
+        .map(|token| token.tag())
+        .collect()
+}
+
+fn boundary_tag(owner: &SourceTokens, range: TokenRange) -> Option<TokenTag> {
+    owner.token(range.end()).ok().map(|token| token.tag())
+}
+
+fn symbol_ids_in_range(
+    owner: &SourceTokens,
+    range: TokenRange,
+) -> Vec<crate::compiler_frontend::symbols::string_interning::StringId> {
+    let mut cursor = owner.cursor(range).expect("checked range should fit");
+    (0..range.len() as usize)
+        .filter_map(|_| cursor.advance())
+        .filter(|token| token.tag() == TokenTag::SYMBOL)
+        .filter_map(|token| token.string_id())
+        .collect()
+}
+
+fn ast_cursor(owner: &Arc<SourceTokens>) -> AstCursor<'_> {
+    AstCursor::from_source_tokens(
+        owner,
+        owner.full_range().expect("test owner range should fit"),
     )
+    .expect("canonical AST cursor should construct")
+}
+
+#[test]
+fn canonical_range_view_rejects_foreign_source() {
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![FixturePart::Static(TokenTag::EOF)],
+    );
+    let canonical = &owner;
+    let foreign = TokenRange::new(
+        SourceId::from_index(1),
+        TokenIndex::try_from_raw(0).expect("zero index is representable"),
+        TokenIndex::try_from_raw(1).expect("one index is representable"),
+    )
+    .expect("ordered foreign range should construct");
+
+    assert!(matches!(
+        TokenFactView::from_source_range(canonical, foreign),
+        Err(crate::compiler_frontend::tokenizer::tokens::TokenRangeError::ForeignSource {
+            expected,
+            actual,
+        }) if expected == canonical.source() && actual == foreign.source()
+    ));
+}
+
+#[test]
+fn canonical_range_view_rejects_out_of_owner_range() {
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![FixturePart::Static(TokenTag::EOF)],
+    );
+    let out_of_owner = TokenRange::new(
+        owner.source(),
+        TokenIndex::try_from_raw(0).expect("zero index is representable"),
+        TokenIndex::try_from_raw(2).expect("two index is representable"),
+    )
+    .expect("ordered range should construct");
+
+    assert!(matches!(
+        TokenFactView::from_source_range(&owner, out_of_owner),
+        Err(crate::compiler_frontend::tokenizer::tokens::TokenRangeError::OutOfBounds { .. })
+    ));
 }
 
 #[test]
 fn top_level_comma_detection_ignores_nested_commas() {
+    let source = SourceId::COMPILATION_ROOT;
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
 
-    let nested_only = stream_from_kinds(
+    let nested_only = source_tokens_from_parts(
+        source,
         vec![
-            TokenKind::OpenParenthesis,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Comma,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::CloseParenthesis,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
-    assert!(!has_top_level_comma_before_statement_end(&nested_only));
+    let nested_cursor = ast_cursor(&nested_only);
+    assert!(!has_top_level_comma_before_statement_end(&nested_cursor));
 
-    let top_level = stream_from_kinds(
+    let top_level = source_tokens_from_parts(
+        source,
         vec![
-            TokenKind::Symbol(string_table.intern("a")),
-            TokenKind::Comma,
-            TokenKind::Symbol(string_table.intern("b")),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
-    assert!(has_top_level_comma_before_statement_end(&top_level));
+    let top_level_cursor = ast_cursor(&top_level);
+    assert!(has_top_level_comma_before_statement_end(&top_level_cursor));
 
-    let multiline = stream_from_kinds(
+    let multiline = source_tokens_from_parts(
+        source,
         vec![
-            TokenKind::Symbol(string_table.intern("a")),
-            TokenKind::Comma,
-            TokenKind::Newline,
-            TokenKind::Symbol(string_table.intern("b")),
-            TokenKind::Assign,
-            TokenKind::Symbol(string_table.intern("pair")),
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Symbol(string_table.intern("pair")),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
-    assert!(has_top_level_comma_before_statement_end(&multiline));
+    let multiline_cursor = ast_cursor(&multiline);
+    assert!(has_top_level_comma_before_statement_end(&multiline_cursor));
 }
 
 #[test]
-fn expression_end_index_respects_nested_depth() {
+fn canonical_comma_gate_respects_nested_call_depth() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-
-    let tokens = vec![
-        token(TokenKind::Symbol(string_table.intern("call"))),
-        token(TokenKind::OpenParenthesis),
-        token(TokenKind::Symbol(string_table.intern("a"))),
-        token(TokenKind::Comma),
-        token(TokenKind::Symbol(string_table.intern("b"))),
-        token(TokenKind::CloseParenthesis),
-        token(TokenKind::Comma),
-        token(TokenKind::Symbol(string_table.intern("tail"))),
-        token(TokenKind::Eof),
-    ];
-
-    let end_index = find_expression_end_index(&tokens, 0, &[TokenKind::Comma]);
-    assert_eq!(
-        end_index, 6,
-        "expected top-level comma after call expression"
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(string_table.intern("call")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Symbol(string_table.intern("a")),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("b")),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Symbol(string_table.intern("tail")),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+    let cursor = ast_cursor(&owner);
+    assert!(
+        has_top_level_comma_before_statement_end(&cursor),
+        "the gate must ignore the nested comma and see the top-level comma"
     );
 }
 
 #[test]
-fn declaration_initializer_tokens_include_terminal_catch_then_block() {
+fn declaration_initializer_range_includes_terminal_catch_then_block() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let next_statement_name = string_table.intern("next_statement");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Then,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("0", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement_name),
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("0", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement_name),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let (range, _) = scan_initializer(&owner, &mut string_table)
         .expect("catch initializer should scan successfully");
-    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
-
     assert_eq!(
-        collected_kinds,
+        tags_in_range(&owner, range),
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Then,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("0", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::End,
+            TokenTag::SYMBOL,
+            TokenTag::OPEN_PARENTHESIS,
+            TokenTag::CLOSE_PARENTHESIS,
+            TokenTag::CATCH,
+            TokenTag::COLON,
+            TokenTag::NEWLINE,
+            TokenTag::THEN,
+            TokenTag::NUMERIC_LITERAL,
+            TokenTag::NEWLINE,
+            TokenTag::END,
         ]
     );
-    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+    assert_eq!(boundary_tag(&owner, range), Some(TokenTag::NEWLINE));
 }
 
 #[test]
-fn declaration_initializer_tokens_balance_nested_blocks_inside_catch() {
+fn declaration_initializer_range_balances_nested_blocks_inside_catch() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
     let flag_name = string_table.intern("flag");
     let io_name = string_table.intern("io");
     let next_statement_name = string_table.intern("next_statement");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::If,
-            TokenKind::Symbol(flag_name),
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Symbol(io_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Then,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("0", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::End,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement_name),
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(flag_name),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(io_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::THEN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("0", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::END),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement_name),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let (range, _) = scan_initializer(&owner, &mut string_table)
         .expect("nested catch initializer should scan successfully");
-    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
-
-    assert!(
-        collected_kinds.contains(&TokenKind::Then),
-        "catch fallback should remain inside the initializer token slice"
-    );
+    let tags = tags_in_range(&owner, range);
+    assert!(tags.contains(&TokenTag::THEN));
     assert_eq!(
-        collected_kinds
-            .iter()
-            .filter(|kind| matches!(kind, TokenKind::End))
-            .count(),
+        tags.iter().filter(|tag| **tag == TokenTag::END).count(),
         2,
-        "both the nested if and the catch block terminators should be collected"
+        "both nested and outer terminators should be collected"
     );
-    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+    assert_eq!(boundary_tag(&owner, range), Some(TokenTag::NEWLINE));
 }
 
 #[test]
-fn balanced_template_region_consumes_nested_templates() {
+fn balanced_template_region_consumes_nested_templates_from_source() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-
     let text_outer = string_table.intern("outer");
     let text_inner = string_table.intern("inner");
-
-    // Stream starts just after an opening TemplateHead that the caller already consumed.
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::StringSliceLiteral(text_outer),
-            TokenKind::TemplateHead,
-            TokenKind::StringSliceLiteral(text_inner),
-            TokenKind::TemplateClose,
-            TokenKind::TemplateClose,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(text_outer),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(text_inner),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::Static(TokenTag::TEMPLATE_CLOSE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
+    let mut cursor = full_cursor(&owner);
+    let opening = cursor.advance().expect("opening token should be present");
     let mut consumed = Vec::new();
-    consume_balanced_template_region(
-        &mut stream,
-        |token, _kind| consumed.push(token.kind),
+    let end = consume_balanced_template_region_from_source(
+        &mut cursor,
+        opening,
+        |token| consumed.push(token.tag()),
         |_location| String::from("unexpected eof"),
+        |error| format!("infrastructure failure: {error:?}"),
     )
     .expect("balanced template scan should succeed");
 
     assert_eq!(
         consumed,
         vec![
-            TokenKind::StringSliceLiteral(text_outer),
-            TokenKind::TemplateHead,
-            TokenKind::StringSliceLiteral(text_inner),
-            TokenKind::TemplateClose,
-            TokenKind::TemplateClose,
+            TokenTag::STRING_SLICE_LITERAL,
+            TokenTag::TEMPLATE_HEAD,
+            TokenTag::STRING_SLICE_LITERAL,
+            TokenTag::TEMPLATE_CLOSE,
+            TokenTag::TEMPLATE_CLOSE,
         ]
     );
-    assert_eq!(stream.current_token_kind(), &TokenKind::Eof);
+    assert_eq!(
+        end,
+        TokenIndex::try_from_index(6).expect("index should fit")
+    );
+    assert_eq!(cursor.peek().map(|token| token.tag()), Some(TokenTag::EOF));
 }
 
 #[test]
-fn balanced_template_region_errors_on_eof_before_close() {
+fn balanced_template_region_errors_on_eof_before_close_from_source() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::StringSliceLiteral(string_table.intern("x")),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::StringSlice(string_table.intern("x")),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = consume_balanced_template_region(
-        &mut stream,
-        |_token, _kind| {},
+    let mut cursor = full_cursor(&owner);
+    let opening = cursor.advance().expect("opening token should be present");
+    let error = consume_balanced_template_region_from_source(
+        &mut cursor,
+        opening,
+        |_token| {},
         |_location| String::from("missing template close"),
+        |error| format!("infrastructure failure: {error:?}"),
     )
     .expect_err("unterminated template should fail");
 
@@ -266,99 +378,109 @@ fn balanced_template_region_errors_on_eof_before_close() {
 }
 
 #[test]
-fn collect_symbol_references_matches_initializer_behavior_for_bare_symbol() {
+fn collect_scanned_symbol_references_matches_initializer_behavior_for_bare_symbol() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let name = string_table.intern("value");
-    let tokens = vec![
-        token(TokenKind::Symbol(name)),
-        token(TokenKind::Newline),
-        token(TokenKind::Eof),
-    ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
-        &tokens,
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
+    );
+    let references = collect_scanned_symbol_references(
+        TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
     );
-    assert_eq!(refs.len(), 1);
-    assert_eq!(string_table.resolve(refs[0].name), "value");
-    assert!(refs[0].dot_member.is_none());
-    assert!(!refs[0].followed_by_call);
-    assert!(!refs[0].followed_by_choice_namespace);
+
+    assert_eq!(references.len(), 1);
+    assert_eq!(string_table.resolve(references[0].name), "value");
+    assert!(references[0].dot_member.is_none());
+    assert!(!references[0].followed_by_call);
+    assert!(!references[0].followed_by_choice_namespace);
 }
 
 #[test]
-fn collect_symbol_references_matches_initializer_behavior_for_dot_member() {
+fn collect_scanned_symbol_references_matches_initializer_behavior_for_dot_member() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let name = string_table.intern("config");
     let member = string_table.intern("setting");
-    let tokens = vec![
-        token(TokenKind::Symbol(name)),
-        token(TokenKind::Dot),
-        token(TokenKind::Symbol(member)),
-        token(TokenKind::Newline),
-    ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
-        &tokens,
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::DOT),
+            FixturePart::Symbol(member),
+            FixturePart::Static(TokenTag::NEWLINE),
+        ],
+    );
+    let references = collect_scanned_symbol_references(
+        TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
     );
-    assert_eq!(refs.len(), 1);
-    assert_eq!(string_table.resolve(refs[0].name), "config");
+
+    assert_eq!(references.len(), 1);
+    assert_eq!(string_table.resolve(references[0].name), "config");
     assert_eq!(
-        refs[0].dot_member.map(|m| string_table.resolve(m)),
+        references[0]
+            .dot_member
+            .map(|member| string_table.resolve(member)),
         Some("setting")
     );
-    assert!(!refs[0].followed_by_call);
+    assert!(!references[0].followed_by_call);
 }
 
 #[test]
-fn collect_symbol_references_matches_initializer_behavior_for_call() {
+fn collect_scanned_symbol_references_matches_initializer_behavior_for_call() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let name = string_table.intern("helper");
-    let tokens = vec![
-        token(TokenKind::Symbol(name)),
-        token(TokenKind::OpenParenthesis),
-        token(TokenKind::CloseParenthesis),
-    ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
-        &tokens,
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+        ],
+    );
+    let references = collect_scanned_symbol_references(
+        TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
     );
-    assert_eq!(refs.len(), 1);
-    assert_eq!(string_table.resolve(refs[0].name), "helper");
-    assert!(refs[0].followed_by_call);
-    assert!(!refs[0].followed_by_choice_namespace);
+
+    assert_eq!(references.len(), 1);
+    assert_eq!(string_table.resolve(references[0].name), "helper");
+    assert!(references[0].followed_by_call);
+    assert!(!references[0].followed_by_choice_namespace);
 }
 
 #[test]
-fn collect_symbol_references_matches_initializer_behavior_for_choice_namespace() {
+fn collect_scanned_symbol_references_matches_initializer_behavior_for_choice_namespace() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let name = string_table.intern("Status");
-    let tokens = vec![
-        token(TokenKind::Symbol(name)),
-        token(TokenKind::DoubleColon),
-        token(TokenKind::Symbol(string_table.intern("Ready"))),
-    ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
-        &tokens,
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::DOUBLE_COLON),
+            FixturePart::Symbol(string_table.intern("Ready")),
+        ],
+    );
+    let references = collect_scanned_symbol_references(
+        TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
     );
-    assert_eq!(refs.len(), 1);
-    assert_eq!(string_table.resolve(refs[0].name), "Status");
-    assert!(!refs[0].followed_by_call);
-    assert!(refs[0].followed_by_choice_namespace);
+
+    assert_eq!(references.len(), 1);
+    assert_eq!(string_table.resolve(references[0].name), "Status");
+    assert!(!references[0].followed_by_call);
+    assert!(references[0].followed_by_choice_namespace);
 }
 
 // ---------------------------------------------------------------------------
-//  Declaration-initializer EOF delimiter reporting
+// Declaration-initializer EOF delimiter reporting
 // ---------------------------------------------------------------------------
 
-/// Extract the expected EOF delimiter string from a scanner error.
-///
-/// Panics when the error is not an `UnexpectedEndOfFile` diagnostic so each test
-/// names exactly what it protects.
 fn eof_expected_delimiter(
     failure: &TokenScanFailure,
     string_table: &StringTable,
@@ -381,18 +503,16 @@ fn eof_expected_delimiter(
 #[test]
 fn eof_in_template_reports_closing_bracket() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let name = string_table.intern("value");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::TemplateHead,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("value")),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -404,18 +524,16 @@ fn eof_in_template_reports_closing_bracket() {
 #[test]
 fn eof_in_parenthesis_reports_closing_paren() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let name = string_table.intern("call");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::OpenParenthesis,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("call")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated parenthesis should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -427,45 +545,42 @@ fn eof_in_parenthesis_reports_closing_paren() {
 #[test]
 fn eof_in_collection_reports_closing_brace() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let name = string_table.intern("data");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(name),
-            TokenKind::OpenCurly,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("data")),
+            FixturePart::Static(TokenTag::OPEN_CURLY),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated collection should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
         Some("}".to_owned()),
-        "open collection/map expects }}"
+        "open collection/map expects }}",
     );
 }
 
 #[test]
 fn eof_in_catch_block_reports_semicolon() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let load_name = string_table.intern("load");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Symbol(load_name),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated catch block should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -477,20 +592,19 @@ fn eof_in_catch_block_reports_semicolon() {
 #[test]
 fn eof_in_value_producing_if_reports_semicolon() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let condition_name = string_table.intern("ready");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::If,
-            TokenKind::Symbol(condition_name),
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::IF),
+            FixturePart::Symbol(condition_name),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated value-producing if should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -502,25 +616,22 @@ fn eof_in_value_producing_if_reports_semicolon() {
 #[test]
 fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let load_name = string_table.intern("load");
-    let arg_name = string_table.intern("arg");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::Symbol(load_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::CloseParenthesis,
-            TokenKind::Catch,
-            TokenKind::Colon,
-            TokenKind::Newline,
-            TokenKind::Symbol(arg_name),
-            TokenKind::OpenParenthesis,
-            TokenKind::Eof,
+            FixturePart::Symbol(string_table.intern("load")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::CLOSE_PARENTHESIS),
+            FixturePart::Static(TokenTag::CATCH),
+            FixturePart::Static(TokenTag::COLON),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(string_table.intern("arg")),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated nested parenthesis should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -532,17 +643,16 @@ fn eof_in_nested_parenthesis_inside_catch_reports_innermost_paren() {
 #[test]
 fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TemplateHead,
-            TokenKind::OpenParenthesis,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated parenthesis inside template should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -553,17 +663,16 @@ fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
 #[test]
 fn eof_in_template_inside_parenthesis_reports_innermost_template() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::OpenParenthesis,
-            TokenKind::TemplateHead,
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let error = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
+    let error = scan_initializer(&owner, &mut string_table)
         .expect_err("unterminated template inside parenthesis should report EOF");
     assert_eq!(
         eof_expected_delimiter(&error, &string_table),
@@ -573,11 +682,7 @@ fn eof_in_template_inside_parenthesis_reports_innermost_template() {
 
 #[test]
 fn innermost_open_construct_is_none_when_nothing_is_open() {
-    assert_eq!(
-        innermost_open_construct(&[]),
-        None,
-        "no open construct means no fabricated delimiter"
-    );
+    assert_eq!(innermost_open_construct(&[]), None);
 }
 
 #[test]
@@ -589,114 +694,113 @@ fn innermost_open_construct_prioritizes_depth_over_statement_blocks() {
     ];
     assert_eq!(
         innermost_open_construct(&open_constructs),
-        Some(OpenConstruct::Parenthesis),
-        "parenthesis inside a catch or value-if is innermost"
+        Some(OpenConstruct::Parenthesis)
     );
 }
 
 #[test]
-fn declaration_initializer_tokens_keep_a_multiline_pipe_list_together() {
+fn declaration_initializer_range_keeps_a_multiline_pipe_list_together() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let field_a = string_table.intern("a");
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(field_a),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::Symbol(field_b),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_a),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_b),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
-        .expect("a multiline pipe list should scan as one initializer");
-    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
-
+    let (range, _) = scan_initializer(&owner, &mut string_table)
+        .expect("multiline pipe list should scan as one initializer");
     assert!(
-        collected_kinds.contains(&TokenKind::Symbol(field_b)),
+        symbol_ids_in_range(&owner, range).contains(&field_b),
         "the scanner must not stop at the newline between record fields"
     );
-    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+    assert_eq!(boundary_tag(&owner, range), Some(TokenTag::NEWLINE));
 }
 
 #[test]
-fn declaration_initializer_tokens_keep_a_malformed_multiline_pipe_list_together() {
+fn declaration_initializer_range_keeps_a_malformed_multiline_pipe_list_together() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
     let field_b = string_table.intern("b");
     let next_statement = string_table.intern("next");
-    let mut stream = stream_from_kinds(
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
         vec![
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("1", &mut string_table)),
-            TokenKind::Comma,
-            TokenKind::Newline,
-            TokenKind::Symbol(field_b),
-            TokenKind::Assign,
-            TokenKind::NumericLiteral(NumericLiteralToken::test_new("2", &mut string_table)),
-            TokenKind::Newline,
-            TokenKind::TypeParameterBracket,
-            TokenKind::Newline,
-            TokenKind::Symbol(next_statement),
-            TokenKind::Eof,
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Numeric(NumericLiteralToken::test_new("1", &mut string_table)),
+            FixturePart::Static(TokenTag::COMMA),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(field_b),
+            FixturePart::Static(TokenTag::ASSIGN),
+            FixturePart::Numeric(NumericLiteralToken::test_new("2", &mut string_table)),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::TYPE_PARAMETER_BRACKET),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Symbol(next_statement),
+            FixturePart::Static(TokenTag::EOF),
         ],
-        &mut string_table,
     );
 
-    let collected = collect_declaration_initializer_tokens(&mut stream, &mut string_table)
-        .expect("a malformed multiline pipe list should still scan as one initializer");
-    let collected_kinds: Vec<_> = collected.into_iter().map(|token| token.kind).collect();
-
+    let (range, _) = scan_initializer(&owner, &mut string_table)
+        .expect("malformed multiline pipe list should remain one initializer");
+    let symbol_ids = symbol_ids_in_range(&owner, range);
     assert!(
-        collected_kinds.contains(&TokenKind::Symbol(field_b)),
+        symbol_ids.contains(&field_b),
         "the scanner must not stop at the comma after a malformed first pipe-list member"
     );
     assert!(
-        !collected_kinds.contains(&TokenKind::Symbol(next_statement)),
+        !symbol_ids.contains(&next_statement),
         "the closing pipe must end the initializer before the next statement"
     );
-    assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+    assert_eq!(range.end().index(), 10);
+    assert_eq!(boundary_tag(&owner, range), Some(TokenTag::NEWLINE));
 }
 
 #[test]
 fn initializer_references_carry_the_scanned_token_span() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut builder = ExtendedSpanBuilder::new();
-    let name = string_table.intern("other_const");
     let source_id = SourceId::from_index(1);
-    let span = LocalSpan::exact(4, 11, &mut builder).expect("reference bounds should encode");
-    let tokens = vec![
-        Token::new(TokenKind::Symbol(name), span),
-        Token::new(TokenKind::Newline, LocalSpan::source_start()),
-        Token::new(TokenKind::Eof, LocalSpan::source_start()),
-    ];
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let name = string_table.intern("other_const");
+    let span = LocalSpan::exact(4, 11, &mut span_builder).expect("reference bounds should encode");
+    let mut token_builder = TestSourceTokensBuilder::new(source_id);
+    token_builder
+        .push_symbol(TokenTag::SYMBOL, name, span)
+        .expect("symbol fixture token should build");
+    token_builder
+        .push_static(TokenTag::NEWLINE, LocalSpan::source_start())
+        .expect("newline fixture token should build");
+    token_builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = token_builder
+        .finish()
+        .expect("canonical span fixture should satisfy source-token invariants");
 
-    let references = collect_symbol_references(&tokens, source_id);
+    let references =
+        collect_scanned_symbol_references(TokenFactView::from_source(&owner), source_id);
 
-    assert_eq!(
-        references.len(),
-        1,
-        "one bare symbol should produce one reference"
-    );
+    assert_eq!(references.len(), 1);
     assert_eq!(references[0].name, name);
     assert_eq!(
         references[0].span,
         Some(SourceSpan::new(source_id, span)),
-        "the reference must keep the token's exact span and source identity"
+        "reference must keep exact token span and source identity"
     );
 }

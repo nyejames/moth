@@ -49,8 +49,12 @@ use crate::compiler_frontend::value_mode::ValueMode;
 fn const_loop_iteration_bindings_preserve_source_provenance() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let item_path = path_fork.try_intern_portable_path("item", &mut string_table).expect("test path fits");
-    let index_path = path_fork.try_intern_portable_path("index", &mut string_table).expect("test path fits");
+    let item_path = path_fork
+        .try_intern_portable_path("item", &mut string_table)
+        .expect("test path fits");
+    let index_path = path_fork
+        .try_intern_portable_path("index", &mut string_table)
+        .expect("test path fits");
     let member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
@@ -143,7 +147,9 @@ fn string_slice_with_no_bindings_returns_borrowed() {
 fn bool_condition_binding_substitution_returns_owned() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("show", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("show", &mut string_table)
+        .expect("test path fits");
 
     let binding_value = Expression::bool(true, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {
@@ -189,7 +195,9 @@ fn bool_condition_binding_substitution_returns_owned() {
 fn option_present_capture_substitution_returns_owned() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("maybe_name", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("maybe_name", &mut string_table)
+        .expect("test path fits");
 
     let inner_value = Expression::string_slice(
         string_table.intern("Alice"),
@@ -261,7 +269,9 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
 fn option_capture_scalar_payload_uses_ordinary_const_rules() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let option_path = path_fork.try_intern_portable_path("maybe_payload", &mut string_table).expect("test path fits");
+    let option_path = path_fork
+        .try_intern_portable_path("maybe_payload", &mut string_table)
+        .expect("test path fits");
     let option_value = Expression::coerced(
         Expression::string_slice(
             string_table.intern("payload"),
@@ -278,7 +288,9 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         ValueMode::ImmutableOwned,
         ConstRecordState::RuntimeValue,
     );
-    let capture_path = path_fork.try_intern_portable_path("payload", &mut string_table).expect("test path fits");
+    let capture_path = path_fork
+        .try_intern_portable_path("payload", &mut string_table)
+        .expect("test path fits");
     let pattern = MatchPattern::OptionPresentCapture {
         name: string_table.intern("payload"),
         binding_path: capture_path,
@@ -324,7 +336,9 @@ fn assert_store_backed_option_capture(
     payload_template: Template,
 ) {
     let mut path_fork = PathInternerFork::empty();
-    let option_path = path_fork.try_intern_portable_path("maybe_payload", string_table).expect("test path fits");
+    let option_path = path_fork
+        .try_intern_portable_path("maybe_payload", string_table)
+        .expect("test path fits");
     let option_value = Expression::coerced(
         Expression::template(payload_template, ValueMode::ImmutableOwned),
         builtin_type_ids::STRING,
@@ -338,7 +352,9 @@ fn assert_store_backed_option_capture(
         ConstRecordState::RuntimeValue,
     );
     let capture_name = string_table.intern("payload");
-    let capture_path = path_fork.try_intern_portable_path("payload", string_table).expect("test path fits");
+    let capture_path = path_fork
+        .try_intern_portable_path("payload", string_table)
+        .expect("test path fits");
     let pattern = MatchPattern::OptionPresentCapture {
         name: capture_name,
         binding_path: capture_path,
@@ -506,7 +522,9 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
 fn rpn_with_bound_reference_operand_returns_owned() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let path = path_fork.try_intern_portable_path("counter", &mut string_table).expect("test path fits");
+    let path = path_fork
+        .try_intern_portable_path("counter", &mut string_table)
+        .expect("test path fits");
 
     let binding_value = Expression::int(5, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {

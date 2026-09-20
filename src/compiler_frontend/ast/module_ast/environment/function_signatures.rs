@@ -6,6 +6,7 @@
 //! without adding a second nominal-type system just for headers.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::generic_functions::{
@@ -30,7 +31,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -42,6 +42,7 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -82,19 +83,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
             if header.export_mode.is_public() {
-                let function_name = self.path_fork.component(header.tokens.src_path).ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "Public generic function header had no source-path name.",
-                        ),
-                        string_table,
-                    )
-                })?;
+                let function_name = self
+                    .path_fork
+                    .component(header.declaration_path)
+                    .ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "Public generic function header had no source-path name.",
+                            ),
+                            string_table,
+                        )
+                    })?;
                 self.validate_public_generic_bounds(
                     function_name,
                     generic_parameters,
                     &resolved_bounds_by_local,
-                    &header.source_file,
+                    &self.header_source_path(header),
                     trait_environment,
                     string_table,
                 )?;
@@ -119,7 +123,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 registered_generic_parameters
                     .as_ref()
                     .map(|registered| &registered.canonical_by_local),
-                Some(header.tokens.file_id),
+                Some(header.tokens.source()),
                 &visibility,
                 string_table,
             )?;
@@ -133,12 +137,41 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
                     .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
+                let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "function header has no prepared source token owner",
+                        ),
+                        string_table,
+                    )
+                })?;
+                // Live parser state stays on the canonical source owner. The transient
+                // cursor spans the full canonical source so nested default ranges stay
+                // inside its bounds for this signature parse only. `from_source_tokens`
+                // retains the canonical owner for later bounded expression handoffs.
+                let full = owner_tokens.full_range().map_err(|error| {
+                    self.error_messages(
+                        CompilerError::compiler_error(format!(
+                            "function header source range could not be constructed: {error:?}"
+                        )),
+                        string_table,
+                    )
+                })?;
+                let source_owner =
+                    AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
+                        self.error_messages(
+                            CompilerError::compiler_error(format!(
+                                "function header source range is outside its source owner: {error:?}"
+                            )),
+                            string_table,
+                        )
+                    })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
                 let signature = function_signature_from_syntax_with_unresolved_types(
                     signature,
-                    &header.tokens.path_syntax,
+                    &source_owner,
                     &signature_context,
                     &mut type_interner,
                     string_table,
@@ -158,12 +191,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.file_id,
+                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
             let resolved_signature = resolve_function_signature(
-                &header.tokens.src_path,
+                &header.declaration_path,
                 &unresolved_signature,
                 registered_generic_parameters
                     .as_ref()
@@ -198,7 +231,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validate_generic_parameters_used(
                 generic_parameters,
                 &used_generic_parameters,
-                &header.tokens.src_path,
+                &header.declaration_path,
                 header.name_span,
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -244,19 +277,36 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     ));
                 };
-
+                let canonical_owner =
+                    self.token_owner(header.tokens.source()).ok_or_else(|| {
+                        self.error_messages(
+                            CompilerError::compiler_error(
+                                "generic function header has no prepared source token owner",
+                            ),
+                            string_table,
+                        )
+                    })?;
+                let body = GenericFunctionBody::source(
+                    canonical_owner,
+                    header.tokens,
+                    header.token_sequence,
+                    header.declaration_path,
+                )
+                .map_err(|error| self.error_messages(error, string_table))?;
                 let template = build_generic_function_template(
                     header,
                     generic_parameters,
                     &resolved_signature.signature,
                     registered_generic_parameters.list_id,
+                    self.header_source_path(header),
+                    body,
                 );
                 self.generic_function_templates_by_path
-                    .insert(header.tokens.src_path.to_owned(), template);
+                    .insert(header.declaration_path.to_owned(), template);
             }
 
             self.resolved_function_signatures_by_path
-                .insert(header.tokens.src_path.to_owned(), resolved_signature);
+                .insert(header.declaration_path.to_owned(), resolved_signature);
         }
 
         Ok(())
@@ -323,7 +373,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let entry = ReceiverMethodEntry {
                 function_path: *function_path,
                 receiver: receiver.clone(),
-                source_file: self.path_fork.parent(*function_path).unwrap_or(PathId::ROOT),
+                source_file: self
+                    .path_fork
+                    .parent(*function_path)
+                    .unwrap_or(PathId::ROOT),
                 receiver_mutable: resolved
                     .signature
                     .parameters
@@ -424,12 +477,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 /// Constructs a generic function template from a resolved header and signature.
 ///
 /// WHY: generic function templates carry the unresolved body tokens and generic parameter
-/// metadata so that concrete instantiations can be emitted later during AST body lowering.
 fn build_generic_function_template(
     header: &Header,
     generic_parameters: &GenericParameterList,
     signature: &FunctionSignature,
     generic_parameter_list_id: GenericParameterListId,
+    source_file: PathId,
+    body: GenericFunctionBody,
 ) -> GenericFunctionTemplate {
     debug_assert!(
         !generic_parameters.is_empty(),
@@ -437,14 +491,14 @@ fn build_generic_function_template(
     );
 
     GenericFunctionTemplate {
-        function_path: header.tokens.src_path.to_owned(),
-        source_file: header.source_file.to_owned(),
+        function_path: header.declaration_path.to_owned(),
+        source_file,
         declaration_identity: None,
         generic_parameter_owner: None,
         generic_parameter_list_id,
         signature: signature.to_owned(),
         declaration_span: header.name_span,
-        body_tokens: Some(GenericFunctionBody::source(header.tokens.to_owned())),
+        body_tokens: Some(body),
     }
 }
 

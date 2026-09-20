@@ -5,14 +5,14 @@
 //! WHY: keeping the grammar in one place makes separator, exponent, and sign rules
 //!      consistent between source literals and future string casts.
 
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NumberLiteralErrorReason};
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
-use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
-use crate::return_token;
+use crate::compiler_frontend::tokenizer::lexer::{
+    TokenizeResult, current_source_span, map_token_emit_error,
+};
+use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
 
 /// Tokenize an integer or float literal starting with `first_digit`.
 ///
@@ -25,10 +25,9 @@ pub(super) fn tokenize_numeric_literal(
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
     sign: NumericLiteralSign,
-) -> TokenizeResult<Token> {
+) -> TokenizeResult<TokenTag> {
     let mut literal_text = String::new();
     literal_text.push(first_digit);
-
     // ------------------------
     //  Consume integer part
     // ------------------------
@@ -98,9 +97,11 @@ pub(super) fn tokenize_numeric_literal(
                 parsed.exponent_digit_count,
                 parsed.exponent_sign,
             );
-            return_token!(TokenKind::NumericLiteral(token), stream);
+            let source = stream.file_id;
+            stream
+                .emit_numeric(token)
+                .map_err(|error| map_token_emit_error(error, source))
         }
-
         Err(reason) => {
             // Report the authored source text so diagnostics preserve underscores and sign.
             let authored_id = string_table.intern(&authored);

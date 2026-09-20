@@ -11,12 +11,13 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDeclarationReason, InvalidSignatureMemberReason,
 };
+use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRef, TokenTag};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitConformanceSyntax, TraitDeclarationSyntax,
     TraitIncompatibilitySyntax, TraitReferenceSyntax, TraitRequirementSyntax,
@@ -33,20 +34,57 @@ use crate::compiler_frontend::headers::types::{HeaderBuildContext, HeaderParseFa
 ///      header-dispatch boundary also uses two lanes, so callers stay in sync.
 type TraitHeaderResult<T> = Result<T, HeaderParseFailure>;
 
+fn cursor_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
+    cursor.current().map(TokenRef::source_span)
+}
+
+fn skip_cursor_newlines(cursor: &mut TokenCursor<'_>) {
+    while cursor
+        .current()
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
+        let _ = cursor.advance();
+    }
+}
+
+fn checked_symbol_id(
+    token: TokenRef<'_>,
+    string_table: &StringTable,
+) -> TraitHeaderResult<StringId> {
+    let Some(name) = token.string_id() else {
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error("canonical symbol token is missing its string payload"),
+        ));
+    };
+    token
+        .string_spelling(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "canonical symbol payload could not be read: {error:?}",
+            )))
+        })?
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "canonical symbol token is missing its string payload",
+            ))
+        })?;
+    Ok(name)
+}
+
 // ------------------------
 //  Trait declaration parsing
 // ------------------------
 
 pub(super) fn parse_trait_declaration(
-    token_stream: &mut FileTokens,
-    declaration_token: &Token,
+    cursor: &mut TokenCursor<'_>,
+    declaration_span: SourceSpan,
     declaration_name: StringId,
     source_order: usize,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
-    let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
+    let name_span = declaration_span;
     let trait_path = context
         .path_fork
         .try_intern_child(context.source_file, declaration_name)
@@ -56,31 +94,31 @@ pub(super) fn parse_trait_declaration(
             ))
         })?;
 
-    token_stream.skip_newlines();
+    skip_cursor_newlines(cursor);
 
     loop {
-        match token_stream.current_token_kind() {
-            TokenKind::End => {
-                token_stream.advance();
+        match cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF) {
+            TokenTag::END => {
+                let _ = cursor.advance();
                 break;
             }
 
-            TokenKind::Eof => {
+            TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::unexpected_end_of_file(
                         Some(context.string_table.intern(";")),
-                        Some(token_stream.current_span()),
+                        cursor_span(cursor),
                     ),
                 ));
             }
 
-            TokenKind::Newline => {
-                token_stream.skip_newlines();
+            TokenTag::NEWLINE => {
+                skip_cursor_newlines(cursor);
             }
 
             _ => {
                 let requirement =
-                    parse_trait_requirement(token_stream, trait_path, context, span_builder)?;
+                    parse_trait_requirement(cursor, trait_path, context, span_builder)?;
                 requirements.push(requirement);
             }
         }
@@ -96,24 +134,31 @@ pub(super) fn parse_trait_declaration(
 }
 
 fn parse_trait_requirement(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     trait_path: PathId,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
-    let name_span = token_stream.current_span();
-
-    let TokenKind::Symbol(method_name) = token_stream.current_token_kind() else {
+    let Some(first) = cursor.current() else {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token_in_declaration(Some(token_stream.current_span())),
+            CompilerDiagnostic::unexpected_token_in_declaration(None),
         ));
     };
-    let method_name = *method_name;
-    token_stream.advance();
-
-    if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
+    let name_span = first.source_span();
+    if first.tag() != TokenTag::SYMBOL {
         return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::unexpected_token_in_declaration(Some(token_stream.current_span())),
+            CompilerDiagnostic::unexpected_token_in_declaration(Some(name_span)),
+        ));
+    }
+    let method_name = checked_symbol_id(first, context.string_table)?;
+    let _ = cursor.advance();
+
+    if cursor
+        .current()
+        .is_none_or(|token| token.tag() != TokenTag::TYPE_PARAMETER_BRACKET)
+    {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
         ));
     }
 
@@ -129,14 +174,16 @@ fn parse_trait_requirement(
             ))
         })?;
 
+    let mut declaration_cursor = DeclarationCursor::new(*cursor)?;
     let signature = parse_trait_requirement_signature_syntax(
-        token_stream,
+        &mut declaration_cursor,
         context.warnings,
         context.string_table,
         method_path,
         context.path_fork,
         span_builder,
     )?;
+    *cursor = declaration_cursor.canonical_cursor();
 
     // Every non-empty requirement must start with `This` or `~This`.
     if let Some(first_param) = signature.parameters.first() {
@@ -169,85 +216,84 @@ fn parse_trait_requirement(
         span: name_span,
     })
 }
+
 // ------------------------
 //  Trait conformance parsing
 // ------------------------
 
 pub(super) fn parse_trait_conformance(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     target: ConformanceTargetSyntax,
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitConformanceSyntax> {
     let mut traits = Vec::new();
 
     loop {
-        match token_stream.current_token_kind() {
-            TokenKind::Symbol(trait_name) => {
-                let trait_span = token_stream.current_span();
-                ensure_trait_name_is_all_caps(*trait_name, Some(trait_span), context.string_table)?;
-
-                traits.push(TraitReferenceSyntax {
-                    name: *trait_name,
-                    span: trait_span,
-                });
-                token_stream.advance();
-            }
-
-            _ => {
-                if traits.is_empty() {
-                    return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::invalid_declaration(
-                            InvalidDeclarationReason::TraitConformanceMissingTrait,
-                            Some(target.name),
-                            Some(token_stream.current_span()),
-                        ),
-                    ));
-                }
-
+        let Some(current) = cursor.current() else {
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_declaration(
+                    InvalidDeclarationReason::TraitConformanceMissingTrait,
+                    Some(target.name),
+                    None,
+                ),
+            ));
+        };
+        if current.tag() != TokenTag::SYMBOL {
+            if traits.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(Some(
-                        token_stream.current_span(),
-                    )),
+                    CompilerDiagnostic::invalid_declaration(
+                        InvalidDeclarationReason::TraitConformanceMissingTrait,
+                        Some(target.name),
+                        Some(current.source_span()),
+                    ),
                 ));
             }
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::unexpected_token_in_declaration(Some(current.source_span())),
+            ));
         }
+        let trait_name = checked_symbol_id(current, context.string_table)?;
+        let trait_span = current.source_span();
+        ensure_trait_name_is_all_caps(trait_name, Some(trait_span), context.string_table)?;
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
-                let comma_span = Some(token_stream.current_span());
-                token_stream.advance();
-                token_stream.skip_newlines();
+        traits.push(TraitReferenceSyntax {
+            name: trait_name,
+            span: trait_span,
+        });
+        let _ = cursor.advance();
+
+        match cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF) {
+            TokenTag::COMMA => {
+                let comma_span = cursor_span(cursor);
+                let _ = cursor.advance();
+                skip_cursor_newlines(cursor);
 
                 // A comma may continue across newlines, but it must still be followed by a trait.
-                if matches!(
-                    token_stream.current_token_kind(),
-                    TokenKind::End | TokenKind::Eof
-                ) {
+                if cursor
+                    .current()
+                    .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
+                {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::unexpected_trailing_comma(comma_span),
                     ));
                 }
             }
 
-            TokenKind::Newline | TokenKind::Eof => {
-                break;
-            }
+            TokenTag::NEWLINE | TokenTag::EOF => break,
 
-            TokenKind::End => {
+            TokenTag::END => {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::invalid_declaration(
                         InvalidDeclarationReason::TraitConformanceSemicolon,
                         Some(target.name),
-                        Some(token_stream.current_span()),
+                        cursor_span(cursor),
                     ),
                 ));
             }
 
             _ => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(Some(
-                        token_stream.current_span(),
-                    )),
+                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
         }
@@ -257,37 +303,37 @@ pub(super) fn parse_trait_conformance(
 }
 
 pub(super) fn parse_specialized_conformance_target(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     target_name: StringId,
-    target_token: &Token,
+    target_span: SourceSpan,
 ) -> TraitHeaderResult<ConformanceTargetSyntax> {
-    token_stream.advance(); // past `of`
+    let _ = cursor.advance(); // past `of`
 
     loop {
-        match token_stream.current_token_kind() {
-            TokenKind::Must => {
+        match cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF) {
+            TokenTag::MUST => {
                 return Ok(ConformanceTargetSyntax {
                     name: target_name,
                     kind: ConformanceTargetKind::SpecializedGenericInstance,
-                    span: SourceSpan::new(token_stream.file_id, target_token.span),
+                    span: target_span,
                 });
             }
 
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(Some(
-                        token_stream.current_span(),
-                    )),
+                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
 
-            _ => token_stream.advance(),
+            _ => {
+                let _ = cursor.advance();
+            }
         }
     }
 }
 
 pub(super) fn parse_trait_incompatibility(
-    token_stream: &mut FileTokens,
+    cursor: &mut TokenCursor<'_>,
     subject: TraitReferenceSyntax,
     source_order: usize,
     context: &mut HeaderBuildContext<'_>,
@@ -295,72 +341,70 @@ pub(super) fn parse_trait_incompatibility(
     let mut incompatible_traits = Vec::new();
 
     loop {
-        match token_stream.current_token_kind() {
-            TokenKind::Symbol(trait_name) => {
-                let trait_span = token_stream.current_span();
-                ensure_trait_name_is_all_caps(*trait_name, Some(trait_span), context.string_table)?;
-
-                incompatible_traits.push(TraitReferenceSyntax {
-                    name: *trait_name,
-                    span: trait_span,
-                });
-                token_stream.advance();
-            }
-
-            _ => {
-                if incompatible_traits.is_empty() {
-                    return Err(HeaderParseFailure::Diagnostic(
-                        CompilerDiagnostic::invalid_declaration(
-                            InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
-                            Some(subject.name),
-                            Some(token_stream.current_span()),
-                        ),
-                    ));
-                }
-
+        let Some(current) = cursor.current() else {
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_declaration(
+                    InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
+                    Some(subject.name),
+                    None,
+                ),
+            ));
+        };
+        if current.tag() != TokenTag::SYMBOL {
+            if incompatible_traits.is_empty() {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(Some(
-                        token_stream.current_span(),
-                    )),
+                    CompilerDiagnostic::invalid_declaration(
+                        InvalidDeclarationReason::TraitIncompatibilityMissingTrait,
+                        Some(subject.name),
+                        Some(current.source_span()),
+                    ),
                 ));
             }
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::unexpected_token_in_declaration(Some(current.source_span())),
+            ));
         }
+        let trait_name = checked_symbol_id(current, context.string_table)?;
+        let trait_span = current.source_span();
+        ensure_trait_name_is_all_caps(trait_name, Some(trait_span), context.string_table)?;
 
-        match token_stream.current_token_kind() {
-            TokenKind::Comma => {
-                let comma_span = Some(token_stream.current_span());
-                token_stream.advance();
-                token_stream.skip_newlines();
+        incompatible_traits.push(TraitReferenceSyntax {
+            name: trait_name,
+            span: trait_span,
+        });
+        let _ = cursor.advance();
 
-                if matches!(
-                    token_stream.current_token_kind(),
-                    TokenKind::End | TokenKind::Eof
-                ) {
+        match cursor.current().map(TokenRef::tag).unwrap_or(TokenTag::EOF) {
+            TokenTag::COMMA => {
+                let comma_span = cursor_span(cursor);
+                let _ = cursor.advance();
+                skip_cursor_newlines(cursor);
+
+                if cursor
+                    .current()
+                    .is_none_or(|token| matches!(token.tag(), TokenTag::END | TokenTag::EOF))
+                {
                     return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::unexpected_trailing_comma(comma_span),
                     ));
                 }
             }
 
-            TokenKind::Newline | TokenKind::Eof => {
-                break;
-            }
+            TokenTag::NEWLINE | TokenTag::EOF => break,
 
-            TokenKind::End => {
+            TokenTag::END => {
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::invalid_declaration(
                         InvalidDeclarationReason::TraitIncompatibilitySemicolon,
                         Some(subject.name),
-                        Some(token_stream.current_span()),
+                        cursor_span(cursor),
                     ),
                 ));
             }
 
             _ => {
                 return Err(HeaderParseFailure::Diagnostic(
-                    CompilerDiagnostic::unexpected_token_in_declaration(Some(
-                        token_stream.current_span(),
-                    )),
+                    CompilerDiagnostic::unexpected_token_in_declaration(cursor_span(cursor)),
                 ));
             }
         }
@@ -382,7 +426,9 @@ pub(super) fn conformance_header_path(
     let name = string_table.intern(&format!("__trait_conformance_{:?}", span.local()));
     path_fork
         .try_intern_child(target_path, name)
-        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning conformance path"))
+        .ok_or_else(|| {
+            CompilerError::compiler_error("path table exhausted while interning conformance path")
+        })
 }
 
 pub(super) fn incompatibility_header_path(
@@ -394,7 +440,11 @@ pub(super) fn incompatibility_header_path(
     let name = string_table.intern(&format!("__trait_incompatibility_{:?}", span.local()));
     path_fork
         .try_intern_child(subject_path, name)
-        .ok_or_else(|| CompilerError::compiler_error("path table exhausted while interning incompatibility path"))
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "path table exhausted while interning incompatibility path",
+            )
+        })
 }
 
 pub(super) fn ensure_trait_name_is_all_caps(

@@ -6,6 +6,7 @@
 //!      prevents silent changes to literal type inference.
 
 use super::*;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -21,7 +22,7 @@ use crate::compiler_frontend::numeric_text::token::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -109,11 +110,16 @@ fn parse_whole_number_token(
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let scope = path_fork.try_intern_portable_path("test.moth", &mut string_table).expect("test path fits");
+    let scope = path_fork
+        .try_intern_portable_path("test.moth", &mut string_table)
+        .expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Expression,
         scope,
-        Rc::new(TopLevelDeclarationTable::new(vec![], &PathInternerFork::empty()) ),
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
@@ -126,9 +132,10 @@ fn parse_whole_number_token(
         NumericLiteralSign::Negative => format!("-{normalized_text}"),
     };
     let source_text = string_table.intern(&source);
-    let tokens = vec![
-        Token::new(
-            TokenKind::NumericLiteral(NumericLiteralToken::new(
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_numeric(
+            NumericLiteralToken::new(
                 sign,
                 source_text,
                 min_text,
@@ -137,12 +144,21 @@ fn parse_whole_number_token(
                 0,
                 0,
                 NumericExponentSign::None,
-            )),
+            ),
             LocalSpan::source_start(),
-        ),
-        Token::new(TokenKind::Eof, LocalSpan::source_start()),
-    ];
-    let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
+        )
+        .expect("numeric fixture token should build");
+    builder
+        .push_static(TokenTag::EOF, LocalSpan::source_start())
+        .expect("EOF fixture token should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;
     let mut type_environment = TypeEnvironment::new();

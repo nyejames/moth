@@ -125,7 +125,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             })
             .collect::<Vec<_>>();
         visible_paths.sort_by_key(|(path, _)| {
-            self.path_fork.render_portable(*path, string_table, &mut Vec::new())
+            self.path_fork
+                .render_portable(*path, string_table, &mut Vec::new())
         });
 
         for (path, origin) in visible_paths {
@@ -366,7 +367,9 @@ fn imported_trait_path(
     let root_role = match origin.module_origin().role() {
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal => "normal",
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Support => "support",
-        crate::compiler_frontend::semantic_identity::ModuleRootRole::ProjectPackageFacade => "facade",
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::ProjectPackageFacade => {
+            "facade"
+        }
     };
     let mut path = PathId::ROOT;
     for component in std::iter::once("<imported-trait>")

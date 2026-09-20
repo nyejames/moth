@@ -33,10 +33,7 @@ pub(crate) fn validate_no_recursive_generic_type(
     ))
 }
 
-fn generic_type_references_nominal_path(
-    data_type: &DataType,
-    declaration_path: &PathId,
-) -> bool {
+fn generic_type_references_nominal_path(data_type: &DataType, declaration_path: &PathId) -> bool {
     match data_type {
         DataType::GenericInstance { base, arguments } => {
             let base_matches = matches!(
@@ -140,10 +137,7 @@ fn type_identity_key_references_nominal_path(
 //  Runtime struct cycle validation
 // --------------------------------
 
-fn collect_runtime_struct_dependencies(
-    data_type: &DataType,
-    dependencies: &mut FxHashSet<PathId>,
-) {
+fn collect_runtime_struct_dependencies(data_type: &DataType, dependencies: &mut FxHashSet<PathId>) {
     // WHY: Cycle validation only cares about runtime struct-to-struct edges,
     // not scalar or constant data.
     match data_type {
@@ -224,12 +218,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
 
                 for dependency in dependencies {
                     if struct_fields_by_path.contains_key(&dependency) {
-                        visit(
-                            &dependency,
-                            struct_fields_by_path,
-                            visiting,
-                            visited,
-                        )?;
+                        visit(&dependency, struct_fields_by_path, visiting, visited)?;
                     }
                 }
             }

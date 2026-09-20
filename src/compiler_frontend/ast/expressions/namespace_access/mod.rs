@@ -15,6 +15,7 @@ use leaf_resolution::{LeafDispatchContext, resolve_namespace_value_member};
 use traversal::{NamespaceMemberLookup, lookup_namespace_member};
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -24,17 +25,17 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for namespace access parsing.
 ///
 /// WHAT: carries everything needed to resolve a dotted path starting at a visible namespace
 /// dependency namespace.
 /// WHY: avoids threading a long argument list through the identifier dispatch path.
-pub(super) struct NamespaceAccessInput<'a, 'env> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct NamespaceAccessInput<'a, 'env, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
@@ -57,7 +58,7 @@ pub(super) struct NamespaceAccessInput<'a, 'env> {
 /// BOUNDARY: source and module public-surface namespace records remain shallow, so any second dot
 /// in a source or module public-surface path reports the existing `nested_traversal` diagnostic.
 pub(super) fn parse_namespace_access(
-    input: NamespaceAccessInput<'_, '_>,
+    input: NamespaceAccessInput<'_, '_, '_>,
 ) -> Result<(), ExpressionParseError> {
     let NamespaceAccessInput {
         token_stream,
@@ -79,12 +80,12 @@ pub(super) fn parse_namespace_access(
     let mut current_record = root_record;
 
     loop {
-        let member_span = if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
+        let member_span = if token_stream.current_tag() == TokenTag::EOF {
             dot_span
         } else {
             Some(token_stream.current_span())
         };
-        let TokenKind::Symbol(member_name) = token_stream.current_token_kind().to_owned() else {
+        if token_stream.current_tag() != TokenTag::SYMBOL {
             return Err(CompilerDiagnostic::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
@@ -93,10 +94,17 @@ pub(super) fn parse_namespace_access(
                 member_span,
             )
             .into());
-        };
+        }
+        let member_name = token_stream
+            .current_string_id_in(string_table)?
+            .ok_or_else(|| {
+                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                    "namespace member symbol had no string payload",
+                )
+            })?;
 
         let lookup = lookup_namespace_member(current_record, member_name);
-        let has_following_dot = token_stream.peek_next_token() == Some(&TokenKind::Dot);
+        let has_following_dot = token_stream.peek_next_tag() == Some(TokenTag::DOT);
 
         // Source and module public-surface records are shallow. Any attempt to descend further
         // than one member must keep using the existing `nested_traversal` diagnostic, which the

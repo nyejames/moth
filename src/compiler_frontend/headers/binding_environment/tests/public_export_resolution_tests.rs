@@ -30,9 +30,7 @@ fn intern_path(
         .expect("test path fits")
 }
 
-fn empty_exports_for_roots(
-    roots: &[PathId],
-) -> FxHashMap<PathId, FxHashSet<PublicExportEntry>> {
+fn empty_exports_for_roots(roots: &[PathId]) -> FxHashMap<PathId, FxHashSet<PublicExportEntry>> {
     let mut map = FxHashMap::default();
     for root in roots {
         map.entry(*root).or_default();
@@ -113,9 +111,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     let mut child_exports = FxHashSet::default();
     child_exports.insert(PublicExportEntry {
         export_name: greet_name,
-        target: PublicExportTarget::SourceDeclaration {
-            path: greet_source,
-        },
+        target: PublicExportTarget::SourceDeclaration { path: greet_source },
     });
 
     let mut module_root_public_exports = FxHashMap::default();
@@ -194,7 +190,11 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     let page_file = intern_path(&["page.moth"], &mut string_table, &mut path_fork);
     let export_name = string_table.intern("public_name");
     let source_name = string_table.intern("provider_name");
-    let diagnostic_path = intern_path(&["child", "provider_name"], &mut string_table, &mut path_fork);
+    let diagnostic_path = intern_path(
+        &["child", "provider_name"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let selection =
         DependencySelectionId::new(DependencyShellId::new(SourceId::from_index(4), 9), 3);
 
@@ -255,7 +255,11 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
 
     let entry_root = intern_path(&["entry-root"], &mut string_table, &mut path_fork);
     let utils_root = intern_path(&["lib", "utils-root"], &mut string_table, &mut path_fork);
-    let utils_mod_file = intern_path(&["lib", "utils", "@mod.moth"], &mut string_table, &mut path_fork);
+    let utils_mod_file = intern_path(
+        &["lib", "utils", "@mod.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(utils_mod_file, utils_root);
@@ -271,7 +275,11 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &utils_mod_file,
-        header_path: &intern_path(&["internal", "empty_values"], &mut string_table, &mut path_fork),
+        header_path: &intern_path(
+            &["internal", "empty_values"],
+            &mut string_table,
+            &mut path_fork,
+        ),
         source_package_public_exports: &FxHashMap::default(),
         file_package_membership: &FxHashMap::default(),
         module_root_public_exports: &module_root_public_exports,

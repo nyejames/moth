@@ -133,11 +133,10 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_builtin_error_type_id(
         &mut self,
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
-        let error_path =
-            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-                self.path_fork,
-                self.string_table,
-            );
+        let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+            self.path_fork,
+            self.string_table,
+        );
         let nominal_id = self.type_environment.nominal_id_for_path(&error_path)?;
         self.type_environment.type_id_for_nominal_id(nominal_id)
     }
@@ -162,11 +161,10 @@ impl<'a> HirBuilder<'a> {
             return existing;
         }
 
-        let error_path =
-            crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
-                self.path_fork,
-                self.string_table,
-            );
+        let error_path = crate::compiler_frontend::builtins::error_type::builtin_error_type_path(
+            self.path_fork,
+            self.string_table,
+        );
         let message_path = self
             .path_fork
             .try_intern_child(error_path, self.string_table.intern(ERROR_FIELD_MESSAGE))

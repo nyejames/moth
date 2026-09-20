@@ -18,6 +18,7 @@ use super::parse_expression_dispatch::{
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
@@ -33,7 +34,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[allow(
@@ -41,7 +42,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
     reason = "identifier parsing keeps the token stream, scope, mutable rpn/interner/string/path state, and the catch and evidence policy flags as separate borrows"
 )]
 pub(super) fn parse_identifier_or_call(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,
@@ -51,7 +52,7 @@ pub(super) fn parse_identifier_or_call(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     // Fast path for reserved receiver keyword `this`.
-    if token_stream.current_token_kind() == &TokenKind::This {
+    if token_stream.current_tag() == TokenTag::THIS {
         return parse_this_reference(
             token_stream,
             context,
@@ -65,9 +66,12 @@ pub(super) fn parse_identifier_or_call(
 
     // One identifier token can expand into several expression forms: a local/reference read,
     // struct construction, source or external function call, or namespace record access.
-    let TokenKind::Symbol(identifier) = token_stream.current_token_kind().to_owned() else {
+    if token_stream.current_tag() != TokenTag::SYMBOL {
         return Ok(());
-    };
+    }
+    let identifier = token_stream
+        .current_string_id_in(string_table)?
+        .ok_or_else(|| CompilerError::compiler_error("symbol token had no string payload"))?;
 
     if context.is_assignment_target_unavailable(identifier) {
         return Err(CompilerDiagnostic::invalid_assignment_target(
@@ -116,7 +120,7 @@ pub(super) fn parse_identifier_or_call(
 
         // Const records are field-access-only in runtime contexts.
         if binding.value.is_const_record_value()
-            && token_stream.peek_next_token() != Some(&TokenKind::Dot)
+            && token_stream.peek_next_tag() != Some(TokenTag::DOT)
             && !context.kind.is_constant_context()
         {
             return Err(CompilerDiagnostic::const_record_used_as_value(
@@ -130,7 +134,7 @@ pub(super) fn parse_identifier_or_call(
         // This keeps `x #= MyStruct(...)` on the constructor path so const
         // record coercion can validate field values instead of rejecting the
         // struct symbol itself as a non-constant reference.
-        if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
+        if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
             && let Some(struct_constructor) = context
                 .source_struct_constructor(binding.as_declaration(), type_interner.environment())?
         {
@@ -164,7 +168,7 @@ pub(super) fn parse_identifier_or_call(
         }
 
         // Choice constructors are routed through their own parser.
-        if token_stream.peek_next_token() == Some(&TokenKind::DoubleColon) {
+        if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
             if context.is_source_choice_declaration(
                 binding.as_declaration(),
                 type_interner.environment(),
@@ -297,7 +301,7 @@ pub(super) fn parse_identifier_or_call(
         .as_ref()
         .and_then(|fv| fv.visible_namespace_records.get(&identifier))
     {
-        if token_stream.peek_next_token() == Some(&TokenKind::Dot) {
+        if token_stream.peek_next_tag() == Some(TokenTag::DOT) {
             return parse_namespace_access(NamespaceAccessInput {
                 token_stream,
                 context,
@@ -410,7 +414,7 @@ pub(super) fn parse_identifier_or_call(
     }
 
     // Receiver methods cannot be called as free functions.
-    if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
+    if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
         && let Some(method_entry) = context.lookup_visible_receiver_method_by_name(identifier)
     {
         let diagnostic = free_function_receiver_method_call_error(
@@ -424,7 +428,7 @@ pub(super) fn parse_identifier_or_call(
     }
 
     // External types cannot be constructed with struct literal syntax.
-    if token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis)
+    if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
         && context.lookup_visible_external_type(identifier).is_some()
     {
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -469,7 +473,7 @@ pub(super) fn parse_identifier_or_call(
 /// WHY: `this` is a reserved keyword token, not an ordinary identifier, so it needs its own
 /// parse path, but semantically it behaves like any other parameter reference.
 fn parse_this_reference(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression: &mut Vec<ExpressionRpnItem>,

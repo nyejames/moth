@@ -5,9 +5,10 @@
 //! WHY: the head parser must recognize control flow before body parsing, but
 //! branch/body splitting belongs to the body parser in the next phase.
 
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_tokens,
+    ParsedLoopHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -22,10 +23,10 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
-use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 /// Template head control flow joins ordinary expression parsing with template construction. It
 /// preserves both authored diagnostics and retained-data infrastructure failures until the
@@ -34,14 +35,14 @@ type ControlFlowSuffixResult<T> = Result<T, TemplateError>;
 
 /// Parse a template `if` suffix after the `if` token has been seen.
 pub(crate) fn parse_if_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
-    let marker_span = token_stream.current_token().span;
+    let marker_span = current_token_local_span(token_stream);
     token_stream.advance(); // consume `if`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
@@ -50,14 +51,19 @@ pub(crate) fn parse_if_suffix(
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateIfCondition,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
     }
 
-    let parsed_header =
-        parse_if_header(token_stream, context, type_interner, string_table, path_fork)?;
+    let parsed_header = parse_if_header(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     ensure_suffix_ends_at_body_start(token_stream)?;
     token_stream.advance(); // consume `:`
@@ -102,29 +108,28 @@ pub(crate) fn parse_if_suffix(
             inline_source_consts_for_const_required_if_condition(condition, context, string_table);
     }
 
-    let else_context =
-        context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
+    let else_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
 
     Ok(TemplateBodyParseMode::If(Box::new(
         TemplateIfBodyParseInput {
             selector: condition,
             then_context,
             else_context,
-            span: Some(SourceSpan::new(token_stream.file_id, marker_span)),
+            span: Some(SourceSpan::new(token_stream.source_id(), marker_span)),
         },
     )))
 }
 
 /// Parse a template `loop` suffix after the `loop` token has been seen.
 pub(crate) fn parse_loop_suffix(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     validation_mode: TemplateControlFlowValidationMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ControlFlowSuffixResult<TemplateBodyParseMode> {
-    let marker_span = token_stream.current_token().span;
+    let marker_span = current_token_local_span(token_stream);
     token_stream.advance(); // consume `loop`
 
     if next_meaningful_token_is_body_boundary(token_stream) {
@@ -133,31 +138,35 @@ pub(crate) fn parse_loop_suffix(
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::MissingTemplateLoopHeader,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
     }
 
+    let start_index = token_stream.position();
     let body_start_index = find_template_body_start(token_stream)?;
-    let suffix_tokens = &token_stream.tokens[token_stream.index..body_start_index];
-
-    if has_top_level_suffix_separator(suffix_tokens) {
+    let mut window = token_stream
+        .subcursor_window(start_index, body_start_index)
+        .map_err(TemplateError::from)?;
+    let mut warnings = Vec::new();
+    if has_top_level_suffix_separator_in_window(&mut window) {
         return Err(with_token_span(
             token_stream,
             marker_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-                Some(SourceSpan::new(token_stream.file_id, marker_span)),
+                Some(SourceSpan::new(token_stream.source_id(), marker_span)),
             ),
         )
         .into());
     }
-
-    let mut warnings = Vec::new();
-    let (parsed_header, body_context) = parse_loop_header_tokens(
-        suffix_tokens,
-        &token_stream.path_syntax,
+    let eof_span = window
+        .span_at(body_start_index.saturating_sub(1))
+        .unwrap_or_else(|| SourceSpan::new(token_stream.source_id(), marker_span));
+    let mut window = window.with_synthetic_eof_span(eof_span);
+    let (parsed_header, body_context) = parse_loop_header_cursor(
+        &mut window,
         context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
         type_interner,
         &mut warnings,
@@ -194,41 +203,55 @@ pub(crate) fn parse_loop_suffix(
         },
     };
 
-    token_stream.index = body_start_index + 1;
+    token_stream
+        .set_position(body_start_index + 1)
+        .map_err(TemplateError::from)?;
 
     Ok(TemplateBodyParseMode::Loop(Box::new(
         TemplateLoopBodyParseInput {
             header,
             body_context,
-            span: Some(SourceSpan::new(token_stream.file_id, marker_span)),
+            span: Some(SourceSpan::new(token_stream.source_id(), marker_span)),
         },
     )))
 }
 
-fn next_meaningful_token_is_body_boundary(token_stream: &FileTokens) -> bool {
-    let mut index = token_stream.index;
-
-    while index < token_stream.length {
-        match token_stream.tokens[index].kind {
-            TokenKind::Newline => index += 1,
-            TokenKind::StartTemplateBody | TokenKind::TemplateClose | TokenKind::Eof => {
-                return true;
-            }
-            _ => return false,
+/// Walk past newlines to the next meaningful token.
+///
+/// WHAT: reports whether that token ends the suffix instead of opening a header.
+/// WHY: the suffix header must reject `loop` with nothing between it and the body.
+fn next_meaningful_token_is_body_boundary(token_stream: &mut AstCursor) -> bool {
+    let resume = token_stream.position();
+    let end = token_stream.length();
+    let mut boundary = true;
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        let tag = token_stream.current_tag();
+        if matches!(
+            tag,
+            TokenTag::START_TEMPLATE_BODY | TokenTag::TEMPLATE_CLOSE | TokenTag::EOF
+        ) {
+            break;
         }
+        if tag != TokenTag::NEWLINE {
+            boundary = false;
+            break;
+        }
+        token_stream.advance();
     }
-
-    true
+    token_stream
+        .set_position(resume)
+        .expect("suffix boundary resume stays inside the active parser view");
+    boundary
 }
 
-fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<()> {
-    match token_stream.current_token_kind() {
-        TokenKind::StartTemplateBody => Ok(()),
-        TokenKind::Comma => Err(with_current_token_span(
+fn ensure_suffix_ends_at_body_start(token_stream: &AstCursor) -> ControlFlowSuffixResult<()> {
+    match token_stream.current_tag() {
+        TokenTag::START_TEMPLATE_BODY => Ok(()),
+        TokenTag::COMMA => Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ControlFlowSuffixNotFinal,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into()),
@@ -236,85 +259,127 @@ fn ensure_suffix_ends_at_body_start(token_stream: &FileTokens) -> ControlFlowSuf
             token_stream,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-                token_stream.current_span().into(),
+                None,
             ),
         )
         .into()),
     }
 }
 
-fn find_template_body_start(token_stream: &FileTokens) -> ControlFlowSuffixResult<usize> {
+/// Walk to the terminator that ends a control-flow suffix.
+///
+/// WHAT: reports the top-level `StartTemplateBody` index, or the ready diagnostic when the
+/// suffix reaches a `TemplateClose` or `Eof` first.
+fn find_template_body_start(token_stream: &mut AstCursor) -> ControlFlowSuffixResult<usize> {
+    let resume = token_stream.position();
+    let end = token_stream.length();
     let mut nesting_depth = NestingDepth::default();
-    let mut index = token_stream.index;
-
-    while index < token_stream.length {
-        let token = &token_stream.tokens[index];
-        if nesting_depth.is_top_level() && matches!(token.kind, TokenKind::StartTemplateBody) {
-            return Ok(index);
+    let mut outcome: Option<ControlFlowSuffixResult<usize>> = None;
+    while token_stream.position() < end && !token_stream.is_at_end() {
+        let tag = token_stream.current_tag();
+        let is_top_level = nesting_depth.is_top_level();
+        if is_top_level && tag == TokenTag::START_TEMPLATE_BODY {
+            outcome = Some(Ok(token_stream.position()));
+            break;
         }
-
-        if nesting_depth.is_top_level()
-            && matches!(token.kind, TokenKind::TemplateClose | TokenKind::Eof)
-        {
-            return Err(with_token_span(
+        if is_top_level && matches!(tag, TokenTag::TEMPLATE_CLOSE | TokenTag::EOF) {
+            let span = token_stream.current_span();
+            outcome = Some(Err(with_token_span(
                 token_stream,
-                token.span,
+                span.local(),
                 CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-                    Some(SourceSpan::new(token_stream.file_id, token.span)),
+                    Some(span),
                 ),
             )
-            .into());
+            .into()));
+            break;
         }
-
-        nesting_depth.step(&token.kind);
-        index += 1;
+        // A nested `Eof` never advances; stop instead of re-reading it.
+        if tag == TokenTag::EOF {
+            break;
+        }
+        nesting_depth.step_tag(tag);
+        token_stream.advance();
     }
-
-    Err(with_current_token_span(
-        token_stream,
-        CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
-            token_stream.current_span().into(),
-        ),
-    )
-    .into())
+    token_stream
+        .set_position(resume)
+        .map_err(TemplateError::from)?;
+    outcome.unwrap_or_else(|| {
+        Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix,
+                None,
+            ),
+        )
+        .into())
+    })
 }
 
 /// Attach the exact source span for a direct suffix diagnostic.
 fn with_current_token_span(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
-    with_token_span(token_stream, token_stream.current_token().span, diagnostic)
-}
-
-fn with_token_span(
-    token_stream: &FileTokens,
-    span: LocalSpan,
-    mut diagnostic: CompilerDiagnostic,
-) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
+        let mut diagnostic = diagnostic;
+        diagnostic.primary_span = Some(token_stream.current_span());
+        return diagnostic;
     }
     diagnostic
 }
 
-fn has_top_level_suffix_separator(tokens: &[Token]) -> bool {
+fn with_token_span(
+    token_stream: &AstCursor,
+    span: LocalSpan,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(SourceSpan::new(token_stream.source_id(), span));
+    }
+    diagnostic
+}
+
+/// Read-only current-token local span on the canonical cursor view.
+///
+/// WHAT: reports the `LocalSpan` of the suffix marker token without advancing
+/// the stream.
+/// WHY: marker payloads join with `source_id` at the diagnostic site.
+fn current_token_local_span(token_stream: &AstCursor) -> LocalSpan {
+    token_stream.current_span().local()
+}
+
+/// Walk the canonical suffix window looking for a top-level `,`.
+///
+/// WHAT: reports whether the suffix window holds a top-level comma outside `|...|` bindings.
+/// WHY: the window enforces the half-open bound (dense segmented coordinates included), so the
+/// scan cannot observe tokens after the `StartTemplateBody` terminator.
+fn has_top_level_suffix_separator_in_window(window: &mut AstCursor) -> bool {
+    let resume = window.position();
+    let end = window.length();
     let mut nesting_depth = NestingDepth::default();
     let mut pipe_depth = 0usize;
-
-    for token in tokens {
+    let mut separated = false;
+    while window.position() < end && !window.is_at_end() {
+        let tag = window.current_tag();
         if nesting_depth.is_top_level() {
-            if matches!(token.kind, TokenKind::TypeParameterBracket) {
+            if tag == TokenTag::TYPE_PARAMETER_BRACKET {
                 pipe_depth = if pipe_depth == 0 { 1 } else { 0 };
-            } else if pipe_depth == 0 && matches!(token.kind, TokenKind::Comma) {
-                return true;
+            } else if pipe_depth == 0 && tag == TokenTag::COMMA {
+                separated = true;
+                break;
             }
         }
-
-        nesting_depth.step(&token.kind);
+        // `Eof` never advances, so stop before re-reading it.
+        if tag == TokenTag::EOF {
+            break;
+        }
+        nesting_depth.step_tag(tag);
+        window.advance();
     }
-
-    false
+    window
+        .set_position(resume)
+        .expect("suffix separator resume stays inside the active parser view");
+    separated
 }

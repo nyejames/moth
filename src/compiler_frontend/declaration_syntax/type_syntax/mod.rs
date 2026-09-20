@@ -18,7 +18,7 @@
 //! - expression typing/coercion policy
 //! - call-site/feature-specific diagnostic framing outside type syntax itself
 
-use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::reserved_trait_keyword_or_dispatch_mismatch;
+use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::reserved_trait_keyword_or_dispatch_mismatch_for_tag;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericApplicationErrorReason, InvalidCollectionTypeReason,
     InvalidMapTypeReason,
@@ -27,9 +27,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 pub(crate) use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
 

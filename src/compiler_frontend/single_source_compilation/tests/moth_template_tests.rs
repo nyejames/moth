@@ -316,14 +316,10 @@ fn prepare_bundle_source(
         .unwrap_or_else(|| panic!("bundle source {source_path:?} should have a source identity"))
         .id;
     let source = match source_path.extension() {
-        Some(extension) if extension == "md" => FrontendFilePrepareSource::PlainMarkdown {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
-        _ => FrontendFilePrepareSource::MothTemplate {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
+        Some(extension) if extension == "md" => {
+            FrontendFilePrepareSource::PlainMarkdown { source_code }
+        }
+        _ => FrontendFilePrepareSource::MothTemplate { source_code },
     };
 
     let options = HeaderParseOptions::default();

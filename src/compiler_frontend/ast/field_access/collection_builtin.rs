@@ -11,6 +11,7 @@ use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::fallible_handling::token_stream_starts_fallible_handling_suffix;
@@ -24,9 +25,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 // --------------------------
 //  Constants
@@ -75,7 +76,7 @@ fn fallible_collection_result(
 // --------------------------
 
 pub(super) fn parse_collection_builtin_member_typed(
-    token_stream: &mut FileTokens,
+    token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -111,7 +112,7 @@ pub(super) fn parse_collection_builtin_member_typed(
     let none_type_id = type_interner.builtins().none;
     let member_name_text = string_table.resolve(member_name).to_owned();
 
-    if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
+    if token_stream.peek_next_tag() != Some(TokenTag::OPEN_PARENTHESIS) {
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::MissingParentheses,
             Some(member_name),
@@ -251,7 +252,7 @@ pub(super) fn parse_collection_builtin_member_typed(
     };
 
     if matches!(builtin, CollectionBuiltinOp::Get)
-        && token_stream.current_token_kind().is_assignment_operator()
+        && token_stream.current_tag().is_assignment_operator()
     {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::CollectionGetTargetNotWritable,

@@ -14,11 +14,9 @@
 //! - Delimiter depth is tracked so `=>` inside nested parentheses, collections, or
 //!   templates is not mistaken for an arm separator.
 
-use crate::compiler_frontend::tokenizer::line_scanning::{
-    find_top_level_colon_on_line, find_top_level_fat_arrow_on_line,
-    find_top_level_match_arm_fat_arrow,
-};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 
 pub(crate) struct MatchArmHeaderCandidate {
     pub(crate) start_index: usize,
@@ -29,29 +27,74 @@ pub(crate) struct MatchArmHeaderCandidate {
 ///
 /// A token starts a logical line when:
 /// - it is not `Newline`, `End`, or `Eof`;
-pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> bool {
-    if index >= token_stream.length {
+pub(crate) fn token_is_line_initial(token_stream: &AstCursor, index: usize) -> bool {
+    if index >= token_stream.length() {
         return false;
     }
 
-    let token = &token_stream.tokens[index];
-    if matches!(
-        token.kind,
-        TokenKind::Newline | TokenKind::End | TokenKind::Eof
-    ) {
+    let Some(tag) = token_stream.token_ref_at(index).map(|token| token.tag()) else {
+        return false;
+    };
+    if matches!(tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF) {
         return false;
     }
-
-    index == 0 || token_stream.tokens[index - 1].kind == TokenKind::Newline
+    index == 0
+        || token_stream
+            .token_ref_at(index.saturating_sub(1))
+            .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
 /// header, including the narrow guarded-header newline exception.
 pub(crate) fn token_index_has_top_level_fat_arrow(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     start_index: usize,
 ) -> bool {
     find_top_level_match_arm_fat_arrow(token_stream, start_index).is_some()
+}
+
+fn find_top_level_match_arm_fat_arrow(
+    token_stream: &AstCursor,
+    start_index: usize,
+) -> Option<usize> {
+    let mut walk = token_stream
+        .subcursor_window(start_index, token_stream.length())
+        .expect("match-arm window stays inside the active parser view");
+    let mut nesting_depth = NestingDepth::default();
+    let mut guard_started = false;
+    let mut guard_expression_started = false;
+
+    while !walk.is_at_end() {
+        let tag = walk.current_tag();
+        match tag {
+            TokenTag::END | TokenTag::EOF => break,
+            TokenTag::NEWLINE => {
+                if nesting_depth.is_top_level() && guard_started && !guard_expression_started {
+                    walk.advance();
+                    continue;
+                }
+                break;
+            }
+            TokenTag::FAT_ARROW if nesting_depth.is_top_level() => {
+                if !guard_started || guard_expression_started {
+                    return Some(walk.position());
+                }
+                break;
+            }
+            TokenTag::IF if nesting_depth.is_top_level() && !guard_started => {
+                guard_started = true;
+            }
+            _ => {
+                if guard_started && nesting_depth.is_top_level() {
+                    guard_expression_started = true;
+                }
+                nesting_depth.step_tag(walk.current_tag());
+            }
+        }
+        walk.advance();
+    }
+
+    None
 }
 
 /// Check whether the current token starts a line-initial match arm header.
@@ -62,9 +105,9 @@ pub(crate) fn token_index_has_top_level_fat_arrow(
 /// - the match header contains a top-level `=>`, with only the parser-supported
 ///   newline exception after a guard `if`.
 pub(crate) fn current_token_starts_match_arm_header(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
 ) -> Option<MatchArmHeaderCandidate> {
-    token_index_starts_match_arm_header(token_stream, token_stream.index, None)
+    token_index_starts_match_arm_header(token_stream, token_stream.position(), None)
 }
 
 /// Check whether the token at `start_index` begins a match arm header.
@@ -73,7 +116,7 @@ pub(crate) fn current_token_starts_match_arm_header(
 /// character column. This preserves the "same arm column" idea used by semicolon
 /// delimiter diagnostics.
 pub(crate) fn token_index_starts_match_arm_header(
-    token_stream: &FileTokens,
+    token_stream: &AstCursor,
     start_index: usize,
     _required_column: Option<i32>,
 ) -> Option<MatchArmHeaderCandidate> {
@@ -81,13 +124,13 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    let start_token = &token_stream.tokens[start_index];
-    let start_kind = &start_token.kind;
-
+    let start_tag = token_stream
+        .token_ref_at(start_index)
+        .map(|token| token.tag())?;
     // `else` is handled separately by the match parser.
     if matches!(
-        start_kind,
-        TokenKind::Else | TokenKind::FatArrow | TokenKind::Arrow | TokenKind::Colon
+        start_tag,
+        TokenTag::ELSE | TokenTag::FAT_ARROW | TokenTag::ARROW | TokenTag::COLON
     ) {
         return None;
     }
@@ -100,17 +143,46 @@ pub(crate) fn token_index_starts_match_arm_header(
     })
 }
 
+fn find_top_level_token_on_line(
+    token_stream: &AstCursor,
+    start_index: usize,
+    matches_target: impl Fn(TokenTag) -> bool,
+) -> Option<usize> {
+    let mut walk = token_stream
+        .subcursor_window(start_index, token_stream.length())
+        .expect("match-arm line window stays inside the active parser view");
+    let mut nesting_depth = NestingDepth::default();
+    while !walk.is_at_end() {
+        let tag = walk.current_tag();
+        match tag {
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => break,
+            _ if nesting_depth.is_top_level() && matches_target(tag) => {
+                return Some(walk.position());
+            }
+            _ => nesting_depth.step_tag(walk.current_tag()),
+        }
+        walk.advance();
+    }
+    None
+}
+
 /// Returns true when the current logical line contains a top-level `=>` at any
 /// position, regardless of whether the current token is line-initial.
 ///
 /// Used by `body_dispatch.rs` to detect same-line accidental second arms.
-pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &FileTokens) -> bool {
-    find_top_level_fat_arrow_on_line(token_stream, token_stream.index).is_some()
+pub(crate) fn current_line_contains_top_level_fat_arrow(token_stream: &AstCursor) -> bool {
+    find_top_level_token_on_line(token_stream, token_stream.position(), |tag| {
+        tag == TokenTag::FAT_ARROW
+    })
+    .is_some()
 }
 
 /// Scan forward from the current token looking for a top-level `Colon` on the same
 /// logical line. Returns `true` if one is found at delimiter depth `0` before any
 /// `Newline`, `End`, or `Eof`.
-pub(crate) fn current_line_contains_top_level_colon(token_stream: &FileTokens) -> bool {
-    find_top_level_colon_on_line(token_stream, token_stream.index).is_some()
+pub(crate) fn current_line_contains_top_level_colon(token_stream: &AstCursor) -> bool {
+    find_top_level_token_on_line(token_stream, token_stream.position(), |tag| {
+        tag == TokenTag::COLON
+    })
+    .is_some()
 }

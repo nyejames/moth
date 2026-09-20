@@ -10,6 +10,7 @@ use super::expression_rpn::ExpressionRpnItem;
 use super::function_calls::{FunctionCallParseInput, parse_function_call_expression};
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
@@ -24,7 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Input bundle for source callable member parsing.
 ///
@@ -32,8 +33,8 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 /// whether generic or non-generic.
 /// WHY: avoids threading a long argument list through both bare-identifier and
 /// namespace-member call sites.
-pub(super) struct SourceCallableMemberInput<'a, 'env> {
-    pub(super) token_stream: &'a mut FileTokens,
+pub(super) struct SourceCallableMemberInput<'a, 'env, 'tokens> {
+    pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) function_path: &'a PathId,
     pub(super) signature: &'a FunctionSignature,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
@@ -57,7 +58,7 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
 /// WHY: both bare identifier and namespace member access share this path, so
 /// keeping it in one place guarantees consistent behavior.
 pub(super) fn parse_source_callable_member(
-    input: SourceCallableMemberInput<'_, '_>,
+    input: SourceCallableMemberInput<'_, '_, '_>,
 ) -> Result<(), ExpressionParseError> {
     let SourceCallableMemberInput {
         token_stream,
@@ -84,16 +85,14 @@ pub(super) fn parse_source_callable_member(
     //  Generic source call
     // ------------------------
     if let Some(template) = generic_template {
-        match token_stream.peek_next_token() {
+        match token_stream.peek_next_tag() {
             // Explicit call-site type arguments are not part of the Alpha surface.
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
-            Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
-                let explicit_syntax_span = token_stream
-                    .tokens
-                    .get(token_stream.index + 1)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
-                    .or(call_span);
+            Some(TokenTag::OF | TokenTag::LESS_THAN | TokenTag::TEMPLATE_HEAD) => {
+                // Pure lookahead: read the offending follower span through the cursor view.
+                let follower_span = token_stream.span_at(token_stream.position().saturating_add(1));
+                let explicit_syntax_span = follower_span.or(call_span);
 
                 return Err(with_generic_primary_span(
                     explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),
@@ -104,7 +103,7 @@ pub(super) fn parse_source_callable_member(
 
             // Generic functions must be called; using them as first-class values is
             // deferred for Alpha. Require an immediate `(` to route into the call parser.
-            Some(TokenKind::OpenParenthesis) => {}
+            Some(TokenTag::OPEN_PARENTHESIS) => {}
 
             _ => {
                 return Err(with_generic_primary_span(
