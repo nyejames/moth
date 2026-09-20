@@ -223,9 +223,13 @@ fn struct_types_compatible(
     }
 
     // Generic instances are interned, so equality is the right check.
-    if type_environment.generic_instance_key(expected).is_some()
-        || type_environment.generic_instance_key(actual).is_some()
-    {
+    if matches!(
+        type_environment.type_kind(expected),
+        Some(TypeKind::GenericInstance)
+    ) || matches!(
+        type_environment.type_kind(actual),
+        Some(TypeKind::GenericInstance)
+    ) {
         return expected == actual;
     }
 

@@ -1037,7 +1037,6 @@ impl TypeEnvironment {
             self.insert_definition(TypeDefinition::GenericInstance(GenericInstanceDefinition {
                 base,
                 arguments,
-                source_key: key.clone(),
             }));
 
         self.generic_instance_ids.insert(key.clone(), id);
@@ -1739,18 +1738,6 @@ impl TypeEnvironment {
             TypeDefinition::Struct(def) => Some(&def.path),
             TypeDefinition::Choice(def) => Some(&def.path),
             TypeDefinition::GenericInstance(def) => self.nominal_path_by_id(def.base),
-            _ => None,
-        }
-    }
-
-    /// Returns the generic instance key for a generic instance type.
-    ///
-    /// WHAT: reverse lookup from a generic instance TypeId to its canonical key.
-    /// WHY: generic nominal inference and HIR lowering need the instance key to
-    ///      resolve cached generic struct/choice IDs.
-    pub fn generic_instance_key(&self, id: TypeId) -> Option<&GenericInstanceKey> {
-        match self.get(id)? {
-            TypeDefinition::GenericInstance(def) => Some(&def.source_key),
             _ => None,
         }
     }

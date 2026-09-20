@@ -75,7 +75,6 @@ pub(crate) fn build_generic_parameter_scope(
         canonical_by_local,
         &forbidden_names,
         string_table,
-        "AST Construction",
     )
     .map_err(|mut diagnostic| {
         let parameter_name = match &diagnostic.payload {

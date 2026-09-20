@@ -169,7 +169,6 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     None,
                     forbidden_names,
                     string_table,
-                    "Header Parsing",
                 )
                 .map_err(|diagnostic| {
                     with_parameter_span(token_stream, &parameter_list, diagnostic)

@@ -10,8 +10,8 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::ids::{
-    BuiltinTypeKey, GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId,
-    TypeConstructor, TypeId,
+    BuiltinTypeKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
+    TypeId,
 };
 
 // -----------------------------------------------------------
@@ -136,5 +136,4 @@ pub struct GenericParameterDefinition {
 pub struct GenericInstanceDefinition {
     pub base: NominalTypeId,
     pub arguments: Box<[TypeId]>,
-    pub source_key: GenericInstanceKey,
 }

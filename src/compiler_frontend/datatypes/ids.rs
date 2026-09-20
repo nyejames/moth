@@ -4,7 +4,6 @@
 //! WHY: `TypeId` equality is the canonical semantic type equality check.
 //!      Deterministic lookup comes from stable keys, not from numeric IDs.
 
-use crate::compiler_frontend::external_packages::ExternalTypeId;
 // -----------------------------------------------------------
 //  Compact Type Identifiers
 // -----------------------------------------------------------
@@ -56,21 +55,6 @@ pub struct GenericParameterListId(pub u32);
 // -----------------------------------------------------------
 //  Canonical Keys
 // -----------------------------------------------------------
-
-/// Stable key for canonical type lookup.
-///
-/// WHAT: encodes everything needed to decide whether a type already exists.
-/// WHY: two types with the same `TypeKey` must share the same `TypeId`.
-#[allow(dead_code)] // Planned: stable canonical type lookup key for TypeEnvironment.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TypeKey {
-    Builtin(BuiltinTypeKey),
-    Nominal(NominalTypeId),
-    Constructed(ConstructedTypeKey),
-    GenericParameter(GenericParameterId),
-    Function(FunctionTypeKey),
-    External(ExternalTypeId),
-}
 
 /// Keys for builtin scalar types.
 ///

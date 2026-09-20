@@ -102,7 +102,6 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
         None,
         &FxHashSet::default(),
         &string_table,
-        "AST Construction",
     )
     .expect("valid generic names should be accepted");
 

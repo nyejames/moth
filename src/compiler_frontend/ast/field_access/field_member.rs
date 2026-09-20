@@ -22,6 +22,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
@@ -75,10 +76,10 @@ fn const_field_value<'a>(
     resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
     path_fork: &PathInternerFork,
 ) -> Option<&'a Expression> {
-    if type_environment
-        .generic_instance_key(receiver_type_id)
-        .is_some()
-    {
+    if matches!(
+        type_environment.type_kind(receiver_type_id),
+        Some(TypeKind::GenericInstance)
+    ) {
         return None;
     }
 

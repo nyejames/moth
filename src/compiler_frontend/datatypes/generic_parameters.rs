@@ -160,7 +160,6 @@ impl GenericParameterScope {
         canonical_by_local: Option<&FxHashMap<TypeParameterId, GenericParameterId>>,
         forbidden_names: &FxHashSet<StringId>,
         string_table: &StringTable,
-        _compilation_stage: &str,
     ) -> GenericParameterScopeResult<Self> {
         let mut scope = Self::empty();
 
