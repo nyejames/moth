@@ -18,16 +18,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .clone();
 
         for (local_path, origin) in imported {
-            let Some(record) = self
-                .binding_environment
-                .imported_declarations_by_origin
-                .get(&origin)
-                .cloned()
-            else {
-                continue;
-            };
-            let PublicDeclarationSemantics::Function(function) = &record.semantics else {
-                continue;
+            let function = {
+                let Some(record) = self
+                    .binding_environment
+                    .imported_declarations_by_origin
+                    .get(&origin)
+                else {
+                    continue;
+                };
+                let PublicDeclarationSemantics::Function(function) = &record.semantics else {
+                    continue;
+                };
+                function.clone()
             };
             let generic_parameter_list_id = match &function.category {
                 PublicFunctionCategory::ConcreteLocal => None,

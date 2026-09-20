@@ -92,18 +92,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .clone();
 
         for (local_path, origin) in imported {
-            let Some(record) = self
-                .binding_environment
-                .imported_declarations_by_origin
-                .get(&origin)
-                .cloned()
-            else {
-                continue;
+            let alias_target = {
+                let Some(record) = self
+                    .binding_environment
+                    .imported_declarations_by_origin
+                    .get(&origin)
+                else {
+                    continue;
+                };
+                let PublicDeclarationSemantics::TransparentAlias(alias) = &record.semantics else {
+                    continue;
+                };
+                alias.target_type_identity.clone()
             };
-            let PublicDeclarationSemantics::TransparentAlias(alias) = record.semantics else {
-                continue;
-            };
-            let type_id = self.intern_imported_canonical_type(&alias.target_type_identity)?;
+            let type_id = self.intern_imported_canonical_type(&alias_target)?;
             Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 local_path,
                 ResolvedTypeAlias {
@@ -126,21 +128,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .imported_declarations_by_local_path
             .clone();
         for (local_path, origin) in imported {
-            let Some(record) = self
-                .binding_environment
-                .imported_declarations_by_origin
-                .get(&origin)
-                .cloned()
-            else {
-                continue;
-            };
-            let PublicDeclarationSemantics::Constant(constant) = record.semantics else {
-                continue;
+            let (constant, declaration_provenance) = {
+                let Some(record) = self
+                    .binding_environment
+                    .imported_declarations_by_origin
+                    .get(&origin)
+                else {
+                    continue;
+                };
+                let PublicDeclarationSemantics::Constant(constant) = &record.semantics else {
+                    continue;
+                };
+                (
+                    constant.clone(),
+                    record.synthetic_interface_provenance.clone(),
+                )
             };
             let declaration = self.project_imported_constant(
                 local_path,
                 &constant,
-                &record.synthetic_interface_provenance,
+                &declaration_provenance,
                 &origin,
                 string_table,
             )?;
