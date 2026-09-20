@@ -61,48 +61,24 @@ pub(super) fn fold_tir_branch_chain_with_insertion(
     }
 
     for branch in branches {
-        let effective_expression =
-            fold_input.effective_expression_for_site(branch.selector_site_id)?;
+        let effective_expression = fold_input
+            .effective_expression_for_site(branch.selector_site_id)?
+            .unwrap_or_else(|| branch.condition_expression());
 
-        let selected = match (&branch.selector, effective_expression) {
-            (TemplateBranchSelector::Bool(condition), None) => {
-                let (selected, condition_provenance) =
-                    fold_bool_condition_with_provenance(condition, branch.span, fold_context)?;
+        let selected = match &branch.selector {
+            TemplateBranchSelector::Bool(_) => {
+                let (selected, condition_provenance) = fold_bool_condition_with_provenance(
+                    effective_expression,
+                    branch.span,
+                    fold_context,
+                )?;
                 output_state.provenance.merge(&condition_provenance);
                 selected
             }
-            (TemplateBranchSelector::Bool(_), Some(effective)) => {
-                let (selected, condition_provenance) =
-                    fold_bool_condition_with_provenance(effective, branch.span, fold_context)?;
-                output_state.provenance.merge(&condition_provenance);
-                selected
-            }
-            (TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern }, None) => {
+            TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
                 let (payload, capture_provenance) =
                     selected_option_capture_payload_with_provenance(
-                        scrutinee,
-                        pattern,
-                        fold_input.view.store(),
-                        fold_context,
-                    )?;
-                output_state.provenance.merge(&capture_provenance);
-                if let Some(payload) = payload {
-                    return fold_tir_branch_with_insertion(
-                        branch,
-                        [payload],
-                        output_state,
-                        fold_context,
-                        fold_input,
-                        insertion,
-                    );
-                }
-
-                false
-            }
-            (TemplateBranchSelector::OptionPresentCapture { pattern, .. }, Some(effective)) => {
-                let (payload, capture_provenance) =
-                    selected_option_capture_payload_with_provenance(
-                        effective,
+                        effective_expression,
                         pattern,
                         fold_input.view.store(),
                         fold_context,

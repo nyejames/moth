@@ -5,7 +5,8 @@
 // WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
@@ -19,7 +20,7 @@ use crate::compiler_frontend::ast::templates::template_folding::{
 use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::fold_prepared_template;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
+    ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
@@ -38,9 +39,12 @@ use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirV
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
 };
+use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
@@ -97,6 +101,48 @@ fn fold_prepared_view(
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view.clone(), context)?;
     Ok(emission)
+}
+
+fn build_branch_template(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    selector: TemplateBranchSelector,
+    branch_text: &str,
+    fallback_text: &str,
+) -> (TemplateIrId, ExpressionSiteId, StringId, StringId) {
+    let mut builder = TemplateIrBuilder::new(store);
+    let branch_text_id = string_table.intern(branch_text);
+    let branch_text_node = builder.push_text_node(
+        branch_text_id,
+        branch_text.len(),
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let branch_body = builder.push_sequence_node(vec![branch_text_node], None);
+    let fallback_text_id = string_table.intern(fallback_text);
+    let fallback_text_node = builder.push_text_node(
+        fallback_text_id,
+        fallback_text.len(),
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let fallback = builder.push_sequence_node(vec![fallback_text_node], None);
+    let selector_site_id = builder.store.next_expression_site_id();
+    let branch = TemplateIrBranch::new(selector, branch_body, None, selector_site_id);
+    let root = builder.push_branch_chain_node(vec![branch], Some(fallback), None, None);
+    let template_id = builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    );
+    (
+        template_id,
+        selector_site_id,
+        branch_text_id,
+        fallback_text_id,
+    )
 }
 
 #[test]
@@ -307,6 +353,129 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
         missing_emission,
         TemplateEmission::NoOutput,
         "unresolved slot overlay must fold to structural no-output"
+    );
+}
+
+#[test]
+fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+
+    let (bool_template, bool_site, bool_branch_text, bool_fallback_text) = build_branch_template(
+        &mut store,
+        &mut string_table,
+        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
+        "bool-branch",
+        "bool-fallback",
+    );
+
+    let mut type_environment = TypeEnvironment::new();
+    let option_none = Expression::option_none_with_type_id(
+        builtin_type_ids::STRING,
+        DataType::StringSlice,
+        &mut type_environment,
+        None,
+    );
+    let capture_name = string_table.intern("capture");
+    let mut path_fork = PathInternerFork::empty();
+    let capture_path = path_fork
+        .try_intern_portable_path("main.moth/#capture", &mut string_table)
+        .expect("test capture path fits");
+    let option_pattern = MatchPattern::OptionPresentCapture {
+        name: capture_name,
+        binding_path: capture_path,
+        inner_type_id: builtin_type_ids::STRING,
+        span: None,
+        binding_span: None,
+    };
+    let mut option_some = option_none.clone();
+    option_some.kind = ExpressionKind::Coerced {
+        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
+        to_type: option_some.type_id,
+    };
+    let (option_template, option_site, option_branch_text, option_fallback_text) =
+        build_branch_template(
+            &mut store,
+            &mut string_table,
+            TemplateBranchSelector::OptionPresentCapture {
+                scrutinee: option_none,
+                pattern: Box::new(option_pattern),
+            },
+            "option-branch",
+            "option-fallback",
+        );
+
+    let bool_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(
+                bool_site,
+                Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            )],
+        })
+        .expect("bool overlay allocation");
+    let option_overlay_id = store
+        .allocate_expression_overlay(TirExpressionOverlay {
+            overrides: vec![(option_site, Box::new(option_some))],
+        })
+        .expect("option overlay allocation");
+
+    let bool_structural_view = TirView::new(
+        &store,
+        bool_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("bool structural view should construct");
+    let bool_overlay_view = TirView::new(
+        &store,
+        bool_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext {
+            expression_overlay: Some(bool_overlay_id),
+            slot_resolution: None,
+            wrapper_context: None,
+        },
+    )
+    .expect("bool overlay view should construct");
+    let option_structural_view = TirView::new(
+        &store,
+        option_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("option structural view should construct");
+    let option_overlay_view = TirView::new(
+        &store,
+        option_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext {
+            expression_overlay: Some(option_overlay_id),
+            slot_resolution: None,
+            wrapper_context: None,
+        },
+    )
+    .expect("option overlay view should construct");
+
+    let mut fold_context = fold_context(&mut string_table);
+    assert_eq!(
+        fold_prepared_view(&bool_structural_view, &mut fold_context)
+            .expect("structural bool selector should fold"),
+        TemplateEmission::Output(ConstStringValue::Text(bool_fallback_text)),
+    );
+    assert_eq!(
+        fold_prepared_view(&bool_overlay_view, &mut fold_context)
+            .expect("overlay bool selector should fold"),
+        TemplateEmission::Output(ConstStringValue::Text(bool_branch_text)),
+    );
+    assert_eq!(
+        fold_prepared_view(&option_structural_view, &mut fold_context)
+            .expect("structural option selector should fold"),
+        TemplateEmission::Output(ConstStringValue::Text(option_fallback_text)),
+    );
+    assert_eq!(
+        fold_prepared_view(&option_overlay_view, &mut fold_context)
+            .expect("overlay option selector should fold"),
+        TemplateEmission::Output(ConstStringValue::Text(option_branch_text)),
     );
 }
 

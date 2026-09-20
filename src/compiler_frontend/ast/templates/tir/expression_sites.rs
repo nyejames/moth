@@ -207,9 +207,8 @@ fn walk_tir_view_expression_payload_node(
 
     match &node.kind {
         TemplateIrNodeKind::Sequence { children } => {
-            let children = children.clone();
             for child in children {
-                walk_tir_view_expression_payload_node(view, child, visitor, visited_templates)?;
+                walk_tir_view_expression_payload_node(view, *child, visitor, visited_templates)?;
             }
         }
 
@@ -229,9 +228,7 @@ fn walk_tir_view_expression_payload_node(
         TemplateIrNodeKind::BranchChain {
             branches, fallback, ..
         } => {
-            let branches = branches.clone();
-            let fallback = *fallback;
-            for branch in &branches {
+            for branch in branches {
                 let expression = view
                     .effective_expression_for_site(branch.selector_site_id)?
                     .unwrap_or(branch.condition_expression());
@@ -246,7 +243,7 @@ fn walk_tir_view_expression_payload_node(
             if let Some(fallback_id) = fallback {
                 walk_tir_view_expression_payload_node(
                     view,
-                    fallback_id,
+                    *fallback_id,
                     visitor,
                     visited_templates,
                 )?;
@@ -260,16 +257,12 @@ fn walk_tir_view_expression_payload_node(
             aggregate_wrapper,
             ..
         } => {
-            let header = header.clone();
-            let header_sites = *header_sites;
-            let body = *body;
-            let aggregate_wrapper = *aggregate_wrapper;
-            visit_loop_header_effective_expressions(view, &header, header_sites, visitor)?;
-            walk_tir_view_expression_payload_node(view, body, visitor, visited_templates)?;
+            visit_loop_header_effective_expressions(view, header, *header_sites, visitor)?;
+            walk_tir_view_expression_payload_node(view, *body, visitor, visited_templates)?;
             if let Some(wrapper_id) = aggregate_wrapper {
                 walk_tir_view_expression_payload_node(
                     view,
-                    wrapper_id,
+                    *wrapper_id,
                     visitor,
                     visited_templates,
                 )?;

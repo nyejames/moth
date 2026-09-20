@@ -544,7 +544,7 @@ impl PreparationWalk {
                             )?);
                         }
                     }
-                    let slot_resolution_missing = view.slot_resolution_overlay()?.is_none();
+                    let slot_resolution_overlay_absent = view.context().slot_resolution.is_none();
                     if role.virtual_wrapper
                         && (role.in_aggregate_wrapper
                             || slot_placeholder_has_wrapper_context(placeholder))
@@ -554,7 +554,7 @@ impl PreparationWalk {
                             role,
                             RuntimeTemplateReason::SlotWrapperApplication,
                         );
-                    } else if !role.virtual_wrapper && slot_resolution_missing {
+                    } else if !role.virtual_wrapper && slot_resolution_overlay_absent {
                         self.record_role_runtime(
                             &mut facts,
                             role,
