@@ -1,10 +1,9 @@
 //! Build-resolved source-provider inputs consumed by header interface binding.
 //!
 //! WHAT: associates one retained dependency shell or implicit template scope with the immutable
-//! public semantic interface selected by Stage 0 through one dense provider table. The table
-//! assigns a build-local [`ProviderInterfaceId`] per unique completed interface and validates
-//! duplicate shells, duplicate implicit scopes and equal-origin interface agreement while it
-//! builds.
+//! public semantic interface selected by Stage 0 through one dense provider set. The set assigns
+//! a build-local [`ProviderInterfaceId`] per unique completed interface and validates duplicate
+//! shells, duplicate implicit scopes and equal-origin interface agreement while it builds.
 //! WHY: the compiler binds names and semantic facts, while the build system owns graph and
 //! namespace resolution. This narrow borrowed input keeps build-local `ModuleId` values out of
 //! the compiler, prevents header binding from probing the filesystem or comparing path
@@ -22,7 +21,7 @@ use rustc_hash::FxHashMap;
 
 /// Dense build-local identity of one provider interface inside a module binding operation.
 ///
-/// WHAT: an operation-local handle into [`ProviderInterfaceTable`]. It never enters persistent
+/// WHAT: an operation-local handle into [`SourceProviderDependencySet`]. It never enters persistent
 /// or public semantic identity; the stable module origin remains the semantic identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ProviderInterfaceId(usize);
@@ -64,7 +63,7 @@ pub(crate) struct SourceProviderDependency<'a> {
     pub(crate) interface: &'a PublicSemanticInterface,
 }
 
-/// One dense provider interface table per module binding operation.
+/// One dense provider interface set per module binding operation.
 ///
 /// WHAT: maps `ProviderInterfaceId` to the borrowed completed interface, retained shells and
 /// implicit template scopes to provider IDs, and validates equal-origin agreement once per
@@ -72,7 +71,7 @@ pub(crate) struct SourceProviderDependency<'a> {
 /// WHY: header binding and re-export caches query provider facts by dense identity, so the
 /// module never re-runs publication validation or compares origins per shell.
 #[derive(Debug, Default)]
-pub(crate) struct ProviderInterfaceTable<'a> {
+pub(crate) struct SourceProviderDependencySet<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
     binding_views: Vec<ProviderBindingView<'a>>,
     by_shell: FxHashMap<DependencyShellId, ProviderInterfaceId>,
@@ -81,9 +80,11 @@ pub(crate) struct ProviderInterfaceTable<'a> {
     by_origin: FxHashMap<StableModuleOriginIdentity, ProviderInterfaceId>,
 }
 
-impl<'a> ProviderInterfaceTable<'a> {
-    fn build(dependencies: &[SourceProviderDependency<'a>]) -> Result<Self, CompilerError> {
-        let mut table = Self {
+impl<'a> SourceProviderDependencySet<'a> {
+    pub(crate) fn new(
+        dependencies: Vec<SourceProviderDependency<'a>>,
+    ) -> Result<Self, CompilerError> {
+        let mut set = Self {
             interfaces: Vec::with_capacity(dependencies.len()),
             binding_views: Vec::with_capacity(dependencies.len()),
             by_shell: FxHashMap::default(),
@@ -92,33 +93,33 @@ impl<'a> ProviderInterfaceTable<'a> {
             by_origin: FxHashMap::default(),
         };
 
-        for dependency in dependencies {
+        for dependency in &dependencies {
             match dependency.kind {
                 ProviderDependencyKind::Authored { shell } => {
-                    if table.by_shell.contains_key(&shell) {
+                    if set.by_shell.contains_key(&shell) {
                         return Err(CompilerError::compiler_error(format!(
                             "source provider input set resolved dependency shell {:?} more than once",
                             shell
                         )));
                     }
-                    let provider_id = table.register(dependency.interface)?;
-                    table.by_shell.insert(shell, provider_id);
+                    let provider_id = set.register(dependency.interface)?;
+                    set.by_shell.insert(shell, provider_id);
                 }
                 ProviderDependencyKind::ImplicitTemplate { package_prefix } => {
-                    if table.implicit_by_prefix.contains_key(package_prefix) {
+                    if set.implicit_by_prefix.contains_key(package_prefix) {
                         return Err(CompilerError::compiler_error(format!(
                             "source provider input set registered implicit template scope @{} more than once",
                             package_prefix
                         )));
                     }
-                    let provider_id = table.register(dependency.interface)?;
-                    table.implicit_by_prefix.insert(package_prefix, provider_id);
-                    table.implicit_providers.push((package_prefix, provider_id));
+                    let provider_id = set.register(dependency.interface)?;
+                    set.implicit_by_prefix.insert(package_prefix, provider_id);
+                    set.implicit_providers.push((package_prefix, provider_id));
                 }
             }
         }
 
-        Ok(table)
+        Ok(set)
     }
 
     /// Register one completed interface, collapsing exact repeats and rejecting equal-origin
@@ -151,6 +152,42 @@ impl<'a> ProviderInterfaceTable<'a> {
         self.by_origin
             .insert(interface.module_origin.clone(), provider_id);
         Ok(provider_id)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.interfaces.is_empty()
+    }
+
+    /// Iterate every unique provider interface in registration order.
+    #[cfg(test)]
+    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
+        self.interfaces.iter().copied()
+    }
+
+    /// Iterate every unique provider with its dense provider ID.
+    pub(crate) fn providers(
+        &self,
+    ) -> impl Iterator<Item = (ProviderInterfaceId, &'a PublicSemanticInterface)> + '_ {
+        self.interfaces
+            .iter()
+            .enumerate()
+            .map(|(index, interface)| (ProviderInterfaceId(index), *interface))
+    }
+
+    /// Admit immutable provider interfaces only when every binding target resolves locally.
+    ///
+    /// This runs once per provider ID before header binding so malformed successful provider
+    /// state remains an internal compiler failure rather than degrading into a source dependency
+    /// diagnostic.
+    pub(crate) fn validate_binding_targets(
+        &self,
+        external_registry: &ExternalPackageRegistry,
+    ) -> Result<(), CompilerError> {
+        for interface in &self.interfaces {
+            interface.validate_binding_targets(external_registry)?;
+        }
+
+        Ok(())
     }
 
     /// Resolve one retained dependency shell to its dense provider interface.
@@ -211,107 +248,5 @@ impl<'a> ProviderInterfaceTable<'a> {
         &self,
     ) -> impl Iterator<Item = (&'a str, ProviderInterfaceId)> + '_ {
         self.implicit_providers.iter().copied()
-    }
-
-    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
-        self.interfaces.iter().copied()
-    }
-
-    /// Iterate every unique provider with its dense provider ID.
-    pub(crate) fn providers(
-        &self,
-    ) -> impl Iterator<Item = (ProviderInterfaceId, &'a PublicSemanticInterface)> + '_ {
-        self.interfaces
-            .iter()
-            .enumerate()
-            .map(|(index, interface)| (ProviderInterfaceId(index), *interface))
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.interfaces.is_empty()
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct SourceProviderDependencySet<'a> {
-    table: ProviderInterfaceTable<'a>,
-}
-
-impl<'a> SourceProviderDependencySet<'a> {
-    pub(crate) fn new(
-        dependencies: Vec<SourceProviderDependency<'a>>,
-    ) -> Result<Self, CompilerError> {
-        Ok(Self {
-            table: ProviderInterfaceTable::build(&dependencies)?,
-        })
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.table.is_empty()
-    }
-
-    /// Iterate every unique provider interface in registration order.
-    #[cfg(test)]
-    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &'a PublicSemanticInterface> + '_ {
-        self.table.interfaces()
-    }
-
-    /// Iterate every unique provider with its dense provider ID.
-    pub(crate) fn providers(
-        &self,
-    ) -> impl Iterator<Item = (ProviderInterfaceId, &'a PublicSemanticInterface)> + '_ {
-        self.table.providers()
-    }
-
-    /// Admit immutable provider interfaces only when every binding target resolves locally.
-    ///
-    /// This runs once per provider ID before header binding so malformed successful provider
-    /// state remains an internal compiler failure rather than degrading into a source dependency
-    /// diagnostic.
-    pub(crate) fn validate_binding_targets(
-        &self,
-        external_registry: &ExternalPackageRegistry,
-    ) -> Result<(), CompilerError> {
-        for interface in self.table.interfaces() {
-            interface.validate_binding_targets(external_registry)?;
-        }
-
-        Ok(())
-    }
-
-    /// Resolve one retained dependency shell to its dense provider interface.
-    pub(crate) fn resolve_clause(
-        &self,
-        shell: DependencyShellId,
-    ) -> Option<ResolvedDependencyClause> {
-        self.table.resolve_clause(shell)
-    }
-
-    /// Resolve the provider ID selected for one public re-export dependency shell.
-    pub(crate) fn resolve_reexport(&self, shell: DependencyShellId) -> Option<ProviderInterfaceId> {
-        self.table.resolve_reexport(shell)
-    }
-
-    /// Resolve one provider ID to its borrowed completed interface.
-    pub(crate) fn interface(
-        &self,
-        provider_id: ProviderInterfaceId,
-    ) -> Result<&'a PublicSemanticInterface, CompilerError> {
-        self.table.interface(provider_id)
-    }
-
-    /// The one operation-scoped binding view for a provider ID.
-    pub(crate) fn binding_view(
-        &self,
-        provider_id: ProviderInterfaceId,
-    ) -> Result<&ProviderBindingView<'a>, CompilerError> {
-        self.table.binding_view(provider_id)
-    }
-
-    /// Iterate over source packages selected by the builder for `.mtf` implicit scope.
-    pub(crate) fn implicit_template_scope_providers(
-        &self,
-    ) -> impl Iterator<Item = (&'a str, ProviderInterfaceId)> + '_ {
-        self.table.implicit_template_scope_providers()
     }
 }
