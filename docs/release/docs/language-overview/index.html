@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Language basics | Moth</title>
-    <meta name="description" content="Blocks, comments, naming, core values, strings and characters in Moth.">
+    <meta name="description" content="Blocks, comments, naming, core values, strings and MON syntax in Moth.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -699,7 +699,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Language basics</p><h1>Language basics</h1><p>Moth uses a compact set of syntax rules across the whole language. Colons open blocks, semicolons close them and square brackets build strings rather than index collections.</p><p>These choices differ from C-like and Python-like languages, but they keep each delimiter tied to one job. Start here before moving to bindings, control flow and user-defined types.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Language basics</p><h1>Language basics</h1><p>Moth uses a compact set of syntax rules across the whole language. Colons open blocks, semicolons close them and square brackets build strings rather than index collections.</p><p>These choices keep declarations, supplied values and blocks visually distinct. Start here before moving to bindings, control flow and user-defined types.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Blocks and statements
@@ -1000,6 +1000,96 @@ text <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&q
 <span class='moth-code-comment'>-- text[0] = &#39;X&#39;        -- invalid</span></code></pre><h3>Templates</h3><p>Templates own interpolation, formatting, slots, wrappers and structured content. See <a href="../templates">Templates</a> for the complete system.</p><p>Quoted slices and templates both participate in the language&#39;s <code>String</code> surface. Expression-position raw backtick slices aren&#39;t implemented. Inside a template body, backticks, backslashes and physical newlines are ordinary body text available to the active formatter.</p>
 </div>
 </fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: MON syntax
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="mon-syntax-level"
+                id="mon-syntax-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="mon-syntax-level"
+                id="mon-syntax-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="mon-syntax">
+                    MON syntax
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="mon-syntax-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="mon-syntax-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p><strong>Accepted queued design.</strong> Anonymous records using the notation below are not yet implemented. Calls and named constructors already use parentheses.</p><p>MON means Moth Object Notation. MON syntax gives supplied arguments and record values a common notation. Pipes declare fields or parameters. Parentheses supply values or group an expression.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    width <span class='moth-code-type'>Int</span>,
+    height <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span>
+
+size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>
+
+settings <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+    window <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>,
+<span class='moth-code-delimiter'>)</span></code></pre><p>Every anonymous field has a name and a value. Records can nest directly. <code>#=</code> requires all their values to be known during compilation.</p><p><code>(value)</code> groups an expression. <code>(name = value)</code> constructs a one-field record. Commas separate entries, and a final comma is optional. Moth has no tuple values.</p><p>Named types still need their constructors. An anonymous record with matching fields does not become a <code>Size</code>.</p><p>The MON serialisation format is separate future work. This syntax alone does not turn a record into text or make every Moth value serialisable.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Accepted queued design.</strong> Parenthesised anonymous const records are queued for implementation. Runtime anonymous records are a separate later feature. Ordinary calls and named constructors already use parentheses. See <a href="../progress">Progress</a> for implementation and target support.</p><p>MON means Moth Object Notation. <strong>MON syntax</strong> names Moth&#39;s shared parenthesised argument and value-construction notation. <strong>The MON format</strong> is a future data profile with its own supported values and serialisation rules. Using MON syntax does not make a value serialisable or turn a call into a data document.</p><p>This reference owns the shared notation and the distinction between grouping, supplied arguments and anonymous construction. Calls, constructors, directives and const or runtime records retain their own semantic contracts.</p><h3>Declarations and supplied values</h3><p>Pipes enclose declared parameters and typed nominal fields. Parentheses supply values or group an expression.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    width <span class='moth-code-type'>Int</span>,
+    height <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span>
+
+size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span></code></pre><p>A nominal value uses its named constructor. Matching field names do not make an anonymous record a <code>Size</code>. MON syntax adds no implicit nominal construction, structural typing, argument spreading or tuple values.</p><p>Declaration lists remain flat. A legal default expression may contain nested value construction without introducing a nested type declaration. Defaults still need the type and compile-time evidence their receiving declaration requires.</p><h3>Grouping and records</h3><p>A single unnamed expression in parentheses is grouping. A named initializer selects anonymous record construction, including a record with one field.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span> <span class='moth-code-operator'>+</span> <span class='moth-code-number'>2</span><span class='moth-code-delimiter'>)</span>
+label <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Moth&quot;</span><span class='moth-code-delimiter'>)</span>
+labels <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>first <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>, second <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Rob&quot;</span>,<span class='moth-code-delimiter'>)</span>
+empty <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>A comma separates entries. It does not create a tuple or infer a field name. <code>(value,)</code>, <code>(first, second)</code> and <code>(,)</code> are invalid value constructions. Expression-position <code>()</code> is an empty const record when the receiving context requires a compile-time value. Empty runtime records are outside the initial runtime surface. Neither case introduces a unit type.</p><p><code>(calculate(x = 1, y = 2))</code> groups a call. Names and commas inside that inner call do not classify the outer parentheses. Grouping preserves ordinary precedence, place access, postfix operations and immediate cast-target rules.</p><h3>Entries and layout</h3><p>Every anonymous entry has a unique identifier and an explicit <code>= expression</code>. Its type is inferred from that expression. Entries have no type annotation, declaration qualifier, default, omitted value or field-level mutable declaration. There are no positional anonymous fields or implicit name shorthands.</p><p>Use commas between entries. One trailing comma is allowed. Blank lines and comments may separate entries, and a value may start on the line after <code>=</code>. The field label and <code>=</code> use the ordinary named-argument boundary. Newlines do not replace commas or join an incomplete label to a later assignment.</p><p>A field label does not bind a local name. Every initializer resolves names in the surrounding scope. Earlier fields are not bare names visible to later fields.</p><pre style=""><code class='codeblock'>title <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>
+panel <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    title <span class='moth-code-operator'>=</span> title,
+    details <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Overview&quot;</span><span class='moth-code-delimiter'>)</span>,
+<span class='moth-code-delimiter'>)</span></code></pre><p>The two <code>title</code> labels belong to different records and do not conflict. Duplicate labels within the same record are invalid.</p><p>Each initializer supplies one value. Multiple return slots cannot become a tuple field or expand into several entries. A field label supplies no expected type for an otherwise untyped <code>none</code>, empty container or <code>cast</code>. Use an earlier typed value when its type cannot be inferred. The existing expression rules decide which empty literals can infer their own type.</p><h3>Recursive construction</h3><p>Anonymous values nest directly. Named nominal children still use their constructors.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    width <span class='moth-code-type'>Int</span>,
+    height <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span>
+
+settings <span class='moth-code-operator'>#=</span> <span class='moth-code-delimiter'>(</span>
+    window <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+        size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>,
+    <span class='moth-code-delimiter'>)</span>,
+<span class='moth-code-delimiter'>)</span>
+
+width <span class='moth-code-operator'>#=</span> settings.window.size.width</code></pre><p><code>#=</code> requires the complete value to fold, including every nested field. It does not grant new compile-time execution capabilities. A runtime receiving context selects the separate runtime-record contract even when all fields look constant.</p><p><a href="../constants/#const-records">Const records</a> owns folded fields and runtime-use restrictions. <a href="../structs/#anonymous-records">Runtime anonymous records</a> owns hidden nominal identity, local composition and escape restrictions.</p><h3>Context determines argument policy</h3><p>Calls, constructors and directives share MON list syntax without sharing every permitted argument or value category.</p><ul><li>User calls and named constructors keep positional-then-named signature routing.</li><li>Host calls and builtin members keep their positional-only contracts.</li><li>Anonymous records require named entries and establish their own fields.</li><li>Directive arguments require compile-time values and their registered categories.</li></ul><p>A known signature supplies parameter names, types and defaults. An anonymous record has no callee signature or omitted default slots. Shared syntax changes neither evaluation order nor the ordinary access, coercion and error rules.</p><p><code>consume(x = 1)</code> supplies the argument named <code>x</code>. <code>consume((x = 1))</code> supplies one record expression, whose legality still depends on record and parameter rules. There is no automatic record-to-argument expansion.</p><p>Ordinary <code>f()</code> is a zero-argument call. The accepted directive contract uses bare <code>$name</code> when no arguments are supplied and rejects <code>$name()</code>. Template labels, indices and helper wrappers retain their specialised meanings.</p><h3>MON format boundary</h3><p>The future MON data profile uses named-only, const-required parsing through the same compiler owners. Its reader and compiler-native builder need a defined value domain and serialisation contract before implementation. The engine or application validates its own schema over that data.</p><p>The format still needs decisions about root framing, scalars and numbers, optional values, collections and maps, tags, escaping, ordering, resources, round trips and input limits. Full compile-time Moth authoring expressions and the self-contained serialised representation are distinct surfaces.</p><p>Templates remain ordinary strings. MON syntax adds no automatic record printing, implicit live bindings, stored Wire capabilities or executable Route values.</p>
+</div>
+</fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
     <a
         class="doc-pager__link doc-pager__link--previous"
@@ -1209,99 +1299,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

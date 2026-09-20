@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Structs | Moth</title>
-    <meta name="description" content="Nominal structs, construction, fields and receiver methods in Moth.">
+    <meta name="description" content="Nominal structs, construction, fields, deferred anonymous records and receiver methods in Moth.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -699,7 +699,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>A struct creates a nominal type with named fields. Two structs remain different types even when their fields match, unlike structural record systems.</p><p>Receiver methods use ordinary top-level function declarations in the same file as the type. Their first parameter shows shared or mutable access.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / Structs</p><h1>Structs</h1><p>A struct creates a nominal type with named fields. Two structs remain different types even when their fields match, unlike structural record systems.</p><p>Receiver methods use ordinary top-level function declarations in the same file as the type. Their first parameter shows shared or mutable access.</p><p>Runtime anonymous records are accepted deferred design. Their local hidden types keep nominal identity and use the shared MON construction notation.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Struct declarations
@@ -837,15 +837,107 @@ player.score <span class='moth-code-operator'>=</span> <span class='moth-code-nu
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>A struct constructor uses the struct name and supplies its fields.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Point</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    <p>A struct constructor uses the struct name and supplies its fields through <a href="../language-overview/#mon-syntax">MON syntax</a>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Point</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     x <span class='moth-code-type'>Int</span>,
     y <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
 <span class='moth-code-delimiter'>|</span>
 
 first <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span><span class='moth-code-delimiter'>)</span>
-second <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span>x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Constructor routing</h3><ul><li>Positional arguments fill fields in declaration order.</li><li>Positional arguments must come before named arguments.</li><li>A named argument must match a real field.</li><li>Each field may be supplied once.</li><li>Omitted fields use their declared defaults.</li><li>Every field without a default is required.</li><li>Extra arguments are invalid.</li><li>Values are checked and contextually coerced against field types.</li></ul><p>A constructor creates a fresh value.</p><h3>Field reads</h3><p>Use <code>.</code> to read a field.</p><pre style=""><code class='codeblock'>point <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span>
+second <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span>x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Constructor routing</h3><ul><li>Positional arguments fill fields in declaration order.</li><li>Positional arguments must come before named arguments.</li><li>A named argument must match a real field.</li><li>Each field may be supplied once.</li><li>Omitted fields use their declared defaults.</li><li>Every field without a default is required.</li><li>Extra arguments are invalid.</li><li>Values are checked and contextually coerced against field types.</li></ul><p>A constructor creates a fresh value.</p><h3>Explicit nested construction</h3><p>Construct a named child at its field&#39;s receiving boundary:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span> width <span class='moth-code-type'>Int</span>, height <span class='moth-code-type'>Int</span> <span class='moth-code-delimiter'>|</span>
+<span class='moth-code-nominal'>Window</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span> size <span class='moth-code-nominal'>Size</span> <span class='moth-code-delimiter'>|</span>
+
+window <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Window</span><span class='moth-code-delimiter'>(</span>size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span></code></pre><p>An anonymous <code>(width = 1280, height = 720)</code> does not become a <code>Size</code> because the fields match. MON syntax adds no implicit nominal construction or structural conversion. Named type declarations remain separate, flat declarations.</p><h3>Field reads</h3><p>Use <code>.</code> to read a field.</p><pre style=""><code class='codeblock'>point <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span>
 horizontal <span class='moth-code-operator'>=</span> point.x</code></pre><p>A field read uses normal shared access.</p><h3>Field writes</h3><p>The root value must be a mutable place.</p><pre style=""><code class='codeblock'>point <span class='moth-code-operator'>~=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span>
-point.x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>30</span></code></pre><p>A field of an immutable binding cannot be assigned.</p><p>Field mutability is controlled by the root place and the current access. It is not a separate field type.</p><p>Const records use struct-shaped compile-time data but have additional restrictions owned by Constants and compile-time behaviour.</p>
+point.x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>30</span></code></pre><p>A field of an immutable binding cannot be assigned.</p><p>Field mutability is controlled by the root place and the current access. It is not a separate field type.</p><p>Const records use struct-shaped compile-time data but have additional restrictions owned by Constants and compile-time behaviour. <a href="#anonymous-records">Runtime anonymous records</a> describes the separate deferred local hidden-struct feature.</p>
+</div>
+</fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Runtime anonymous records
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="anonymous-records-level"
+                id="anonymous-records-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="anonymous-records-level"
+                id="anonymous-records-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="anonymous-records">
+                    Runtime anonymous records
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="anonymous-records-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="anonymous-records-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p><strong>Accepted deferred implementation.</strong> Runtime anonymous records are planned and are not yet executable in the Alpha compiler.</p><p>An anonymous record groups local values without declaring a named type:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>show_window</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    window <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>(</span>
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+        size <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>,
+    <span class='moth-code-delimiter'>)</span>
+
+    window.size.width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1440</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Every field needs a name and a value. Records can nest directly. Runtime fields may use ordinary runtime expressions and follow normal access and copy rules.</p><p>Each literal site has its own hidden nominal type. Matching fields do not make two different sites interchangeable. Use explicit constructors for named types.</p><p>The initial feature is local-only. Records carrying hidden types cannot be passed to functions, returned, exported or stored in collections or maps. Ordinary values extracted from their fields follow their normal rules.</p><p>See <a href="../constants/#const-records">Const records</a> for compile-time member groups and <a href="../language-overview/#mon-syntax">MON syntax</a> for the shared notation.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Accepted deferred implementation.</strong> Runtime anonymous records are queued after shared MON syntax and numeric semantics. The examples below describe the accepted contract, not current executable support. See <a href="../progress">Progress</a>.</p><p>A runtime anonymous record is a local value backed by a hidden nominal struct. It uses the named-only form of <a href="../language-overview/#mon-syntax">MON syntax</a>. The ordinary struct owners provide construction, field access, copy, borrow validation and lifetime validation.</p><h3>Construction</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    width <span class='moth-code-type'>Int</span>,
+    height <span class='moth-code-type'>Int</span>,
+<span class='moth-code-delimiter'>|</span>
+
+<span class='moth-code-function'>show_window</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    window <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>(</span>
+        title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Strategy&quot;</span>,
+        bounds <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>
+            size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span>,
+            visible <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span>,
+        <span class='moth-code-delimiter'>)</span>,
+    <span class='moth-code-delimiter'>)</span>
+
+    window.bounds.size.width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1440</span>
+    independent <span class='moth-code-operator'>~=</span> <span class='moth-code-keyword'>copy</span> window
+    independent.title <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Overview&quot;</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A runtime receiving context selects a runtime record. Its field expressions need not fold. Every field has a unique name and an initializer. At least one field is required. Empty <code>()</code> is outside this runtime surface.</p><p>Field initializers run once in source order under ordinary expression, access and error rules. Labels introduce no local names. A mutable root permits field writes only when ordinary access rules allow them. It does not copy an existing child or grant additional authority over one.</p><h3>Hidden nominal identity</h3><p>Each static literal site owns one hidden nominal type within its compiled body. Repeated executions of that site produce values of the same type. Distinct sites remain different types even when their field names and types match. Aliases and copies preserve the type identity.</p><p>Compatible assignment requires the same resolved identity. Another literal of matching shape is not a replacement value of that type. The hidden type has no source-visible name, constructor name, receiver methods or trait conformance.</p><p>A named struct still uses its explicit constructor. An anonymous record does not satisfy a named field or parameter by matching its shape.</p><h3>Recursive local composition</h3><p>Anonymous parents may contain anonymous children directly or through an already bound local. They may also contain ordinary supported values, including explicitly constructed nominal structs and choices.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>show_state</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
+    child <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>)</span>
+    state <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>
+        saved <span class='moth-code-operator'>=</span> child,
+        fresh <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>(</span>enabled <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>true</span><span class='moth-code-delimiter'>)</span>,
+    <span class='moth-code-delimiter'>)</span>
+
+    selected <span class='moth-code-operator'>=</span> state.fresh
+    count <span class='moth-code-operator'>=</span> state.saved.count
+<span class='moth-code-delimiter'>;</span></code></pre><p>A compiler-generated parent field carries the child&#39;s resolved hidden type. Nesting is supported recursively from the first runtime implementation. Extracting a child to another local preserves its type and alias relationship. An ordinary named or scalar leaf follows that leaf type&#39;s ordinary rules.</p><p>This composition permission applies to compiler-generated anonymous parent fields. It does not make hidden types legal in authored nominal field declarations or permit an unnamed child to bypass a named parent&#39;s declared field types.</p><h3>Local-only uses</h3><p>Supported uses are local binding, compatible assignment, projection, explicit copy and recursive composition inside anonymous parents. Normal type and access rules still apply.</p><p>A hidden identity cannot cross a function argument or return boundary, including private functions. It cannot appear in an authored signature, type alias, nominal struct or choice field, receiver method, trait evidence or exported value/interface. The initial implementation also rejects collection/map storage and generic arguments carrying a hidden identity.</p><p>These restrictions are transitive. A containing parent, optional or captured value cannot hide a prohibited identity. An ordinary leaf extracted from a record is not restricted merely because it came through that record.</p><p>A generic body may construct a local record from its resolved concrete values where ordinary compilation supports that body. Passing the hidden type as a generic argument remains invalid.</p><h3>Values and capabilities</h3><p>Records follow ordinary reference, copy, borrow and lifetime rules. Inline nesting creates no new region, implicit deep copy or escape exemption.</p><p>Compile-time records remain separate folded member groups, with the whole-value runtime restrictions in <a href="../constants/#const-records">Const records</a>. A runtime record never uses the compile-time record marker as its runtime type.</p><p>Wiring retains its own storage rules. MON construction does not turn wire identity or routes into ordinary storable field values. Runtime records gain no serialisation support from sharing MON syntax.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1204,99 +1296,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {

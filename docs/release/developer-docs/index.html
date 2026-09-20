@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>Developer documentation | Moth</title>
-    <meta name="description" content="Compiler and build-system references for contributors and anyone reading Moth's internals.">
+    <meta name="description" content="Compiler and build-system references for contributors and anyone reading Moth&#39;s internals.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -635,99 +635,99 @@ throw new Error("Expected internal Result carrier during fallback handling");
 }
 
 function __moth_fixed_collection(items, fixedCapacity) {
-return {
-__moth_kind: "fixed_collection",
-items: items,
-fixedCapacity: fixedCapacity,
-};
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
 }
 
 function __moth_collection_items(collection) {
-if (Array.isArray(collection)) {
-return collection;
-}
-return collection.items;
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
 }
 
 function __moth_collection_is_valid(collection) {
-if (Array.isArray(collection)) {
-return true;
-}
-if (collection === null || typeof collection !== "object") {
-return false;
-}
-if (collection.__moth_kind !== "fixed_collection") {
-return false;
-}
-if (!Array.isArray(collection.items)) {
-return false;
-}
-return (
-Number.isInteger(collection.fixedCapacity)
-&& collection.fixedCapacity > 0
-&& collection.items.length <= collection.fixedCapacity
-);
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
 }
 
 function __moth_collection_index_is_valid(collection, index) {
-const items = __moth_collection_items(collection);
-return Number.isInteger(index) && index >= 0 && index < items.length;
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
 }
 
 function __moth_collection_get(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-return { tag: "ok", value: items[index] };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
 }
 
 function __moth_collection_set(collection, index, value) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-items[index] = value;
-return { tag: "ok", value: null };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_push_growable(collection, value) {
-collection.push(value);
+    collection.push(value);
 }
 
 function __moth_collection_push_fixed(collection, value) {
-if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-const items = __moth_collection_items(collection);
-if (items.length >= collection.fixedCapacity) {
-return __moth_error_result("Fixed collection capacity exceeded", 102);
-}
-items.push(value);
-return { tag: "ok", value: null };
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
 }
 
 function __moth_collection_remove(collection, index) {
-if (!__moth_collection_is_valid(collection)) {
-return __moth_error_result("Collection operation expects an ordered collection", 100);
-}
-if (!__moth_collection_index_is_valid(collection, index)) {
-return __moth_error_result("Collection index out of bounds", 101);
-}
-const items = __moth_collection_items(collection);
-const removed = items.splice(index, 1)[0];
-return { tag: "ok", value: removed };
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
 }
 
 function __moth_collection_length(collection) {
-const items = __moth_collection_items(collection);
-return items.length;
+    const items = __moth_collection_items(collection);
+    return items.length;
 }
 
 function __moth_string_like(value) {
