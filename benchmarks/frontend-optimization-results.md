@@ -3869,11 +3869,30 @@ Constant and nominal remain within their locked budgets. Generic remains above t
 exception required by the owning plan; no budget is raised or loosened, and no no-worsening claim
 is made.
 
-The closeout validation recipe completed native featured Clippy, feature-lane coverage, source
-and first-party audits, workspace tests (`5210 + 17 + 839` passed), integration (`1973/1973`),
-docs and benchmark preflight/quick sanity (`82/82`); it stopped only at the accepted generic
-scaling exception. `just timers-erasure-check` then passed with a clean no-timer binary of
-`8,862,096` bytes. No host-memory failure occurred.
+The bounded executable closeout recipe attached to source checkpoint `4cfd9d492` completed native
+featured Clippy, feature-lane coverage, source and first-party audits, workspace tests
+(`5210 + 17 + 839` passed), integration (`1973/1973`), docs and benchmark preflight/quick sanity
+(`82/82`); it stopped only at the accepted generic scaling exception. `just timers-erasure-check`
+then passed with a clean no-timer binary of `8,862,096` bytes. This is checkpoint-scoped executable
+evidence, not a claim that the final platform workflow was green.
+### Final pre-merge validation disposition
+
+The manually dispatched `Validate and deploy` workflow at `7afdcc4e16` is the final pre-merge
+platform evidence for the Phase 3 code checkpoint. It is intentionally not green: native and
+feature-configured Clippy portions report the known `clippy::result_large_err` failures caused by
+the current `CompilerMessages` representation, including `Result` call sites whose `Err` variant
+is at least 128 bytes.
+
+These failures are deferred diagnostic-layout work owned by the later compact-diagnostic/error
+carrier phases. This closeout does not box `CompilerMessages`, add lint allowances or suppress
+`result_large_err`. The workflow still exercised the successful feature coverage, source and
+first-party audits, workspace, integration, documentation and benchmark-preflight families recorded
+above; those results do not make the aggregate workflow green. Fresh validation is required when
+the next implementation checkpoint activates.
+
+The generic `n^1.70` scaling exception remains separately accepted with its existing evidence and
+unchanged budget. The documentation-only commits after the executable checkpoint do not change that
+disposition or establish validation provenance for the final documentation HEAD.
 
 ### Final owner-ledger smoke observations
 
