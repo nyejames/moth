@@ -333,17 +333,18 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 }
 
                 _ => {
-                    let found_token = match self.token_stream.current() {
-                        Some(found) => {
-                            DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                                CompilerDiagnostic::token_view_invariant_error(
-                                    error,
-                                    "template-body unexpected-token diagnostic",
-                                )
-                            })?
-                        }
-                        None => DiagnosticToken::from_static_tag(self.token_stream.current_tag()),
-                    };
+                    let found_token = self
+                        .token_stream
+                        .current_diagnostic_token(self.string_table)
+                        .map_err(|error| {
+                            CompilerDiagnostic::token_view_invariant_error(
+                                error,
+                                "template-body unexpected-token diagnostic",
+                            )
+                        })?
+                        .unwrap_or_else(|| {
+                            DiagnosticToken::from_static_tag(self.token_stream.current_tag())
+                        });
                     let mut diagnostic =
                         CompilerDiagnostic::unexpected_token_from_tag(found_token, last_known_span);
                     diagnostic.primary_span = last_known_span;

@@ -74,12 +74,11 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 /// emission as `CompilerError`, not become an authored declaration diagnostic.
 type DeclarationResult<T> = Result<T, ExpressionParseError>;
 
-/// True when `|` at `pipe_index` opens a value record, read through a cursor view.
+/// True when `|` at `pipe_index` opens a value record in the bounded declaration cursor view.
 ///
-/// WHAT: mirrors `pipe_opens_value_record` without touching the parser compatibility
-/// vector; used for the statement-owned struct/record dispatch below.
-/// WHY: initializer substreams are canonical bounded adapters, so this short-lived
-/// read-only view preserves adapter-relative indexes and source spans exactly.
+/// WHAT: classifies the statement-owned struct/record dispatch from canonical `TokenTag` facts.
+/// WHY: initializer substreams remain bounded views, so cursor-relative indexes and source spans
+/// stay tied to the same source-token owner.
 fn pipe_opens_value_record_at_cursor(
     cursor: &DeclarationCursor,
     pipe_index: usize,
@@ -583,10 +582,17 @@ pub fn resolve_declaration_syntax(
 
         initializer_stream.skip_newlines();
         if initializer_stream.current_tag() != TokenTag::EOF {
-            let found = match initializer_stream.current() {
-                Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from_static_tag(initializer_stream.current_tag()),
-            };
+            let found = initializer_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "declaration initializer diagnostic",
+                    )
+                })?
+                .unwrap_or_else(|| {
+                    DiagnosticToken::from_static_tag(initializer_stream.current_tag())
+                });
             return Err(CompilerDiagnostic::unexpected_token_from_tag(
                 found,
                 Some(initializer_stream.current_span()),
@@ -901,11 +907,17 @@ pub fn resolve_declaration_syntax(
             .into());
         }
 
+        let found = initializer_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "declaration initializer diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(initializer_stream.current_tag()));
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            match initializer_stream.current() {
-                Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from_static_tag(initializer_stream.current_tag()),
-            },
+            found,
             Some(initializer_stream.current_span()),
         )
         .into());

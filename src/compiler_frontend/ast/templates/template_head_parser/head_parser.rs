@@ -323,17 +323,15 @@ pub fn parse_template_head(
             }
 
             if token != TokenTag::COMMA {
-                let found = match token_stream.current() {
-                    Some(found) => {
-                        Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "template-head separator diagnostic",
-                            )
-                        })?)
-                    }
-                    None => Some(DiagnosticToken::from_static_tag(token)),
-                };
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head separator diagnostic",
+                        )
+                    })?
+                    .or_else(|| Some(DiagnosticToken::from_static_tag(token)));
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::expected_token_from_tags(
@@ -559,23 +557,22 @@ pub fn parse_template_head(
                     defer_comma_advance = true;
                     apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
                 } else {
-                    let found = token_stream.current();
                     let span = current_source_span(token_stream);
-                    let diagnostic = match found {
-                        Some(found) => CompilerDiagnostic::unexpected_token_from_tag(
-                            DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                                CompilerDiagnostic::token_view_invariant_error(
-                                    error,
-                                    "template-head `this` diagnostic",
-                                )
-                            })?,
-                            span,
-                        ),
-                        None => CompilerDiagnostic::unexpected_token_from_tag(
-                            DiagnosticToken::from_static_tag(TokenTag::THIS),
-                            span,
-                        ),
-                    };
+                    let diagnostic = token_stream
+                        .current_diagnostic_token(string_table)
+                        .map_err(|error| {
+                            CompilerDiagnostic::token_view_invariant_error(
+                                error,
+                                "template-head `this` diagnostic",
+                            )
+                        })?
+                        .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                        .unwrap_or_else(|| {
+                            CompilerDiagnostic::unexpected_token_from_tag(
+                                DiagnosticToken::from_static_tag(TokenTag::THIS),
+                                span,
+                            )
+                        });
                     return Err(with_current_token_span(token_stream, diagnostic).into());
                 }
             }
@@ -743,23 +740,22 @@ pub fn parse_template_head(
             // Separators
             TokenTag::COMMA => {
                 // Multiple commas in succession.
-                let found = token_stream.current();
                 let span = current_source_span(token_stream);
-                let diagnostic = match found {
-                    Some(found) => CompilerDiagnostic::unexpected_token_from_tag(
-                        DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "template-head comma diagnostic",
-                            )
-                        })?,
-                        span,
-                    ),
-                    None => CompilerDiagnostic::unexpected_token_from_tag(
-                        DiagnosticToken::from_static_tag(TokenTag::COMMA),
-                        span,
-                    ),
-                };
+                let diagnostic = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head comma diagnostic",
+                        )
+                    })?
+                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .unwrap_or_else(|| {
+                        CompilerDiagnostic::unexpected_token_from_tag(
+                            DiagnosticToken::from_static_tag(TokenTag::COMMA),
+                            span,
+                        )
+                    });
                 return Err(with_current_token_span(token_stream, diagnostic).into());
             }
 
@@ -772,22 +768,21 @@ pub fn parse_template_head(
 
             _ => {
                 let span = current_source_span(token_stream);
-                let found = token_stream.current();
-                let diagnostic = match found {
-                    Some(found) => CompilerDiagnostic::unexpected_token_from_tag(
-                        DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "template-head unexpected-token diagnostic",
-                            )
-                        })?,
-                        span,
-                    ),
-                    None => CompilerDiagnostic::unexpected_token_from_tag(
-                        DiagnosticToken::from_static_tag(token),
-                        span,
-                    ),
-                };
+                let diagnostic = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "template-head unexpected-token diagnostic",
+                        )
+                    })?
+                    .map(|found| CompilerDiagnostic::unexpected_token_from_tag(found, span))
+                    .unwrap_or_else(|| {
+                        CompilerDiagnostic::unexpected_token_from_tag(
+                            DiagnosticToken::from_static_tag(token),
+                            span,
+                        )
+                    });
                 return Err(with_current_token_span(token_stream, diagnostic).into());
             }
         }

@@ -446,10 +446,20 @@ pub(crate) fn parse_choice_shell(
             }
             _ => {
                 let span = current_source_span(token_stream);
-                let Some(found) = token_stream.canonical_cursor().current() else {
+                let Some(found) = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        HeaderParseFailure::Infrastructure(
+                            CompilerDiagnostic::token_view_invariant_error(
+                                error,
+                                "choice unexpected-token diagnostic",
+                            ),
+                        )
+                    })?
+                else {
                     return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
                 };
-                return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
             }
         }
     }

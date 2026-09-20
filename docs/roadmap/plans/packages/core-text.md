@@ -23,8 +23,8 @@ NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner 
 ```
 
 The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
-only remaining blocker owned here. The umbrella programme owns cross-cutting blockers for every
-code-bearing phase, including the inherited data-layout base that currently fails `just validate`.
+only remaining blocker owned here. The umbrella programme also keeps the package lane paused until
+final data-layout Phase 3 exact-checkpoint R5 closeout.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
 single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole

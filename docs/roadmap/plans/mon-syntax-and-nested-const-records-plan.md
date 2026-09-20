@@ -4,8 +4,11 @@
 
 - Status: queued, with the maintainer's syntax direction accepted.
 - Current slice: not started.
-- Blockers: the accepted source/token-layout Phase 3 checkpoint and the separate post-Phase-3 compiler cleanup must be merged.
-- Next action: refresh the activation tree, record the baseline in working notes and start Phase 0.
+- Blockers: the source/token-layout Phase 3 implementation checkpoint is complete, but its final
+  exact-checkpoint R5 closeout and the separate post-Phase-3 compiler cleanup must be completed
+  before this plan starts.
+- Next action: refresh the activation tree, record the baseline in working notes and start Phase 0
+  only after those prerequisites are merged.
 
 ## Purpose
 
@@ -17,11 +20,17 @@ The maintainer's accepted direction changes the current record contract. Publish
 
 ## Sequencing and activation
 
-Run after the accepted source/token-layout Phase 3 merge and the separate compiler-cleanup follow-up. The follow-up is a required checkpoint, not work absorbed by this plan. Its exact scope and filename belong to its own authoring task.
+Run after final source/token-layout Phase 3 closeout and the separate compiler-cleanup follow-up.
+The follow-up is a required checkpoint, not work absorbed by this plan. Its exact scope and filename
+belong to its own authoring task.
 
 Complete this cutover before the subsequent Wiring and native result-slot/Core const-evaluation checkpoints and before data-layout Phase 4 resumes. General directives and runtime anonymous records consume the resulting shared syntax later. Runtime records retain their separate numeric-semantics prerequisite. The main roadmap owns the full serial order and existing package pauses remain in force.
 
-`diagnostic-data-layout-changes` is the preparation reference while Phase 3 is active. Implementation starts from the accepted merged tree, including the cleanup checkpoint, rather than an earlier main or an assumed branch state. Establish the full revision, worktree status and validation baseline at activation in local working notes. Keep this queued plan free of a speculative baseline SHA.
+The source/token-layout Phase 3 implementation checkpoint and final exact-checkpoint R5 closeout,
+plus the separate compiler-cleanup follow-up, are prerequisites. Implementation starts from the
+fully closed merged tree after those checkpoints rather than an earlier main or an assumed branch
+state. Establish the full revision, worktree status and validation baseline at activation in local
+working notes. Keep this queued plan free of a speculative baseline SHA.
 
 Preserve delivered source-owned token storage, retained ranges, exact spans and parser cursors. Use the diagnostic API present at activation. This work neither starts the deferred diagnostic-layout phases nor restores adapters removed by Phase 3 or its follow-up.
 

@@ -55,15 +55,15 @@ pub(super) fn parse_mutable_receiver_expression(
     token_stream.advance();
 
     if token_stream.current_tag() != TokenTag::SYMBOL {
-        let found = match token_stream.current() {
-            Some(found) => DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
                 crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
                     error,
                     "mutable-receiver symbol diagnostic",
                 )
-            })?,
-            None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
-        };
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
         return Err(CompilerDiagnostic::unexpected_token_from_tag(found, marker_span).into());
     }
     let symbol_id = token_stream
@@ -182,17 +182,14 @@ fn parse_copy_place_payload(
             )?;
 
             if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
-                let found = match token_stream.current() {
-                    Some(found) => {
-                        Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                            CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "copy-place closing-delimiter diagnostic",
-                            )
-                        })?)
-                    }
-                    None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-                };
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "copy-place closing-delimiter diagnostic",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::expected_token_from_tags(
                     TokenTag::CLOSE_PARENTHESIS,
                     found,

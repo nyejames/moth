@@ -17,16 +17,19 @@ Implementation observations and file paths below are navigation aids, not frozen
 ```text
 STATUS: queued, design approved
 CURRENT_SLICE: activation and merged-baseline audit
-BLOCKERS: diagnostics Phase 3 completion and merge, then wiring v1 plan completion. The package-foundations baseline is merged on main; its Phase 0 remains open only on the red `ci-clippy-native` lane, which the data-layout plan owns.
-NEXT_ACTION: finish the remaining prerequisite merges into main, create a fresh worktree, then run Phase 0
+BLOCKERS: exact-checkpoint R5 closeout for the source/token-layout Phase 3, compiler cleanup, MON
+syntax and MON Rust tooling checkpoints, then Wiring V1, must be merged before native result-slot/
+Core const-evaluation work begins.
+NEXT_ACTION: finish those prerequisite merges into main, create a fresh worktree, then run Phase 0.
 ```
 
 ## Required reading
 
-Phases 2 and 3 of the diagnostics work are still moving while this plan is written. At activation,
-re-read current authorities and trace the current code. Preserve newer source IDs, spans, token
-ownership and failure lanes. Never restore an older API because an example in this plan uses it.
-No speculative baseline SHA belongs in the committed status block.
+Phase 3 implementation and diagnostic provenance are complete; exact-checkpoint R5 attribution
+remains open. At activation, re-read current authorities and trace the current code. Preserve newer
+source IDs, spans, token ownership and failure lanes. Never restore an older API because an example
+in this plan uses it. No speculative baseline SHA belongs in the committed status block.
+
 
 Read `AGENTS.md` and its current routes first. For this cross-stage refactor, read the full relevant
 compiler, build, data-layout and memory authorities, including:
@@ -69,7 +72,7 @@ rather than linking short-lived plan files.
 | Folding contexts | Required constants and opportunistic ordinary expressions share one evaluator. A runtime declaration remains a runtime declaration. |
 | First real operations | Enable `length`, `is_empty`, `contains`, `starts_with` and `ends_with` in `@core/text`. Other package APIs are not expanded here. |
 | Borrow precision | Preserve result-slot identity and existing conservative legality. Put finer result alias/lifetime investigations in Boracle follow-up work. |
-| Scheduling | Run on merged `main` after the two prerequisite baselines. Diagnostics and result-slot-dependent package expansion pause until this work lands; package work on the existing external ABI continues beside it. |
+| Scheduling | Run on merged `main` after final source/token-layout Phase 3 R5 closeout, the post-Phase-3 compiler tidy-up, MON syntax, MON Rust tooling and Wiring checkpoints. Native result-slot/Core const-evaluation work then lands before explicit data-layout Phase 4 reactivation; package expansion remains paused until its prerequisites are present. |
 
 ## Scope limits
 
@@ -403,8 +406,10 @@ legacy/current API or compatibility wrapper to manufacture a green checkpoint.
 
 ### Phase 0 - merge checkpoint, audit and final contract map
 
-- [ ] Confirm both prerequisite baselines are merged, that no competing workstream is changing the
-      shared result representation, and that the implementation worktree starts from current `main`.
+- [ ] Confirm final source/token-layout Phase 3 R5 closeout and the post-Phase-3 compiler cleanup,
+      MON syntax, MON Rust tooling and Wiring prerequisites are merged, that no competing workstream
+      is changing the shared result representation, and that the implementation worktree starts from
+      current `main`.
 - [ ] Run and record baseline validation, supported backend lanes, Boracle gates and known unrelated
       failures. Read the new data-layout contracts before naming any diagnostic or source type.
 - [ ] Trace every producer/consumer in the owner table, including frozen generics, module interfaces,
@@ -614,8 +619,8 @@ Perform updates when the owning behavior lands, not as advance claims of support
 | Package umbrella and future living plans | Make the merged result-slot/const-eval foundation a prerequisite. Require per-operation notes for supported evaluation, runtime-only behavior, parity blockers and value-shape blockers. |
 | Boracle docs and roadmap TODOs | Add the follow-up below as an investigation, not implemented reference semantics or a new production checker claim. |
 | `index.md` and audit records | Update moved/fundamentally changed owners. Mark affected audit coverage stale under the audit rules. A Slice review is not a new structured audit. |
-| Main roadmap | Enforce the serial checkpoint after diagnostics Phase 3 and the package baseline merge. Resume both workstreams after this lands, then delete this plan entry with the plan. |
-| Diagnostics work-item state | At the Phase 3 checkpoint, record the validated main handoff and block Compact diagnostics, type snapshots and frozen reports until this compiler foundation lands. Keep the remaining diagnostics work open and refresh its activation assumptions afterward. |
+| Main roadmap | Enforce the serial checkpoint after final source/token-layout Phase 3 R5 closeout, the post-Phase-3 compiler cleanup, MON syntax, MON Rust tooling and Wiring. Resume native result-slot/Core const-evaluation work only after this chain lands. |
+| Diagnostics work-item state | At final Phase 3 closeout, record the validated main handoff and keep Compact diagnostics, type snapshots and frozen reports blocked until this compiler foundation lands. Refresh activation assumptions after the native checkpoint. |
 
 The compiler-foundation plan remains outside `plans/packages/`. Package plans name its delivered
 capabilities rather than linking a short-lived plan. The umbrella keeps its living-plan lifecycle

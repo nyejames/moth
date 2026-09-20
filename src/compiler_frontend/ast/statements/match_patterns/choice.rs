@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidMatchPatternReason,
+    CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
@@ -284,12 +284,14 @@ fn parse_choice_pattern_captures(
                         .into());
                     }
                     _ => {
-                        let found = match token_stream.current() {
-                            Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                            None => {
-                                Some(DiagnosticToken::from_static_tag(token_stream.current_tag()))
-                            }
-                        };
+                        let found = token_stream
+                            .current_diagnostic_token(string_table)
+                            .map_err(|error| {
+                                CompilerDiagnostic::token_view_invariant_error(
+                                    error,
+                                    "choice payload separator diagnostic",
+                                )
+                            })?;
                         return Err(CompilerDiagnostic::expected_token_from_tags(
                             TokenTag::COMMA,
                             found,

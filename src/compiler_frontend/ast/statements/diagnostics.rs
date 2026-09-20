@@ -7,6 +7,7 @@
 //!      `CompilerDiagnostic` records instead of legacy `CompilerError`.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
@@ -31,12 +32,11 @@ fn with_current_token_span(
 /// Produce a diagnostic for an unexpected token in statement position.
 ///
 /// WHAT: maps each unexpected token tag to the most appropriate typed diagnostic.
-/// WHY: centralizes the decision about which constructor to use so the dispatch
-///      loop stays readable.
+/// WHY: centralizes the constructor decision so the statement dispatch loop stays readable.
 pub(crate) fn unexpected_statement_token(
     token_stream: &AstCursor,
-    _string_table: &mut StringTable,
-) -> CompilerDiagnostic {
+    string_table: &mut StringTable,
+) -> Result<CompilerDiagnostic, CompilerError> {
     let current_tag = token_stream.current_tag();
     let span = Some(token_stream.current_span());
     let diagnostic = match current_tag {
@@ -87,24 +87,34 @@ pub(crate) fn unexpected_statement_token(
                 reserved_trait_keyword_error(keyword, span)
             } else {
                 // Invariant: Must and TraitThis are always reserved trait keywords.
-                let found = match token_stream.current() {
-                    Some(found) => DiagnosticToken::from_token_ref(found),
-                    None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
-                };
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "statement-position unexpected-token diagnostic",
+                        )
+                    })?
+                    .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
                 CompilerDiagnostic::unexpected_token_from_tag(found, span)
             }
         }
 
         _ => {
-            let found = match token_stream.current() {
-                Some(found) => DiagnosticToken::from_token_ref(found),
-                None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
-            };
+            let found = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "statement-position unexpected-token diagnostic",
+                    )
+                })?
+                .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
             CompilerDiagnostic::unexpected_token_from_tag(found, span)
         }
     };
 
-    with_current_token_span(token_stream, diagnostic)
+    Ok(with_current_token_span(token_stream, diagnostic))
 }
 
 /// Context for an unexpected scope-close (`;`) diagnostic.

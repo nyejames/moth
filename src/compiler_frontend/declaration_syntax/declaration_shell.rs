@@ -150,10 +150,17 @@ pub fn parse_declaration_syntax(
         }
         _ => {
             let span = current_source_span(token_stream);
-            let found = match token_stream.canonical_cursor().current() {
-                Some(found) => Some(DiagnosticToken::from_token_ref(found)),
-                None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
-            };
+            let found = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    HeaderParseFailure::Infrastructure(
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "declaration initializer diagnostic projection",
+                        ),
+                    )
+                })?
+                .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::expected_token_from_tags(TokenTag::ASSIGN, found, span),
             ));

@@ -177,11 +177,6 @@ impl CompilerDiagnostic {
         )
     }
 
-    /// Infallible `UnexpectedToken` over validated source token views.
-    pub(crate) fn unexpected_token_from_ref(found: TokenRef<'_>, span: Option<SourceSpan>) -> Self {
-        Self::unexpected_token_from_tag(DiagnosticToken::from_token_ref(found), span)
-    }
-
     /// Map a token-view failure into the compiler-invariant error lane.
     ///
     /// WHAT: keeps malformed compact payloads as infrastructure failures.

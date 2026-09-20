@@ -3757,3 +3757,84 @@ counts; the full retained/intermediate ownership ledger remains missing:
 
 Retained report metrics for generic-scaling-160 are zero because the clean result drops its
 report context. No budget is raised or loosened by this record.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 matched evidence (provisional, 2026-09-20)
+
+> This section records the independent R5 comparison for the pre-final candidate `aa337b136`.
+> The final parser cutover at `6309adf6d` came afterward, so these measurements are not evidence
+> for the final checkpoint. Raw per-process output is local-only under `/tmp/moth-r5-independent/`;
+> no raw allocator logs are committed. Budgets remain nominal/constant `n^1.25` and generic
+> `n^1.70`.
+
+### Measurement identity
+
+- Compared commits: pre-Phase-3 `c17672bb5bb8306432c69cefbb9afbe8a5484b2d`, pause `3fb55d31b96f81bd983c26efe82465353f09479a`, immediate correction parent `fcc41b602084e1ce3c1af240ed4baf3ec089cc04`, candidate `aa337b13648712c28c84368750940944f940ae5e`.
+- Fixtures and metric boundaries were identical: constant chain (`frontend.ast.total`, sizes 32/128/512), nominal scaling (`frontend.ast.environment`, sizes 40/80/160/320), generic scaling (`frontend.generated.materialise`, sizes 20/40/80/160), warning-heavy, and diagnosed fixtures from `benchmarks/manifest.toml`.
+- Each commit used a release `data_layout_memory_probe` binary built with the same `rustc 1.98.1 (48a229cea 2026-09-01)`, Cargo `1.98.1`, host `aarch64-apple-darwin`, Apple M1 Pro, and `RAYON_NUM_THREADS=1`. Five measured independent process invocations followed one discarded warm-up per tag; rounds interleaved fixture then tag order `pre`, `pause`, `parent`, `candidate`.
+- Probe allocator values are baseline-relative aggregate proxies; semantic retention fields are owner-ledger observations. They are not substituted for one another.
+
+### Scaling distributions
+
+Each cell lists the five independent measurements in round order; `median [min,max]` follows. Deltas are candidate minus the named comparison.
+
+#### Constant chain — `stage.frontend.ast.total`, budget `n^1.25`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 32 | `0.257/0.240/0.266/0.276/0.247`; `0.257 [0.240,0.276]` | `0.277/0.298/0.275/0.285/0.276`; `0.277 [0.275,0.298]` | `0.297/0.249/0.259/0.248/0.274`; `0.259 [0.248,0.297]` | `0.263/0.257/0.278/0.267/0.269`; `0.267 [0.257,0.278]` | `+0.010` | `-0.010` | `+0.008` |
+| 128 | `0.430/0.447/0.541/0.419/0.435`; `0.435 [0.419,0.541]` | `0.530/0.554/0.488/0.472/0.494`; `0.494 [0.472,0.554]` | `0.453/0.472/0.487/0.443/0.458`; `0.458 [0.443,0.487]` | `0.455/0.446/0.452/0.428/0.443`; `0.446 [0.428,0.455]` | `+0.012` | `-0.048` | `-0.012` |
+| 512 | `1.202/1.361/1.190/1.166/1.295`; `1.202 [1.166,1.361]` | `1.300/1.267/1.258/1.265/1.459`; `1.267 [1.258,1.459]` | `1.339/1.178/1.198/1.392/1.305`; `1.305 [1.178,1.392]` | `1.211/1.135/1.218/1.379/1.201`; `1.211 [1.135,1.379]` | `+0.009` | `-0.057` | `-0.094` |
+
+Fits: pre `n^0.557`, pause `n^0.549`, parent `n^0.584`, candidate `n^0.545`.
+
+#### Nominal environment — `stage.frontend.ast.environment`, budget `n^1.25`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 40 | `0.575/0.598/0.589/0.629/0.600`; `0.598 [0.575,0.629]` | `0.619/0.646/0.637/0.635/0.630`; `0.635 [0.619,0.646]` | `0.650/0.681/0.627/0.605/0.601`; `0.627 [0.601,0.681]` | `0.607/0.587/0.599/0.627/0.592`; `0.599 [0.587,0.627]` | `+0.001` | `-0.036` | `-0.028` |
+| 80 | `1.073/1.081/1.110/1.062/1.052`; `1.073 [1.052,1.110]` | `1.143/1.118/1.142/1.116/1.224`; `1.142 [1.116,1.224]` | `1.084/1.083/1.115/1.119/1.335`; `1.115 [1.083,1.335]` | `1.059/1.090/1.135/1.093/1.063`; `1.090 [1.059,1.135]` | `+0.017` | `-0.052` | `-0.025` |
+| 160 | `2.051/2.093/2.024/2.049/2.101`; `2.051 [2.024,2.101]` | `2.119/2.361/2.168/2.148/2.099`; `2.148 [2.099,2.361]` | `2.267/2.072/2.035/2.064/2.073`; `2.072 [2.035,2.267]` | `2.056/2.143/2.072/2.013/2.039`; `2.056 [2.013,2.143]` | `+0.005` | `-0.093` | `-0.017` |
+| 320 | `3.945/4.131/3.875/4.010/3.938`; `3.945 [3.875,4.131]` | `4.321/4.137/4.035/4.075/4.162`; `4.137 [4.035,4.321]` | `4.076/4.034/4.428/3.998/4.087`; `4.076 [3.998,4.428]` | `3.905/3.963/4.131/3.959/4.048`; `3.963 [3.905,4.131]` | `+0.018` | `-0.174` | `-0.114` |
+
+Fits: pre `n^0.910`, pause `n^0.902`, parent `n^0.900`, candidate `n^0.909`.
+
+#### Generic materialisation — `stage.frontend.generated.materialise`, budget `n^1.70`
+
+| size | pre distribution; median [range] | pause distribution; median [range] | parent distribution; median [range] | candidate distribution; median [range] | Δ candidate-pre | Δ candidate-pause | Δ candidate-parent |
+| ---: | --- | --- | --- | --- | ---: | ---: | ---: |
+| 20 | `10.074/9.826/9.857/9.654/9.986`; `9.857 [9.654,10.074]` | `9.915/10.937/10.325/9.703/9.838`; `9.915 [9.703,10.937]` | `9.605/10.211/10.437/10.347/10.291`; `10.291 [9.605,10.437]` | `9.725/9.918/9.861/10.083/10.151`; `9.918 [9.725,10.151]` | `+0.062` | `+0.003` | `-0.373` |
+| 40 | `29.471/29.502/29.645/30.140/31.690`; `29.645 [29.471,31.690]` | `29.668/30.285/29.900/29.701/31.061`; `29.900 [29.668,31.061]` | `29.353/29.200/29.526/30.537/30.762`; `29.526 [29.200,30.762]` | `29.894/29.665/32.557/28.778/29.562`; `29.665 [28.778,32.557]` | `+0.021` | `-0.234` | `+0.139` |
+| 80 | `106.885/107.315/106.859/106.000/123.533`; `106.885 [106.000,123.533]` | `113.390/105.473/108.013/105.403/105.747`; `105.747 [105.403,113.390]` | `106.067/109.020/106.914/105.073/106.219`; `106.219 [105.073,109.020]` | `104.315/105.379/106.819/104.979/106.441`; `105.379 [104.315,106.819]` | `-1.506` | `-0.368` | `-0.841` |
+| 160 | `399.389/406.654/408.831/408.601/407.764`; `407.764 [399.389,408.831]` | `405.015/410.638/418.993/397.652/401.318`; `405.015 [397.652,418.993]` | `406.677/402.113/402.604/419.315/418.719`; `406.677 [402.113,419.315]` | `402.883/408.304/397.600/406.818/402.029`; `402.883 [397.600,408.304]` | `-4.881` | `-2.131` | `-3.794` |
+
+Fits: pre `n^1.796`, pause `n^1.788`, parent `n^1.776`, candidate `n^1.786`.
+
+### Outcome and allocator distributions
+
+All five samples preserved the same outcome and diagnostic counts per fixture: warning-heavy was clean with 39 warnings; diagnosed was diagnosed with 40 errors. Median aggregate allocator values (live / peak / after-report-drop bytes) were:
+
+| fixture | pre | pause | parent | candidate |
+| --- | --- | --- | --- | --- |
+| warning-heavy.moth (Success, 0 errors, 39 warnings) | `30108 / 2057633 / 1479` | `29953 / 2057695 / 1479` | `29954 / 2057714 / 1479` | `29957 / 2056363 / 1479` |
+| diagnosed (Diagnosed, 40 errors, 0 warnings) | `318671 / 1730799 / 1488` | `317998 / 1965214 / 1488` | `318040 / 1965977 / 1488` | `318166 / 1947482 / 1488` |
+
+The candidate remained within the unchanged constant and nominal budgets, while generic remained
+above the inherited `n^1.70` budget at every compared point. Absolute generic medians were lower
+than pre/pause at sizes 80 and 160 but are still a measured tradeoff rather than a no-worsening
+claim; the budget is intentionally unchanged. This four-point, five-sample comparison is
+provisional historical evidence for candidate `aa337b136`, not final-checkpoint performance
+acceptance; exact R5 attribution for `6309adf6d` remains open.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 ownership ledger smoke evidence (provisional, 2026-09-20)
+
+The feature-gated ledger records compiler-owned storage and lifetime events rather than allocator bookkeeping. The release probe was built from the candidate implementation with `data_layout_memory_probe`, rustc/cargo `1.98.1`, Apple M1 Pro, and `RAYON_NUM_THREADS=1`. These are one-process smoke observations; matched five-run allocator distributions remain above.
+
+| Fixture | Outcome | Errors/warnings | Owners | Shape/span bytes | Numeric/path/sequence bytes | Transient bytes (peak) | Donor identity tables | Generic owner bytes (live/peak) | Frozen report contexts/path tables | Incomplete |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | --- |
+| `benchmarks/speed-test.moth` | Success | 0 / 0 | 1 | 32,816 / 16,408 | 8,688 / 0 / 888 | 68,616 (68,616) | 0 / 0 | 0 (0 / 0) | 0 / 0 | false |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 1 | 2,120 / 1,060 | 0 / 0 / 16 | 5,760 (5,760) | 0 / 0 | 0 (0 / 0) | 1 / 1 | false |
+| `benchmarks/adversarial/generic-trait-churn.moth` | Success | 0 / 0 | 1 | 7,568 / 3,784 | 312 / 0 / 280 | 18,864 (18,864) | strings 2 / paths 1 | 1 (11,944 / 11,944) | 0 / 0 | false |
+| `benchmarks/data-layout/diagnosed` | Diagnosed | 40 / 0 | 42 | 9,112 / 4,556 | 48 / 8 / 736 | 22,560 (19,008) | 0 / 0 | 0 (0 / 0) | 1 / 41 | false |
+| `/tmp/moth-r5-independent/early-malformed.moth` (`[`, newline) | Diagnosed | 1 / 0 | 1 | 32 / 16 | 0 / 0 / 4 | 48 (48) | 0 / 0 | 0 (0 / 0) | 0 / 0 | false |
+
+The warning-heavy report retained one identity context and path table with 78 rows/1,536 bytes; the diagnosed report retained one context and 41 path tables with 6,602 rows/79,224 bytes. Clean and early malformed outcomes retained no frozen report context. The diagnosed path table count is intentionally higher because each diagnosed source domain keeps its own source-owned table. Full raw output remains local-only in `/tmp/moth-r5-independent/`; the ledger reports `incomplete=false` for every smoke.

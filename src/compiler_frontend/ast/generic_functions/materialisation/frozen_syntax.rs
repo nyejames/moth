@@ -1,8 +1,8 @@
 //! Frozen generic body ownership and donor file-reference capture.
 //!
 //! Persistent generic syntax keeps the canonical declaring-source owner and checked body view.
-//! Compatibility parser adapters are materialised only for the current operation, while stable
-//! Stage 0 file-reference facts cross the source-preparation lifetime independently.
+//! Stage 0 file-reference facts cross the source-preparation lifetime independently; no
+//! compatibility parser adapter or copied token window is materialised.
 
 use super::super::{GenericFunctionBody, MaterialisedDonorContext};
 use super::frozen_file_references::StableResolvedFileReference;
@@ -281,8 +281,8 @@ impl StableBodySyntax {
         _string_table: &mut StringTable,
         identity_tables: Option<(&Arc<PathTable>, &Arc<FrozenStringTable>)>,
     ) -> Result<MaterialisedBody, CompilerError> {
-        // Validate the retained canonical owner before carrying its range/sequence to a parser
-        // consumer; parser adapters themselves are intentionally deferred until that boundary.
+        // Validate the retained canonical owner before handing its range/sequence to a parser
+        // consumer; no compatibility adapter or copied parser window is created.
         crate::compiler_frontend::ast::generic_functions::templates::validate_source_owner(
             &self.source_owner.source_tokens,
             self.token_range,

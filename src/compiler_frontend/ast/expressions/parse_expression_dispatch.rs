@@ -100,16 +100,27 @@ fn reject_adjacent_operand(
     Ok(())
 }
 
-fn unexpected_token_at_current(token_stream: &AstCursor, fallback: TokenTag) -> CompilerDiagnostic {
+fn unexpected_token_at_current(
+    token_stream: &AstCursor,
+    fallback: TokenTag,
+    string_table: &mut StringTable,
+) -> Result<CompilerDiagnostic, ExpressionParseError> {
     let span = Some(token_stream.current_span());
-    if let Some(found) = token_stream.current() {
-        CompilerDiagnostic::unexpected_token_from_ref(found, span)
-    } else {
-        CompilerDiagnostic::unexpected_token_from_tag(
+    let found = token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "expression unexpected-token diagnostic",
+            )
+        })?;
+    Ok(match found {
+        Some(found) => CompilerDiagnostic::unexpected_token_from_tag(found, span),
+        None => CompilerDiagnostic::unexpected_token_from_tag(
             DiagnosticToken::from_static_tag(fallback),
             span,
-        )
-    }
+        ),
+    })
 }
 
 fn is_value_operand_start_token(tag: TokenTag) -> bool {
@@ -453,7 +464,9 @@ pub(super) fn dispatch_expression_token(
         | TokenTag::ELSE
         | TokenTag::END => dispatch_delimiter_token(token, token_stream, state, string_table),
 
-        TokenTag::CLOSE_PARENTHESIS => dispatch_close_parenthesis(token, token_stream, state),
+        TokenTag::CLOSE_PARENTHESIS => {
+            dispatch_close_parenthesis(token, token_stream, state, string_table)
+        }
 
         TokenTag::OPEN_PARENTHESIS => {
             let group_span = Some(token_stream.current_postfix_operator_span());
@@ -518,7 +531,7 @@ pub(super) fn dispatch_expression_token(
                 return Err(error.into());
             }
 
-            Err(unexpected_token_at_current(token_stream, token).into())
+            Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
         }
 
         TokenTag::OPEN_CURLY => {
@@ -704,7 +717,7 @@ pub(super) fn dispatch_expression_token(
 
         TokenTag::HASH => {
             if token_stream.peek_next_tag() != Some(TokenTag::TEMPLATE_HEAD) {
-                return Err(unexpected_token_at_current(token_stream, token).into());
+                return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
             }
 
             Ok(ExpressionTokenStep::Advance)
@@ -801,7 +814,9 @@ pub(super) fn dispatch_expression_token(
             advance_with_operator(state.expression, context, token_stream, Operator::Range)
         }
 
-        TokenTag::WILDCARD => Err(unexpected_token_at_current(token_stream, token).into()),
+        TokenTag::WILDCARD => {
+            Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
+        }
 
         TokenTag::TYPE_PARAMETER_BRACKET => {
             // A complete operand precedes `|`: there is no binary `|` operator. Runtime
@@ -854,7 +869,9 @@ pub(super) fn dispatch_expression_token(
             }
         }
 
-        TokenTag::ADD_ASSIGN => Err(unexpected_token_at_current(token_stream, token).into()),
+        TokenTag::ADD_ASSIGN => {
+            Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
+        }
 
         _ => {
             if let Some(error) =
@@ -863,7 +880,7 @@ pub(super) fn dispatch_expression_token(
                 return Err(error.into());
             }
 
-            Err(unexpected_token_at_current(token_stream, token).into())
+            Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
         }
     }
 }
@@ -877,7 +894,9 @@ fn dispatch_delimiter_token(
     if state.expression.is_empty() {
         match token_tag {
             TokenTag::COMMA | TokenTag::ARROW => {
-                return Err(unexpected_token_at_current(token_stream, token_tag).into());
+                return Err(
+                    unexpected_token_at_current(token_stream, token_tag, string_table)?.into(),
+                );
             }
 
             _ => {}
@@ -902,13 +921,14 @@ fn dispatch_close_parenthesis(
     token: TokenTag,
     token_stream: &mut AstCursor,
     state: &mut ExpressionDispatchState<'_>,
+    string_table: &mut StringTable,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     if state.consume_closing_parenthesis {
         token_stream.advance();
     }
 
     if state.expression.is_empty() {
-        return Err(unexpected_token_at_current(token_stream, token).into());
+        return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
     }
 
     Ok(ExpressionTokenStep::Break)
@@ -981,7 +1001,7 @@ fn dispatch_is_token(
         // `is:` → type guard in a match arm. The left-hand side must be a single expression.
         Some(TokenTag::COLON) => {
             if state.expression.len() > 1 {
-                return Err(unexpected_token_at_current(token_stream, token).into());
+                return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
             }
 
             let value = evaluate_expression(
@@ -1019,7 +1039,7 @@ fn parse_cast_expression(
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     // `cast` is only valid as the leading token of an expression at an explicit boundary.
     if !state.expression.is_empty() {
-        return Err(unexpected_token_at_current(token_stream, token).into());
+        return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
     }
 
     let cast_target_context = *state.cast_target_context;

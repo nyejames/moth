@@ -436,7 +436,7 @@ pub(crate) fn parse_function_body_statements(
                 return Err(statement_dispatch_error(unexpected_statement_token(
                     token_stream,
                     string_table,
-                )));
+                )?));
             }
         }
     }

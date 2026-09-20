@@ -408,8 +408,8 @@ impl ModulePreparationContext<'_> {
         let active_root_role = stable_origin.role();
 
         // 1. Prepare all selected files against one local string-table fork per worker chunk.
-        //    Directory Moth inputs parse the canonical owner through the narrow transitional
-        //    adapter, synthetic Moth and Moth-template inputs consume complete outputs retained
+        //    Directory Moth inputs parse from their canonical owner through a bounded source
+        //    view; synthetic Moth and Moth-template inputs consume complete outputs retained
         //    during discovery, and deferred inputs resolve their kind from the authoritative
         //    source database before their one preparation. Merge/remap once before aggregating
         //    header syntax.

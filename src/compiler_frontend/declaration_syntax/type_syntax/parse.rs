@@ -16,7 +16,7 @@ use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
-    TokenRef, TokenTag,
+    TokenRef, TokenTag, TokenViewError,
 };
 
 /// Two-lane result for type-annotation parsing.
@@ -69,6 +69,18 @@ impl<'a> TypeTokenWindow<'a> {
         self.source
             .token(TokenIndex::try_from_index(absolute)?)
             .ok()
+    }
+
+    fn diagnostic_token_from_ref(
+        self,
+        token: TokenRef<'a>,
+        destination: &mut StringTable,
+    ) -> Result<DiagnosticToken, TokenViewError> {
+        DiagnosticToken::try_from_token_ref_in(
+            token,
+            self.payload_origin.map(|origin| origin.strings),
+            destination,
+        )
     }
 
     fn token_tag_at(self, index: usize) -> Option<TokenTag> {
@@ -257,7 +269,7 @@ fn parse_type_atom(
             context,
         ))),
         TokenTag::OF => {
-            let found = current_diagnostic_token(token_stream)?;
+            let found = current_diagnostic_token(token_stream, string_table)?;
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::unexpected_token_from_tag(
                     found,
@@ -298,7 +310,7 @@ fn parse_type_atom(
                         token_stream.advance();
                     } else {
                         let span = current_source_span(token_stream);
-                        let found = current_diagnostic_token(token_stream)?;
+                        let found = current_diagnostic_token(token_stream, string_table)?;
                         return Err(HeaderParseFailure::Diagnostic(
                             CompilerDiagnostic::invalid_type_annotation(
                                 context,
@@ -336,7 +348,7 @@ fn parse_type_atom(
                         | TokenTag::MULTIPLY_ASSIGN
                 ) =>
         {
-            let found = current_diagnostic_token(token_stream)?;
+            let found = current_diagnostic_token(token_stream, string_table)?;
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
                     context,
@@ -352,12 +364,16 @@ fn parse_type_atom(
                     CompilerDiagnostic::unexpected_end_of_file(None, span),
                 ));
             };
-            let found = DiagnosticToken::try_from_token_ref(token).map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "type annotation diagnostic projection",
-                ))
-            })?;
+            let found = token_stream
+                .diagnostic_token_from_ref(token, string_table)
+                .map_err(|error| {
+                    HeaderParseFailure::Infrastructure(
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "type annotation diagnostic projection",
+                        ),
+                    )
+                })?;
             Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::invalid_type_annotation(
                     context,
@@ -461,12 +477,16 @@ fn parse_collection_type(
     if collection_type_slice_can_start_type(inner, context, string_table)? {
         let parsed_slice = parse_type_slice(inner, context, string_table)?;
         if let Some(extra_token) = parsed_slice.next_token {
-            let found = DiagnosticToken::try_from_token_ref(extra_token.view).map_err(|error| {
-                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "collection element trailing token",
-                ))
-            })?;
+            let found = inner
+                .diagnostic_token_from_ref(extra_token.view, string_table)
+                .map_err(|error| {
+                    HeaderParseFailure::Infrastructure(
+                        CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "collection element trailing token",
+                        ),
+                    )
+                })?;
             return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::expected_token_from_tags(
                     TokenTag::CLOSE_CURLY,
@@ -773,12 +793,14 @@ fn try_parse_map_side(
 
     let parsed_slice = parse_type_slice(tokens, context, string_table)?;
     if let Some(extra_token) = parsed_slice.next_token {
-        let found = DiagnosticToken::try_from_token_ref(extra_token.view).map_err(|error| {
-            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-                error,
-                "map side trailing token",
-            ))
-        })?;
+        let found = tokens
+            .diagnostic_token_from_ref(extra_token.view, string_table)
+            .map_err(|error| {
+                HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "map side trailing token",
+                ))
+            })?;
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::expected_token_from_tags(
                 TokenTag::CLOSE_CURLY,
@@ -1026,7 +1048,7 @@ fn parse_generic_arguments(
             }
             _other => {
                 let span = current_source_span(token_stream);
-                let found = current_diagnostic_token(token_stream)?;
+                let found = current_diagnostic_token(token_stream, string_table)?;
                 return Err(HeaderParseFailure::Diagnostic(
                     CompilerDiagnostic::unexpected_token_from_tag(found, span),
                 ));
@@ -1196,22 +1218,26 @@ fn compilation_stage(context: TypeAnnotationContext) -> &'static str {
         TypeAnnotationContext::TraitRequirement => "Trait Requirement Parsing",
     }
 }
-fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
-    token_stream.current_span()
-}
 
 fn current_diagnostic_token(
     token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
 ) -> TypeParseResult<DiagnosticToken> {
-    let token = token_stream.canonical_cursor().current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "diagnostic projection requested without a current token",
-        ))
-    })?;
-    DiagnosticToken::try_from_token_ref(token).map_err(|error| {
-        HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
-            error,
-            "type annotation diagnostic projection",
-        ))
-    })
+    token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "type annotation diagnostic projection",
+            ))
+        })?
+        .ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "diagnostic projection requested without a current token",
+            ))
+        })
+}
+
+fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpan> {
+    token_stream.current_span()
 }

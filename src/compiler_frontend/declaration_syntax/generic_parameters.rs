@@ -28,6 +28,20 @@ use rustc_hash::FxHashSet;
 ///      through every successful header parse while losing the outer failure lane.
 type GenericParameterParseResult<T> = Result<T, HeaderParseFailure>;
 
+fn current_diagnostic_token(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> GenericParameterParseResult<Option<DiagnosticToken>> {
+    token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "generic-parameter diagnostic projection",
+            ))
+        })
+}
+
 /// Parse a generic parameter list after the current `type` keyword.
 ///
 /// The parser stops with the token stream positioned on the declaration delimiter
@@ -77,7 +91,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 
             TokenTag::SYMBOL => {
                 let span = current_source_span(token_stream);
-                let Some(found) = token_stream.canonical_cursor().current() else {
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                     return Err(with_token_span(
                         span,
                         CompilerDiagnostic::unexpected_end_of_file(None, span),
@@ -86,7 +100,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 };
                 return Err(with_token_span(
                     span,
-                    CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                    CompilerDiagnostic::unexpected_token_from_tag(found, span),
                 )
                 .into());
             }
@@ -94,7 +108,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             TokenTag::COMMA => {
                 if expecting_parameter {
                     let span = current_source_span(token_stream);
-                    let Some(found) = token_stream.canonical_cursor().current() else {
+                    let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                         return Err(with_token_span(
                             span,
                             CompilerDiagnostic::unexpected_end_of_file(None, span),
@@ -103,7 +117,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     };
                     return Err(with_token_span(
                         span,
-                        CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                        CompilerDiagnostic::unexpected_token_from_tag(found, span),
                     )
                     .into());
                 }
@@ -135,7 +149,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 
                 if expecting_parameter {
                     let span = current_source_span(token_stream);
-                    let Some(found) = token_stream.canonical_cursor().current() else {
+                    let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                         return Err(with_token_span(
                             span,
                             CompilerDiagnostic::unexpected_end_of_file(None, span),
@@ -144,7 +158,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     };
                     return Err(with_token_span(
                         span,
-                        CompilerDiagnostic::unexpected_token_from_ref(found, span),
+                        CompilerDiagnostic::unexpected_token_from_tag(found, span),
                     )
                     .into());
                 }
@@ -209,12 +223,12 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
 
             _other => {
                 let span = current_source_span(token_stream);
-                let found = DiagnosticToken::from_token_ref(
-                    token_stream
-                        .canonical_cursor()
-                        .current()
-                        .expect("validated declaration cursor token"),
-                );
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generic-parameter diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(with_token_span(
                     span,
                     CompilerDiagnostic::invalid_generic_parameter(
@@ -235,7 +249,7 @@ fn parse_trait_bounds_for_current_parameter(
 ) -> GenericParameterParseResult<()> {
     let Some(parameter) = parameters.last_mut() else {
         let span = current_source_span(token_stream);
-        let Some(found) = token_stream.canonical_cursor().current() else {
+        let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
             return Err(with_token_span(
                 span,
                 CompilerDiagnostic::unexpected_end_of_file(None, span),
@@ -244,7 +258,7 @@ fn parse_trait_bounds_for_current_parameter(
         };
         return Err(with_token_span(
             span,
-            CompilerDiagnostic::unexpected_token_from_ref(found, span),
+            CompilerDiagnostic::unexpected_token_from_tag(found, span),
         )
         .into());
     };
@@ -315,12 +329,12 @@ fn parse_trait_bounds_for_current_parameter(
             }
             _other => {
                 let span = current_source_span(token_stream);
-                let found = DiagnosticToken::from_token_ref(
-                    token_stream
-                        .canonical_cursor()
-                        .current()
-                        .expect("validated declaration cursor token"),
-                );
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "generic-parameter diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(with_token_span(
                     span,
                     CompilerDiagnostic::invalid_generic_parameter(

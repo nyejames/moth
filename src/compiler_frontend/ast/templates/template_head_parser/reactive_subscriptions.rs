@@ -113,7 +113,8 @@ pub(super) fn parse_reactive_subscription(
 
     let Some(reference) = context.get_reference(&source_name) else {
         let found = match source_token {
-            Some(source_token) => DiagnosticToken::try_from_token_ref(source_token)
+            Some(source_token) => token_stream
+                .diagnostic_token_from_ref(source_token, string_table)
                 .map_err(|error| {
                     CompilerDiagnostic::token_view_invariant_error(
                         error,

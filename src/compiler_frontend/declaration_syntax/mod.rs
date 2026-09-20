@@ -19,10 +19,11 @@ pub(crate) mod record_body;
 pub(crate) mod signature_members;
 pub(crate) mod r#struct;
 
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
-    TokenCursor, TokenPayloadOrigin, TokenRef, TokenTag,
+    TokenCursor, TokenPayloadOrigin, TokenRef, TokenTag, TokenViewError,
 };
 
 pub(crate) fn cursor_current_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
@@ -139,6 +140,36 @@ impl<'a> DeclarationCursor<'a> {
     /// Borrow the current canonical token without materialising a wide payload.
     pub(crate) fn current_token_ref(&self) -> Option<TokenRef<'a>> {
         self.cursor.current()
+    }
+
+    /// Project the current token into a durable diagnostic payload in the requester's string
+    /// domain, translating retained donor strings and numeric text by spelling.
+    pub(crate) fn current_diagnostic_token(
+        &self,
+        destination: &mut StringTable,
+    ) -> Result<Option<DiagnosticToken>, TokenViewError> {
+        self.current_token_ref()
+            .map(|token| {
+                DiagnosticToken::try_from_token_ref_in(
+                    token,
+                    self.payload_origin.map(|origin| origin.strings),
+                    destination,
+                )
+            })
+            .transpose()
+    }
+
+    /// Project one token borrowed from this declaration cursor's canonical owner.
+    pub(crate) fn diagnostic_token_from_ref(
+        &self,
+        token: TokenRef<'_>,
+        destination: &mut StringTable,
+    ) -> Result<DiagnosticToken, TokenViewError> {
+        DiagnosticToken::try_from_token_ref_in(
+            token,
+            self.payload_origin.map(|origin| origin.strings),
+            destination,
+        )
     }
 
     fn string_id_in(

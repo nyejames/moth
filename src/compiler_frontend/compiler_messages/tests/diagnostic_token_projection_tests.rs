@@ -158,8 +158,10 @@ fn projected_unexpected_and_expected_rendering_survives_store_drop() {
             let token_ref = source_tokens
                 .token(index)
                 .expect("fixture token index should resolve");
+            let projected = DiagnosticToken::try_from_token_ref(token_ref)
+                .expect("fixture token should project into a diagnostic token");
             let projected_unexpected =
-                super::CompilerDiagnostic::unexpected_token_from_ref(token_ref, None);
+                super::CompilerDiagnostic::unexpected_token_from_tag(projected, None);
             let projected_expected = super::CompilerDiagnostic::expected_token_from_ref(
                 TokenTag::ARROW,
                 Some(token_ref),

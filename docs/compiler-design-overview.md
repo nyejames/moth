@@ -1608,19 +1608,35 @@ Current locations are navigation aids rather than permanent architecture.
 
 ### Stage owners
 
-- Tokenization and numeric text: `src/compiler_frontend/tokenizer/`, `src/compiler_frontend/numeric_text/`
-- Header syntax, binding and declaration shells: `src/compiler_frontend/headers/`, `src/compiler_frontend/declaration_syntax/`
+- Tokenization, canonical token storage, bounded cursors and numeric text:
+  `src/compiler_frontend/tokenizer/`, `src/compiler_frontend/numeric_text/`
+- Token schema and typed token payloads: `src/compiler_frontend/tokenizer/schema.rs`,
+  `src/compiler_frontend/tokenizer/storage.rs`, `src/compiler_frontend/tokenizer/cursor.rs`
+- Header syntax, binding and declaration shells: `src/compiler_frontend/headers/`,
+  `src/compiler_frontend/declaration_syntax/`
 - Path syntax tables and general path resolution: `src/compiler_frontend/paths/`
-- Dependency clause syntax, retained shells, target classification and interface binding: `src/compiler_frontend/headers/`, `src/compiler_frontend/headers/dependency_target.rs`
+- Dependency clause syntax, retained shells, target classification and interface binding:
+  `src/compiler_frontend/headers/`, `src/compiler_frontend/headers/dependency_target.rs`
 - Local declaration ordering: `src/compiler_frontend/module_dependencies.rs`
-- Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`, `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`, `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
+- Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`,
+  `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`,
+  `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
 - Binding-backed interfaces: `src/compiler_frontend/external_packages/`
 - AST, constants, generics, templates and TIR: `src/compiler_frontend/ast/`
+- Generic retained syntax and donor payload provenance:
+  `src/compiler_frontend/ast/generic_functions/materialisation/`
+- Prepared-source ownership and exactly-once Stage 0 handoff:
+  `src/build_system/create_project_modules/prepared_source.rs`,
+  `src/build_system/create_project_modules/source_preparation.rs`
 - Public-interface projection and validation: `src/compiler_frontend/public_interface/`
 - Call-shaped argument parsing and slot routing: the focused owner under
   `src/compiler_frontend/ast/expressions/`
 - HIR, validation and reachability: `src/compiler_frontend/hir/`
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
-- Target-contract validation: backend feature and external package validation owners under `src/backends/`
+- Target-contract validation: backend feature and external package validation owners under
+  `src/backends/`
+- Phase 3 probe-only ownership accounting:
+  `src/compiler_frontend/instrumentation/memory_ledger.rs`,
+  `src/benchmarking/frontend.rs`, `src/bin/data_layout_memory_probe.rs`
 - Boundary rules over these owners: `xtask/src/architecture_boundary.rs`
 - Integration cases and validation: `tests/cases/`, `src/compiler_tests/`, `justfile`

@@ -123,17 +123,14 @@ fn create_multiple_expressions_inner(
 
     if consume_closing_parenthesis {
         if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
-            let found = match token_stream.current() {
-                Some(found) => {
-                    Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "expression closing-delimiter diagnostic",
-                        )
-                    })?)
-                }
-                None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-            };
+            let found = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "expression closing-delimiter diagnostic",
+                    )
+                })?;
             return Err(CompilerDiagnostic::expected_token_from_tags(
                 TokenTag::CLOSE_PARENTHESIS,
                 found,

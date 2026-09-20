@@ -16,7 +16,9 @@ exposed but does not own, and coverage ownership. It cannot accept public API or
 ```text
 STATUS: semantic contract published and implemented; corrections and the accepted arithmetic surface delivered
 CURRENT_SLICE: none - the contract, the four corrections and the five arithmetic functions are complete
-BLOCKERS: a Wasm lowering set still waits for a target decision; the repeated same-name `catch` binder defect below is inherited and owned outside this package; the umbrella programme owns the inherited red `just validate` gate
+BLOCKERS: a Wasm lowering set still waits for a target decision; the repeated same-name `catch`
+binder defect below is inherited and owned outside this package; the umbrella programme keeps the
+package lane paused until final data-layout Phase 3 exact-checkpoint R5 closeout
 NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
 
@@ -207,14 +209,15 @@ Rules for this package: every expected value comes from the published contract, 
 observes the returned error's `code` rather than a message, so the two Time codes each have an owner.
 Host formatting is asserted only where the contract fixes the format.
 
-This slice could not close the mandatory `just validate` gate: the inherited data-layout base fails
-the all-targets lint build and two feature lanes. The programme plan owns that record. Focused
-evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (42/42), the full
-`cargo run -- tests` at the inherited failure count, `cargo run -- check docs --terse`,
+Historical slice validation record (not current-state evidence): this slice could not close the
+mandatory `just validate` gate at that checkpoint because the inherited data-layout base failed the
+all-targets lint build and two feature lanes. The programme plan owns that historical record.
+Focused evidence was `cargo run -- tests --tag time` (29/29), `--tag core-packages` (42/42), the
+full `cargo run -- tests` at the inherited failure count, `cargo run -- check docs --terse`,
 `cargo check -p moth --lib` with its 31 inherited warnings, and `rustfmt --check` on every touched
 Rust file except `src/compiler_frontend/ast/expressions/tests/eval_expression_tests.rs`, whose two
-unformatted hunks at lines 68-75 and 132-139 arrived with the data-layout merge and sit outside every
-region this batch touched.
+unformatted hunks at lines 68-75 and 132-139 arrived with the data-layout merge and sit outside
+every region this batch touched.
 
 The final review closed three coverage gaps and two contract overstatements. The offset fields were
 only exercised through the combined `+99:99` sample, which either half of the range check could

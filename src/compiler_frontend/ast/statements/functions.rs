@@ -426,10 +426,9 @@ fn parse_signature_default_expression(
         string_table,
         &*path_fork,
     );
-    // The default range is canonical source provenance. Nest an explicit cursor over the
-    // live owner so the canonical owner stays available for bounded expression handoffs;
-    // the canonical view reports EOF at the range end, matching the bounded-adapter handoff
-    // which excludes its synthetic EOF from canonical positions.
+    // The default range is canonical source provenance. Nest an explicit cursor over the live
+    // owner so bounded expression handoffs retain canonical ownership; the canonical view reports
+    // EOF at the range end and excludes that synthetic EOF from canonical positions.
     let range = member.default_range.ok_or_else(|| {
         CompilerError::compiler_error("signature default expression range was unexpectedly empty")
     })?;

@@ -5,11 +5,12 @@
 //! enum or any source-owned side-store handles that would make a diagnostic
 //! depend on the source token buffer's lifetime.
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use crate::compiler_frontend::symbols::string_interning::{
+    FrozenStringTable, StringId, StringIdRemap, StringTable,
+};
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenDescriptorPayload, TokenRef, TokenTag, TokenViewError, numeric_kind_flags,
 };
-
 const TAG_MASK: u32 = u16::MAX as u32;
 const FLAGS_SHIFT: u32 = u16::BITS;
 
@@ -72,6 +73,27 @@ impl DiagnosticToken {
     ///      its lifetime, cloning the live token view, or materializing path tables.
     ///      `Path` keeps only its stable tag; the dense path handle is dropped.
     pub(crate) fn try_from_token_ref(token: TokenRef<'_>) -> Result<Self, TokenViewError> {
+        Self::try_project_token_ref(token, None, None)
+    }
+
+    /// Checked origin-aware projection into the requester's string-table domain.
+    ///
+    /// String-shaped payloads and numeric literal text are resolved through the donor table before
+    /// they are interned into `destination`. The compact diagnostic token retains only the
+    /// requester's resulting `StringId`; it never retains the donor resolver or table.
+    pub(crate) fn try_from_token_ref_in(
+        token: TokenRef<'_>,
+        donor_strings: Option<&FrozenStringTable>,
+        destination: &mut StringTable,
+    ) -> Result<Self, TokenViewError> {
+        Self::try_project_token_ref(token, donor_strings, Some(destination))
+    }
+
+    fn try_project_token_ref(
+        token: TokenRef<'_>,
+        donor_strings: Option<&FrozenStringTable>,
+        mut destination: Option<&mut StringTable>,
+    ) -> Result<Self, TokenViewError> {
         let tag = token.tag();
         match tag.descriptor().payload() {
             TokenDescriptorPayload::Static => {
@@ -91,15 +113,33 @@ impl DiagnosticToken {
             | TokenDescriptorPayload::StyleDirective
             | TokenDescriptorPayload::StringLiteral
             | TokenDescriptorPayload::RawStringLiteral => {
-                let value = token
-                    .string_id()
-                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                let value = match donor_strings {
+                    Some(strings) => {
+                        let spelling = token
+                            .string_spelling(strings)?
+                            .ok_or(TokenViewError::MalformedStringHandle)?;
+                        let Some(destination) = destination.as_deref_mut() else {
+                            return Err(TokenViewError::MalformedStringHandle);
+                        };
+                        destination.intern(spelling)
+                    }
+                    None => token
+                        .string_id()
+                        .ok_or(TokenViewError::MalformedStringHandle)?,
+                };
                 Ok(Self::string_token(tag, value))
             }
             TokenDescriptorPayload::NumericLiteral => {
-                let literal = token
-                    .numeric_literal()?
-                    .ok_or(TokenViewError::MalformedNumericHandle)?;
+                let literal = match donor_strings {
+                    Some(strings) => {
+                        let Some(destination) = destination.as_deref_mut() else {
+                            return Err(TokenViewError::MalformedStringHandle);
+                        };
+                        token.numeric_literal_in(strings, destination)?
+                    }
+                    None => token.numeric_literal()?.cloned(),
+                }
+                .ok_or(TokenViewError::MalformedNumericHandle)?;
                 Ok(Self::new(
                     tag,
                     numeric_kind_flags(literal.kind),

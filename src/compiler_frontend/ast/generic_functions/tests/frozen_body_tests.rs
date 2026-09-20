@@ -32,6 +32,11 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, render_payload,
+};
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -62,10 +67,10 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathInternerBuilder, PathInternerFork,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag,
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1046,6 +1051,75 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         "donor",
         "the borrowed cursor must resolve colliding donor StringIds to the donor spelling",
     );
+    let projected = cursor
+        .current_diagnostic_token(&mut materialised_strings)
+        .expect("materialised body diagnostic projection should succeed")
+        .expect("materialised body should expose its current token");
+    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
+    let rendered = render_payload(
+        &diagnostic.payload,
+        DiagnosticRenderContext::new(&materialised_strings),
+    )
+    .message;
+    assert!(
+        rendered.contains("donor"),
+        "materialised-body diagnostics must render donor spelling, got {rendered:?}",
+    );
+}
+
+#[test]
+fn malformed_materialised_donor_text_handle_is_infrastructure_failure() {
+    let source = SourceId::COMPILATION_ROOT;
+    let source_file = PathId::ROOT;
+    let invalid_handle = StringId::from_index(0);
+    let owner = canonical_tokens_with_path_syntax(
+        source,
+        PathSyntaxTable::with_source(source),
+        |builder| {
+            builder
+                .push_symbol(TokenTag::SYMBOL, invalid_handle, token_span())
+                .expect("malformed donor symbol shape should still be packable");
+        },
+    );
+    let end = TokenIndex::try_from_index(owner.len()).expect("test token range fits");
+    let range = TokenRange::try_new_for(
+        owner.as_ref(),
+        TokenIndex::try_from_index(0).expect("test token range fits"),
+        end,
+    )
+    .expect("test token range must be in bounds");
+    let empty_donor_strings = StringTable::new();
+    let body = GenericFunctionBody::materialised(
+        owner,
+        range,
+        None,
+        source_file,
+        MaterialisedDonorContext {
+            resolution_facts: Arc::new(
+                Stage0ResolutionFacts::frozen_generic(source, Vec::new())
+                    .expect("empty frozen facts should be valid"),
+            ),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+            source_path_table: None,
+            source_string_table: Some(Arc::new(empty_donor_strings.freeze())),
+        },
+    )
+    .expect("malformed donor body should retain its checked owner");
+    let parse_owner = body
+        .parse_owner()
+        .expect("materialised donor body should expose a parse owner");
+    let (cursor, _) = parse_owner
+        .cursor()
+        .expect("materialised donor body should construct its cursor");
+    let error = cursor
+        .current_diagnostic_token(&mut StringTable::new())
+        .expect_err("malformed donor text must fail diagnostic projection");
+    assert_eq!(error, TokenViewError::MalformedStringHandle);
+    let infrastructure = CompilerDiagnostic::token_view_invariant_error(
+        error,
+        "materialised body diagnostic projection",
+    );
+    assert_eq!(infrastructure.error_type, ErrorType::Compiler);
 }
 
 #[test]
@@ -1161,6 +1235,24 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         ),
         (NumericLiteralKind::DecimalPoint, 2, 1),
         "typed payload translation must not disturb the donor's lexical facts",
+    );
+    let projected = cursor
+        .current_diagnostic_token(&mut materialised_strings)
+        .expect("donor numeric diagnostic projection should succeed")
+        .expect("the current numeric token should project into a diagnostic token");
+    let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(projected, None);
+    let rendered = render_payload(
+        &diagnostic.payload,
+        DiagnosticRenderContext::new(&materialised_strings),
+    )
+    .message;
+    assert!(
+        rendered.contains("-12.5"),
+        "numeric donor diagnostics must render donor-authored text, got {rendered:?}",
+    );
+    assert!(
+        !rendered.contains("requester authored"),
+        "numeric donor diagnostics must not use colliding requester text, got {rendered:?}",
     );
 }
 

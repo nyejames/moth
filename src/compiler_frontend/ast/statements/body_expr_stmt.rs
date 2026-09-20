@@ -119,10 +119,15 @@ fn parse_and_validate_statement_expression(
     }
 
     if !is_expression_statement(&expression) {
-        let found = match token_stream.current() {
-            Some(found) => DiagnosticToken::from_token_ref(found),
-            None => DiagnosticToken::from_static_tag(token_stream.current_tag()),
-        };
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "statement expression diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
         return Err(CompilerDiagnostic::unexpected_token_from_tag(
             found,
             Some(token_stream.current_span()),

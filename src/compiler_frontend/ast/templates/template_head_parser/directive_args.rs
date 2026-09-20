@@ -112,24 +112,25 @@ fn ends_directive_argument_without_expression(tag: TokenTag) -> bool {
 
 /// Expects the current token to be `)`. Returns a syntax error with a
 /// suggestion if it is not.
-pub(crate) fn expect_directive_close_paren(token_stream: &AstCursor) -> DirectiveArgsResult<()> {
+pub(crate) fn expect_directive_close_paren(
+    token_stream: &AstCursor,
+    string_table: &mut StringTable,
+) -> DirectiveArgsResult<()> {
     if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
         return Ok(());
     }
 
-    let found = match token_stream.current() {
-        Some(found) => Some(
-            DiagnosticToken::try_from_token_ref(found)
-                .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "template directive close-paren diagnostic",
-                    )
-                })
-                .map_err(TemplateError::from)?,
-        ),
-        None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-    };
+    let found = token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "template directive close-paren diagnostic",
+            )
+        })
+        .map_err(TemplateError::from)?;
+    let found =
+        found.or_else(|| Some(DiagnosticToken::from_static_tag(token_stream.current_tag())));
     Err(with_current_token_span(
         token_stream,
         CompilerDiagnostic::expected_token_from_tags(TokenTag::CLOSE_PARENTHESIS, found, None),
@@ -190,27 +191,21 @@ fn parse_single_expression_in_directive_parens(
     .map_err(TemplateError::from)?;
 
     if token_stream.current_tag() == TokenTag::COMMA {
-        let diagnostic = match token_stream.current() {
-            Some(found) => CompilerDiagnostic::unexpected_token_from_tag(
-                DiagnosticToken::try_from_token_ref(found)
-                    .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template directive extra-argument diagnostic",
-                        )
-                    })
-                    .map_err(TemplateError::from)?,
-                None,
-            ),
-            None => CompilerDiagnostic::unexpected_token_from_tag(
-                DiagnosticToken::from_static_tag(TokenTag::COMMA),
-                None,
-            ),
-        };
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "template directive extra-argument diagnostic",
+                )
+            })
+            .map_err(TemplateError::from)?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(TokenTag::COMMA));
+        let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(found, None);
         return Err(with_current_token_span(token_stream, diagnostic).into());
     }
 
-    expect_directive_close_paren(token_stream)?;
+    expect_directive_close_paren(token_stream, string_table)?;
 
     Ok(expression)
 }
@@ -255,26 +250,22 @@ pub(crate) fn parse_required_parenthesized_expression(
     path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Expression> {
     if !directive_has_arguments(token_stream) {
-        let found = match token_stream.current() {
-            Some(found) => Some(
-                DiagnosticToken::try_from_token_ref(found)
-                    .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template directive opening-paren diagnostic",
-                        )
-                    })
-                    .map_err(TemplateError::from)?,
-            ),
-            None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-        };
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "template directive opening-paren diagnostic",
+                )
+            })
+            .map_err(TemplateError::from)?
+            .or_else(|| Some(DiagnosticToken::from_static_tag(token_stream.current_tag())));
         return Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::expected_token_from_tags(TokenTag::OPEN_PARENTHESIS, found, None),
         )
         .into());
     }
-
     advance_into_directive_arguments(token_stream);
     parse_single_expression_in_directive_parens(
         directive_name,
@@ -380,7 +371,7 @@ pub(crate) fn parse_optional_slot_target_argument(
     };
 
     token_stream.advance();
-    expect_directive_close_paren(token_stream)?;
+    expect_directive_close_paren(token_stream, string_table)?;
     Ok(target)
 }
 
@@ -391,19 +382,16 @@ pub(crate) fn parse_required_slot_name_argument(
     string_table: &mut StringTable,
 ) -> DirectiveArgsResult<StringId> {
     if !directive_has_arguments(token_stream) {
-        let found = match token_stream.current() {
-            Some(found) => Some(
-                DiagnosticToken::try_from_token_ref(found)
-                    .map_err(|error| {
-                        CompilerDiagnostic::token_view_invariant_error(
-                            error,
-                            "template insert opening-paren diagnostic",
-                        )
-                    })
-                    .map_err(TemplateError::from)?,
-            ),
-            None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-        };
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "template insert opening-paren diagnostic",
+                )
+            })
+            .map_err(TemplateError::from)?
+            .or_else(|| Some(DiagnosticToken::from_static_tag(token_stream.current_tag())));
         return Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::expected_token_from_tags(TokenTag::OPEN_PARENTHESIS, found, None),
@@ -457,7 +445,7 @@ pub(crate) fn parse_required_slot_name_argument(
     };
 
     token_stream.advance();
-    expect_directive_close_paren(token_stream)?;
+    expect_directive_close_paren(token_stream, string_table)?;
     Ok(slot_name)
 }
 

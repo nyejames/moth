@@ -4,6 +4,7 @@
 //! payloads stay in the canonical source owner and are read through checked [`TokenRef`] views.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntax, PathSyntaxId, PathSyntaxTable};
@@ -11,7 +12,7 @@ use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
-    TokenRef, TokenSequenceId, TokenTag,
+    TokenRef, TokenSequenceId, TokenTag, TokenViewError,
 };
 use std::sync::Arc;
 
@@ -222,7 +223,39 @@ impl<'a> AstCursor<'a> {
                 "canonical string-shaped token is missing its payload",
             ));
         }
+
         self.string_id_in(token, destination)
+    }
+    /// Project the current token into a durable diagnostic payload in the requester's string
+    /// domain. Donor-origin strings and numeric text are translated by spelling; static, path,
+    /// character and boolean payloads remain compact tag-local values.
+    pub(crate) fn current_diagnostic_token(
+        &self,
+        destination: &mut StringTable,
+    ) -> Result<Option<DiagnosticToken>, TokenViewError> {
+        self.current()
+            .map(|token| {
+                DiagnosticToken::try_from_token_ref_in(
+                    token,
+                    self.payload_origin.map(|origin| origin.strings),
+                    destination,
+                )
+            })
+            .transpose()
+    }
+
+    /// Project one token borrowed from this cursor's canonical owner while preserving donor
+    /// provenance for payloads that are interpreted by the requester.
+    pub(crate) fn diagnostic_token_from_ref(
+        &self,
+        token: TokenRef<'_>,
+        destination: &mut StringTable,
+    ) -> Result<DiagnosticToken, TokenViewError> {
+        DiagnosticToken::try_from_token_ref_in(
+            token,
+            self.payload_origin.map(|origin| origin.strings),
+            destination,
+        )
     }
 
     /// Return the current numeric payload with text IDs translated only when consumed.

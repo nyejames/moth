@@ -42,6 +42,20 @@ use rustc_hash::FxHashMap;
 ///      inline diagnostic lane once.
 type SignatureMemberParseResult<T> = Result<T, HeaderParseFailure>;
 
+fn current_diagnostic_token(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> SignatureMemberParseResult<Option<DiagnosticToken>> {
+    token_stream
+        .current_diagnostic_token(string_table)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
+                error,
+                "signature-member diagnostic projection",
+            ))
+        })
+}
+
 /// Distinguishes the two syntactic contexts that share `| ... |` member parsing.
 ///
 /// WHAT: `this` is valid only in function parameter lists, not in struct fields.
@@ -202,12 +216,11 @@ pub fn parse_function_signature_syntax(
         | TokenTag::DATATYPE_NONE
         | TokenTag::OPEN_CURLY
         | TokenTag::SYMBOL => {
-            let found = DiagnosticToken::from_token_ref(
-                token_stream
-                    .canonical_cursor()
-                    .current()
-                    .expect("validated declaration cursor token"),
-            );
+            let found = current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "signature diagnostic requested without a current token",
+                )
+            })?;
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
@@ -224,12 +237,11 @@ pub fn parse_function_signature_syntax(
         }
 
         _ => {
-            let found = DiagnosticToken::from_token_ref(
-                token_stream
-                    .canonical_cursor()
-                    .current()
-                    .expect("validated declaration cursor token"),
-            );
+            let found = current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "signature diagnostic requested without a current token",
+                )
+            })?;
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingArrowOrColon { found },
                 current_source_span(token_stream),
@@ -265,10 +277,11 @@ pub fn parse_signature_members_syntax(
     fn ensure_member_slot(
         expecting_member: bool,
         token_stream: &DeclarationCursor<'_>,
+        string_table: &mut StringTable,
     ) -> SignatureMemberParseResult<()> {
         if !expecting_member {
-            let found = token_stream.canonical_cursor().current();
-            return Err(CompilerDiagnostic::expected_token_from_ref(
+            let found = current_diagnostic_token(token_stream, string_table)?;
+            return Err(CompilerDiagnostic::expected_token_from_tags(
                 TokenTag::COMMA,
                 found,
                 current_source_span(token_stream),
@@ -294,14 +307,14 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenTag::ARROW | TokenTag::COLON => {
-                let Some(found) = token_stream.canonical_cursor().current() else {
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                     return Err(CompilerDiagnostic::unexpected_end_of_file(
                         None,
                         current_source_span(token_stream),
                     )
                     .into());
                 };
-                return Err(CompilerDiagnostic::unexpected_token_from_ref(
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(
                     found,
                     current_source_span(token_stream),
                 )
@@ -309,7 +322,7 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenTag::SYMBOL => {
-                ensure_member_slot(expecting_member, token_stream)?;
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
                 let Some(member_name) = token_stream
                     .current_string_id_in(string_table)
                     .map_err(HeaderParseFailure::Infrastructure)?
@@ -345,7 +358,7 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenTag::THIS if member_context == SignatureMemberContext::FunctionParameter => {
-                ensure_member_slot(expecting_member, token_stream)?;
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 let this_id = string_table.intern("this");
                 let this_path =
@@ -381,7 +394,7 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenTag::TRAIT_THIS if member_context == SignatureMemberContext::TraitRequirement => {
-                ensure_member_slot(expecting_member, token_stream)?;
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 if member_index > 0 {
                     return Err(CompilerDiagnostic::invalid_signature_member(
@@ -413,7 +426,7 @@ pub fn parse_signature_members_syntax(
             }
 
             TokenTag::MUTABLE if member_context == SignatureMemberContext::TraitRequirement => {
-                ensure_member_slot(expecting_member, token_stream)?;
+                ensure_member_slot(expecting_member, token_stream, string_table)?;
 
                 token_stream.advance();
 
@@ -509,10 +522,10 @@ pub fn parse_signature_members_syntax(
                 }
 
                 let span = current_source_span(token_stream);
-                let Some(found) = token_stream.canonical_cursor().current() else {
+                let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                     return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
                 };
-                return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
+                return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
             }
         }
     }
@@ -665,7 +678,7 @@ fn parse_signature_member_syntax(
                 .into());
             }
 
-            collect_member_default_range(token_stream)?
+            collect_member_default_range(token_stream, string_table)?
         }
 
         TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE | TokenTag::TYPE_PARAMETER_BRACKET => {
@@ -673,14 +686,14 @@ fn parse_signature_member_syntax(
         }
 
         TokenTag::AS => {
-            let Some(found) = token_stream.canonical_cursor().current() else {
+            let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     None,
                     current_source_span(token_stream),
                 )
                 .into());
             };
-            return Err(CompilerDiagnostic::unexpected_token_from_ref(
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
                 found,
                 current_source_span(token_stream),
             )
@@ -689,10 +702,10 @@ fn parse_signature_member_syntax(
 
         _ => {
             let span = current_source_span(token_stream);
-            let Some(found) = token_stream.canonical_cursor().current() else {
+            let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
             };
-            return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
         }
     };
 
@@ -760,6 +773,7 @@ fn is_missing_default_boundary(tag: TokenTag) -> bool {
 
 fn collect_member_default_range(
     token_stream: &mut DeclarationCursor<'_>,
+    string_table: &mut StringTable,
 ) -> SignatureMemberParseResult<Option<TokenRange>> {
     // A member/EOF boundary before any expression token is a missing default, not an empty
     // one, so report it here rather than letting a newline reach the infrastructure lane.
@@ -808,10 +822,10 @@ fn collect_member_default_range(
             })?;
     if range.is_empty() {
         let span = current_source_span(token_stream);
-        let Some(found) = token_stream.canonical_cursor().current() else {
+        let Some(found) = current_diagnostic_token(token_stream, string_table)? else {
             return Err(CompilerDiagnostic::unexpected_end_of_file(None, span).into());
         };
-        return Err(CompilerDiagnostic::unexpected_token_from_ref(found, span).into());
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(found, span).into());
     }
 
     Ok(Some(range))
@@ -864,12 +878,12 @@ fn parse_trait_requirement_return_list(
             }
 
             _unexpected_token => {
-                let found = DiagnosticToken::from_token_ref(
-                    token_stream
-                        .canonical_cursor()
-                        .current()
-                        .expect("validated declaration cursor token"),
-                );
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "signature diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),
@@ -1028,12 +1042,12 @@ fn parse_return_list_syntax(
                 .into());
             }
             _unexpected_token => {
-                let found = DiagnosticToken::from_token_ref(
-                    token_stream
-                        .canonical_cursor()
-                        .current()
-                        .expect("validated declaration cursor token"),
-                );
+                let found =
+                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "signature diagnostic requested without a current token",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingCommaOrColon { found },
                     current_source_span(token_stream),

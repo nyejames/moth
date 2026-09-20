@@ -4,7 +4,9 @@ Suggested repository path: `docs/roadmap/plans/post-phase-3-compiler-tidy-up-pla
 
 ## Status
 
-Queued. Start only after the source, token and diagnostic data-layout programme's Phase 3 has been accepted. This plan changes implementation shape, not language semantics or compiler-stage ownership.
+Final Phase 3 closeout remains queued behind exact-checkpoint R5 evidence. Start only after the source,
+token and diagnostic data-layout programme's final closeout; this plan changes implementation shape,
+not language semantics or compiler-stage ownership.
 
 Proposed placement: the post-Phase-3 checkpoint, before overlapping Wiring or native result-slot work starts. This does not reactivate diagnostic Phase 4 or change the relative order of Wiring, native result slots and later diagnostics. If overlapping work has already landed, preserve it and revalidate the affected items against that state.
 
@@ -86,13 +88,21 @@ Keep existing complexity budgets unchanged. The review snapshot recorded an inhe
 
 Generated JavaScript and formatter output should be byte-identical on parity fixtures. Compare public semantic records and compiler diagnostics structurally where internal IDs legitimately vary. Do not update golden output merely to make a refactor pass. Any unavoidable internal Debug spelling change needs explicit review and must not alter public identity or source-diagnostic contracts.
 
-## Phase 0 - Activate on accepted Phase 3
+## Phase 0 - Activate after final Phase 3 closeout
 
-- [ ] Verify the accepted Phase 3 exit and capture a full committed baseline SHA, branch and worktree status. Keep the active implementation worktree untouched until its work is complete. Use a dedicated tidy-up worktree from the accepted checkpoint.
-- [ ] Read current authorities, detailed migration status, roadmap order and any accepted cleanup decisions that supersede these reports.
-- [ ] Revalidate each scheduled finding by symbol, including callers, consumers, tests, feature gates, registrations and relevant history. Use commit-qualified searches while another worktree is changing. Mark superseded findings as retired rather than recreating deleted code.
-- [ ] Establish the baseline validation result and existing non-recording performance results. Record any explicitly accepted exception separately. Identify the focused fixtures needed by Phases 1 through 7.
-- [ ] Establish a small completion record under `tmp/` containing accepted slice SHAs, dispositions and validation evidence. Keep raw measurements local. This is not a new audit registry.
+- [ ] Verify the final Phase 3 closeout and capture a full committed baseline SHA, branch and
+  worktree status. Keep the active implementation worktree untouched until its work is complete.
+  Use a dedicated tidy-up worktree from the closed checkpoint.
+- [ ] Read current authorities, detailed migration status, roadmap order and any accepted cleanup
+  decisions that supersede these reports.
+- [ ] Revalidate each scheduled finding by symbol, including callers, consumers, tests, feature
+  gates, registrations and relevant history. Use commit-qualified searches while another worktree
+  is changing. Mark superseded findings as retired rather than recreating deleted code.
+- [ ] Establish the baseline validation result and existing non-recording performance results.
+  Record any explicitly accepted exception separately. Identify the focused fixtures needed by
+  Phases 1 through 7.
+- [ ] Establish a small completion record under `tmp/` containing accepted slice SHAs, dispositions
+  and validation evidence. Keep raw measurements local. This is not a new audit registry.
 
 Exit: every scheduled item still has a current owner and a specific local correction. No unfinished Phase 3 adapter is included as independent cleanup. If one item cannot be validated, exclude that item and continue with the verified remainder.
 

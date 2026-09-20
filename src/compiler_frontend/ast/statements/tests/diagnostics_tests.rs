@@ -63,7 +63,8 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
         .expect("the canonical cursor must seek to the requested token");
     assert_eq!(cursor.current_tag(), TokenTag::COMMA);
     let token_span = cursor.current_span();
-    let diagnostic = unexpected_statement_token(&cursor, &mut string_table);
+    let diagnostic = unexpected_statement_token(&cursor, &mut string_table)
+        .expect("unexpected statement token projection should stay on the diagnostic lane");
 
     assert!(matches!(
         diagnostic.payload,

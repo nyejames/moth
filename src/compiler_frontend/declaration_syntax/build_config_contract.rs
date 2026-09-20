@@ -426,8 +426,8 @@ pub(crate) fn find_invalid_config_qualifier_spacing_in_cursor(
 
 /// Canonical source-view entry for header-owned `#Config` dispatch.
 ///
-/// The declaration parser keeps its compatibility cursor for the deferred qualifier grammar, but
-/// this decision reads only stable source tags and the source-owned symbol payload.
+/// The declaration parser reads canonical source tags and source-owned symbol payloads directly;
+/// qualifier scanning stays bounded to the active source view without a compatibility cursor.
 pub(crate) fn starts_build_config_qualifier_at_source(
     source_tokens: &SourceTokens,
     index: TokenIndex,
@@ -493,15 +493,15 @@ pub(crate) fn parse_build_config_qualifier(
     } else {
         let expected =
             DiagnosticToken::from_string_tag(TokenTag::SYMBOL, string_table.intern("Config"));
-        let found = match token_stream.canonical_cursor().current() {
-            Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
                 HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
                     error,
                     "config qualifier diagnostic projection",
                 ))
-            })?),
-            None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
-        };
+            })?
+            .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::expected_token_from_projections(
                 expected,
@@ -512,15 +512,15 @@ pub(crate) fn parse_build_config_qualifier(
     }
     if token_stream.current_tag() != TokenTag::OF {
         let span = token_stream.current_span();
-        let found = match token_stream.canonical_cursor().current() {
-            Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(|error| {
+        let found = token_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
                 HeaderParseFailure::Infrastructure(CompilerDiagnostic::token_view_invariant_error(
                     error,
                     "config qualifier diagnostic projection",
                 ))
-            })?),
-            None => Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
-        };
+            })?
+            .or_else(|| Some(DiagnosticToken::from_static_tag(TokenTag::EOF)));
         return Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::expected_token_from_tags(TokenTag::OF, found, span),
         ));

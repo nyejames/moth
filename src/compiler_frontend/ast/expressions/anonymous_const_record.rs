@@ -14,9 +14,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidExpressionReason,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
@@ -177,17 +175,14 @@ pub(super) fn parse_anonymous_const_record_expression(
             }
 
             _ => {
-                let found = match token_stream.current() {
-                    Some(found) => Some(DiagnosticToken::try_from_token_ref(found).map_err(
-                        |error| {
-                            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
-                                error,
-                                "anonymous-record separator diagnostic",
-                            )
-                        },
-                    )?),
-                    None => Some(DiagnosticToken::from_static_tag(token_stream.current_tag())),
-                };
+                let found = token_stream
+                    .current_diagnostic_token(string_table)
+                    .map_err(|error| {
+                        crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                            error,
+                            "anonymous-record separator diagnostic",
+                        )
+                    })?;
                 return Err(CompilerDiagnostic::expected_token_from_tags(
                     TokenTag::COMMA,
                     found,
