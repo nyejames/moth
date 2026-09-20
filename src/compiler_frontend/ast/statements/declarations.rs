@@ -845,7 +845,6 @@ pub fn resolve_declaration_syntax(
                     expression,
                     declared_type_id,
                     type_interner.environment(),
-                    context,
                     TypeMismatchContext::Declaration,
                 )?
             } else {

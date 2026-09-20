@@ -7,10 +7,8 @@
 //! WHY: centralising evidence selection and cast-specific diagnostics prevents
 //!      boundary callers from duplicating trait/evidence lookup logic.
 
-use super::evidence::{builtin_evidence_fallibility, builtin_evidence_policy};
-use super::targets::{
-    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget, builtin_cast_target_for_type,
-};
+use super::evidence::lookup_builtin_evidence;
+use super::targets::{BuiltinCastFallibility, BuiltinCastTarget, builtin_cast_target_for_type};
 use super::traits::{BUILTIN_CAST_TRAIT_ROWS, CoreCastTrait, builtin_cast_trait_metadata};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
@@ -192,10 +190,10 @@ fn select_cast_evidence(
     active_generic_type_context: Option<&ActiveGenericTypeContext>,
 ) -> CastEvidenceSelection {
     if let Some(source_target) = source_target
-        && let Some((fallibility, policy)) = resolve_builtin_cast_target(source_target, target)
+        && let Some(row) = lookup_builtin_evidence(source_target, target)
     {
-        let evidence = ResolvedCastEvidence::Builtin { policy };
-        return match fallibility {
+        let evidence = ResolvedCastEvidence::Builtin { policy: row.policy };
+        return match row.fallibility {
             BuiltinCastFallibility::Infallible => CastEvidenceSelection {
                 infallible: Some(evidence),
                 fallible: None,
@@ -354,15 +352,4 @@ fn core_cast_trait_for_target_and_fallibility(
         }
     }
     None
-}
-
-/// Resolves a (source, target) pair to its fallibility and policy id, or
-/// `None` when no initial builtin evidence row exists.
-pub(crate) fn resolve_builtin_cast_target(
-    source: BuiltinCastTarget,
-    target: BuiltinCastTarget,
-) -> Option<(BuiltinCastFallibility, BuiltinCastPolicyId)> {
-    let fallibility = builtin_evidence_fallibility(source, target)?;
-    let policy = builtin_evidence_policy(source, target)?;
-    Some((fallibility, policy))
 }

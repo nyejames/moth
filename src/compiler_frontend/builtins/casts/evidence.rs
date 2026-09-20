@@ -132,22 +132,6 @@ pub(crate) fn builtin_evidence_rows() -> &'static [BuiltinCastEvidenceRow] {
     INITIAL_BUILTIN_EVIDENCE_ROWS
 }
 
-/// Reports the fallibility of a builtin evidence row, or `None` when no row exists.
-pub(crate) fn builtin_evidence_fallibility(
-    source: BuiltinCastTarget,
-    target: BuiltinCastTarget,
-) -> Option<BuiltinCastFallibility> {
-    lookup_builtin_evidence(source, target).map(|row| row.fallibility)
-}
-
-/// Reports the policy id for a builtin evidence row, or `None` when no row exists.
-pub(crate) fn builtin_evidence_policy(
-    source: BuiltinCastTarget,
-    target: BuiltinCastTarget,
-) -> Option<BuiltinCastPolicyId> {
-    lookup_builtin_evidence(source, target).map(|row| row.policy)
-}
-
 /// Resolves a `BuiltinCastTarget` to its canonical `TypeId` in the supplied
 /// `TypeEnvironment`.
 ///

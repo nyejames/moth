@@ -7,8 +7,7 @@
 //!      contents so they cannot drift silently.
 
 use crate::compiler_frontend::builtins::casts::evidence::{
-    builtin_evidence_fallibility, builtin_evidence_policy, builtin_evidence_rows,
-    lookup_builtin_evidence,
+    builtin_evidence_rows, lookup_builtin_evidence,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
@@ -37,17 +36,10 @@ fn float_to_int_is_fallible_with_truncation_policy() {
 }
 
 #[test]
-fn fallibility_helpers_match_row_classification() {
-    assert_eq!(
-        builtin_evidence_fallibility(BuiltinCastTarget::String, BuiltinCastTarget::Bool),
-        Some(BuiltinCastFallibility::Fallible)
-    );
-    assert_eq!(
-        builtin_evidence_policy(BuiltinCastTarget::String, BuiltinCastTarget::Bool),
-        Some(BuiltinCastPolicyId::StringToBool)
-    );
-    assert_eq!(
-        builtin_evidence_fallibility(BuiltinCastTarget::Bool, BuiltinCastTarget::Int),
-        None
-    );
+fn single_lookup_row_carries_policy_and_fallibility() {
+    let row = lookup_builtin_evidence(BuiltinCastTarget::String, BuiltinCastTarget::Bool)
+        .expect("String -> Bool evidence should exist");
+    assert_eq!(row.fallibility, BuiltinCastFallibility::Fallible);
+    assert_eq!(row.policy, BuiltinCastPolicyId::StringToBool);
+    assert!(lookup_builtin_evidence(BuiltinCastTarget::Bool, BuiltinCastTarget::Int).is_none());
 }

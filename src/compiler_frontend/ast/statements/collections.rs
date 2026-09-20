@@ -221,7 +221,6 @@ fn parse_collection_literal(
                     parsed_item,
                     *expected_item_type_id,
                     type_interner.environment(),
-                    context,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -594,7 +593,6 @@ fn parse_map_literal(
                     parsed_key,
                     key_type_id,
                     type_interner.environment(),
-                    context,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -602,7 +600,6 @@ fn parse_map_literal(
                     parsed_value,
                     value_type_id,
                     type_interner.environment(),
-                    context,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -725,7 +722,6 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 key_type_id,
                 type_interner.environment(),
-                context,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -733,7 +729,6 @@ fn parse_inferred_curly_literal(
                 first_value,
                 value_type_id,
                 type_interner.environment(),
-                context,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -834,7 +829,6 @@ fn parse_inferred_curly_literal(
                             parsed_key,
                             key_type_id,
                             type_interner.environment(),
-                            context,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -842,7 +836,6 @@ fn parse_inferred_curly_literal(
                             parsed_value,
                             value_type_id,
                             type_interner.environment(),
-                            context,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -896,7 +889,6 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 element_type_id,
                 type_interner.environment(),
-                context,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -963,7 +955,6 @@ fn parse_inferred_curly_literal(
                             parsed_item,
                             element_type_id,
                             type_interner.environment(),
-                            context,
                             TypeMismatchContext::CollectionElement,
                         )?;
 

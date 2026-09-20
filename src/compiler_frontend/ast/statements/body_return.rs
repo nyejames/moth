@@ -98,7 +98,6 @@ pub(crate) fn parse_return_statement(
             returned_error,
             expected_error_type_id,
             type_interner.environment(),
-            context,
             TypeMismatchContext::ReturnValue,
         )?;
 
@@ -158,7 +157,6 @@ pub(crate) fn parse_return_statement(
                 value_block_expr,
                 expected_type_id,
                 type_interner.environment(),
-                context,
                 TypeMismatchContext::ReturnValue,
             )?
         } else {
@@ -229,7 +227,6 @@ pub(crate) fn parse_return_statement(
                 returned_value,
                 *expected_type_id,
                 type_interner.environment(),
-                context,
                 TypeMismatchContext::ReturnValue,
             )?);
         }

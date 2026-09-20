@@ -8,7 +8,6 @@
 //! when assigned to `T?`. This module bridges that gap by inserting explicit
 //! AST coercion nodes after natural expression typing has completed.
 
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -35,7 +34,6 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
     expression: Expression,
     expected_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    _scope_context: &ScopeContext,
     mismatch_context: TypeMismatchContext,
 ) -> ContextualCoercionResult<Expression> {
     if expression.type_id == expected_type_id {

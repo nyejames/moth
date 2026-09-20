@@ -61,7 +61,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
-use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
+use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -327,9 +327,12 @@ fn build_mutation_from_target(
                 .into());
             }
 
-            validate_assignment_value_type(target_type_id, &rhs, type_interner.environment())?;
-
-            coerce_expression_to_declared_type(rhs, target_type_id, type_interner.environment())
+            coerce_expression_to_explicit_type_boundary(
+                rhs,
+                target_type_id,
+                type_interner.environment(),
+                TypeMismatchContext::Assignment,
+            )?
         }
 
         compound_tag => {

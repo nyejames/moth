@@ -177,7 +177,6 @@ pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
         produced_values,
         &target.result_type_ids,
         type_interner.environment(),
-        context,
         target.receiver_kind,
     )
 }
@@ -280,7 +279,6 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 expression,
                 expected_type_id,
                 type_interner.environment(),
-                context,
                 mismatch_context_for_receiver(receiver_kind),
             )?;
         }
@@ -318,7 +316,6 @@ fn validate_and_coerce_produced_values(
     produced_values: Vec<Expression>,
     expected_type_ids: &[TypeId],
     type_environment: &TypeEnvironment,
-    context: &ScopeContext,
     receiver_kind: ValueReceiverKind,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let mut checked_values = Vec::with_capacity(produced_values.len());
@@ -333,7 +330,6 @@ fn validate_and_coerce_produced_values(
             produced_value,
             *expected_type_id,
             type_environment,
-            context,
             mismatch_context,
         )?);
     }

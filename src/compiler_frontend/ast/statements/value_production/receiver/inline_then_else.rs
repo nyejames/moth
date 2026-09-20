@@ -360,14 +360,12 @@ pub(super) fn parse_inline_then_else(
         then_expr,
         result_type_id,
         type_interner.environment(),
-        then_context,
         mismatch_context,
     )?;
     let else_expr = coerce_expression_to_explicit_type_boundary(
         else_expr,
         result_type_id,
         type_interner.environment(),
-        else_context,
         mismatch_context,
     )?;
 
