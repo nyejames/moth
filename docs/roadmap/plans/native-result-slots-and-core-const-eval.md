@@ -17,7 +17,7 @@ Implementation observations and file paths below are navigation aids, not frozen
 ```text
 STATUS: queued, design approved
 CURRENT_SLICE: activation and merged-baseline audit
-BLOCKERS: exact-checkpoint R5 closeout for the source/token-layout Phase 3, compiler cleanup, MON
+BLOCKERS: source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; compiler cleanup, MON
 syntax and MON Rust tooling checkpoints, then Wiring V1, must be merged before native result-slot/
 Core const-evaluation work begins.
 NEXT_ACTION: finish those prerequisite merges into main, create a fresh worktree, then run Phase 0.
@@ -25,10 +25,11 @@ NEXT_ACTION: finish those prerequisite merges into main, create a fresh worktree
 
 ## Required reading
 
-Phase 3 implementation and diagnostic provenance are complete; exact-checkpoint R5 attribution
-remains open. At activation, re-read current authorities and trace the current code. Preserve newer
-source IDs, spans, token ownership and failure lanes. Never restore an older API because an example
-in this plan uses it. No speculative baseline SHA belongs in the committed status block.
+Phase 3 implementation and diagnostic provenance are complete; its exact R5 evidence is accepted at
+`4cfd9d492`, including the explicitly inherited generic scaling exception. At activation, re-read
+current authorities and trace the current code. Preserve newer source IDs, spans, token ownership
+and failure lanes. Never restore an older API because an example in this plan uses it. No
+speculative baseline SHA belongs in the committed status block.
 
 
 Read `AGENTS.md` and its current routes first. For this cross-stage refactor, read the full relevant

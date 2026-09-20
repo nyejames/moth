@@ -3838,3 +3838,55 @@ The feature-gated ledger records compiler-owned storage and lifetime events rath
 | `/tmp/moth-r5-independent/early-malformed.moth` (`[`, newline) | Diagnosed | 1 / 0 | 1 | 32 / 16 | 0 / 0 / 4 | 48 (48) | 0 / 0 | 0 (0 / 0) | 0 / 0 | false |
 
 The warning-heavy report retained one identity context and path table with 78 rows/1,536 bytes; the diagnosed report retained one context and 41 path tables with 6,602 rows/79,224 bytes. Clean and early malformed outcomes retained no frozen report context. The diagnosed path table count is intentionally higher because each diagnosed source domain keeps its own source-owned table. Full raw output remains local-only in `/tmp/moth-r5-independent/`; the ledger reports `incomplete=false` for every smoke.
+
+## Data Layout Migration - Phase 3 Slice 3H R5 exact final-checkpoint closeout (2026-09-20)
+
+This section records the exact final source checkpoint `4cfd9d492`, derived from the Phase 3
+implementation checkpoint `6309adf6d`. The closeout changes use a generated `TypeEnvironment`
+fork and share the immutable completed header-binding environment through `Rc`; the rejected
+shared path-source experiment is not part of this checkpoint.
+
+- Toolchain: rustc/cargo `1.98.1 (48a229cea)`, Apple M1 Pro `aarch64-apple-darwin`,
+  `RAYON_NUM_THREADS=1`.
+- Probe: `cargo build --release --bin data_layout_memory_probe --features
+  data_layout_memory_probe`, then `./target/release/data_layout_memory_probe <fixture>`.
+- Fixtures and metric boundaries: constant chain (`frontend.ast.total`, sizes `32/128/512`),
+  nominal scaling (`frontend.ast.environment`, sizes `40/80/160/320`) and generic scaling
+  (`frontend.generated.materialise`, sizes `20/40/80/160`).
+- Each final-checkpoint size had one discarded warm-up and five independent process samples.
+  Samples were collected in size order within each series; the earlier pre/pause/parent
+  distributions and the candidate-attribution policy remain in the matched comparison above.
+- Final medians and fits:
+
+| series | five samples by size, in ms | medians by size, in ms | fit | budget |
+| --- | --- | --- | ---: | ---: |
+| Constant chain | `32: 0.237/0.217/0.241/0.219/0.225`; `128: 0.393/0.435/0.423/0.487/0.439`; `512: 1.254/1.173/1.176/1.174/1.123` | `0.225/0.435/1.174` | `n^0.597` | `n^1.25` |
+| Nominal environment | `40: 0.588/0.608/0.606/0.596/0.620`; `80: 1.111/1.111/1.151/1.082/1.111`; `160: 2.187/2.251/2.073/2.090/2.099`; `320: 4.108/4.089/4.036/4.146/4.104` | `0.606/1.111/2.099/4.104` | `n^0.919` | `n^1.25` |
+| Generic materialisation | `20: 9.793/10.374/10.210/10.272/10.626`; `40: 29.417/29.568/35.892/30.339/31.666`; `80: 103.514/105.039/109.133/104.984/105.897`; `160: 408.542/400.639/395.957/424.336/405.826` | `10.272/30.339/105.039/405.826` | `n^1.770` | `n^1.70` |
+
+Constant and nominal remain within their locked budgets. Generic remains above the unchanged
+`n^1.70` budget. The generic exceedance is explicitly accepted as the inherited Phase 3
+exception required by the owning plan; no budget is raised or loosened, and no no-worsening claim
+is made.
+
+The closeout validation recipe completed native featured Clippy, feature-lane coverage, source
+and first-party audits, workspace tests (`5210 + 17 + 839` passed), integration (`1973/1973`),
+docs and benchmark preflight/quick sanity (`82/82`); it stopped only at the accepted generic
+scaling exception. `just timers-erasure-check` then passed with a clean no-timer binary of
+`8,862,096` bytes. No host-memory failure occurred.
+
+### Final owner-ledger smoke observations
+
+The same release probe reported complete owner-ledger observations (`incomplete=false`) for the
+clean, warning, generic-heavy, diagnosed and early-malformed cases:
+
+| fixture | outcome/errors/warnings | shape/span bytes | numeric/path/sequence bytes | transient bytes (peak) | donor identity tables | generic owner bytes (live/peak) | report contexts/path tables |
+| --- | --- | --- | --- | ---: | --- | --- | --- |
+| `speed-test.moth` | Success / `0/0` | `32816/16408` | `8688/0/888` | `68616 (68616)` | `0/0` | `0 (0/0)` | `0/0` |
+| `warning-heavy.moth` | Success / `0/39` | `2120/1060` | `0/0/16` | `5760 (5760)` | `0/0` | `0 (0/0)` | `1/1` |
+| `generic-trait-churn.moth` | Success / `0/0` | `7568/3784` | `312/0/280` | `18864 (18864)` | `2/1` | `11944 (11944/11944)` | `0/0` |
+| `data-layout/diagnosed` | Diagnosed / `40/0` | `9112/4556` | `48/8/736` | `22560 (19008)` | `0/0` | `0 (0/0)` | `1/41` |
+| `early-malformed.moth` | Diagnosed / `1/0` | `32/16` | `0/0/4` | `48 (48)` | `0/0` | `0 (0/0)` | `0/0` |
+
+Raw per-process output remains local-only under `/tmp/moth-r5-independent/`; allocator values
+remain baseline-relative proxies and are not substituted for owner attribution.

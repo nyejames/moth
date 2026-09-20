@@ -4,9 +4,10 @@ Suggested repository path: `docs/roadmap/plans/post-phase-3-compiler-tidy-up-pla
 
 ## Status
 
-Final Phase 3 closeout remains queued behind exact-checkpoint R5 evidence. Start only after the source,
-token and diagnostic data-layout programme's final closeout; this plan changes implementation shape,
-not language semantics or compiler-stage ownership.
+The final Phase 3 closeout is accepted at source checkpoint `4cfd9d492`, derived from the
+implementation checkpoint `6309adf6d`. Start this plan from a fresh activation worktree after that
+checkpoint; this plan changes implementation shape, not language semantics or compiler-stage
+ownership.
 
 Proposed placement: the post-Phase-3 checkpoint, before overlapping Wiring or native result-slot work starts. This does not reactivate diagnostic Phase 4 or change the relative order of Wiring, native result slots and later diagnostics. If overlapping work has already landed, preserve it and revalidate the affected items against that state.
 

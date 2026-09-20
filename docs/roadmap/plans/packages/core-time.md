@@ -18,7 +18,9 @@ STATUS: semantic contract published and implemented; corrections and the accepte
 CURRENT_SLICE: none - the contract, the four corrections and the five arithmetic functions are complete
 BLOCKERS: a Wasm lowering set still waits for a target decision; the repeated same-name `catch`
 binder defect below is inherited and owned outside this package; the umbrella programme keeps the
-package lane paused until final data-layout Phase 3 exact-checkpoint R5 closeout
+package lane paused under the roadmap order until compiler cleanup, MON syntax, MON Rust tooling,
+Wiring V1 and native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeout
+`4cfd9d492` is accepted.
 NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
 

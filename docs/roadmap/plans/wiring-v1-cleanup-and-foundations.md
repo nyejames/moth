@@ -6,8 +6,8 @@ Intended repository path: `docs/roadmap/plans/wiring-v1-cleanup-and-foundations-
 
 - Status: queued, with the design interview accepted.
 - Current slice: not started.
-- Blockers: final source/token-layout Phase 3 closeout, compiler cleanup, MON syntax and MON Rust
-  tooling checkpoints must be merged into the activation branch.
+- Blockers: source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; compiler cleanup, MON
+  syntax and MON Rust tooling checkpoints must be merged into the activation branch.
 - Next action: establish the current baseline, pause the compact-diagnostics migration before Phase
   4 and start Phase 0 below after those prerequisites are complete.
 

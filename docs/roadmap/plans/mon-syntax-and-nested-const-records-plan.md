@@ -4,11 +4,10 @@
 
 - Status: queued, with the maintainer's syntax direction accepted.
 - Current slice: not started.
-- Blockers: the source/token-layout Phase 3 implementation checkpoint is complete, but its final
-  exact-checkpoint R5 closeout and the separate post-Phase-3 compiler cleanup must be completed
-  before this plan starts.
+- Blockers: the source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; the separate
+  post-Phase-3 compiler cleanup must be completed before this plan starts.
 - Next action: refresh the activation tree, record the baseline in working notes and start Phase 0
-  only after those prerequisites are merged.
+  only after the cleanup prerequisite is merged.
 
 ## Purpose and authority
 

@@ -3,12 +3,12 @@
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
 > **Status:** Accepted end-state architecture. Phase 3 fixed-token/source-owned implementation is
-> complete at checkpoint `6309adf6d`; final closeout remains open for exact-checkpoint R5 evidence.
-> The owning plan records the provisional matched comparison and the unchanged `n^1.70`
-> generic-scaling budget; no final-checkpoint performance claim is made. The post-Phase-3 compiler
-> tidy-up, then MON syntax, MON Rust tooling, Wiring and native result-slot checkpoints precede
-> explicit Phase 4 reactivation. User-facing diagnostic improvement work remains paused until that
-> gate.
+> complete at checkpoint `6309adf6d`; R5 closeout corrections and exact final evidence are accepted
+> at `4cfd9d492`. The owning plan records constant and nominal fits within their locked budgets and
+> explicitly accepts the inherited generic `n^1.70` exception (`n^1.770`) without raising or
+> loosening that budget or claiming no worsening. The post-Phase-3 compiler tidy-up, then MON syntax,
+> MON Rust tooling, Wiring and native result-slot checkpoints precede explicit Phase 4 reactivation.
+> User-facing diagnostic improvement work remains paused until that gate.
 >
 > **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
 > `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening

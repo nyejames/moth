@@ -19,12 +19,11 @@ plans under this directory.
 ```text
 STATUS: paused by the user after the `@core/math` and `@core/time` batch
 CURRENT_SLICE: none - `@core/math` and `@core/time` are delivered, each with its accepted contract published in the canonical reference before implementation
-BLOCKERS: package development remains paused until final data-layout Phase 3 closeout completes;
-the remaining shared closeout item is exact-checkpoint R5 attribution. The accepted Phase 2
-continuation checkpoint `c17672bb5` (diagnostic correction plus validation-lane stabilization)
-synchronises the branch; it does not reopen this pause.
-NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing final
-data-layout Phase 3 closeout, then rerun the complete package gate.
+BLOCKERS: package development remains paused under the roadmap order until the post-Phase-3
+compiler cleanup, MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
+checkpoints are merged; data-layout Phase 3 closeout `4cfd9d492` is accepted.
+NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing those
+roadmap prerequisites, then rerun the complete package gate.
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -39,10 +38,11 @@ own Phase 2 (`@core/text` v1) has not started, and the checkpoint order below is
 
 The foundation and documentation baseline is merged into main. Phase 1 and the Phase 0
 implementation are delivered there. Data-layout Phase 3 implementation and diagnostic provenance
-are complete at `6309adf6d`; the package lane is paused solely until final exact-checkpoint R5
-closeout is complete. The roadmap previously allowed isolated package work fitting the existing
-external ABI to run alongside data-layout Phases 2 and 3; that permission is spent and this is the
-one current schedule.
+are complete at `6309adf6d`, with R5 closeout accepted at `4cfd9d492`; the package lane remains
+paused under the serial roadmap order for compiler cleanup, MON syntax, MON Rust tooling, Wiring
+V1 and native result slots/Core const evaluation. The roadmap previously allowed isolated package
+work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; that permission
+is spent and this is the one current schedule.
 Integrating at the accepted Phase 2 continuation checkpoint (`c17672bb5`, diagnostic correction
 plus validation-lane stabilization) is a synchronisation event only: it does not reopen the package
 pause or permit a new slice. Slices needing result slots or Core const evaluation still wait for the
@@ -438,7 +438,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Implementation merged; package lane paused pending final data-layout Phase 3 exact-checkpoint R5 closeout | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 0 | Package foundations | this plan | Implementation merged; package lane paused behind the serial compiler-cleanup, MON, Wiring and native result-slot/Core const-eval checkpoints | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
@@ -700,9 +700,10 @@ The checkpoint must provide:
 Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
 owners directly and remove any planning assumptions made obsolete by the implementation. This
 checkpoint alone would pause package work only while the shared result representation is actually
-changing under it; the current pause is the user's scheduling decision and lasts until final
-data-layout Phase 3 closeout. The accepted Phase 2 data-layout continuation checkpoint
-synchronises the branch and does not reopen that pause.
+changing under it; the user's current scheduling pause continues through the ordered post-Phase-3
+compiler cleanup, MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
+checkpoints. The accepted Phase 2 data-layout continuation checkpoint synchronises the branch and
+does not reopen that pause.
 
 ### Phase 2 - `@core/text` current v1 slice
 

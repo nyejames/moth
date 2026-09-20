@@ -8,19 +8,21 @@
 >
 **Status:**
 Phase 1 is delivered on main; Phase 2 is accepted at `c17672bb5`; the Phase 3 implementation
-cutover is recorded at checkpoint `6309adf6d`. The canonical `SourceTokens` owner, bounded parser
-views, typed payload stores and preparation lifecycle are complete; `Token`, `TokenKind` and
-`FileTokens` have been deleted. Final Phase 3 closeout remains gated on exact-checkpoint R5 evidence;
-Phase 4 remains gated behind the roadmap sequence and explicit reactivation.
-Validation state: the bounded closeout equivalents pass every required lane except the unchanged
-generic-scaling budget: the current quick fit is `n^1.79` against `n^1.70`. The recorded matched
-five-sample R5 evidence measured candidate `aa337b136` before the final parser cutover commits and
-therefore is not evidence for `6309adf6d`. Detailed measurements live in
-`benchmarks/frontend-optimization-results.md`; no budget is raised or loosened.
-After the Phase 3 implementation checkpoint, and once final R5 closeout evidence is resolved, this
-plan pauses through the roadmap order: compiler tidy-up, then MON syntax and nested const records,
-MON Rust tooling, Wiring V1, then native result slots and Core const evaluation, with Phase 4
-resuming only after explicit reactivation.
+cutover is recorded at checkpoint `6309adf6d`, and the R5 closeout source corrections are accepted
+at `4cfd9d492`. The canonical `SourceTokens` owner, bounded parser views, typed payload stores and
+preparation lifecycle are complete; `Token`, `TokenKind` and `FileTokens` have been deleted.
+Phase 3 is accepted with the explicitly inherited generic-scaling exception recorded below; Phase 4
+remains gated behind the roadmap sequence and explicit reactivation.
+Validation state: the current closeout candidate passed native featured Clippy, feature coverage,
+source and first-party audits, workspace tests (`5210 + 17 + 839`), integration (`1973/1973`),
+docs and benchmark sanity (`82/82` preflights), then stopped only at generic scaling. Exact release
+R5 fits are constant `n^0.597`, nominal `n^0.919` and generic `n^1.770` against budgets
+`n^1.25`, `n^1.25` and `n^1.70`; `just timers-erasure-check` passed separately. The generic
+exceedance is explicitly accepted without raising or loosening its budget, and no no-worsening claim
+is made. Detailed measurements live in `benchmarks/frontend-optimization-results.md`.
+After the Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
+const evaluation, with Phase 4 resuming only after explicit reactivation.
 
 ## Purpose
 
@@ -75,9 +77,9 @@ from a compressed summary alone.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
-- Phase: Phase 3 fixed-token/source-owned implementation is complete at checkpoint `6309adf6d` on
-  `diagnostic-data-layout-changes`; final closeout remains open only for exact-checkpoint R5
-  evidence attribution.
+- Phase: Phase 3 fixed-token/source-owned implementation is accepted at checkpoint `6309adf6d` on
+  `diagnostic-data-layout-changes`; R5 closeout corrections and evidence are accepted at
+  `4cfd9d492`.
 - Goal: `SourceTokens` is the canonical immutable token owner. Headers, AST and generic bodies
   retain checked ranges and sequence IDs over that owner. The former `Token`, `TokenKind` and
   `FileTokens` representations, compatibility cursors and copied parser windows are deleted.
@@ -85,55 +87,56 @@ ACTIVE_PLAN:
   storage, typed cold stores and bounded `TokenCursor`/`TokenRef` views. Headers, prepared sources
   and generic bodies retain canonical ranges or sequence IDs; `SourceTokenOwner` and
   `StableBodyOwner` carry the required source and donor identity without cloned token vectors.
-- Validation evidence: the bounded closeout equivalents and the recorded R5 distributions/ledger
-  smokes live in `benchmarks/frontend-optimization-results.md`; the R5 candidate predates the
-  final parser cutover and is not attributed to `6309adf6d`.
-- Scaling status: constant and nominal remain within `n^1.25`; generic remains above the unchanged
-  `n^1.70` budget. The recorded candidate fit is a measured exception, not final-checkpoint
-  performance evidence. No budget was raised or loosened and no no-worsening claim is made.
+- Validation evidence: the exact final-checkpoint R5 distributions and owner-ledger smokes live in
+  `benchmarks/frontend-optimization-results.md`; the historical four-point comparison remains
+  explicitly attributed to its pre-final candidate.
+- Scaling status: exact final-checkpoint constant and nominal fits are within `n^1.25`; generic
+  is `n^1.770` against the unchanged `n^1.70` budget. The generic exceedance is the explicitly
+  accepted inherited exception. No budget was raised or loosened and no no-worsening claim is made.
 - Retention status: the feature-gated owner ledger records source-token arrays, cold stores,
   transient construction pressure, requester remaps, donor identity tables and generic owner
   live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
-- Closeout status: R3 diagnostic projection and R4 preparation ownership are complete; exact
-  checkpoint R5 attribution remains open.
+- Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
+  are complete.
 - OPEN_FINDINGS:
   - F1 (3H-R1a): closed — bounded parser views survive declaration handoffs.
   - F2 (3H-R1b): closed — sequential scans walk cursors without segmented-prefix rescans.
   - F3 (3H-R3): closed — all token-bearing diagnostic projections carry requester-domain
     provenance or stay on an explicit same-domain path.
   - F4 (3H-R4): closed — headers, prepared sources and generic bodies share canonical owners.
-  - F5 (3H-R5): open — the recorded matched evidence predates the final `6309adf6d` parser
-    cutover; no exact-checkpoint matched R5 claim is made.
-- NEXT_SUBSTEP: pause after Phase 3; start the separate post-Phase-3 compiler tidy-up checkpoint,
-  then follow the roadmap's MON, MON Rust tooling, Wiring and native result-slot/Core const-eval
-  sequence before explicitly reactivating Phase 4.
+  - F5 (3H-R5): closed — exact final-checkpoint evidence is recorded; the inherited generic budget
+    exception is explicitly accepted without changing the budget.
+- NEXT_SUBSTEP: start the separate post-Phase-3 compiler tidy-up checkpoint, then follow the
+  roadmap's MON, MON Rust tooling, Wiring and native result-slot/Core const-eval sequence before
+  explicitly reactivating Phase 4.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`.
+  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
+  `4cfd9d492`.
 - Non-goals: diagnostic compact-record work; package implementation; compiler tidy-up, MON syntax
   and nested const records, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
   implementation before their owning roadmap checkpoints; Phase 4 reactivation before the explicit
   gate.
 
 Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
-diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`, and implementation
-checkpoint `6309adf6d` contains the completed code cutover. Final Phase 3 closeout remains open;
-detailed implementation and review checkpoints remain in Git history, while the summaries below
-retain only contracts and evidence needed by later phases.
+diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`, implementation
+checkpoint `6309adf6d` contains the completed code cutover, and R5 closeout is accepted at
+`4cfd9d492`. Detailed implementation and review checkpoints remain in Git history, while the
+summaries below retain only contracts and evidence needed by later phases.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 remains complete. Phase 2 PathId cutover, generated identity pairing and report-owner
   retention metrics are accepted at `c17672bb5` with the diagnostic correction and validation-lane
   stabilisation; refreshed probe evidence is recorded.
-- The recorded Phase 3 R5 distributions and owner-ledger smokes are in
-  `benchmarks/frontend-optimization-results.md`; their candidate predates the final parser cutover
-  and is not evidence for `6309adf6d`.
-- Phase 3 fixed-token/source-owned implementation is complete at `6309adf6d`. `SourceTokens` is
-  the only token owner; retained ranges and sequence IDs, typed payload provenance, preparation
-  ownership and diagnostic projection provenance are final. Final closeout remains open for exact
-  checkpoint R5 attribution.
-- After final Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then
-  MON syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and
-  Core const evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
+- Phase 3 fixed-token/source-owned implementation is accepted at `6309adf6d`, with final R5
+  source corrections and evidence accepted at `4cfd9d492`. `SourceTokens` is the only token owner;
+  retained ranges and sequence IDs, typed payload provenance, preparation ownership and diagnostic
+  projection provenance are final.
+- Exact final R5 evidence records constant and nominal fits within budget and an explicitly accepted
+  inherited generic `n^1.70` exception. No budget was raised or loosened and no no-worsening claim
+  is made; validation had no host-memory failure.
+- After Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+  syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
+  evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
   reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
 
 HISTORICAL_ACCEPTED_SLICES:
@@ -228,8 +231,9 @@ DECISIONS_ALREADY_MADE:
   - source/user/date: user interview, 2026-07-19
 
 BLOCKERS / RISKS:
-- Phase 3 implementation is complete at `6309adf6d`; final exact-checkpoint R5 closeout evidence
-  remains open. The separate post-Phase-3 compiler tidy-up checkpoint follows closeout.
+
+- Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
+  `4cfd9d492`; the separate post-Phase-3 compiler tidy-up checkpoint follows closeout.
 - User-facing diagnostic improvement remains paused until the Phase 4 reactivation gate is satisfied.
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
 - compact-ID merge order must remain deterministic across file and module parallelism.
@@ -238,35 +242,34 @@ BLOCKERS / RISKS:
   dead parallel owner and warnings. Revisit source freezing together with that terminal owner.
 VALIDATION_STATE:
 
-Phase 3 implementation closeout is `6309adf6d` (2026-09-20). Earlier bounded sequential
-validation equivalents used `CARGO_BUILD_JOBS=1`, `CARGO_INCREMENTAL=0`, zero Cargo profile debug
-info, `RUST_TEST_THREADS=1` and `RAYON_NUM_THREADS=1` to cap host memory. The `just validate`
-recipe now routes its workspace Rust unit suite through `just validate-unit-tests`, which applies
-the same caps while leaving integration and performance lanes on their normal commands. A full
-`just validate` run after that change completed native featured Clippy, feature coverage, source and
-first-party audits, workspace tests (`6065` passed), integration (`1973/1973`), docs and bench-ci
-(`82/82` preflights), then stopped at the unchanged generic-scaling budget exception: nominal
-`n^0.94`, constant `n^0.79` and generic `n^1.78` against budgets `n^1.25`, `n^1.25` and
-`n^1.70`. No memory failure occurred; budgets remain unchanged. This remains a provisional
-measured exception, not final-checkpoint performance acceptance.
-The provisional matched R5 evidence and owner-ledger smoke observations remain the implementation
-performance record; this full-recipe run is a memory-safety smoke and does not replace exact-final-
-checkpoint performance evidence.
-Earlier per-slice validation is Git history, not a current workspace claim. The plan pauses after
-Phase 3 and the roadmap order above; Phase 4 reactivation remains gated.
+Phase 3 R5 closeout validation ran on Apple M1 Pro / Rust 1.98.1 with the memory-bounded unit
+recipe (`CARGO_BUILD_JOBS=1`, `CARGO_INCREMENTAL=0`, zero Cargo profile debug info,
+`RUST_TEST_THREADS=1`, `RAYON_NUM_THREADS=1`). Native featured Clippy, feature coverage, source
+and first-party audits, workspace tests (`5210 + 17 + 839`), integration (`1973/1973`), docs and
+bench-ci (`82/82` preflights plus quick measurements) passed. The aggregate recipe then stopped at
+the unchanged generic scaling exception: its bounded quick fit was `n^1.79` against `n^1.70`;
+nominal `n^0.99` and constant `n^0.78` passed. The exact release R5 follow-up records
+constant `n^0.597`, nominal `n^0.919` and generic `n^1.770`; no host-memory failure occurred.
+`just timers-erasure-check` passed separately with an `8,862,096`-byte no-timer binary.
+
+The generic result is an explicitly accepted inherited exception, not a budget change or a
+no-worsening claim. The exact final owner-ledger smokes report `incomplete=false` for clean,
+warning-heavy, generic-heavy, diagnosed and early-malformed fixtures. Earlier per-slice validation
+is Git history, not a current workspace claim. The plan pauses after Phase 3 and the roadmap order
+above; Phase 4 reactivation remains gated.
 Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
 starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
 all-target Clippy gate before accepting a slice.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
-- current authorities, implementation map and style/validation records now describe the completed
-  canonical token owner, bounded parser views, preparation lifecycle and recorded generic-budget
+- current authorities, implementation map and style/validation records now describe the accepted
+  canonical token owner, bounded parser views, preparation lifecycle and inherited generic-budget
   exception
 - authorised docs updates for this 3H closeout: the plan, the architecture status, the compiler
   implementation overview and the benchmark evidence
-- next action: resolve final Phase 3 R5 evidence closeout, then activate the separate post-Phase-3
-  compiler tidy-up plan; preserve the roadmap sequence before Phase 4
+- next action: start the separate post-Phase-3 compiler tidy-up checkpoint; preserve the roadmap
+  sequence before Phase 4
 - `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
   Phase 1 standing-contracts section).
 
@@ -420,10 +423,11 @@ before the first implementation phase that freezes reports.
 ### Current roadmap state
 
 Test Suite Hardening was delivered in `03168082d`. This plan was the active representation migration
-through Phase 3, with implementation checkpoint `6309adf6d` recorded. The canonical `SourceTokens`
-owner, bounded parser views, typed payload stores and preparation lifecycle are complete; final
-closeout remains open before the plan pauses through the roadmap sequence toward Phase 4. The
-diagnostics plan remains paused until that gate.
+through Phase 3, with implementation checkpoint `6309adf6d` and R5 closeout checkpoint `4cfd9d492`.
+The canonical `SourceTokens` owner, bounded parser views, typed payload stores and preparation
+lifecycle are complete; Phase 3 is accepted with its explicitly recorded inherited generic-scaling
+exception before the plan pauses through the roadmap sequence toward Phase 4. The diagnostics plan
+remains paused until that gate.
 
 ### Approved private discovery-finalization contract
 
@@ -720,9 +724,10 @@ tables are Git history.
 
 ### Standing correction contracts
 
-These remain in force for later phases. They do not reopen Phase 1 or the accepted Phase 2 and
-Phase 3 migrations; Phase 3 is complete at `6309adf6d`, and 3H old-token deletion is closed.
-Current status and ownership are recorded in the active capsule and the completed 3H section below.
+These remain in force for later phases. They do not reopen Phase 1, the accepted Phase 2 migration
+or the accepted Phase 3 migration; Phase 3 is complete at `4cfd9d492`, and 3H old-token deletion is
+closed. Current status and ownership are recorded in the active capsule and the completed 3H section
+below.
 
 #### Cold ownership
 
@@ -1194,14 +1199,15 @@ Findings closed by the completed substeps:
   consumers classify through `TokenTag` and read payloads through checked typed facts.
 - F4: headers, prepared sources and generic bodies retain one canonical `SourceTokens` owner;
   donor strings/path tables and requester remaps are explicit cold provenance, not copied syntax.
-- F5: the matched five-sample comparison and owner ledger are recorded as provisional pre-final-
-  checkpoint evidence. The generic series remains above the unchanged `n^1.70` budget; its lower
-  candidate exponent than the pre-Phase-3 point and lower large-size medians are recorded as a
-  measured tradeoff, with no budget change or no-worsening claim. Exact final-checkpoint attribution
-  remains open.
+- F5: exact final-checkpoint release evidence and owner-ledger smokes are recorded in
+  `benchmarks/frontend-optimization-results.md`. Constant and nominal remain within budget; the
+  generic series remains above unchanged `n^1.70` and is explicitly accepted as the inherited
+  exception without a budget change or no-worsening claim.
 
-No inventoried legacy-token site remains. The owner map in the implementation overview and the
-architecture authority are the navigation sources for later phases.
+The implementation and R5 closeout are accepted. No inventoried legacy-token site remains. The owner
+map in the implementation overview and the architecture authority are the navigation sources for
+later phases.
+
 
 #### [x] 3H-R0 — Resume and establish the real checkpoint (complete)
 
@@ -1345,27 +1351,26 @@ builders stay alive through their final producer, private discovery rebinds once
 outcomes retain only the context needed for diagnostics. Duplicate token/path/OS-path metadata,
 adapter constructors, obsolete remappers, dead counters and broad compatibility support are gone.
 
-#### [ ] 3H-R5 — Attribute performance and close the memory evidence
+#### [x] 3H-R5 — Attribute performance and close the memory evidence
 
-The recorded four-point release comparison uses exact pre-Phase-3 `c17672bb5`, pause
-`3fb55d31b`, correction parent `fcc41b602` and candidate `aa337b136`, identical fixtures and
-boundaries, Rust/Cargo `1.98.1`, Apple M1 Pro, `RAYON_NUM_THREADS=1`, one warm-up and five
-interleaved independent samples. That candidate predates the final parser cutover commits ending at
-`6309adf6d`, so its `n^1.786` generic result is historical evidence and is not attributed to the
-final checkpoint. Constant and nominal fit within the inherited `n^1.25` budgets; generic remains
-above the unchanged `n^1.70` budget.
+The exact final-checkpoint follow-up uses source checkpoint `4cfd9d492`, derived from
+`6309adf6d`, with Rust/Cargo `1.98.1`, Apple M1 Pro, `RAYON_NUM_THREADS=1`, one discarded
+warm-up and five independent release-probe samples per size. Constant and nominal fits are
+`n^0.597` and `n^0.919`, within their inherited `n^1.25` budgets. Generic is `n^1.770` against
+the unchanged `n^1.70` budget.
 
 The feature-gated owner ledger records distinct source-token shape/span and cold-store storage,
 capacities, transient construction pressure, requester remaps, donor identity tables and generic
-owner live/peak bytes. Warning, diagnosed, clean, generic-heavy and early-malformed smokes report
-complete observations. Exact-checkpoint matched R5 evidence remains open; no budget is raised or
-loosened and no no-worsening claim is made.
+owner live/peak bytes. Clean, warning-heavy, generic-heavy, diagnosed and early-malformed smokes
+all report `incomplete=false`.
 
-The bounded validation policy, focused parser/lifecycle evidence and donor-origin diagnostic
-regressions are recorded. Final closeout remains blocked until exact-checkpoint R5 attribution is
-measured or explicitly accepted for the final checkpoint. The aggregate `just validate` recipe now
-constrains only its Rust unit lane for host memory; integration and performance lanes remain normal.
-Phase 4 remains gated behind the roadmap sequence and explicit reactivation; no later plan was started.
+The generic exceedance is explicitly accepted as the inherited Phase 3 exception. The budget is
+not raised or loosened, and no no-worsening claim is made. The bounded validation policy, focused
+parser/lifecycle evidence and donor-origin diagnostic regressions remain recorded; native Clippy,
+feature coverage, source/dependency audits, workspace tests, integration, docs, bench-ci and timer
+erasure all passed, with the aggregate recipe stopping only at this accepted generic exception.
+Phase 4 remains gated behind the roadmap sequence and explicit reactivation; no later plan was
+started.
 
 ### Phase 3 — Audit / style-guide review / validation
 
@@ -1387,8 +1392,8 @@ Complete common phase close:
 - [x] run full integration output and diagnostic equivalence checks
 - [x] record provisional common/cold token bytes, capacities, transient representations,
   generic-retained identity data and matched timing in the benchmark evidence
-- [ ] run matched pre-Phase-3, pause, correction-parent and final-checkpoint scaling comparisons
-  with identical fixtures, toolchain, profile and thread settings
+- [x] record exact final-checkpoint constant, nominal and generic release samples with the locked
+  toolchain/fixtures and retain the historical pre/pause/parent comparison
 
 ### Phase 3 exit criteria
 
@@ -1401,7 +1406,7 @@ Complete common phase close:
   provenance and no per-body table copies or retained compatibility shell
 - [x] no duplicated source, path or OS-path metadata remains after adapter deletion
 - [x] no crate-internal migration adapter, compatibility cursor branch or conversion helper remains
-- [ ] final-checkpoint constant and nominal matched scaling remain within budget; generic evidence
+- [x] final-checkpoint constant and nominal matched scaling remain within budget; generic evidence
   records an explicitly accepted inherited `n^1.70` exception without changing the budget
 ---
 

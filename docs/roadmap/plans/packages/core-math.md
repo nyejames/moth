@@ -19,7 +19,9 @@ an explicit dependency clause.
 STATUS: activated early for existing-ABI work; the accepted scalar expansion is delivered
 CURRENT_SLICE: none - the expansion, its published numerical contract and its coverage are complete
 BLOCKERS: compile-time folding waits for the Core const-eval prerequisite; the package lane remains
-paused under the umbrella until final data-layout Phase 3 exact-checkpoint R5 closeout.
+paused under the roadmap order until the post-Phase-3 compiler cleanup, MON syntax, MON Rust tooling,
+Wiring V1 and native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeout
+`4cfd9d492` is accepted.
 NEXT_ACTION: none required; a Wasm lowering set and const-eval folding are the next candidates, each needing its own accepted contract
 ```
 
