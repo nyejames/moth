@@ -15,8 +15,8 @@ validate-common:
     @echo "first-party dependency audit"
     just first-party-deps
 
-    @echo "unit tests"
-    cargo test --workspace --quiet -- --format terse
+    @echo "unit tests (memory-bounded)"
+    just validate-unit-tests
 
     @echo "integration tests"
     cargo run --quiet -- tests --terse
@@ -32,6 +32,18 @@ validate-common:
 
     @echo "timers erasure"
     just timers-erasure-check
+
+# Keep the Rust unit suite from multiplying compiler and test-harness memory on developer hosts.
+# Integration and performance lanes stay on their existing commands so their critical behaviour is
+# still exercised under the normal validation configuration.
+[unix]
+validate-unit-tests:
+    CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 cargo test --workspace --quiet -- --format terse
+
+[windows]
+validate-unit-tests:
+    $env:CARGO_BUILD_JOBS = "1"; $env:CARGO_INCREMENTAL = "0"; $env:CARGO_PROFILE_DEV_DEBUG = "0"; $env:CARGO_PROFILE_TEST_DEBUG = "0"; $env:RUST_TEST_THREADS = "1"; $env:RAYON_NUM_THREADS = "1"; cargo test --workspace --quiet -- --format terse
+
 
 ship:
     cargo fmt
@@ -153,14 +165,14 @@ test-honesty-evidence:
 # Independently reported CI gates.
 #
 # CI runs each as its own job so one failed validation family never hides another; `just validate`
-# keeps the fail-fast local ordering. `ci-gate-unit-tests` is the workspace-unified configuration
-# a developer runs locally, and `ci-gate-feature-matrix` is what actually covers the default and
-# per-feature configurations.
+# keeps the fail-fast local ordering. `ci-gate-unit-tests` uses the same memory-bounded workspace
+# test recipe as local validation, and `ci-gate-feature-matrix` is what actually covers the default
+# and per-feature configurations.
 ci-gate-clippy:
     just ci-clippy-native
 
 ci-gate-unit-tests:
-    cargo test --workspace --quiet -- --format terse
+    just validate-unit-tests
 
 ci-gate-feature-matrix:
     just test-feature-matrix

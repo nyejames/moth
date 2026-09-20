@@ -173,10 +173,12 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
-        [: Rust unit tests]
-        [: `cargo test --workspace --quiet -- --format terse`]
+        [: **Rust unit tests**]
+        [: `just validate-unit-tests`]
         [: Rust unit and subsystem tests across the complete workspace, in the
-        workspace-unified feature configuration]
+        workspace-unified feature configuration, with one Cargo build job, one
+        test-harness thread, one Rayon worker, no incremental compilation and
+        zero dev/test debug info]
     ]
 
     [td:
@@ -231,6 +233,13 @@ Before declaring a non-trivial code-bearing slice complete, run:
         into its bytes]
     ]
 ]
+
+The `validate-unit-tests` recipe is the memory-bounded Rust test lane used by
+both `just validate` and `just ci-gate-unit-tests`. It constrains Cargo build
+parallelism, test-harness threads, Rayon workers, incremental compilation and
+dev/test debug information. Integration tests and performance benchmarks retain
+their normal commands and thread settings because those lanes are themselves
+part of the behaviour being validated.
 
 - `ci-clippy-native` lints the native host only, across every workspace target and the explicit
   standard feature set. It deliberately excludes the opt-in `boracle` feature.
