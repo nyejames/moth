@@ -118,7 +118,7 @@ impl DiagnosticToken {
                         let spelling = token
                             .string_spelling(strings)?
                             .ok_or(TokenViewError::MalformedStringHandle)?;
-                        let Some(destination) = destination.as_deref_mut() else {
+                        let Some(destination) = destination.as_mut() else {
                             return Err(TokenViewError::MalformedStringHandle);
                         };
                         destination.intern(spelling)
@@ -132,7 +132,7 @@ impl DiagnosticToken {
             TokenDescriptorPayload::NumericLiteral => {
                 let literal = match donor_strings {
                     Some(strings) => {
-                        let Some(destination) = destination.as_deref_mut() else {
+                        let Some(destination) = destination.as_mut() else {
                             return Err(TokenViewError::MalformedStringHandle);
                         };
                         token.numeric_literal_in(strings, destination)?

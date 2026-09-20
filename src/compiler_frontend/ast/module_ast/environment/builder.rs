@@ -738,7 +738,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(AstModuleEnvironment {
             lookups: Rc::new(AstModuleLookups {
                 module_symbols: self.module_symbols,
-                binding_environment: self.binding_environment,
+                binding_environment: Rc::new(self.binding_environment),
                 warnings: self.warnings,
                 declaration_table: self.declaration_table,
                 imported_functions_by_local_path: self.projected_imported_functions_by_local_path,

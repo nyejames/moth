@@ -90,7 +90,7 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(super) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
-    pub(crate) binding_environment: HeaderBindingEnvironment,
+    pub(crate) binding_environment: Rc<HeaderBindingEnvironment>,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
@@ -1426,7 +1426,7 @@ impl ModuleMaterialisationPreparation {
                 &lookups.declaration_table,
                 const_values,
             )?,
-            binding_environment: lookups.binding_environment.clone(),
+            binding_environment: Rc::clone(&lookups.binding_environment),
             imported_functions_by_local_path: lookups.imported_functions_by_local_path.clone(),
             imported_struct_definitions: lookups.imported_struct_definitions.clone(),
             imported_choice_definitions: lookups.imported_choice_definitions.clone(),

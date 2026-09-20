@@ -73,7 +73,7 @@ impl ModuleMaterialisationPreparation {
         let mut declaration_table =
             TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
         let mut resolved_module_constants = ResolvedConstantSet::default();
-        let mut generated_type_environment = self.type_environment.clone();
+        let mut generated_type_environment = self.type_environment.fork_for_generated();
         let mut template_materialiser = GeneratedFoldedValueMaterialiser {
             type_environment: &mut generated_type_environment,
             external_registry: &self.external_package_registry,
@@ -117,7 +117,7 @@ impl ModuleMaterialisationPreparation {
 
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
-            binding_environment: self.binding_environment.clone(),
+            binding_environment: Rc::clone(&self.binding_environment),
             warnings: Vec::new(),
             declaration_table: Rc::new(declaration_table),
             imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
@@ -147,7 +147,7 @@ impl ModuleMaterialisationPreparation {
         Ok(AstModuleEnvironment {
             lookups: Rc::new(lookups),
             generated_evidence_pairs: Rc::new(FxHashSet::default()),
-            type_environment: self.type_environment.clone(),
+            type_environment: generated_type_environment,
             resolved_public_type_roots: Default::default(),
             resolved_public_trait_roots: Vec::new(),
         })
