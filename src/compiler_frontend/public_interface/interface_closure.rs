@@ -518,7 +518,16 @@ impl ClosureWork {
     }
 
     fn enqueue_type(&mut self, identity: &CanonicalTypeIdentity) {
-        identity.visit(&mut |nested| match nested {
+        identity.visit(&mut |nested| self.enqueue_canonical_type(nested));
+    }
+
+    /// Select one visited canonical identity without recursing into its children.
+    ///
+    /// [`CanonicalTypeIdentity::visit`] and [`PublicFoldedValue::visit_type_identities`] own
+    /// recursion. Keeping this callback non-recursive prevents folded values from walking a
+    /// canonical identity subtree once for each enclosing visitor and once again here.
+    fn enqueue_canonical_type(&mut self, identity: &CanonicalTypeIdentity) {
+        match identity {
             CanonicalTypeIdentity::SourceNominal(origin) => {
                 self.enqueue_declaration(OriginDeclarationId::Type(origin.clone()));
             }
@@ -535,7 +544,7 @@ impl ClosureWork {
             | CanonicalTypeIdentity::FallibleCarrier(_)
             | CanonicalTypeIdentity::GenericParameter(_)
             | CanonicalTypeIdentity::AnonymousConstRecord => {}
-        });
+        }
     }
 
     fn enqueue_trait(&mut self, identity: &CanonicalTraitIdentity) {
@@ -545,7 +554,7 @@ impl ClosureWork {
     }
 
     fn enqueue_folded_value(&mut self, value: &PublicFoldedValue) {
-        value.visit_type_identities(&mut |identity| self.enqueue_type(identity));
+        value.visit_type_identities(&mut |identity| self.enqueue_canonical_type(identity));
     }
 }
 
@@ -890,42 +899,28 @@ fn collect_concrete_receiver_origins(
 
 /// Collect every declaration origin referenced by one canonical type identity.
 ///
-/// This precomputes the evidence eligibility predicate once per evidence record at closure
-/// setup, so the fixed point never re-scans all candidates or re-walks type shapes.
+/// CanonicalTypeIdentity owns recursive traversal. This callback only selects public source
+/// nominals and generic bases; module-private generic instances are traversed by the visitor,
+/// but their private nominal bases are never selected.
 fn collect_type_origins(identity: &CanonicalTypeIdentity, origins: &mut Vec<OriginDeclarationId>) {
-    match identity {
+    identity.visit(&mut |nested| match nested {
         CanonicalTypeIdentity::SourceNominal(origin) => {
             origins.push(OriginDeclarationId::Type(origin.clone()));
         }
-        CanonicalTypeIdentity::Collection(collection) => {
-            collect_type_origins(collection.element(), origins);
-        }
-        CanonicalTypeIdentity::OrderedMap(map) => {
-            collect_type_origins(map.key(), origins);
-            collect_type_origins(map.value(), origins);
-        }
-        CanonicalTypeIdentity::Option(inner) => collect_type_origins(inner, origins),
-        CanonicalTypeIdentity::FallibleCarrier(carrier) => {
-            collect_type_origins(carrier.success(), origins);
-            collect_type_origins(carrier.error(), origins);
-        }
         CanonicalTypeIdentity::GenericInstance(instance) => {
             origins.push(OriginDeclarationId::Type(instance.base().clone()));
-            for argument in instance.arguments() {
-                collect_type_origins(argument, origins);
-            }
-        }
-        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
-            for argument in instance.arguments() {
-                collect_type_origins(argument, origins);
-            }
         }
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
+        | CanonicalTypeIdentity::Collection(_)
+        | CanonicalTypeIdentity::OrderedMap(_)
+        | CanonicalTypeIdentity::Option(_)
+        | CanonicalTypeIdentity::FallibleCarrier(_)
         | CanonicalTypeIdentity::GenericParameter(_)
         | CanonicalTypeIdentity::AnonymousConstRecord => {}
-    }
+    });
 }
 
 fn closure_error(detail: impl Into<String>) -> CompilerError {
@@ -933,4 +928,61 @@ fn closure_error(detail: impl Into<String>) -> CompilerError {
         "public semantic interface closure: {}",
         detail.into()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler_frontend::canonical_type_identity::{
+        ModulePrivateGenericInstanceTypeIdentity, ModulePrivateNominalIdentity,
+    };
+    use crate::compiler_frontend::semantic_identity::{
+        ModuleRootRole, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+        StablePackageIdentity,
+    };
+
+    #[test]
+    fn private_generic_arguments_remain_closure_reachable_without_private_base_selection() {
+        let module = StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("closure-test"),
+            "closure".to_owned(),
+            ModuleRootRole::Normal,
+        );
+        let argument = OriginTypeId::new(
+            module.clone(),
+            "Argument".to_owned(),
+            OriginTypeCategory::Struct,
+        );
+        let identity = CanonicalTypeIdentity::ModulePrivateGenericInstance(
+            ModulePrivateGenericInstanceTypeIdentity::new(
+                ModulePrivateNominalIdentity::new(
+                    module,
+                    "HiddenBox".to_owned(),
+                    OriginTypeCategory::Struct,
+                ),
+                vec![CanonicalTypeIdentity::SourceNominal(argument.clone())].into_boxed_slice(),
+            ),
+        );
+
+        let mut work = ClosureWork::new();
+        work.enqueue_type(&identity);
+        assert_eq!(
+            work.pending.len(),
+            1,
+            "only the public argument should enter the closure queue",
+        );
+        assert!(matches!(
+            work.pending.front(),
+            Some(ClosureWorkItem::Declaration(OriginDeclarationId::Type(origin)))
+                if origin == &argument
+        ));
+
+        let mut evidence_origins = Vec::new();
+        collect_type_origins(&identity, &mut evidence_origins);
+        assert_eq!(
+            evidence_origins,
+            vec![OriginDeclarationId::Type(argument)],
+            "evidence indexing must retain private-generic arguments without selecting the base",
+        );
+    }
 }

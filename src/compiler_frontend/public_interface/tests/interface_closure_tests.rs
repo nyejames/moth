@@ -6,7 +6,11 @@
 //! dependency order.
 //! WHY: these hidden join invariants are not visible through end-to-end output.
 
-use super::super::model::{ConcreteCallSummaryRecord, PublicAliasSemantics, PublicFieldTypeSlot};
+use super::super::model::{
+    ConcreteCallSummaryRecord, PublicAliasSemantics, PublicChoiceSemantics,
+    PublicChoiceVariantSurface, PublicConstantSemantics, PublicFieldTypeSlot,
+    PublicGenericParameterSurface,
+};
 use super::super::{
     LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicEvidenceOwnership, PublicEvidenceRecord, PublicEvidenceRequirementMapping,
@@ -16,16 +20,19 @@ use super::super::{
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
-    StableTraitRequirementIdentity,
+    CollectionTypeIdentity, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
+    GenericInstanceTypeIdentity, OrderedMapTypeIdentity, StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::folded_value::{PublicFoldedField, PublicFoldedValue};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -43,6 +50,10 @@ fn provider_origin(module_name: &str) -> StableModuleOriginIdentity {
 
 fn type_origin(module: &StableModuleOriginIdentity, name: &str) -> OriginTypeId {
     OriginTypeId::new(module.clone(), name.to_owned(), OriginTypeCategory::Struct)
+}
+
+fn choice_origin(module: &StableModuleOriginIdentity, name: &str) -> OriginTypeId {
+    OriginTypeId::new(module.clone(), name.to_owned(), OriginTypeCategory::Choice)
 }
 
 fn alias_type_origin(module: &StableModuleOriginIdentity, name: &str) -> OriginTypeId {
@@ -357,6 +368,165 @@ fn deep_reexport_closure_visits_each_record_once() {
             .count(),
         1,
         "the reachable evidence record must be copied exactly once"
+    );
+}
+
+#[test]
+fn nested_canonical_and_folded_identities_select_origins() {
+    let module = provider_origin("nested");
+    let container_origin = type_origin(&module, "Container");
+    let box_origin = type_origin(&module, "Box");
+    let argument_origin = type_origin(&module, "Argument");
+    let folded_only_origin = type_origin(&module, "FoldedOnly");
+    let choice_origin = choice_origin(&module, "FoldedChoice");
+    let map_value_origin = type_origin(&module, "MapValue");
+    let constant_origin = OriginConstantId::new(module.clone(), "NESTED".to_owned());
+    let display_text = trait_origin(&module, "DISPLAY_TEXT");
+
+    let nested_field_identity = CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
+        CanonicalTypeIdentity::GenericInstance(GenericInstanceTypeIdentity::new(
+            box_origin.clone(),
+            vec![CanonicalTypeIdentity::Option(Box::new(
+                CanonicalTypeIdentity::SourceNominal(argument_origin.clone()),
+            ))]
+            .into_boxed_slice(),
+        )),
+        None,
+    ));
+    let folded_only_identity = CanonicalTypeIdentity::Option(Box::new(
+        CanonicalTypeIdentity::SourceNominal(folded_only_origin.clone()),
+    ));
+    let nested_map_identity = CanonicalTypeIdentity::OrderedMap(OrderedMapTypeIdentity::new(
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        CanonicalTypeIdentity::SourceNominal(map_value_origin.clone()),
+    ));
+    let optional_map_identity =
+        CanonicalTypeIdentity::Option(Box::new(nested_map_identity.clone()));
+    let folded_choice_identity = CanonicalTypeIdentity::SourceNominal(choice_origin.clone());
+    let provider_interface = provider_interface(
+        &module,
+        vec![
+            struct_record(&module, "Container", Vec::new()),
+            PublicDeclarationRecord {
+                origin: OriginDeclarationId::Constant(constant_origin.clone()),
+                synthetic_interface_provenance: Default::default(),
+                semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
+                    type_identity: CanonicalTypeIdentity::AnonymousConstRecord,
+                    folded_value: PublicFoldedValue::Record(vec![
+                        PublicFoldedField {
+                            name: "nested".to_owned(),
+                            type_identity: nested_field_identity,
+                            value: PublicFoldedValue::Collection(Vec::new()),
+                        },
+                        PublicFoldedField {
+                            name: "optional".to_owned(),
+                            type_identity: folded_only_identity,
+                            value: PublicFoldedValue::OptionSome(Box::new(
+                                PublicFoldedValue::Record(Vec::new()),
+                            )),
+                        },
+                        PublicFoldedField {
+                            name: "choice".to_owned(),
+                            type_identity: folded_choice_identity.clone(),
+                            value: PublicFoldedValue::Choice {
+                                type_identity: Box::new(folded_choice_identity),
+                                variant_name: "WithMap".to_owned(),
+                                fields: vec![PublicFoldedField {
+                                    name: "entries".to_owned(),
+                                    type_identity: optional_map_identity.clone(),
+                                    value: PublicFoldedValue::OptionNone,
+                                }],
+                            },
+                        },
+                    ]),
+                }),
+            },
+            PublicDeclarationRecord {
+                origin: OriginDeclarationId::Type(box_origin.clone()),
+                synthetic_interface_provenance: Default::default(),
+                semantics: PublicDeclarationSemantics::Struct(PublicStructSemantics {
+                    generic_parameters: vec![PublicGenericParameterSurface {
+                        identity: ExportedGenericParameterIdentity::new(
+                            GenericDeclarationOrigin::nominal_type(box_origin.clone())
+                                .expect("struct generic origin should be valid"),
+                            0,
+                            "T".to_owned(),
+                        ),
+                        bounds: Vec::new(),
+                    }],
+                    fields: Vec::new(),
+                    receiver_methods: Vec::new(),
+                }),
+            },
+            struct_record(&module, "Argument", Vec::new()),
+            struct_record(&module, "FoldedOnly", Vec::new()),
+            PublicDeclarationRecord {
+                origin: OriginDeclarationId::Type(choice_origin.clone()),
+                synthetic_interface_provenance: Default::default(),
+                semantics: PublicDeclarationSemantics::Choice(PublicChoiceSemantics {
+                    generic_parameters: Vec::new(),
+                    variants: vec![PublicChoiceVariantSurface {
+                        name: "WithMap".to_owned(),
+                        payload_fields: vec![PublicFieldTypeSlot {
+                            name: "entries".to_owned(),
+                            type_identity: optional_map_identity,
+                            folded_default: None,
+                        }],
+                    }],
+                    receiver_methods: Vec::new(),
+                }),
+            },
+            struct_record(&module, "MapValue", Vec::new()),
+            trait_record(&module, "DISPLAY_TEXT"),
+        ],
+        Vec::new(),
+        vec![evidence_record(
+            container_origin.clone(),
+            CanonicalTraitIdentity::Source(display_text),
+        )],
+    );
+
+    let closed = close(
+        vec![
+            ExportBinding::new(
+                provider_origin("facade"),
+                "Container".to_owned(),
+                OriginDeclarationId::Type(container_origin.clone()),
+            ),
+            ExportBinding::new(
+                provider_origin("facade"),
+                "NESTED".to_owned(),
+                OriginDeclarationId::Constant(constant_origin.clone()),
+            ),
+        ],
+        vec![&provider_interface],
+    )
+    .expect("nested canonical and folded identities should close");
+
+    let declaration_origins = closed
+        .declarations
+        .iter()
+        .map(|declaration| declaration.origin.clone())
+        .collect::<Vec<_>>();
+    let mut expected_origins = vec![
+        OriginDeclarationId::Type(container_origin),
+        OriginDeclarationId::Type(box_origin),
+        OriginDeclarationId::Type(argument_origin),
+        OriginDeclarationId::Type(folded_only_origin),
+        OriginDeclarationId::Type(choice_origin),
+        OriginDeclarationId::Type(map_value_origin),
+        OriginDeclarationId::Constant(constant_origin),
+        OriginDeclarationId::Trait(trait_origin(&module, "DISPLAY_TEXT")),
+    ];
+    expected_origins.sort();
+    assert_eq!(
+        declaration_origins, expected_origins,
+        "nested canonical and folded identities should retain stable selected order",
+    );
+    assert_eq!(
+        closed.reusable_evidence.len(),
+        1,
+        "only evidence attached to the selected public origin should be closed",
     );
 }
 
