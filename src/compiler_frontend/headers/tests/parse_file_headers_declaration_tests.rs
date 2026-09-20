@@ -330,12 +330,14 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             TokenizerEntryMode::SourceFile,
         )
         .expect("source should tokenize");
+    let interned_path = file_tokens.logical_path;
     let (owner, path_syntax) = super::owner_from_lexed_source(file_tokens);
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
         let count = span_builder.len();
         let output = prepare_file_from_tokens(
             owner,
+            interned_path,
             path_syntax,
             &file_path,
             &HeaderParseOptions::default(),
@@ -428,11 +430,15 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         )
         .expect("source should tokenize");
     let lexed = token_stream;
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
-    let scope = owner.logical_path();
+    let scope = lexed.logical_path;
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let (string_table, span_builder) = source_context.preparation_parts();
     let mut cursor = owner
-        .cursor(owner.full_range().expect("canonical source range should fit"))
+        .cursor(
+            owner
+                .full_range()
+                .expect("canonical source range should fit"),
+        )
         .expect("tokenized source must expose canonical tokens");
     let opening = loop {
         let token = cursor.current().expect("template opener");
@@ -443,7 +449,8 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         cursor.advance();
     };
     cursor.advance();
-    let malformed_clause = super::malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
+    let malformed_clause =
+        super::malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
     let mut warnings = Vec::new();
     let mut context = HeaderBuildContext {
         warnings: &mut warnings,
@@ -454,15 +461,9 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         path_fork: &mut path_fork,
         file_role: FileRole::ActiveModuleRoot,
     };
-    let failure = create_top_level_const_template(
-        scope,
-        opening,
-        0,
-        &mut cursor,
-        &mut context,
-        span_builder,
-    )
-    .expect_err("malformed retained selection should fail");
+    let failure =
+        create_top_level_const_template(scope, opening, 0, &mut cursor, &mut context, span_builder)
+            .expect_err("malformed retained selection should fail");
 
     match failure {
         HeaderParseFailure::Infrastructure(error) => {
@@ -897,8 +898,11 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
     let HeaderKind::Function { signature, .. } = &function_header.kind else {
         panic!("expected Function header kind");
     };
-    let default_path_id = cursor_find_path(default_tokens(&headers, signature.parameters[0].default_range))
-        .expect("expected a default path token");
+    let default_path_id = cursor_find_path(default_tokens(
+        &headers,
+        signature.parameters[0].default_range,
+    ))
+    .expect("expected a default path token");
     let start_path_id = cursor_find_path(header_body_tokens(&headers, start_header))
         .expect("expected a start-body path token");
 

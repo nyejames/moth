@@ -13,7 +13,6 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
     TokenRef, TokenSequenceId, TokenTag,
 };
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Mutable AST parser position over a canonical source-token view.
@@ -24,7 +23,6 @@ pub(crate) struct AstCursor<'a> {
     cursor: TokenCursor<'a>,
     /// Canonical source ownership retained for bounded parser handoffs.
     canonical_owner: Option<Arc<SourceTokens>>,
-    canonical_os_path: Option<PathBuf>,
     /// Optional frozen donor identity for retained foreign bodies.
     ///
     /// The cursor keeps provenance in the donor `SourceTokens` and translates only payloads that a
@@ -38,15 +36,10 @@ pub(crate) struct AstCursor<'a> {
 }
 
 impl<'a> AstCursor<'a> {
-    fn new_with_owner(
-        cursor: TokenCursor<'a>,
-        canonical_owner: Option<Arc<SourceTokens>>,
-        canonical_os_path: Option<PathBuf>,
-    ) -> Self {
+    fn new_with_owner(cursor: TokenCursor<'a>, canonical_owner: Option<Arc<SourceTokens>>) -> Self {
         Self {
             cursor,
             canonical_owner,
-            canonical_os_path,
             payload_origin: None,
             synthetic_eof: None,
         }
@@ -54,15 +47,14 @@ impl<'a> AstCursor<'a> {
 
     /// Construct an owner-retaining canonical cursor directly from one canonical source owner.
     ///
-    /// Ordinary header/environment lookups share `Arc<SourceTokens>` plus explicit side-map
-    /// filesystem identity. The cursor borrows the owner while retaining an `Arc` clone for
-    /// later bounded parser handoffs.
+    /// The cursor borrows the owner while retaining an `Arc` clone for later bounded parser
+    /// handoffs. Filesystem identity lives in the source database and module symbol maps, never
+    /// in the cursor.
     pub(crate) fn from_source_tokens(
         source_tokens: &'a Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
         range: TokenRange,
     ) -> Result<Self, CompilerError> {
-        Self::from_source_tokens_for_handoff(source_tokens, canonical_os_path, range)
+        Self::from_source_tokens_for_handoff(source_tokens, range)
     }
 
     /// Construct an owner-retaining canonical cursor for a bounded parser handoff.
@@ -71,7 +63,6 @@ impl<'a> AstCursor<'a> {
     /// directly from the cursor view when a consumer asks for them.
     pub(crate) fn from_source_tokens_for_handoff(
         source_tokens: &'a Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
         range: TokenRange,
     ) -> Result<Self, CompilerError> {
         let canonical = source_tokens.cursor(range).map_err(|error| {
@@ -82,7 +73,6 @@ impl<'a> AstCursor<'a> {
         Ok(Self::new_with_owner(
             canonical,
             Some(Arc::clone(source_tokens)),
-            canonical_os_path,
         ))
     }
 
@@ -92,7 +82,6 @@ impl<'a> AstCursor<'a> {
     /// this shares the same canonical owner without materialising a second payload store.
     pub(crate) fn from_source_sequence(
         source_tokens: &'a Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
         sequence: TokenSequenceId,
     ) -> Result<Self, CompilerError> {
         let view = source_tokens.token_sequence(sequence).map_err(|error| {
@@ -108,7 +97,6 @@ impl<'a> AstCursor<'a> {
         Ok(Self::new_with_owner(
             canonical,
             Some(Arc::clone(source_tokens)),
-            canonical_os_path,
         ))
     }
 
@@ -335,9 +323,7 @@ impl<'a> AstCursor<'a> {
                 )
             })?;
             self.cursor.set_position(position).map_err(|error| {
-                CompilerError::compiler_error(format!(
-                    "AST cursor reposition failed: {error:?}"
-                ))
+                CompilerError::compiler_error(format!("AST cursor reposition failed: {error:?}"))
             })?;
         }
         Ok(())
@@ -389,9 +375,7 @@ impl<'a> AstCursor<'a> {
         let within_active_bounds = if self.cursor.is_segmented() {
             let start_range = TokenRange::new(range.source(), range.start(), range.start());
             match (
-                start_range.and_then(|range| {
-                    self.cursor.parser_position_at_range_end(range)
-                }),
+                start_range.and_then(|range| self.cursor.parser_position_at_range_end(range)),
                 self.cursor.parser_position_at_range_end(range),
             ) {
                 (Some(start), Some(end)) => start >= active_start && end <= active_end,
@@ -409,11 +393,7 @@ impl<'a> AstCursor<'a> {
         }
 
         let nested = self.nested(range)?;
-        let mut cursor = Self::new_with_owner(
-            nested,
-            self.canonical_owner.clone(),
-            self.canonical_os_path.clone(),
-        );
+        let mut cursor = Self::new_with_owner(nested, self.canonical_owner.clone());
         cursor.payload_origin = self.payload_origin;
         Ok(cursor)
     }
@@ -422,11 +402,7 @@ impl<'a> AstCursor<'a> {
     ///
     /// Contiguous cursors use source-local positions; segmented cursors use dense sequence
     /// positions, so source gaps are never exposed.
-    pub(crate) fn subcursor_window(
-        &self,
-        start: usize,
-        end: usize,
-    ) -> Result<Self, CompilerError> {
+    pub(crate) fn subcursor_window(&self, start: usize, end: usize) -> Result<Self, CompilerError> {
         if start > end {
             return Err(CompilerError::compiler_error(
                 "AST cursor subcursor window is inverted",
@@ -438,11 +414,7 @@ impl<'a> AstCursor<'a> {
             ));
         }
 
-        let mut child = Self::new_with_owner(
-            self.cursor,
-            self.canonical_owner.clone(),
-            self.canonical_os_path.clone(),
-        );
+        let mut child = Self::new_with_owner(self.cursor, self.canonical_owner.clone());
         child.payload_origin = self.payload_origin;
         child.synthetic_eof = self.synthetic_eof;
         child.set_position(start)?;

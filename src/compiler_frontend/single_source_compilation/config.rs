@@ -42,12 +42,12 @@ use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
     convert_const_value_to_folded_value,
 };
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header,
     HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -72,8 +72,6 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     /// WHY: this is the authored identity every config diagnostic reports and every authored-scope
     ///      comparison uses, so it must not be replaced by the canonical form.
     pub(crate) authored_path: &'a Path,
-    /// The canonical filesystem path the authored config resolved to.
-    pub(crate) canonical_path: &'a Path,
     /// The registered authored source identity carried by this config's token stream.
     pub(crate) file_id: SourceId,
     pub(crate) source_code: &'a str,
@@ -665,11 +663,7 @@ fn prepare_config_file(
             ),
         ));
     }
-    let owner = SourceTokenOwner::new(
-        lexed.tokens,
-        lexed.logical_path,
-        Some(request.canonical_path.to_path_buf()),
-    );
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
 
     let marker_span = {
@@ -700,6 +694,7 @@ fn prepare_config_file(
 
     let output = match prepare_file_from_tokens(
         owner,
+        authored_scope,
         path_syntax,
         request.authored_path,
         &HeaderParseOptions::default(),

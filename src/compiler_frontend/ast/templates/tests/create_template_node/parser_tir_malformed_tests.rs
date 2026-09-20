@@ -26,12 +26,13 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens.canonical_owner()
+    let canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
         .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(file_tokens.opener_index)
@@ -64,7 +65,8 @@ fn parse_template_diagnostic_with_replaced_body_token(
     // unexpected-token lane without falling back to a compatibility token vector.
     let opener_index = file_tokens.opener_index;
     let source_path = file_tokens.source_path;
-    let mut canonical_owner = file_tokens.canonical_owner()
+    let mut canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     drop(file_tokens);
     let body_index = canonical_owner
@@ -78,8 +80,8 @@ fn parse_template_diagnostic_with_replaced_body_token(
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(opener_index)
         .expect("template opener position must remain in the canonical range");
@@ -108,12 +110,13 @@ fn parse_template_diagnostic_with_span_builder(
     let mut file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens.canonical_owner()
+    let canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
         .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(file_tokens.opener_index)

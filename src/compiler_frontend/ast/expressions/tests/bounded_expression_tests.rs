@@ -75,7 +75,9 @@ fn static_token(builder: &mut TestSourceTokensBuilder, tag: TokenTag) {
 }
 
 fn finish_tokens(builder: TestSourceTokensBuilder) -> std::sync::Arc<SourceTokens> {
-    builder.finish().expect("canonical fixture tokens should build")
+    builder
+        .finish()
+        .expect("canonical fixture tokens should build")
 }
 
 fn create_expression_until_for_test(
@@ -118,7 +120,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
@@ -162,7 +164,7 @@ fn bounded_expression_parses_simple_literal() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
@@ -204,7 +206,7 @@ fn bounded_expression_nested_parentheses() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
@@ -247,7 +249,7 @@ fn bounded_expression_nested_curly_braces() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 
@@ -283,7 +285,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut data_type = ExpectedType::Infer;
 

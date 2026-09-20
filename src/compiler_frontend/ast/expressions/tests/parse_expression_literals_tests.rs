@@ -151,11 +151,13 @@ fn parse_whole_number_token(
     builder
         .push_static(TokenTag::EOF, LocalSpan::source_start())
         .expect("EOF fixture token should build");
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut expression = Vec::new();
     let mut next_number_negative = next_number_negative;

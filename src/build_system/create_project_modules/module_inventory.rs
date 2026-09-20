@@ -264,7 +264,6 @@ impl ModuleCompilationSchedule {
         let preparation_context = ModulePreparationContext {
             source_files: source_spans.sources(),
             style_directives,
-            project_path_resolver: Some(project_path_resolver.clone()),
         };
         let fork_source = string_table.fork_source();
         let path_fork_source = path_interner.fork_source();
@@ -1173,7 +1172,6 @@ fn discover_modules_serial_provider_capable(
     let preparation_context = ModulePreparationContext {
         source_files,
         style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
     };
     let source_tree_index = directory_dependency_resolution.source_tree_index();
     for seed in seeds {

@@ -6,12 +6,10 @@
 //!      so it needs independent boundary coverage.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::literal::parse_literal_pattern;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, NumberLiteralErrorReason,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, NumberLiteralErrorReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::numeric_text::token::{
@@ -72,7 +70,7 @@ fn malformed_numeric_literal_payload_is_infrastructure_error() {
     let range = owner
         .full_range()
         .expect("the canonical test owner should expose a full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("the malformed canonical owner should still construct a cursor");
     let type_environment = TypeEnvironment::new();
 
@@ -142,7 +140,7 @@ fn parse_whole_number_pattern(
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let type_environment = TypeEnvironment::new();
 
@@ -188,7 +186,7 @@ fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestRes
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let type_environment = TypeEnvironment::new();
 

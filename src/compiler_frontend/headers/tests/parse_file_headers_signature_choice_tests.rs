@@ -1,9 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::tokenizer::tokens::{
-    TestSourceTokensBuilder, TokenIndex, TokenTag,
-};
-
+use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenIndex, TokenTag};
 
 #[test]
 fn function_signature_reports_missing_arrow_before_return_type() {
@@ -213,7 +210,7 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
     let range = owner
         .full_range()
         .expect("canonical source-token fixture should expose a full range");
-    let mut cursor = AstCursor::from_source_tokens(&owner, None, range)
+    let mut cursor = AstCursor::from_source_tokens(&owner, range)
         .expect("canonical source-token fixture should expose an AST cursor");
     cursor
         .set_position(1)

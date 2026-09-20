@@ -152,7 +152,9 @@ fn sample_tokens(
         .push_static(TokenTag::CHANNEL_RECEIVE, token_span())
         .expect("channel fixture token should be valid");
     (
-        builder.finish().expect("canonical token fixture should finish"),
+        builder
+            .finish()
+            .expect("canonical token fixture should finish"),
         path_id,
     )
 }
@@ -161,12 +163,13 @@ fn body_view(original: &Arc<SourceTokens>, declaration_path: PathId) -> GenericF
     let range = original
         .full_range()
         .expect("test token range must be in bounds");
-    GenericFunctionBody::source(Arc::clone(original), range, None, declaration_path, None)
+    GenericFunctionBody::source(Arc::clone(original), range, None, declaration_path)
         .expect("test generic body should retain its checked source range")
 }
 fn capture_test_body(
     original: &Arc<SourceTokens>,
     source_file: &PathId,
+    declaration_path: &PathId,
     path_fork: &PathInternerFork,
     source_table: &StringTable,
 ) -> StableBodySyntax {
@@ -202,7 +205,7 @@ fn capture_test_body(
             "test body has no content value resolver",
         ))
     };
-    let body = body_view(original, *source_file);
+    let body = body_view(original, *declaration_path);
     let donor_identity = SharedDonorIdentity::freeze(source_table);
     StableBodySyntax::capture(
         &body,
@@ -279,7 +282,9 @@ fn direct_content_body_fixture() -> (
     builder
         .push_path(TokenTag::PATH, path_id, path_span)
         .expect("content path fixture token should be valid");
-    let body = builder.finish().expect("canonical content fixture should finish");
+    let body = builder
+        .finish()
+        .expect("canonical content fixture should finish");
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -472,7 +477,13 @@ fn frozen_body_preserves_donor_range_and_path_spelling() {
     let source_file = path_fork
         .try_intern_portable_path("src/@mod.moth", &mut source_table)
         .expect("test path fits");
-    let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
+    let frozen = capture_test_body(
+        &original,
+        &source_file,
+        &source_file,
+        &path_fork,
+        &source_table,
+    );
     let (mut generated_path_fork, mut generated_table) =
         generated_materialisation_domain(&path_fork, &source_table);
     let generated_source_file = generated_path_fork
@@ -544,7 +555,13 @@ fn frozen_body_keeps_declaration_path_distinct_from_owning_source_file() {
         .try_intern_child(source_file, source_table.intern("generic_fn"))
         .expect("test declaration path fits");
 
-    let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
+    let frozen = capture_test_body(
+        &original,
+        &source_file,
+        &declaration_path,
+        &path_fork,
+        &source_table,
+    );
     let (mut path_fork, mut generated_table) =
         generated_materialisation_domain(&path_fork, &source_table);
     let generated_source_file = path_fork
@@ -784,10 +801,8 @@ fn repeated_spellings_share_one_frozen_string_entry() {
             .expect("test path fits"),
         SourceSpan::new(SourceId::COMPILATION_ROOT, path_span),
     );
-    let original = canonical_tokens_with_path_syntax(
-        SourceId::COMPILATION_ROOT,
-        path_syntax,
-        |builder| {
+    let original =
+        canonical_tokens_with_path_syntax(SourceId::COMPILATION_ROOT, path_syntax, |builder| {
             builder
                 .push_symbol(TokenTag::SYMBOL, symbol_id, path_span)
                 .expect("first symbol fixture token should be valid");
@@ -797,12 +812,17 @@ fn repeated_spellings_share_one_frozen_string_entry() {
             builder
                 .push_path(TokenTag::PATH, path_id, path_span)
                 .expect("path fixture token should be valid");
-        },
-    );
+        });
     let source_file = path_fork
         .try_intern_portable_path("src/@mod.moth", &mut source_table)
         .expect("test path fits");
-    let frozen = capture_test_body(&original, &source_file, &path_fork, &source_table);
+    let frozen = capture_test_body(
+        &original,
+        &source_file,
+        &source_file,
+        &path_fork,
+        &source_table,
+    );
     assert_eq!(
         frozen.resolved_file_references.len(),
         1,
@@ -920,7 +940,6 @@ fn a_materialised_body_with_only_a_path_identity_is_rejected() {
     );
     let error = match GenericFunctionBody::materialised(
         Arc::clone(&owner),
-        None,
         TokenRange::from_raw(source, 0, 1).expect("fixture range should fit"),
         None,
         source_file,
@@ -968,7 +987,6 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        None,
         range,
         None,
         source_file,
@@ -1066,7 +1084,6 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        None,
         range,
         None,
         source_file,
@@ -1211,8 +1228,8 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
         TokenRange::from_raw(source, 0, 1).expect("fixture segment should be ordered"),
         TokenRange::from_raw(source, 2, 5).expect("fixture segment should be ordered"),
     ];
-    let owner = Arc::get_mut(&mut donor_owner)
-        .expect("canonical sequence owner should be uniquely owned");
+    let owner =
+        Arc::get_mut(&mut donor_owner).expect("canonical sequence owner should be uniquely owned");
     let sequence = owner
         .try_register_token_sequence(&segments)
         .expect("ordered adjacent segments should register");
@@ -1220,7 +1237,6 @@ fn a_segmented_donor_body_borrows_its_source_sequence() {
     let donor_owner = donor_owner;
     let body = GenericFunctionBody::materialised(
         Arc::clone(&donor_owner),
-        None,
         TokenRange::from_raw(source, 0, 5).expect("covering range should be ordered"),
         Some(sequence),
         PathId::ROOT,
@@ -1339,7 +1355,6 @@ fn donor_path_handles_render_through_borrowed_origin() {
     .expect("test token range must be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        None,
         range,
         None,
         PathId::ROOT,
@@ -1671,11 +1686,10 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
                 .expect("test path fits"),
             SourceSpan::new(body_file_id, placeholder_span),
         );
-        let mut builder =
-            TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
+        let mut builder = TestSourceTokensBuilder::with_path_syntax(body_file_id, path_syntax);
         for index in body_range.start().index()..body_range.end().index() {
-            let token_index = TokenIndex::try_from_index(index)
-                .expect("source body token index should fit");
+            let token_index =
+                TokenIndex::try_from_index(index).expect("source body token index should fit");
             let token = body_owner
                 .token(token_index)
                 .expect("source body token should remain readable");
@@ -1716,7 +1730,9 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
                     builder
                         .push_char(
                             TokenTag::CHAR_LITERAL,
-                            token.char_value().expect("char source token should validate"),
+                            token
+                                .char_value()
+                                .expect("char source token should validate"),
                             span,
                         )
                         .expect("char source token should be valid");
@@ -1725,7 +1741,9 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
                     builder
                         .push_bool(
                             TokenTag::BOOL_LITERAL,
-                            token.bool_value().expect("bool source token should validate"),
+                            token
+                                .bool_value()
+                                .expect("bool source token should validate"),
                             span,
                         )
                         .expect("bool source token should be valid");
@@ -2590,7 +2608,7 @@ fn generic_body_rejects_foreign_source_range() {
         .expect("empty canonical source owner should finish");
     let foreign_range =
         TokenRange::from_raw(SourceId::from_index(7), 0, 0).expect("range ordering is valid");
-    let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT, None)
+    let error = GenericFunctionBody::source(owner, foreign_range, None, PathId::ROOT)
         .expect_err("a generic body must reject a range owned by another source");
     assert!(
         error.msg.contains("foreign source identity"),
@@ -2793,7 +2811,6 @@ fn materialised_body_declaration_cursor_translates_colliding_symbol_payloads() {
     .expect("test range should be in bounds");
     let body = GenericFunctionBody::materialised(
         owner,
-        None,
         range,
         None,
         source_file,

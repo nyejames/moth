@@ -7,7 +7,7 @@
 //!      template tests therefore need one test-owned observer while the shipping path uses a
 //!      zero-cost no-op counterpart.
 
-use super::FrontendFilePrepareSource;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -16,14 +16,12 @@ static FILE_FRONTEND_PREPARE_COUNTS: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static FILE_FRONTEND_PREPARE_TRACK_PREFIX: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-pub(super) fn record_prepare(source: &FrontendFilePrepareSource<'_>) {
-    let source_path = match source {
-        FrontendFilePrepareSource::Moth { owner, .. } => owner
-            .os_path_cloned()
-            .expect("Moth preparation owner should carry a canonical OS path"),
-        FrontendFilePrepareSource::MothTemplate { source_path, .. }
-        | FrontendFilePrepareSource::PlainMarkdown { source_path, .. } => source_path.clone(),
-    };
+pub(super) fn record_prepare(source_files: &SourceDatabase, source_id: SourceId) {
+    let source_path = source_files
+        .get(source_id)
+        .and_then(|identity| identity.canonical_os_path.as_deref())
+        .map(Path::to_path_buf)
+        .expect("frontend preparation source should have a canonical OS path");
     let prefix = FILE_FRONTEND_PREPARE_TRACK_PREFIX
         .lock()
         .expect("file preparation test hook lock poisoned");

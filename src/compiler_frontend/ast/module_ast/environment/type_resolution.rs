@@ -1211,13 +1211,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Parse each field inside a temporary scope so that type-resolution errors
         // can be remapped to the appropriate diagnostic for struct defaults vs choice payloads.
         let conversion_result = (|| -> Result<Vec<Declaration>, ExpressionParseError> {
-            let (owner_tokens, os_path) = self
-                .token_owner_parts(header.tokens.source())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "member-bearing header has no prepared source token owner",
-                    )
-                })?;
+            let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "member-bearing header has no prepared source token owner",
+                )
+            })?;
             // Live parser state stays on the canonical source owner. The transient
             // cursor spans the full canonical source so nested default ranges stay
             // inside its bounds for this member-shell parse only. `from_source_tokens`
@@ -1227,8 +1225,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "member-bearing header source range could not be constructed: {error:?}"
                 ))
             })?;
-            let source_owner = AstCursor::from_source_tokens(&owner_tokens, os_path, full)
-                .map_err(|error| {
+            let source_owner =
+                AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
                     CompilerError::compiler_error(format!(
                         "member-bearing header source range is outside its source owner: {error:?}"
                     ))

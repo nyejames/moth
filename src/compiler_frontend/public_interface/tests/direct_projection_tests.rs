@@ -615,7 +615,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
             let range = body
                 .full_range()
                 .expect("empty canonical source should have a checked full range");
-            GenericFunctionBody::source(body, range, None, method_fn_path, None)
+            GenericFunctionBody::source(body, range, None, method_fn_path)
                 .expect("empty generic body should retain its checked range")
         }),
         declaration_span: None,

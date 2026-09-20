@@ -911,10 +911,6 @@ fn synthetic_prepared_identity_snapshot(
                     .expect("header should have its source token owner");
                 assert_eq!(source_owner.tokens_ref().source(), file_id);
                 assert_eq!(
-                    source_owner.os_path(),
-                    identity.canonical_os_path.as_deref()
-                );
-                assert_eq!(
                     source_owner
                         .tokens_ref()
                         .path_syntax_arc()
@@ -1027,7 +1023,6 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     let preparation_context = super::module_preparation::ModulePreparationContext {
         source_files,
         style_directives: &style_directives,
-        project_path_resolver: Some(resolver),
     };
     let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
         StablePackageIdentity::project_local("synthetic-rebound-identity"),

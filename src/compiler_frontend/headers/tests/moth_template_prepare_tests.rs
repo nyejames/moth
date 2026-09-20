@@ -20,6 +20,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderKind,
     HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
@@ -34,7 +35,6 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::pipeline::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -85,9 +85,10 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         &mut span_builder,
     )
     .expect("Moth template body should tokenize");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let output = prepare_moth_template_file(
         owner,
+        source_path,
         lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
@@ -118,13 +119,14 @@ fn canonical_source_keeps_preparing_path_table_separate_until_preparation() {
         &mut span_builder,
     )
     .expect("test Moth template should tokenize");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     assert!(
         owner.tokens_ref().path_syntax_table().is_err(),
         "lexer output keeps the preparing path table separate from immutable source tokens"
     );
     let output = prepare_moth_template_file(
         owner,
+        source_path,
         lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
@@ -168,7 +170,6 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
             source_code: source,
-            source_path: input_path.clone(),
         },
         source_id,
         span_builder: ExtendedSpanBuilder::new(),
@@ -233,7 +234,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         .expect("standalone Moth template source identity was not registered");
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
-        project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
@@ -246,7 +246,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
             source_code: source,
-            source_path: input_path,
         },
         source_id: entry_file_id,
         span_builder: ExtendedSpanBuilder::new(),
@@ -650,7 +649,6 @@ impl MothTemplateScopeFixture {
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
         let options = HeaderParseOptions {
             entry_file_id: None,
-            project_path_resolver: Some(&self.project_path_resolver),
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };
@@ -704,11 +702,9 @@ impl MothTemplateScopeFixture {
                 }
                 SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
                     source_code: source_code.as_str(),
-                    source_path,
                 },
                 SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
                     source_code: source_code.as_str(),
-                    source_path,
                 },
             };
             let input = FrontendFilePrepareInput {
@@ -882,9 +878,10 @@ fn prepare_moth_source(
         &mut span_builder,
     )
     .expect("Moth source should tokenize");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let output = prepare_file_from_tokens(
         owner,
+        source_path,
         lexed.path_syntax,
         entry_file_path,
         &HeaderParseOptions::default(),
@@ -1070,9 +1067,7 @@ fn simple_markdown_body_uses_original_body_token_span() {
         "body token should retain a resolved span"
     );
     assert_eq!(
-        body_token
-            .string_id()
-            .map(|id| string_table.resolve(id)),
+        body_token.string_id().map(|id| string_table.resolve(id)),
         Some("# Heading")
     );
 }
@@ -1177,9 +1172,7 @@ fn empty_moth_template_body_retains_empty_body_range_and_directive_payload() {
 #[test]
 fn backslash_remains_body_text_inside_markdown_initializer() {
     let (output, string_table, _span_builder) = prepare_directly(r"before \n after");
-    assert!(
-        body_has_string(&output, &string_table, r"before \n after")
-    );
+    assert!(body_has_string(&output, &string_table, r"before \n after"));
 }
 
 #[test]
@@ -1217,9 +1210,11 @@ fn unescaped_outer_close_diagnostic_flows_through_pipeline_preparation() {
 #[test]
 fn double_dash_remains_body_text() {
     let (output, string_table, _span_builder) = prepare_directly("alpha -- still text\nbeta");
-    assert!(
-        body_has_string(&output, &string_table, "alpha -- still text\nbeta")
-    );
+    assert!(body_has_string(
+        &output,
+        &string_table,
+        "alpha -- still text\nbeta"
+    ));
 }
 
 #[test]
@@ -1227,16 +1222,12 @@ fn declaration_like_text_remains_markdown_body_text() {
     let (output, string_table, _span_builder) =
         prepare_directly("@docs/intro\ncontent #String = value");
     let declaration = content_constant(&output);
-    assert!(
-        declaration.initializer_references.is_empty()
-    );
-    assert!(
-        body_has_string(
-            &output,
-            &string_table,
-            "@docs/intro\ncontent #String = value",
-        )
-    );
+    assert!(declaration.initializer_references.is_empty());
+    assert!(body_has_string(
+        &output,
+        &string_table,
+        "@docs/intro\ncontent #String = value",
+    ));
 }
 
 #[test]

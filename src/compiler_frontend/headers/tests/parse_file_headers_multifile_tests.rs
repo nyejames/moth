@@ -376,7 +376,6 @@ fn dependency_clause_is_rejected_in_config_source() {
     let file_path = PathBuf::from("config.moth");
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

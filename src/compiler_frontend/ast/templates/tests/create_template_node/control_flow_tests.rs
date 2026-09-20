@@ -18,13 +18,17 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens.canonical_owner()
+    let canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
     let mut context =
         runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
@@ -188,13 +192,17 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens.canonical_owner()
+    let canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
     let mut context =
         runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
 
@@ -646,13 +654,17 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut path_fork,
     );
     let card_source_path = card_file_tokens.source_path;
-    let canonical_owner = card_file_tokens.canonical_owner()
+    let canonical_owner = card_file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut card_tokens = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
-    .expect("test token stream must expose an AST cursor");
+    let mut card_tokens = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    card_tokens
+        .set_position(card_file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
     let card_context = new_constant_context(card_source_path, &path_fork);
     let card_template = Template::new(
         &mut card_tokens,
@@ -685,13 +697,17 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens.canonical_owner()
+    let canonical_owner = file_tokens
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, None, canonical_range)
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
     let context = constant_template_context(&source_path, &declarations, &path_fork)
         .with_template_ir_store(card_context.template_ir_store.clone());
 

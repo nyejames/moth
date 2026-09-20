@@ -19,7 +19,6 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenRange;
-use std::path::PathBuf;
 
 /// Inputs needed to prepare one plain Markdown source file.
 ///
@@ -29,7 +28,6 @@ pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) source_file: PathId,
     pub(crate) file_id: SourceId,
-    pub(crate) canonical_os_path: Option<PathBuf>,
 }
 
 /// Prepare one `.md` source file as a generated `content #String` constant.
@@ -42,7 +40,6 @@ pub(crate) fn prepare_plain_markdown_file(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-    let canonical_os_path = input.canonical_os_path.clone();
     let rendered = render_plain_markdown(input.source_code);
     let rendered_html_id = string_table.intern(&rendered.html);
 
@@ -70,7 +67,6 @@ pub(crate) fn prepare_plain_markdown_file(
         file_dependency_clauses: Vec::new(),
         structural_file_references: Default::default(),
         dependency_selections: Vec::new(),
-        canonical_os_path,
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),
         source_token_stream: None,

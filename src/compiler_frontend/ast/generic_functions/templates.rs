@@ -20,7 +20,6 @@ use crate::compiler_frontend::tokenizer::tokens::TokenRange;
 use crate::compiler_frontend::tokenizer::tokens::TokenSequenceId;
 use crate::compiler_frontend::tokenizer::tokens::TokenSequenceView;
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// One generic function body backed by one canonical source owner.
@@ -38,7 +37,6 @@ pub(crate) enum GenericFunctionBody {
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
-        canonical_os_path: Option<PathBuf>,
     },
     /// Materialised bodies share the donor's canonical owner plus its issuing identity tables.
     ///
@@ -48,7 +46,6 @@ pub(crate) enum GenericFunctionBody {
     /// A path table without its issuing string table is rejected at construction.
     Materialised {
         source_owner: Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
@@ -97,7 +94,6 @@ impl MaterialisedDonorContext {
 /// at consumption through the cursor's typed readers instead of a copied token window.
 pub(crate) struct BodyParseOwner<'a> {
     pub(crate) owner: &'a Arc<SourceTokens>,
-    pub(crate) canonical_os_path: Option<PathBuf>,
     pub(crate) token_range: TokenRange,
     pub(crate) token_sequence: Option<TokenSequenceId>,
     pub(crate) payload_origin: Option<TokenPayloadOrigin<'a>>,
@@ -110,16 +106,8 @@ impl BodyParseOwner<'_> {
     ) -> Result<(AstCursor<'_>, SourceId), crate::compiler_frontend::compiler_errors::CompilerError>
     {
         let cursor = match self.token_sequence {
-            Some(sequence) => AstCursor::from_source_sequence(
-                self.owner,
-                self.canonical_os_path.clone(),
-                sequence,
-            )?,
-            None => AstCursor::from_source_tokens(
-                self.owner,
-                self.canonical_os_path.clone(),
-                self.token_range,
-            )?,
+            Some(sequence) => AstCursor::from_source_sequence(self.owner, sequence)?,
+            None => AstCursor::from_source_tokens(self.owner, self.token_range)?,
         };
         let cursor = match self.payload_origin {
             Some(origin) => cursor.with_payload_origin(origin),
@@ -135,7 +123,6 @@ impl GenericFunctionBody {
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
-        canonical_os_path: Option<PathBuf>,
     ) -> Result<Self, crate::compiler_frontend::compiler_errors::CompilerError> {
         validate_source_owner(
             &source_owner,
@@ -148,13 +135,11 @@ impl GenericFunctionBody {
             token_range,
             token_sequence,
             declaration_path,
-            canonical_os_path,
         })
     }
 
     pub(crate) fn materialised(
         source_owner: Arc<SourceTokens>,
-        canonical_os_path: Option<PathBuf>,
         token_range: TokenRange,
         token_sequence: Option<TokenSequenceId>,
         declaration_path: PathId,
@@ -169,7 +154,6 @@ impl GenericFunctionBody {
         )?;
         Ok(Self::Materialised {
             source_owner,
-            canonical_os_path,
             token_range,
             token_sequence,
             declaration_path,
@@ -208,46 +192,6 @@ impl GenericFunctionBody {
             } => (source_owner, *token_range, *token_sequence),
         }
     }
-
-    /// Filesystem identity of the canonical owner, which `SourceTokens` itself does not store.
-    pub(crate) fn canonical_os_path(&self) -> Option<&PathBuf> {
-        match self {
-            Self::Source {
-                canonical_os_path, ..
-            }
-            | Self::Materialised {
-                canonical_os_path, ..
-            } => canonical_os_path.as_ref(),
-        }
-    }
-
-    pub(crate) fn token_range(&self) -> TokenRange {
-        match self {
-            Self::Source { token_range, .. } | Self::Materialised { token_range, .. } => {
-                *token_range
-            }
-        }
-    }
-
-    pub(crate) fn token_sequence(&self) -> Option<TokenSequenceId> {
-        match self {
-            Self::Source { token_sequence, .. } | Self::Materialised { token_sequence, .. } => {
-                *token_sequence
-            }
-        }
-    }
-
-    pub(crate) fn declaration_path(&self) -> PathId {
-        match self {
-            Self::Source {
-                declaration_path, ..
-            }
-            | Self::Materialised {
-                declaration_path, ..
-            } => *declaration_path,
-        }
-    }
-
     /// Choose the canonical owner this body parses from.
     ///
     /// Source bodies and materialised bodies both borrow their retained canonical owner and
@@ -268,11 +212,36 @@ impl GenericFunctionBody {
         };
         Ok(BodyParseOwner {
             owner: source_owner,
-            canonical_os_path: self.canonical_os_path().cloned(),
             token_range,
             token_sequence,
             payload_origin,
         })
+    }
+
+    pub(crate) fn token_range(&self) -> TokenRange {
+        match self {
+            Self::Source { token_range, .. } | Self::Materialised { token_range, .. } => {
+                *token_range
+            }
+        }
+    }
+    pub(crate) fn token_sequence(&self) -> Option<TokenSequenceId> {
+        match self {
+            Self::Source { token_sequence, .. } | Self::Materialised { token_sequence, .. } => {
+                *token_sequence
+            }
+        }
+    }
+
+    pub(crate) fn declaration_path(&self) -> PathId {
+        match self {
+            Self::Source {
+                declaration_path, ..
+            }
+            | Self::Materialised {
+                declaration_path, ..
+            } => *declaration_path,
+        }
     }
 
     pub(crate) fn resolution_facts(&self) -> Option<&Arc<Stage0ResolutionFacts>> {

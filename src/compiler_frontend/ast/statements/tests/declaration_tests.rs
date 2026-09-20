@@ -536,7 +536,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let source_range = source_owner
             .full_range()
             .expect("the tokenized source must expose a checked full range");
-        let mut owner = AstCursor::from_source_tokens(source_owner, None, source_range)
+        let mut owner = AstCursor::from_source_tokens(source_owner, source_range)
             .expect("the tokenized source must expose an AST cursor");
         owner
             .set_position(declaration_position)

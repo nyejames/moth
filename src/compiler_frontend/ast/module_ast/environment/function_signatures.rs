@@ -137,16 +137,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .environment_header_scope(header, string_table)
                     .with_file_visibility(Arc::clone(&visibility))
                     .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-                let (owner_tokens, owner_os_path) = self
-                    .token_owner_parts(header.tokens.source())
-                    .ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "function header has no prepared source token owner",
-                            ),
-                            string_table,
-                        )
-                    })?;
+                let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+                    self.error_messages(
+                        CompilerError::compiler_error(
+                            "function header has no prepared source token owner",
+                        ),
+                        string_table,
+                    )
+                })?;
                 // Live parser state stays on the canonical source owner. The transient
                 // cursor spans the full canonical source so nested default ranges stay
                 // inside its bounds for this signature parse only. `from_source_tokens`
@@ -160,16 +158,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     )
                 })?;
                 let source_owner =
-                    AstCursor::from_source_tokens(&owner_tokens, owner_os_path, full).map_err(
-                        |error| {
-                            self.error_messages(
-                        CompilerError::compiler_error(format!(
-                            "function header source range is outside its source owner: {error:?}"
-                        )),
-                        string_table,
-                    )
-                        },
-                    )?;
+                    AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
+                        self.error_messages(
+                            CompilerError::compiler_error(format!(
+                                "function header source range is outside its source owner: {error:?}"
+                            )),
+                            string_table,
+                        )
+                    })?;
                 let mut compatibility_cache = TypeCompatibilityCache::new();
                 let mut type_interner =
                     AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);
@@ -281,9 +277,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         string_table,
                     ));
                 };
-                let (canonical_owner, canonical_os_path) = self
-                    .token_owner_parts(header.tokens.source())
-                    .ok_or_else(|| {
+                let canonical_owner =
+                    self.token_owner(header.tokens.source()).ok_or_else(|| {
                         self.error_messages(
                             CompilerError::compiler_error(
                                 "generic function header has no prepared source token owner",
@@ -296,7 +291,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     header.tokens,
                     header.token_sequence,
                     header.declaration_path,
-                    canonical_os_path,
                 )
                 .map_err(|error| self.error_messages(error, string_table))?;
                 let template = build_generic_function_template(

@@ -464,7 +464,6 @@ pub(super) fn finalize_reachable_files(
                 output.rebind_source_identity(
                     final_source_id,
                     final_record.logical_path,
-                    source_file.path.clone(),
                     path_fork,
                 )?;
                 output.freeze_path_syntax(string_table, path_fork)?;

@@ -17,8 +17,8 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal, terse,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -65,7 +65,7 @@ fn publish_template_source(mut lexed: LexedSource) -> TemplateSourceFixture {
         .expect("test canonical token owner should be uniquely owned before publication")
         .attach_shared_path_syntax(Arc::clone(&lexed.path_syntax));
     let source_path = lexed.logical_path;
-    let source_owner = SourceTokenOwner::new(lexed.tokens, source_path, None);
+    let source_owner = SourceTokenOwner::new(lexed.tokens);
 
     TemplateSourceFixture {
         source_owner,
@@ -135,7 +135,6 @@ fn template_tokens_from_source_with_directives(
         path_fork,
     )
 }
-
 
 fn with_test_path_context(
     context: ScopeContext,
@@ -360,12 +359,8 @@ fn folded_template_output_with_style_directives(
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(
-        &canonical_owner,
-        None,
-        canonical_range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");
@@ -420,17 +415,14 @@ fn template_parse_rendered_error_with_style_directives(
 
     let context =
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork);
-    let canonical_owner = fixture.canonical_owner()
+    let canonical_owner = fixture
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(
-        &canonical_owner,
-        None,
-        canonical_range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");
@@ -513,17 +505,14 @@ fn template_warnings_with_style_directives(
     } else {
         new_constant_context_with_style_directives(source_path, style_directives, &path_fork)
     };
-    let canonical_owner = fixture.canonical_owner()
+    let canonical_owner = fixture
+        .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
     let canonical_range = canonical_owner
         .full_range()
         .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(
-        &canonical_owner,
-        None,
-        canonical_range,
-    )
-    .expect("test token stream must expose an AST cursor");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
     token_stream
         .set_position(fixture.opener_index)
         .expect("test token stream position must remain in canonical range");

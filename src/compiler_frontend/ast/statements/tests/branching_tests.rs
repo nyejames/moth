@@ -1039,7 +1039,7 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+    let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, range)
         .expect("test token stream must expose an AST cursor");
     while !cursor.is_at_end() && cursor.current_tag() != TokenTag::IF {
         cursor.advance();
@@ -1111,7 +1111,7 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
             .tokens
             .full_range()
             .expect("test token stream must expose a checked full range");
-        let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+        let mut cursor = AstCursor::from_source_tokens(&tokens.tokens, range)
             .expect("test token stream must expose an AST cursor");
         while !cursor.is_at_end() && cursor.current_tag() != TokenTag::IF {
             cursor.advance();

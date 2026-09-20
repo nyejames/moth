@@ -15,11 +15,11 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
@@ -128,7 +128,6 @@ pub(crate) fn parse_single_file_ast_build_result(
 
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: Some(&project_path_resolver),
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
@@ -146,12 +145,13 @@ pub(crate) fn parse_single_file_ast_build_result(
                 panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
             }
         })?;
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
 
     let output = prepare_file_from_tokens(
         owner,
+        lexed.logical_path,
         path_syntax,
         &file_path,
         &options,
@@ -205,7 +205,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         external_package_registry.as_ref(),
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
+        Some(&project_path_resolver),
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         string_table,
         &mut path_fork,

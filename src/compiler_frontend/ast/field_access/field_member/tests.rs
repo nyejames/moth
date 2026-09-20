@@ -116,11 +116,13 @@ fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     builder
         .push_static(TokenTag::EOF, LocalSpan::source_start())
         .expect("EOF fixture token should build");
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let stream = AstCursor::from_source_tokens(&owner, None, range)
+    let stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut string_table = string_table;
     let error = super::parse_member_name_typed(&stream, &mut string_table)

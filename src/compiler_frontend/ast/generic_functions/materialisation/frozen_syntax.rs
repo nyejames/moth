@@ -12,9 +12,7 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenRange, TokenSequenceId};
-use std::path::PathBuf;
 use std::sync::Arc;
-
 /// Shared donor string identity for one declaring source/module domain.
 ///
 /// WHAT: owns one frozen snapshot of the declaring domain's string table behind a shared
@@ -68,12 +66,10 @@ pub(super) struct StableBodySyntax {
 
 /// Canonical owner retained by durable generic body syntax.
 ///
-/// Every retained body shares its declaring module's immutable `SourceTokens` allocation plus
-/// the filesystem identity that `SourceTokens` itself does not store.
+/// Every retained body shares its declaring module's immutable `SourceTokens` allocation.
 #[derive(Clone, Debug)]
 pub(super) struct StableBodyOwner {
     pub(super) source_tokens: Arc<SourceTokens>,
-    pub(super) canonical_os_path: Option<PathBuf>,
 }
 impl StableBodySyntax {
     #[cfg(test)]
@@ -103,7 +99,6 @@ impl MaterialisedBody {
     pub(super) fn into_generic_body(self) -> Result<GenericFunctionBody, CompilerError> {
         GenericFunctionBody::materialised(
             self.source_owner.source_tokens,
-            self.source_owner.canonical_os_path,
             self.token_range,
             self.token_sequence,
             self.declaration_path,
@@ -159,7 +154,6 @@ impl StableBodySyntax {
         let (canonical_owner, token_range, token_sequence) = body.canonical_view();
         let source_owner = StableBodyOwner {
             source_tokens: Arc::clone(canonical_owner),
-            canonical_os_path: body.canonical_os_path().cloned(),
         };
         // Source and same-domain bodies share the declaring preparation's cached donor owner.
         // The cache freezes once per declaring preparation; every body in the domain clones the

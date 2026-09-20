@@ -62,7 +62,7 @@ fn parse_args(
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, range)
         .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
@@ -116,7 +116,7 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, range)
         .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
@@ -208,7 +208,7 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, range)
         .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
@@ -354,7 +354,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&tokens.tokens, range)
         .expect("test token stream must expose an AST cursor");
 
     while token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {

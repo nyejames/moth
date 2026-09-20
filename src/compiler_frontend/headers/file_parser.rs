@@ -103,9 +103,9 @@ pub(super) fn parse_headers_in_file(
     let mut state = HeaderFileParseState::new(token_count);
     match parse_headers_in_file_inner(cursor, file_id, source_file, context, &mut state) {
         Ok(()) => Ok(state),
-        Err(HeaderParseFailure::Diagnostic(diagnostic)) => {
-            Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(diagnostic)))
-        }
+        Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
+            FileFrontendPrepareFailure::Diagnosed(state.into_error(diagnostic)),
+        ),
         Err(HeaderParseFailure::Infrastructure(error)) => {
             Err(FileFrontendPrepareFailure::Infrastructure(error))
         }
@@ -245,9 +245,11 @@ fn reject_non_block_export(
         ))
     })?;
     if found.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "export-block source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "export-block source token owner does not match its file identity",
+            ),
+        ));
     }
     Err(diagnostic_failure(
         CompilerDiagnostic::expected_token_from_ref(
@@ -285,9 +287,11 @@ fn handle_export_block(
         ))
     })?;
     if colon.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "export-block source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "export-block source token owner does not match its file identity",
+            ),
+        ));
     }
     if colon.tag() != TokenTag::COLON {
         return Err(diagnostic_failure(
@@ -357,9 +361,11 @@ fn handle_export_block(
         ))
     })?;
     if current.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "export-block source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "export-block source token owner does not match its file identity",
+            ),
+        ));
     }
     if current.tag() == TokenTag::EOF {
         return Err(diagnostic_failure(
@@ -553,13 +559,10 @@ fn handle_symbol_item(
         ));
     }
     let facts = TokenFactView::from_source(canonical);
-    if let Some(start) = recognize_legacy_dependency_start(
-        facts,
-        current_index,
-        context.string_table,
-    )? {
-        let path_syntax = (!context.is_config_file)
-            .then(|| Arc::clone(&context.path_syntax));
+    if let Some(start) =
+        recognize_legacy_dependency_start(facts, current_index, context.string_table)?
+    {
+        let path_syntax = (!context.is_config_file).then(|| Arc::clone(&context.path_syntax));
         return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
             facts,
             file_id,
@@ -813,11 +816,12 @@ fn handle_symbol_item_with_export_mode(
         current_span,
         current_index,
     } = symbol;
-    let follower_index = TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "symbol lookahead index exceeded its checked domain",
-        ))
-    })?;
+    let follower_index =
+        TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                "symbol lookahead index exceeded its checked domain",
+            ))
+        })?;
     let (follower_tag, starts_duplicate, starts_trait, starts_specialized) = {
         let canonical = cursor.source_tokens();
         if canonical.source() != file_id {
@@ -872,12 +876,7 @@ fn handle_symbol_item_with_export_mode(
     }
 
     if state.start_body_symbols.contains(&name_id) && !starts_duplicate {
-        record_start_body_token_from_source(
-            state,
-            cursor.source_tokens(),
-            file_id,
-            current_index,
-        )?;
+        record_start_body_token_from_source(state, cursor.source_tokens(), file_id, current_index)?;
         return Ok(());
     }
 
@@ -993,21 +992,19 @@ fn handle_runtime_template_item(
     })?;
     let canonical = cursor.source_tokens();
     if canonical.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
-            "runtime template source token owner does not match its file identity",
-        )));
+        return Err(HeaderParseFailure::Infrastructure(
+            CompilerError::compiler_error(
+                "runtime template source token owner does not match its file identity",
+            ),
+        ));
     }
     let opening = canonical.token(opening_index).map_err(|error| {
         HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
             "runtime template opening exceeded its source token owner: {error:?}",
         )))
     })?;
-    let range = capture_runtime_template_range_from_cursor(
-        opening,
-        cursor,
-        file_id,
-        context.string_table,
-    )?;
+    let range =
+        capture_runtime_template_range_from_cursor(opening, cursor, file_id, context.string_table)?;
     state
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
@@ -1055,6 +1052,7 @@ fn find_config_marker_in_start_ranges(
 }
 pub(super) fn finish_file_output(
     owner: SourceTokenOwner,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
     file_id: SourceId,
     end_index: TokenIndex,
@@ -1116,11 +1114,17 @@ pub(super) fn finish_file_output(
 
     let mut output = if context.file_role == FileRole::ActiveModuleRoot {
         state
-            .into_entry_output(owner, path_syntax, end_index, context.file_role)
+            .into_entry_output(
+                owner,
+                source_file,
+                path_syntax,
+                end_index,
+                context.file_role,
+            )
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     } else {
         state
-            .into_non_entry_output(owner, path_syntax, context.file_role)
+            .into_non_entry_output(owner, source_file, path_syntax, context.file_role)
             .map_err(FileFrontendPrepareFailure::Infrastructure)?
     };
     let canonical_owner = output

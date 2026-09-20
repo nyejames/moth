@@ -125,23 +125,14 @@ fn prepare_owned_source_text(
                     SourceDiscoveryError::Infrastructure(error)
                 }
             })?;
-            if tokenized.logical_path != identity.logical_path
-                || tokenized.file_id != source_id
-            {
+            if tokenized.logical_path != identity.logical_path || tokenized.file_id != source_id {
                 return Err(SourceDiscoveryError::Infrastructure(
                     CompilerError::compiler_error(
                         "lexer source identity does not match its registered owned-source identity",
                     ),
                 ));
             }
-            let owner = SourceTokenOwner::new(
-                tokenized.tokens,
-                tokenized.logical_path,
-                identity
-                    .canonical_os_path
-                    .as_ref()
-                    .map(|path| path.to_path_buf()),
-            );
+            let owner = SourceTokenOwner::new(tokenized.tokens);
             PreparedSourceKind::Moth {
                 owner,
                 path_syntax: tokenized.path_syntax,

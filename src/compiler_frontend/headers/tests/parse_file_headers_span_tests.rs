@@ -38,6 +38,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
         owner,
+        scope,
         path_syntax,
         &canonical,
         &options,
@@ -85,7 +86,7 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .try_intern_portable_path("dependency-spans.moth", &mut merged)
         .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
     assert_eq!(
         prepared.file_dependency_clauses[0].dependency.span.local(),
@@ -186,6 +187,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
         owner,
+        scope,
         path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
@@ -261,7 +263,7 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .try_intern_portable_path("member-spans.moth", &mut merged)
         .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
     assert_eq!(prepared.file_id, final_id);
 
@@ -411,6 +413,7 @@ Generic of A must {trait_name}\n"
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let mut prepared = parse_file_headers_with_table(
         owner,
+        scope,
         path_syntax,
         &canonical,
         &HeaderParseOptions::default(),
@@ -525,7 +528,7 @@ Generic of A must {trait_name}\n"
         .try_intern_portable_path("trait-spans.moth", &mut merged)
         .expect("test path fits");
     prepared
-        .rebind_source_identity(final_id, final_path, canonical, &mut remapped_path_fork)
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
     let mut database = SourceDatabaseBuilder::new(final_sources);

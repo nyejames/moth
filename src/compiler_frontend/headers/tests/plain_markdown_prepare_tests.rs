@@ -34,7 +34,6 @@ fn prepare(
             source_code: source,
             source_file: source_path,
             file_id: SourceId::COMPILATION_ROOT,
-            canonical_os_path: None,
         },
         &mut string_table,
         &mut path_fork,

@@ -22,9 +22,7 @@ use crate::compiler_frontend::headers::constant_dependencies::{
     ConstantDependencyInput, add_constant_initializer_dependencies,
 };
 use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize_local_ordering_hints;
-use crate::compiler_frontend::headers::file_parser::{
-    finish_file_output, parse_headers_in_file,
-};
+use crate::compiler_frontend::headers::file_parser::{finish_file_output, parse_headers_in_file};
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
@@ -73,13 +71,14 @@ use std::sync::Arc;
 /// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
 #[allow(
     clippy::too_many_arguments,
-    reason = "header parsing keeps the canonical source owner, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "header parsing keeps the canonical source owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub fn parse_file_headers_with_table(
     owner: SourceTokenOwner,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
-    options: &HeaderParseOptions<'_>,
+    options: &HeaderParseOptions,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     const_template_offset: usize,
@@ -87,7 +86,6 @@ pub fn parse_file_headers_with_table(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let file_id = owner.source_id();
-    let source_file = owner.logical_path();
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
@@ -98,13 +96,11 @@ pub fn parse_file_headers_with_table(
         |expected_id| expected_id == file_id,
     );
 
-    let source_path = owner.os_path_cloned().unwrap_or_else(|| {
-        let mut scratch = Vec::new();
-        path_fork.render_native(source_file, string_table, &mut scratch)
-    });
-    // Directory Stage 0 supplies normal and support roots through `ModuleRootTable`. Keep the
-    // canonical filename check as a fallback for synthetic or otherwise unindexed preparation so
-    // a `+*.moth` support-package root remains export-capable in those contexts too.
+    let mut scratch = Vec::new();
+    let source_path = path_fork.render_native(source_file, string_table, &mut scratch);
+    // Stage 0's module-root inventory admits only canonical `@*.moth`/`+*.moth` root names.
+    // Keep the filename check here as the provider-independent role classifier; filesystem root
+    // identity remains owned by Stage 0 and is not reconstructed from a relative logical path.
     let is_module_root_file_by_name = source_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -113,9 +109,6 @@ pub fn parse_file_headers_with_table(
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(file_name_is_config_file);
-    let is_prepared_module_root = options
-        .project_path_resolver
-        .is_some_and(|resolver| resolver.is_module_root_file(&source_path));
 
     let file_role = if is_entry_file {
         options
@@ -126,7 +119,7 @@ pub fn parse_file_headers_with_table(
                     FileRole::ActiveApiOnlyModuleRoot
                 }
             })
-    } else if is_prepared_module_root || is_module_root_file_by_name {
+    } else if is_module_root_file_by_name {
         FileRole::ImportedModuleRoot
     } else {
         FileRole::Normal
@@ -169,6 +162,7 @@ pub fn parse_file_headers_with_table(
     let file_output = match parsed {
         Ok((state, end_index)) => finish_file_output(
             owner,
+            source_file,
             path_syntax,
             file_id,
             end_index,
@@ -225,13 +219,14 @@ fn capture_preparation_spans(
 ///      ranges, then retains that same builder for later retained-token span resolution.
 #[allow(
     clippy::too_many_arguments,
-    reason = "file preparation keeps the canonical owner, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "file preparation keeps the canonical owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub(crate) fn prepare_file_from_tokens(
     owner: SourceTokenOwner,
+    source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
     entry_file_path: &Path,
-    options: &HeaderParseOptions<'_>,
+    options: &HeaderParseOptions,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
@@ -239,10 +234,9 @@ pub(crate) fn prepare_file_from_tokens(
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     // Preflight the public preparation boundary: every PathId this function dereferences through
-    // the supplied fork must have been issued by it (or its inherited base). A canonical owner
-    // carrying a foreign file-owned path identity would otherwise reach unchecked
-    // depth/parent/component reads and panic on out-of-domain indices.
-    let source_file = owner.logical_path();
+    // the supplied fork must have been issued by it (or its inherited base). A caller carrying a
+    // foreign file-owned path identity would otherwise reach unchecked depth/parent/component
+    // reads and panic on out-of-domain indices.
     if path_fork.try_depth(source_file).is_none() {
         return Err(FileFrontendPrepareFailure::Infrastructure(
             CompilerError::compiler_error(format!(
@@ -258,6 +252,7 @@ pub(crate) fn prepare_file_from_tokens(
 
     let file_output = parse_file_headers_with_table(
         owner,
+        source_file,
         path_syntax,
         entry_file_path,
         options,
@@ -339,11 +334,7 @@ pub fn prepare_header_syntax(
     for output in prepared_files {
         token_stats.add(&output.token_stats);
         if let Some(stream) = output.source_token_stream.take() {
-            let owner = crate::compiler_frontend::headers::SourceTokenOwner::new(
-                stream,
-                output.source_file,
-                output.canonical_os_path.clone(),
-            );
+            let owner = crate::compiler_frontend::headers::SourceTokenOwner::new(stream);
             if source_token_owners.insert(output.file_id, owner).is_some() {
                 return Err(HeaderPreparationFailure::Infrastructure(
                     CompilerError::compiler_error(

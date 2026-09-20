@@ -1,5 +1,6 @@
 use super::*;
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, terminal::format_payload_guidance,
 };
@@ -10,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
     SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
@@ -19,13 +21,11 @@ use crate::compiler_frontend::style_directives::{
     TemplateHeadCompatibility,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokenBuildError, SourceTokens, SourceTokensBuilder, TokenIndex, TokenRange, TokenRef,
     TokenTag, token_store_append_fits, token_store_length_fits,
 };
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 
 fn full_token_range(lexed: &LexedSource) -> TokenRange {
@@ -36,12 +36,14 @@ fn full_token_range(lexed: &LexedSource) -> TokenRange {
 }
 
 fn ast_cursor(lexed: &LexedSource) -> AstCursor<'_> {
-    AstCursor::from_source_tokens(&lexed.tokens, None, full_token_range(lexed))
+    AstCursor::from_source_tokens(&lexed.tokens, full_token_range(lexed))
         .expect("lexer output must expose a canonical AST cursor")
 }
 
 fn token_string_is(token: TokenRef<'_>, string_table: &StringTable, expected: &str) -> bool {
-    token.string_id().is_some_and(|id| string_table.resolve(id) == expected)
+    token
+        .string_id()
+        .is_some_and(|id| string_table.resolve(id) == expected)
 }
 
 fn numeric_payload(token: TokenRef<'_>) -> Option<&'_ NumericLiteralToken> {
@@ -199,13 +201,17 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
 fn token_refs(tokens: &SourceTokens) -> impl Iterator<Item = TokenRef<'_>> {
     (0..tokens.len()).map(|index| {
         let index = TokenIndex::try_from_index(index).expect("source token range fits");
-        tokens.token(index).expect("source token index must resolve")
+        tokens
+            .token(index)
+            .expect("source token index must resolve")
     })
 }
 
 fn token_at(tokens: &SourceTokens, index: usize) -> TokenRef<'_> {
     let index = TokenIndex::try_from_index(index).expect("source token range fits");
-    tokens.token(index).expect("source token index must resolve")
+    tokens
+        .token(index)
+        .expect("source token index must resolve")
 }
 
 fn find_token_index(tokens: &SourceTokens, predicate: impl Fn(TokenRef<'_>) -> bool) -> usize {
@@ -703,7 +709,8 @@ fn preserves_signed_numeric_literal_after_binary_operator() {
 
     assert!(
         token_refs(tokens).any(|token| {
-            numeric_payload(token).is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
+            numeric_payload(token)
+                .is_some_and(|numeric| numeric.sign == NumericLiteralSign::Negative)
         }),
         "`-1` after a spaced binary operator should remain one signed numeric token"
     );
@@ -1275,7 +1282,11 @@ fn tokenizes_lowercase_this_as_reserved_receiver_keyword() {
     assert_eq!(token_at(tokens, 0).tag(), TokenTag::MODULE_START);
     assert_eq!(token_at(tokens, 1).tag(), TokenTag::THIS);
     assert_eq!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
-    assert!(token_string_is(token_at(tokens, 2), &string_table, "this_value"));
+    assert!(token_string_is(
+        token_at(tokens, 2),
+        &string_table,
+        "this_value"
+    ));
     assert_eq!(token_at(tokens, 3).tag(), TokenTag::TRAIT_THIS);
     assert_eq!(token_at(tokens, 4).tag(), TokenTag::SYMBOL);
     assert!(token_string_is(token_at(tokens, 4), &string_table, "_this"));
@@ -1321,12 +1332,8 @@ fn tokenizes_spaced_bang_keyword_forms_as_separate_tokens() {
     let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        !token_refs(tokens).any(|token| {
-            matches!(
-                token.tag(),
-                TokenTag::RETURN_BANG | TokenTag::CAST_BANG
-            )
-        }),
+        !token_refs(tokens)
+            .any(|token| { matches!(token.tag(), TokenTag::RETURN_BANG | TokenTag::CAST_BANG) }),
         "spaced keyword/bang pairs must not become compound tokens"
     );
     assert!(
@@ -1382,7 +1389,11 @@ fn tokenizes_standalone_underscore_as_wildcard_but_prefixed_names_as_symbols() {
     assert_eq!(token_at(tokens, 2).tag(), TokenTag::SYMBOL);
     assert!(token_string_is(token_at(tokens, 2), &string_table, "_true"));
     assert_eq!(token_at(tokens, 3).tag(), TokenTag::SYMBOL);
-    assert!(token_string_is(token_at(tokens, 3), &string_table, "__value"));
+    assert!(token_string_is(
+        token_at(tokens, 3),
+        &string_table,
+        "__value"
+    ));
 }
 
 #[test]
@@ -1414,9 +1425,7 @@ fn tokenizes_pipe_bindings_in_loop_headers() {
     let second_pipe = token_refs(tokens)
         .enumerate()
         .skip(first_pipe + 1)
-        .find_map(|(idx, token)| {
-            (token.tag() == TokenTag::TYPE_PARAMETER_BRACKET).then_some(idx)
-        })
+        .find_map(|(idx, token)| (token.tag() == TokenTag::TYPE_PARAMETER_BRACKET).then_some(idx))
         .expect("expected closing pipe token");
 
     assert!(loop_index < items_index);
@@ -1489,8 +1498,7 @@ fn tokenizes_style_directives_inside_template_heads() {
         token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "md")
     });
     let fresh = find_token_index(tokens, |token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE
-            && token_string_is(token, &string_table, "fresh")
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "fresh")
     });
 
     assert!(outer_head < markdown);
@@ -1593,23 +1601,17 @@ fn tokenizes_children_directive_with_template_argument() {
     let child_template = token_refs(tokens)
         .enumerate()
         .skip(open_paren + 1)
-        .find_map(|(index, token)| {
-            (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index)
-        })
+        .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index))
         .expect("expected child template opener");
     let close = token_refs(tokens)
         .enumerate()
         .skip(child_template + 1)
-        .find_map(|(index, token)| {
-            (token.tag() == TokenTag::TEMPLATE_CLOSE).then_some(index)
-        })
+        .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_CLOSE).then_some(index))
         .expect("expected the child template to close");
     let close_paren = token_refs(tokens)
         .enumerate()
         .skip(close + 1)
-        .find_map(|(index, token)| {
-            (token.tag() == TokenTag::CLOSE_PARENTHESIS).then_some(index)
-        })
+        .find_map(|(index, token)| (token.tag() == TokenTag::CLOSE_PARENTHESIS).then_some(index))
         .expect("expected ')' after the child template");
     let comma = token_refs(tokens)
         .enumerate()
@@ -1741,8 +1743,7 @@ fn tokenizes_slot_and_insert_directives_inside_template_heads() {
         })
         .count();
     let has_insert_directive = token_refs(tokens).any(|token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE
-            && token_string_is(token, &string_table, "insert")
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "insert")
     });
 
     assert_eq!(slot_directive_count, 2);
@@ -1992,9 +1993,9 @@ fn note_and_todo_template_bodies_are_discarded_until_balanced_close() {
         assert!(
             !token_refs(tokens).any(|token| {
                 token.tag() == TokenTag::STRING_SLICE_LITERAL
-                    && token.string_id().is_some_and(|id| {
-                        string_table.resolve(id).contains("discarded")
-                    })
+                    && token
+                        .string_id()
+                        .is_some_and(|id| string_table.resolve(id).contains("discarded"))
             }),
             "expected ${directive} body text to be discarded during tokenization"
         );
@@ -2019,8 +2020,7 @@ fn doc_template_body_keeps_nested_templates_as_template_tokens() {
     );
     assert_eq!(template_closes, 2);
     assert!(token_refs(tokens).any(|token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE
-            && token_string_is(token, &string_table, "doc")
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "doc")
     }));
 }
 
@@ -2128,7 +2128,8 @@ fn token_start_lines_match_line_index_across_newline_shapes() {
             .nth(position.column as usize)
             .expect("a reported column must name a scalar in that line's visible text");
         assert_eq!(
-            scalar_at_column, first_authored_scalar,
+            scalar_at_column,
+            first_authored_scalar,
             "{:?}: line-index column must point at the token's first authored scalar",
             token.tag()
         );
@@ -2362,8 +2363,7 @@ fn every_token_span_matches_authored_bytes() {
     let resolver = span_builder.resolver();
 
     assert!(
-        token_refs(file_tokens.tokens.as_ref())
-            .any(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
+        token_refs(file_tokens.tokens.as_ref()).any(|token| token.tag() == TokenTag::TEMPLATE_HEAD)
     );
     assert!(
         token_refs(file_tokens.tokens.as_ref())
@@ -2669,14 +2669,22 @@ fn lexed_canonical_shapes_retain_typed_payloads() {
 
     for (index, token) in token_refs(owner).enumerate() {
         let token_index = TokenIndex::try_from_index(index).expect("fixture range fits");
-        assert_eq!(token.index(), token_index, "canonical index mismatch at {index}");
+        assert_eq!(
+            token.index(),
+            token_index,
+            "canonical index mismatch at {index}"
+        );
         match token.tag() {
             TokenTag::SYMBOL | TokenTag::STYLE_DIRECTIVE => {
-                let id = token.string_id().expect("string-shaped token must carry a handle");
+                let id = token
+                    .string_id()
+                    .expect("string-shaped token must carry a handle");
                 string_table.resolve(id);
             }
             TokenTag::STRING_SLICE_LITERAL | TokenTag::RAW_STRING_LITERAL => {
-                let id = token.string_id().expect("literal token must carry a handle");
+                let id = token
+                    .string_id()
+                    .expect("literal token must carry a handle");
                 let text = string_table.resolve(id);
                 if token.tag() == TokenTag::STRING_SLICE_LITERAL {
                     if text == "text" {
@@ -2723,12 +2731,27 @@ fn lexed_canonical_shapes_retain_typed_payloads() {
         }
     }
 
-    assert!(saw_negative_numeric, "the fixture must contain a signed numeric literal");
-    assert!(saw_separator_numeric, "the fixture must contain a separator literal");
-    assert!(saw_exponent_numeric, "the fixture must contain an exponent literal");
+    assert!(
+        saw_negative_numeric,
+        "the fixture must contain a signed numeric literal"
+    );
+    assert!(
+        saw_separator_numeric,
+        "the fixture must contain a separator literal"
+    );
+    assert!(
+        saw_exponent_numeric,
+        "the fixture must contain an exponent literal"
+    );
     assert!(saw_path, "the fixture must contain an authored path");
-    assert!(saw_quoted_string, "the fixture must contain a quoted string literal");
-    assert!(saw_raw_string, "the fixture must contain a raw string literal");
+    assert!(
+        saw_quoted_string,
+        "the fixture must contain a quoted string literal"
+    );
+    assert!(
+        saw_raw_string,
+        "the fixture must contain a raw string literal"
+    );
     assert!(saw_char, "the fixture must contain a char literal");
     assert!(saw_bool, "the fixture must contain a bool literal");
 }

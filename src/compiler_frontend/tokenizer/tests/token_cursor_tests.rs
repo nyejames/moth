@@ -44,7 +44,6 @@ fn mutable_source_tokens() -> Arc<SourceTokens> {
         .expect("mutable source-token fixture should build")
 }
 
-
 #[test]
 fn cursor_observes_half_open_boundaries_and_stable_eof() {
     let tokens = static_tokens();
@@ -105,7 +104,6 @@ fn contiguous_parser_reads_respect_a_nonzero_active_range() {
     assert!(at_end.parser_peek_next().is_none());
     assert_eq!(at_end.parser_previous().unwrap().index().raw(), 1);
 }
-
 
 fn token_range(source: SourceId, start: u32, end: u32) -> TokenRange {
     TokenRange::from_raw(source, start, end).expect("fixture token range should be ordered")
@@ -485,6 +483,7 @@ fn sequence_store_rejects_invalid_ranges_and_handles_without_panicking() {
         Err(TokenSequenceError::OutOfRange { .. })
     ));
 
+    store.freeze();
     assert!(matches!(
         store.try_push(&[token_range(source, 1, 2)]),
         Err(TokenSequenceError::Frozen)
@@ -614,12 +613,7 @@ fn canonical_publication_attaches_the_shared_path_table_to_source_tokens() {
         .expect("path row should fit");
     let mut builder = SourceTokensBuilder::with_capacity(source, 1);
     builder
-        .push_payload(
-            TokenTag::PATH,
-            0,
-            path_row.raw(),
-            LocalSpan::source_start(),
-        )
+        .push_payload(TokenTag::PATH, 0, path_row.raw(), LocalSpan::source_start())
         .expect("path token shape should build");
     let mut tokens = Arc::new(
         builder
@@ -676,10 +670,7 @@ fn canonical_owner_rebinds_without_duplicate_source_storage() {
         .expect("canonical owner should be uniquely mutable before rebinding")
         .rebind_source_identity(rebound);
     assert_eq!(owner.source(), rebound);
-    assert_eq!(
-        owner.numeric_literal_store().owner_source(),
-        Some(rebound)
-    );
+    assert_eq!(owner.numeric_literal_store().owner_source(), Some(rebound));
 }
 
 #[test]

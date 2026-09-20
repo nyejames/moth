@@ -326,13 +326,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     }
 
     fn source_path_for_header(&self, header: &Header) -> Result<PathId, CompilerError> {
-        if let Some(owner) = self.source_token_owners.get(&header.tokens.source()) {
-            return Ok(owner.logical_path());
-        }
-
-        // Plain Markdown contributes an explicit payload without a canonical token stream.
-        // Every tokenized header must retain its source owner; allowing the module identity map
-        // to cover those headers would hide a broken ownership handoff.
         let ownerless_synthetic_constant = matches!(
             header.synthetic_content_payload,
             Some(SyntheticContentPayload::RenderedHtml(_))
@@ -340,12 +333,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             && header.token_sequence.is_none()
             && header.name_span.is_none()
             && matches!(header.kind, HeaderKind::Constant { .. });
-        if !ownerless_synthetic_constant {
+        if !self
+            .source_token_owners
+            .contains_key(&header.tokens.source())
+            && !ownerless_synthetic_constant
+        {
             return Err(CompilerError::compiler_error(
                 "header source path has no canonical prepared source token owner",
             ));
         }
-
         self.environment
             .lookups
             .module_symbols
@@ -360,7 +356,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     fn canonical_owner_for_header(
         &self,
         header: &Header,
-    ) -> Result<(Arc<SourceTokens>, Option<std::path::PathBuf>), CompilerError> {
+    ) -> Result<Arc<SourceTokens>, CompilerError> {
         let owner = self
             .source_token_owners
             .get(&header.tokens.source())
@@ -369,7 +365,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     "header body range has no canonical prepared source stream",
                 )
             })?;
-        Ok((Arc::clone(owner.tokens()), owner.os_path_cloned()))
+        Ok(Arc::clone(owner.tokens()))
     }
 
     pub(in crate::compiler_frontend::ast) fn emit(
@@ -462,7 +458,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 HeaderKind::Constant { .. } | HeaderKind::Choice { .. } => {}
                 HeaderKind::ConstTemplate { .. } => {
                     let template_path = header.declaration_path;
-                    let (template_source, template_os_path) = self
+                    let template_source = self
                         .canonical_owner_for_header(&header)
                         .map_err(|error| self.error_messages(error, string_table))?;
                     let context = self.build_base_scope_context(BaseScopeContextInput {
@@ -481,7 +477,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         self.parse_const_template(
                             &header,
                             &template_source,
-                            template_os_path,
                             &context,
                             string_table
                         )?
@@ -1058,13 +1053,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // bounded canonical source-token range. Segmented headers use the retained
         // sequence; contiguous headers use the range. Loop/template windows and
         // explicit synthetic streams use their own explicit cursors.
-        let (body_source, body_os_path) = self
+        let body_source = self
             .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let function_scope = context.scope;
         let mut body_cursor = match header.token_sequence {
-            Some(sequence) => AstCursor::from_source_sequence(&body_source, body_os_path, sequence),
-            None => AstCursor::from_source_tokens(&body_source, body_os_path, header.tokens),
+            Some(sequence) => AstCursor::from_source_sequence(&body_source, sequence),
+            None => AstCursor::from_source_tokens(&body_source, header.tokens),
         }
         .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
@@ -1119,16 +1114,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             scope_frame_capacity,
         });
 
-        let (start_source, start_os_path) = self
+        let start_source = self
             .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let start_scope = context.scope;
         let start_src_path = header.declaration_path;
         let mut body_cursor = match header.token_sequence {
-            Some(sequence) => {
-                AstCursor::from_source_sequence(&start_source, start_os_path, sequence)
-            }
-            None => AstCursor::from_source_tokens(&start_source, start_os_path, header.tokens),
+            Some(sequence) => AstCursor::from_source_sequence(&start_source, sequence),
+            None => AstCursor::from_source_tokens(&start_source, header.tokens),
         }
         .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(
@@ -1231,16 +1224,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         &mut self,
         header: &Header,
         template_source: &Arc<SourceTokens>,
-        template_os_path: Option<std::path::PathBuf>,
         context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<PreparedTemplateConstruction, CompilerMessages> {
         let source_path = context.scope;
         let mut template_cursor = match header.token_sequence {
-            Some(sequence) => {
-                AstCursor::from_source_sequence(template_source, template_os_path, sequence)
-            }
-            None => AstCursor::from_source_tokens(template_source, template_os_path, header.tokens),
+            Some(sequence) => AstCursor::from_source_sequence(template_source, sequence),
+            None => AstCursor::from_source_tokens(template_source, header.tokens),
         }
         .map_err(|error| self.error_messages(error, string_table))?;
         let mut type_interner = AstTypeInterner::new(

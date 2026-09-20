@@ -13,9 +13,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{
-    TokenIndex, TokenTag, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
 fn tokenize_source(source: &str) -> (LexedSource, StringTable) {
     let mut string_table = StringTable::new();
@@ -58,7 +56,7 @@ fn unexpected_statement_token_retains_exact_multibyte_span() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(owner, None, range)
+    let mut cursor = AstCursor::from_source_tokens(owner, range)
         .expect("test token stream must expose an AST cursor");
     cursor
         .set_position(token_position)
@@ -83,7 +81,7 @@ fn unexpected_scope_close_retains_exact_multibyte_span() {
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut cursor = AstCursor::from_source_tokens(owner, None, range)
+    let mut cursor = AstCursor::from_source_tokens(owner, range)
         .expect("test token stream must expose an AST cursor");
     cursor
         .set_position(token_position)

@@ -16,10 +16,10 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -393,9 +393,10 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         &mut spans,
     )
     .expect("signature tokens");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let prepared = parse_file_headers_with_table(
         owner,
+        scope,
         lexed.path_syntax,
         &path,
         &HeaderParseOptions::default(),

@@ -11,6 +11,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::module_symbols::{PublicExportEntry, PublicExportTarget};
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -18,7 +19,6 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     LocalDeclarationOrderingHint, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -81,11 +81,12 @@ fn parse_module_headers(
             &mut span_builder,
         )
         .expect("tokenization should succeed");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
 
         let output = prepare_file_from_tokens(
             owner,
+            interned_path,
             path_syntax,
             &entry_path_buf,
             &options,
@@ -117,7 +118,7 @@ fn parse_module_headers(
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
+        None,
         &source_files,
         &mut string_table,
         &mut path_fork,
@@ -463,11 +464,12 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
 
     let output = prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         &entry_path,
         &options,
@@ -490,7 +492,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
+        None,
         &source_files,
         &mut string_table,
         &mut path_fork,
@@ -1158,10 +1160,11 @@ fn parse_module_headers_with_content_sources(
             &mut span_builder,
         )
         .expect("tokenization should succeed");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
         let output = prepare_file_from_tokens(
             owner,
+            interned_path,
             path_syntax,
             &entry_path_buf,
             &options,
@@ -1197,12 +1200,13 @@ fn parse_module_headers_with_content_sources(
             &mut span_builder,
         )
         .expect("template tokenization should succeed");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
         // The template's retained tokens index the builder's table; prepare while the builder
         // remains available, then retain it for the remainder of this fixture.
         let output = prepare_moth_template_file(
             owner,
+            interned_path,
             path_syntax,
             &mut string_table,
             &mut path_fork,
@@ -1223,7 +1227,6 @@ fn parse_module_headers_with_content_sources(
                 source_code: source,
                 source_file: interned_path,
                 file_id: file_id_for(path),
-                canonical_os_path: None,
             },
             &mut string_table,
             &mut path_fork,
@@ -1292,7 +1295,7 @@ fn parse_module_headers_with_content_sources(
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver,
+        None,
         &source_files,
         &mut string_table,
         &mut path_fork,
@@ -1526,10 +1529,11 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut root_span_builder,
     )
     .expect("root file should tokenize");
-    let root_owner = SourceTokenOwner::new(root_lexed.tokens, root_lexed.logical_path, None);
+    let root_owner = SourceTokenOwner::new(root_lexed.tokens);
     let root_path_syntax = root_lexed.path_syntax;
     let root_output = prepare_file_from_tokens(
         root_owner,
+        root_logical,
         root_path_syntax,
         &entry_path_buf,
         &options,
@@ -1559,10 +1563,11 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut icon_span_builder,
     )
     .expect("icon template should tokenize");
-    let icon_owner = SourceTokenOwner::new(icon_lexed.tokens, icon_lexed.logical_path, None);
+    let icon_owner = SourceTokenOwner::new(icon_lexed.tokens);
     let icon_path_syntax = icon_lexed.path_syntax;
     let icon_output = prepare_moth_template_file(
         icon_owner,
+        icon_logical,
         icon_path_syntax,
         &mut string_table,
         &mut path_fork,

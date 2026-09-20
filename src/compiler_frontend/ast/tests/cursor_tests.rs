@@ -102,7 +102,7 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
     let owner = bool_owner(&[true, false], true, false, true);
     let range = TokenRange::from_raw(source, 1, 3).expect("fixture range should be ordered");
     let mut cursor =
-        AstCursor::from_source_tokens(&owner, None, range).expect("bounded cursor should build");
+        AstCursor::from_source_tokens(&owner, range).expect("bounded cursor should build");
 
     assert_eq!(cursor.position(), 1);
     assert_eq!(cursor.length(), 3);
@@ -123,11 +123,15 @@ fn bounded_canonical_reads_respect_range_and_offset_limits() {
         "neighbouring tokens stay addressable in the canonical owner, not in the bounded view"
     );
     assert_eq!(
-        cursor.token_ref_at_offset(0).and_then(|token| token.bool_value()),
+        cursor
+            .token_ref_at_offset(0)
+            .and_then(|token| token.bool_value()),
         Some(true)
     );
     assert_eq!(
-        cursor.token_ref_at_offset(1).and_then(|token| token.bool_value()),
+        cursor
+            .token_ref_at_offset(1)
+            .and_then(|token| token.bool_value()),
         Some(false)
     );
     assert!(cursor.token_ref_at_offset(2).is_none());
@@ -147,7 +151,7 @@ fn canonical_subcursor_window_bounds_contiguous_reads() {
     let source = SourceId::COMPILATION_ROOT;
     let owner = bool_owner(&[true, false], true, false, true);
     let mut parent =
-        AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 0, 4).unwrap())
+        AstCursor::from_source_tokens(&owner, TokenRange::from_raw(source, 0, 4).unwrap())
             .expect("bounded cursor should build");
     let mut child = parent
         .subcursor_window(1, 3)
@@ -206,7 +210,7 @@ fn canonical_subcursor_window_skips_segmented_source_gaps() {
     Arc::get_mut(&mut owner)
         .expect("segmented fixture should remain uniquely owned")
         .freeze_numeric_literals();
-    let mut parent = AstCursor::from_source_sequence(&owner, None, sequence)
+    let mut parent = AstCursor::from_source_sequence(&owner, sequence)
         .expect("segmented AST cursor should build");
 
     let restore = parent
@@ -260,7 +264,7 @@ fn segmented_nested_cursor_translates_active_limit() {
     Arc::get_mut(&mut owner)
         .expect("segmented fixture should remain uniquely owned")
         .freeze_numeric_literals();
-    let mut cursor = AstCursor::from_source_sequence(&owner, None, sequence)
+    let mut cursor = AstCursor::from_source_sequence(&owner, sequence)
         .expect("segmented AST cursor should build");
     cursor.advance();
     cursor
@@ -299,9 +303,8 @@ fn segmented_nested_cursor_translates_active_limit() {
 fn declaration_cursor_inherits_contiguous_parser_window() {
     let source = SourceId::COMPILATION_ROOT;
     let owner = bool_owner(&[true, false], true, true, true);
-    let parent =
-        AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 0, 5).unwrap())
-            .expect("bounded cursor should build");
+    let parent = AstCursor::from_source_tokens(&owner, TokenRange::from_raw(source, 0, 5).unwrap())
+        .expect("bounded cursor should build");
     let child = parent
         .subcursor_window(1, 3)
         .expect("interior window should validate against canonical backing");
@@ -373,7 +376,7 @@ fn declaration_cursor_inherits_segmented_parser_window() {
     Arc::get_mut(&mut owner)
         .expect("segmented fixture should remain uniquely owned")
         .freeze_numeric_literals();
-    let parent = AstCursor::from_source_sequence(&owner, None, sequence)
+    let parent = AstCursor::from_source_sequence(&owner, sequence)
         .expect("segmented AST cursor should build");
     let child = parent
         .subcursor_window(1, 2)
@@ -402,7 +405,7 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
     let source = SourceId::COMPILATION_ROOT;
     let owner = bool_owner(&[true, false], true, false, true);
     let mut cursor =
-        AstCursor::from_source_tokens(&owner, None, TokenRange::from_raw(source, 1, 4).unwrap())
+        AstCursor::from_source_tokens(&owner, TokenRange::from_raw(source, 1, 4).unwrap())
             .expect("bounded cursor should build");
     let restore = cursor
         .set_limit(2)

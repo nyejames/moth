@@ -9,10 +9,10 @@ use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
-    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason,
-    InvalidConfigReason, InvalidDeclarationReason, InvalidDependencyClauseReason,
-    InvalidFunctionSignatureReason, InvalidSignatureMemberReason, InvalidThisUsageReason,
-    InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason, InvalidConfigReason,
+    InvalidDeclarationReason, InvalidDependencyClauseReason, InvalidFunctionSignatureReason,
+    InvalidSignatureMemberReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
+    ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
@@ -31,8 +31,8 @@ use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelectionRange, HeaderBuildContext, HeaderExportMode,
     HeaderParseFailure, RetainedDependencyClause, SourceTokenOwner,
 };
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
@@ -43,9 +43,7 @@ use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{
-    TokenCursor, TokenRange, TokenizerEntryMode,
-};
+use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRange, TokenizerEntryMode};
 use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -107,20 +105,26 @@ struct HeaderTestDiagnostics {
 struct HeaderTestPrepareContext<'a> {
     source_id: SourceId,
     entry_file_path: &'a Path,
-    options: &'a HeaderParseOptions<'a>,
+    options: &'a HeaderParseOptions,
     style_directives: &'a StyleDirectiveRegistry,
 }
 
 fn owner_from_lexed_source(
     lexed: LexedSource,
-) -> (SourceTokenOwner, Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>) {
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+) -> (
+    SourceTokenOwner,
+    Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>,
+) {
+    let owner = SourceTokenOwner::new(lexed.tokens);
     (owner, lexed.path_syntax)
 }
 
 fn canonical_handoff(
     lexed: LexedSource,
-) -> (SourceTokenOwner, Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>) {
+) -> (
+    SourceTokenOwner,
+    Arc<crate::compiler_frontend::paths::path_syntax::PathSyntaxTable>,
+) {
     owner_from_lexed_source(lexed)
 }
 
@@ -170,6 +174,7 @@ pub(crate) fn prepare_single_file_with_fork(
     let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     let output = prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         entry_file_path,
         &options,
@@ -215,6 +220,7 @@ fn prepare_test_source_file(
     let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         context.entry_file_path,
         context.options,
@@ -251,6 +257,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
 
     match prepare_file_from_tokens(
         owner,
+        interned_path,
         invalid_path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
@@ -335,6 +342,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     expect_prepare_infrastructure(
         match prepare_file_from_tokens(
             owner,
+            interned_path,
             other_path_syntax,
             &file_path,
             &HeaderParseOptions::default(),
@@ -361,7 +369,6 @@ fn prepare_active_root_with_role(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let options = HeaderParseOptions {
         entry_file_id: None,
-        project_path_resolver: None,
         entry_file_role: None,
         active_root_role,
     };
@@ -539,6 +546,7 @@ fn parse_single_file_headers_with_entry(
     let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
     let prepare_result = prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         &entry_file_path,
         &options,
@@ -569,7 +577,7 @@ fn parse_single_file_headers_with_entry(
         std::slice::from_mut(&mut span_builder),
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver,
+        None,
         &mut string_table,
         &mut path_fork,
     )
@@ -809,7 +817,7 @@ pub(crate) fn parse_multi_file_headers(
         &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver,
+        None,
         &mut string_table,
         &mut path_fork,
     )
@@ -906,7 +914,7 @@ fn parse_multi_file_headers_with_path(
         &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver,
+        None,
         &mut string_table,
         &mut path_fork,
     );

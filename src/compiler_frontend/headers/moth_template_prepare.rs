@@ -25,7 +25,6 @@ use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, Toke
 use crate::compiler_frontend::utilities::token_scan::{
     TokenFactView, collect_scanned_symbol_references,
 };
-use std::path::PathBuf;
 use std::sync::Arc;
 const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 
@@ -36,14 +35,13 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 /// structural `MothContentTemplateEntry` directly.
 pub(crate) fn prepare_moth_template_file(
     owner: SourceTokenOwner,
+    source_file: PathId,
     path_syntax: Arc<PathSyntaxTable>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let file_id = owner.source_id();
-    let src_path = owner.logical_path();
-    let canonical_os_path = owner.os_path_cloned();
     let canonical = owner.tokens_ref();
     if canonical.source() != file_id {
         return Err(CompilerError::compiler_error(
@@ -53,16 +51,10 @@ pub(crate) fn prepare_moth_template_file(
     let token_count = owner.len();
     let token_stats = owner.token_stats();
     let body_range = MothTemplatePrepareContext::body_range(canonical)?;
-    let context = MothTemplatePrepareContext::new(
-        src_path,
-        file_id,
-        canonical_os_path,
-        body_range,
-        string_table,
-    )?;
+    let context = MothTemplatePrepareContext::new(source_file, file_id, body_range, string_table)?;
     let (content_header, config_owned_path_syntax_ids) = {
-        let body_facts = TokenFactView::from_source_range(canonical, context.body_range)
-            .map_err(|error| {
+        let body_facts =
+            TokenFactView::from_source_range(canonical, context.body_range).map_err(|error| {
                 CompilerError::compiler_error(format!(
                     "Moth template body view is invalid: {error:?}"
                 ))
@@ -113,7 +105,6 @@ pub(crate) fn prepare_moth_template_file(
         file_dependency_clauses: Vec::new(),
         structural_file_references,
         dependency_selections: Vec::new(),
-        canonical_os_path: context.canonical_os_path,
         headers,
         top_level_const_fragments: Vec::new(),
         source_token_stream: Some(source_token_stream),
@@ -127,11 +118,10 @@ pub(crate) fn prepare_moth_template_file(
 /// File-local data needed to synthesize the normal constant header.
 ///
 /// The body remains owned by the canonical source token stream. This context retains only its
-/// checked range, filesystem identity metadata, and interned template directive.
+/// semantic source path, checked range, and interned template directive.
 struct MothTemplatePrepareContext {
     source_file: PathId,
     file_id: SourceId,
-    canonical_os_path: Option<PathBuf>,
     body_range: TokenRange,
     markdown_directive: StringId,
 }
@@ -140,7 +130,6 @@ impl MothTemplatePrepareContext {
     fn new(
         source_file: PathId,
         file_id: SourceId,
-        canonical_os_path: Option<PathBuf>,
         body_range: TokenRange,
         string_table: &mut StringTable,
     ) -> Result<Self, CompilerError> {
@@ -149,7 +138,6 @@ impl MothTemplatePrepareContext {
         Ok(Self {
             source_file,
             file_id,
-            canonical_os_path,
             body_range,
             markdown_directive,
         })

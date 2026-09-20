@@ -558,16 +558,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .environment_header_scope(header, string_table)
             .with_file_visibility(Arc::clone(visibility));
 
-        let (owner_tokens, os_path) =
-            self.token_owner_parts(header.tokens.source())
-                .ok_or_else(|| {
-                    self.error_messages(
-                        CompilerError::compiler_error(
-                            "trait requirement header has no prepared source token owner",
-                        ),
-                        string_table,
-                    )
-                })?;
+        let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
+            self.error_messages(
+                CompilerError::compiler_error(
+                    "trait requirement header has no prepared source token owner",
+                ),
+                string_table,
+            )
+        })?;
         // Live parser state stays on the canonical source owner. The transient
         // cursor spans the full canonical source so nested default ranges stay
         // inside its bounds for this signature parse only. `from_source_tokens`
@@ -580,15 +578,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )
         })?;
-        let source_owner =
-            AstCursor::from_source_tokens(&owner_tokens, os_path, full).map_err(|error| {
-                self.error_messages(
-                    CompilerError::compiler_error(format!(
-                        "trait requirement source range is outside its source owner: {error:?}"
-                    )),
-                    string_table,
-                )
-            })?;
+        let source_owner = AstCursor::from_source_tokens(&owner_tokens, full).map_err(|error| {
+            self.error_messages(
+                CompilerError::compiler_error(format!(
+                    "trait requirement source range is outside its source owner: {error:?}"
+                )),
+                string_table,
+            )
+        })?;
         let mut compatibility_cache = TypeCompatibilityCache::new();
         let mut type_interner =
             AstTypeInterner::new(&mut self.type_environment, &mut compatibility_cache);

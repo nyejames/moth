@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use std::sync::Arc;
@@ -19,9 +19,7 @@ fn canonical_tokens_for_all_tags() -> Arc<SourceTokens> {
 
     for tag in TokenTag::all() {
         let result = match tag.descriptor().payload() {
-            TokenDescriptorPayload::Static => {
-                builder.push_static(*tag, LocalSpan::source_start())
-            }
+            TokenDescriptorPayload::Static => builder.push_static(*tag, LocalSpan::source_start()),
             TokenDescriptorPayload::Symbol
             | TokenDescriptorPayload::StyleDirective
             | TokenDescriptorPayload::StringLiteral

@@ -37,9 +37,10 @@ fn prepare_source(
         &mut span_builder,
     )
     .expect("tokenization should succeed");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let output = prepare_file_from_tokens(
         owner,
+        interned_path,
         lexed.path_syntax,
         file_path,
         &HeaderParseOptions::default(),

@@ -90,11 +90,13 @@ fn hash_in_expression_position_rejected() {
     static_token(&mut builder, TokenTag::HASH);
     numeric_token(&mut builder, "2", &mut string_table);
     static_token(&mut builder, TokenTag::EOF);
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
@@ -150,11 +152,13 @@ fn hash_before_template_head_allowed() {
     static_token(&mut builder, TokenTag::HASH);
     static_token(&mut builder, TokenTag::TEMPLATE_HEAD);
     static_token(&mut builder, TokenTag::EOF);
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
@@ -199,11 +203,13 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         .push_symbol(TokenTag::SYMBOL, name, LocalSpan::source_start())
         .expect("symbol fixture token should build");
     static_token(&mut builder, TokenTag::EOF);
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
@@ -267,7 +273,7 @@ fn hash_from_tokenized_source_rejected() {
         .tokens
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut stream = AstCursor::from_source_tokens(&lexed.tokens, None, range)
+    let mut stream = AstCursor::from_source_tokens(&lexed.tokens, range)
         .expect("test token stream must expose an AST cursor");
     while stream.current_tag() != TokenTag::ASSIGN {
         assert!(
@@ -386,18 +392,16 @@ fn constant_identifier_uses_module_store_tir() {
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     builder
-        .push_symbol(
-            TokenTag::SYMBOL,
-            constant_name,
-            LocalSpan::source_start(),
-        )
+        .push_symbol(TokenTag::SYMBOL, constant_name, LocalSpan::source_start())
         .expect("symbol fixture token should build");
     static_token(&mut builder, TokenTag::EOF);
-    let owner = builder.finish().expect("canonical fixture tokens should build");
+    let owner = builder
+        .finish()
+        .expect("canonical fixture tokens should build");
     let range = owner
         .full_range()
         .expect("test token stream must expose a checked full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("test token stream must expose an AST cursor");
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();

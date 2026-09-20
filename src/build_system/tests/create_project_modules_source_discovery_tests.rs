@@ -174,18 +174,28 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         "unreachable speculative token strings must not enter the retained module table"
     );
 
-    let reachable_path =
-        fs::canonicalize(src.join("reachable.moth")).expect("reachable source should canonicalize");
     let prepared_header_syntax = &module.prepared.semantic.prepared_header_syntax;
+    let module_symbols = &prepared_header_syntax.module_symbols;
     let reachable_header = prepared_header_syntax
         .headers
         .iter()
         .find(|header| {
-            prepared_header_syntax
-                .source_token_owners
+            let source_path = module_symbols
+                .source_paths_by_source_id
                 .get(&header.tokens.source())
-                .and_then(|owner| owner.os_path())
-                == Some(reachable_path.as_path())
+                .copied()
+                .map(|path| {
+                    module.prepared.semantic.path_fork.render_portable(
+                        path,
+                        &module.prepared.semantic.string_table,
+                        &mut Vec::new(),
+                    )
+                });
+            source_path
+                .as_deref()
+                .and_then(|path| Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                == Some("reachable.moth")
         })
         .expect("reachable source should retain one header stream");
     let reachable_owner = prepared_header_syntax

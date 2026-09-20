@@ -25,7 +25,6 @@ use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, ResolvedFileReferenceTable,
 };
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
@@ -188,30 +187,6 @@ impl FilePreparationStrategy {
 pub(super) struct ModulePreparationContext<'a> {
     pub(super) source_files: &'a SourceDatabase,
     pub(super) style_directives: &'a StyleDirectiveRegistry,
-    pub(super) project_path_resolver: Option<ProjectPathResolver>,
-}
-
-/// Resolve the canonical filesystem path for a final source identity.
-fn source_path_for_id(
-    source_files: &SourceDatabase,
-    source_id: SourceId,
-) -> Result<PathBuf, CompilerError> {
-    let record = source_files.get(source_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "source identity {} is absent from the source database",
-            source_id.index()
-        ))
-    })?;
-    record
-        .canonical_os_path
-        .clone()
-        .map(|canonical| canonical.into_path_buf())
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "source identity {} has no canonical filesystem path",
-                source_id.index()
-            ))
-        })
 }
 
 fn source_is_moth_template(source_files: &SourceDatabase, source_id: SourceId) -> bool {
@@ -591,7 +566,6 @@ impl ModulePreparationContext<'_> {
 
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role,
         };
@@ -1118,7 +1092,6 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.context.project_path_resolver.as_ref(),
             entry_file_role: self.entry_file_role,
             active_root_role: self.active_root_role,
         };
@@ -1294,20 +1267,13 @@ fn frontend_source<'a>(
             FrontendFilePrepareSource::Moth { owner, path_syntax }
         }
         PreparedSourceKind::Deferred => {
-            let source_path = source_path_for_id(sources, source_id)?;
             let source_code = retained_source_text(sources, source_id, selected_source_texts)?;
             match sources.get(source_id).and_then(|record| record.kind) {
                 Some(SourceKind::Compiler(SourceFileKind::MothTemplate)) => {
-                    FrontendFilePrepareSource::MothTemplate {
-                        source_code,
-                        source_path,
-                    }
+                    FrontendFilePrepareSource::MothTemplate { source_code }
                 }
                 Some(SourceKind::Compiler(SourceFileKind::PlainMarkdown)) => {
-                    FrontendFilePrepareSource::PlainMarkdown {
-                        source_code,
-                        source_path,
-                    }
+                    FrontendFilePrepareSource::PlainMarkdown { source_code }
                 }
                 Some(SourceKind::Compiler(SourceFileKind::Moth)) => {
                     return Err(CompilerError::compiler_error(format!(

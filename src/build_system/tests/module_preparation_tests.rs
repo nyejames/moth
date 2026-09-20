@@ -13,8 +13,8 @@ use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
@@ -26,6 +26,7 @@ use crate::compiler_frontend::module_compilation::{
 };
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
@@ -39,7 +40,6 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -114,7 +114,6 @@ struct FrontendPreparationInputs {
     style_directives: StyleDirectiveRegistry,
     string_table: StringTable,
     path_fork: PathInternerFork,
-    project_path_resolver: Option<ProjectPathResolver>,
     source_files: Arc<SourceDatabase>,
 }
 
@@ -198,7 +197,6 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         style_directives,
         string_table,
         path_fork,
-        project_path_resolver: None,
         source_files: Arc::clone(source_files),
     };
 
@@ -360,7 +358,6 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .source_files
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.id),
-        project_path_resolver: frontend.project_path_resolver,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -408,10 +405,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
-                source: FrontendFilePrepareSource::Moth {
-                    owner,
-                    path_syntax,
-                },
+                source: FrontendFilePrepareSource::Moth { owner, path_syntax },
                 source_id,
                 span_builder,
                 const_template_offset,
@@ -656,7 +650,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
     };
 
     // Single-file preparation tests use the same deterministic synthetic normal-module origin
@@ -882,7 +875,6 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
-        project_path_resolver: Some(project_path_resolver.clone()),
     };
     #[cfg(feature = "timers")]
     let prepared_result = preparation_context.prepare_module(
@@ -1201,7 +1193,6 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1438,7 +1429,6 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1496,7 +1486,6 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
-        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -1579,7 +1568,6 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let mut preparation_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = preparation_context
@@ -1666,7 +1654,6 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                 .source_files
                 .get_by_canonical_path(&fixture.entry_file_path)
                 .map(|record| record.id),
-            project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         };
@@ -1745,7 +1732,6 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
@@ -1806,11 +1792,12 @@ fn parsed_prepared_output(
         span_builder,
     )
     .expect("test source should tokenize");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
 
     parse_file_headers_with_table(
         owner,
+        source_identity,
         path_syntax,
         Path::new(source_name),
         &HeaderParseOptions::default(),
@@ -1949,7 +1936,6 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
-        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -2266,7 +2252,6 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
@@ -2318,7 +2303,6 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(

@@ -2466,7 +2466,7 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn compilation_root_table_excludes_facade_when_it_shares_entry_root() {
+    fn compilation_root_table_keeps_normal_root_when_facade_shares_entry_root() {
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let root = _temp.path().to_path_buf();
 
@@ -2482,10 +2482,6 @@ mod owned_source_inventory_tests {
             compilation_roots.root_file_for_directory(&canonical_root),
             Some(canonical_root.join("@page.moth").as_path()),
             "the normal module remains authoritative for the shared project directory"
-        );
-        assert!(
-            !compilation_roots.is_root_file(&canonical_root.join("+package.moth")),
-            "the project facade must not become a resolver module root"
         );
     }
 

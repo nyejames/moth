@@ -146,7 +146,6 @@ pub(super) fn prepare_file_value_bundle(
         })?;
     let discovery_options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
-        project_path_resolver: Some(&path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -646,7 +645,6 @@ fn finalize_known_sources(
                     .sources()
                     .source_logical_path(source_id)
                     .expect("transferred source must retain logical path"),
-                path,
                 path_fork,
             )?;
             prepared.freeze_path_syntax(string_table, path_fork)?;
@@ -928,16 +926,9 @@ fn prepare_one_source(
     source_code: &str,
     string_table: &mut StringTable,
 ) -> Result<SourcePreparationDelta, FileFrontendPrepareFailure> {
-    let source_path = context.entry_file_path;
     let source = match kind {
-        SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
-        SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-            source_code,
-            source_path: source_path.to_path_buf(),
-        },
+        SourceFileKind::MothTemplate => FrontendFilePrepareSource::MothTemplate { source_code },
+        SourceFileKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown { source_code },
         SourceFileKind::Moth => {
             return Err(FileFrontendPrepareFailure::Infrastructure(
                 CompilerError::compiler_error(

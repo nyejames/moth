@@ -29,12 +29,12 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure, HeaderParseOptions,
     SourcePreparationDelta, parse_file_headers_with_table,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -50,6 +50,7 @@ use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
@@ -60,8 +61,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::cell::RefCell;
-use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -74,10 +74,10 @@ pub(crate) mod test_support;
 
 #[cfg(not(test))]
 mod test_support {
-    use super::FrontendFilePrepareSource;
+    use super::{SourceDatabase, SourceId};
 
     #[inline(always)]
-    pub(super) fn record_prepare(_source: &FrontendFilePrepareSource<'_>) {}
+    pub(super) fn record_prepare(_source_files: &SourceDatabase, _source_id: SourceId) {}
 }
 pub(crate) struct CompilerFrontend<'a> {
     /// The shared registry handle remains owned by the enclosing compilation boundary.
@@ -138,7 +138,7 @@ pub(crate) struct FrontendFilePrepareContext<'a> {
     pub(crate) source_files: &'a SourceDatabase,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_file_path: &'a Path,
-    pub(crate) options: &'a HeaderParseOptions<'a>,
+    pub(crate) options: &'a HeaderParseOptions,
 }
 
 /// Borrowed per-file source payload for frontend preparation.
@@ -157,11 +157,9 @@ pub(crate) enum FrontendFilePrepareSource<'a> {
     },
     MothTemplate {
         source_code: &'a str,
-        source_path: PathBuf,
     },
     PlainMarkdown {
         source_code: &'a str,
-        source_path: PathBuf,
     },
 }
 
@@ -196,18 +194,18 @@ pub(crate) struct AstBuildRequest<'a> {
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
 
-/// Resolve the identity facts one prepared source stamps onto its token stream.
+/// Resolve the registered logical path and source identity for one prepared source path.
 ///
-/// WHAT: returns the registered logical path, source identity and canonical OS path for one
-///       source path.
-/// WHY: every production preparation owner registers its candidate before handing it to the
-///      frontend, so an unregistered source is a compiler invariant failure rather than a path
-///      that can receive a fabricated identity.
+/// Every production preparation owner registers its candidate before handing it to the frontend,
+/// so an unregistered source is a compiler invariant failure rather than a path that can receive
+/// a fabricated identity. Filesystem paths remain in `SourceDatabase` and are not copied onto
+/// token owners or prepared outputs.
+#[cfg(test)]
 fn source_identity_facts(
     source_files: &SourceDatabase,
     source_path: &Path,
     path_fork: &mut PathInternerFork,
-) -> Result<(PathId, SourceId, Option<PathBuf>), FileFrontendPrepareFailure> {
+) -> Result<(PathId, SourceId), FileFrontendPrepareFailure> {
     let record = source_files
         .get_by_canonical_path(source_path)
         .ok_or_else(|| {
@@ -233,27 +231,43 @@ fn source_identity_facts(
             }
         })?;
 
-    Ok((
-        logical_path,
-        source_id,
-        record
-            .canonical_os_path
-            .clone()
-            .map(|canonical| canonical.into_path_buf()),
-    ))
+    Ok((logical_path, source_id))
 }
 
-/// Validate the explicit identity carried beside a canonical Moth token owner.
-///
-/// The owner was minted from the authoritative source table before this preparation pass. Do not
-/// re-intern or reconstruct that metadata from a filesystem path: validating the moved `PathId`,
-/// `SourceId` and canonical OS path preserves one identity owner through the handoff.
+/// Resolve the authoritative logical path for a registered source identity.
+fn source_identity_facts_for_id(
+    source_files: &SourceDatabase,
+    source_id: SourceId,
+    path_fork: &mut PathInternerFork,
+) -> Result<PathId, FileFrontendPrepareFailure> {
+    source_files.get(source_id).ok_or_else(|| {
+        FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "source identity {} was not registered before frontend preparation",
+            source_id.index()
+        )))
+    })?;
+    source_files
+        .logical_path_in_fork(source_id, path_fork)
+        .map_err(|error| match error {
+            SourceDatabaseError::Capacity(capacity) => {
+                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    warnings: Vec::new(),
+                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                })
+            }
+            SourceDatabaseError::Infrastructure(error) => {
+                FileFrontendPrepareFailure::Infrastructure(error)
+            }
+        })
+}
+
+/// Resolve the authoritative logical path for a canonical Moth token owner.
 fn source_identity_facts_for_owner(
     source_files: &SourceDatabase,
     owner: &SourceTokenOwner,
     expected_source_id: SourceId,
-    path_fork: &PathInternerFork,
-) -> Result<(), FileFrontendPrepareFailure> {
+    path_fork: &mut PathInternerFork,
+) -> Result<PathId, FileFrontendPrepareFailure> {
     let source_id = owner.source_id();
     if source_id != expected_source_id {
         return Err(FileFrontendPrepareFailure::Infrastructure(
@@ -264,34 +278,25 @@ fn source_identity_facts_for_owner(
             )),
         ));
     }
-    if path_fork.try_depth(owner.logical_path()).is_none() {
-        return Err(FileFrontendPrepareFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "canonical Moth token owner carries a logical path outside the preparation fork",
-            ),
-        ));
-    }
-    let record = source_files.get(source_id).ok_or_else(|| {
+    source_files.get(source_id).ok_or_else(|| {
         FileFrontendPrepareFailure::Infrastructure(CompilerError::compiler_error(format!(
             "canonical Moth token owner {} was not registered before frontend preparation",
             source_id.index()
         )))
     })?;
-    if record.logical_path != owner.logical_path() {
-        return Err(FileFrontendPrepareFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "canonical Moth token owner logical path does not match its source record",
-            ),
-        ));
-    }
-    if record.canonical_os_path.as_deref() != owner.os_path() {
-        return Err(FileFrontendPrepareFailure::Infrastructure(
-            CompilerError::compiler_error(
-                "canonical Moth token owner filesystem identity does not match its source record",
-            ),
-        ));
-    }
-    Ok(())
+    source_files
+        .logical_path_in_fork(source_id, path_fork)
+        .map_err(|error| match error {
+            SourceDatabaseError::Capacity(capacity) => {
+                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    warnings: Vec::new(),
+                    diagnostic: CompilerDiagnostic::source_table_capacity(capacity.resource()),
+                })
+            }
+            SourceDatabaseError::Infrastructure(error) => {
+                FileFrontendPrepareFailure::Infrastructure(error)
+            }
+        })
 }
 
 impl CompilerFrontend<'static> {
@@ -304,6 +309,7 @@ impl CompilerFrontend<'static> {
     ///       string table. This allows per-file tokenization against local string-table forks.
     /// WHY: parallel and fork-based frontend preparation need to tokenize independently before
     ///      merging deltas back into the module/global table.
+    #[cfg(test)]
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline tokenization keeps the source database, directives, source text, module path, entry mode, and mutable string/path/span state as separate borrows"
@@ -318,8 +324,34 @@ impl CompilerFrontend<'static> {
         path_fork: &mut PathInternerFork,
         span_builder: &mut ExtendedSpanBuilder,
     ) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), FileFrontendPrepareFailure> {
-        let (logical_path, source_id, canonical_os_path) =
+        let (logical_path, source_id) =
             source_identity_facts(source_files, module_path, path_fork)?;
+        Self::tokenize_source_with_identity(
+            style_directives,
+            source_code,
+            logical_path,
+            tokenizer_entry_mode,
+            string_table,
+            path_fork,
+            source_id,
+            span_builder,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "identity-bound tokenization keeps the directives, source text, logical path, entry mode, mutable string/path/span state, and source identity explicit"
+    )]
+    fn tokenize_source_with_identity(
+        style_directives: &StyleDirectiveRegistry,
+        source_code: &str,
+        logical_path: PathId,
+        tokenizer_entry_mode: TokenizerEntryMode,
+        string_table: &mut StringTable,
+        path_fork: &mut PathInternerFork,
+        source_id: SourceId,
+        span_builder: &mut ExtendedSpanBuilder,
+    ) -> Result<(SourceTokenOwner, Arc<PathSyntaxTable>), FileFrontendPrepareFailure> {
         let tokenized = tokenize(
             source_code,
             logical_path,
@@ -338,11 +370,7 @@ impl CompilerFrontend<'static> {
                 ),
             ));
         }
-        let owner = SourceTokenOwner::new(
-            tokenized.tokens,
-            logical_path,
-            canonical_os_path,
-        );
+        let owner = SourceTokenOwner::new(tokenized.tokens);
         Ok((owner, tokenized.path_syntax))
     }
 
@@ -359,7 +387,7 @@ impl CompilerFrontend<'static> {
         local_path_fork: &mut PathInternerFork,
     ) -> SourcePreparationDelta {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
-        test_support::record_prepare(&input.source);
+        test_support::record_prepare(context.source_files, input.source_id);
 
         let FrontendFilePrepareInput {
             source,
@@ -371,29 +399,22 @@ impl CompilerFrontend<'static> {
         let file_id = source_id;
         let mut span_builder = span_builder;
         let result = (|| match source {
-            FrontendFilePrepareSource::PlainMarkdown {
-                source_code,
-                source_path,
-            } => {
-                let (logical_path, source_id, canonical_os_path) =
-                    source_identity_facts(context.source_files, &source_path, local_path_fork)?;
+            FrontendFilePrepareSource::PlainMarkdown { source_code } => {
+                let source_file =
+                    source_identity_facts_for_id(context.source_files, file_id, local_path_fork)?;
                 prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
                         source_code,
-                        source_file: logical_path,
-                        file_id: source_id,
-                        canonical_os_path,
+                        source_file,
+                        file_id,
                     },
                     local_string_table,
                     local_path_fork,
                 )
                 .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
-            FrontendFilePrepareSource::Moth {
-                owner,
-                path_syntax,
-            } => {
-                source_identity_facts_for_owner(
+            FrontendFilePrepareSource::Moth { owner, path_syntax } => {
+                let source_file = source_identity_facts_for_owner(
                     context.source_files,
                     &owner,
                     file_id,
@@ -401,6 +422,7 @@ impl CompilerFrontend<'static> {
                 )?;
                 parse_file_headers_with_table(
                     owner,
+                    source_file,
                     path_syntax,
                     context.entry_file_path,
                     context.options,
@@ -411,29 +433,29 @@ impl CompilerFrontend<'static> {
                     &mut span_builder,
                 )
             }
-            FrontendFilePrepareSource::MothTemplate {
-                source_code,
-                source_path,
-            } => {
+            FrontendFilePrepareSource::MothTemplate { source_code } => {
+                let source_file =
+                    source_identity_facts_for_id(context.source_files, file_id, local_path_fork)?;
                 // Moth template is tokenized exactly once by its template-body preparation path.
                 let tokenizer_entry_mode =
                     match TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate) {
                         Some(mode) => mode,
                         None => unreachable!("Moth template has a tokenizer entry mode"),
                     };
-                let (owner, path_syntax) = Self::tokenize_source(
-                    context.source_files,
+                let (owner, path_syntax) = Self::tokenize_source_with_identity(
                     context.style_directives,
                     source_code,
-                    &source_path,
+                    source_file,
                     tokenizer_entry_mode,
                     local_string_table,
                     local_path_fork,
+                    file_id,
                     &mut span_builder,
                 )?;
 
                 prepare_moth_template_file(
                     owner,
+                    source_file,
                     path_syntax,
                     local_string_table,
                     local_path_fork,

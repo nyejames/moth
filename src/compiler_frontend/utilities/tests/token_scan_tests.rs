@@ -43,7 +43,9 @@ fn source_tokens_from_parts(source: SourceId, parts: Vec<FixturePart>) -> Arc<So
                 .expect("string fixture token should build"),
         }
     }
-    builder.finish().expect("canonical fixture tokens should build")
+    builder
+        .finish()
+        .expect("canonical fixture tokens should build")
 }
 
 fn full_cursor(owner: &SourceTokens) -> TokenCursor<'_> {
@@ -72,7 +74,10 @@ fn boundary_tag(owner: &SourceTokens, range: TokenRange) -> Option<TokenTag> {
     owner.token(range.end()).ok().map(|token| token.tag())
 }
 
-fn symbol_ids_in_range(owner: &SourceTokens, range: TokenRange) -> Vec<crate::compiler_frontend::symbols::string_interning::StringId> {
+fn symbol_ids_in_range(
+    owner: &SourceTokens,
+    range: TokenRange,
+) -> Vec<crate::compiler_frontend::symbols::string_interning::StringId> {
     let mut cursor = owner.cursor(range).expect("checked range should fit");
     (0..range.len() as usize)
         .filter_map(|_| cursor.advance())
@@ -84,7 +89,6 @@ fn symbol_ids_in_range(owner: &SourceTokens, range: TokenRange) -> Vec<crate::co
 fn ast_cursor(owner: &Arc<SourceTokens>) -> AstCursor<'_> {
     AstCursor::from_source_tokens(
         owner,
-        None,
         owner.full_range().expect("test owner range should fit"),
     )
     .expect("canonical AST cursor should construct")
@@ -92,7 +96,10 @@ fn ast_cursor(owner: &Arc<SourceTokens>) -> AstCursor<'_> {
 
 #[test]
 fn canonical_range_view_rejects_foreign_source() {
-    let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, vec![FixturePart::Static(TokenTag::EOF)]);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![FixturePart::Static(TokenTag::EOF)],
+    );
     let canonical = &owner;
     let foreign = TokenRange::new(
         SourceId::from_index(1),
@@ -112,7 +119,10 @@ fn canonical_range_view_rejects_foreign_source() {
 
 #[test]
 fn canonical_range_view_rejects_out_of_owner_range() {
-    let owner = source_tokens_from_parts(SourceId::COMPILATION_ROOT, vec![FixturePart::Static(TokenTag::EOF)]);
+    let owner = source_tokens_from_parts(
+        SourceId::COMPILATION_ROOT,
+        vec![FixturePart::Static(TokenTag::EOF)],
+    );
     let out_of_owner = TokenRange::new(
         owner.source(),
         TokenIndex::try_from_raw(0).expect("zero index is representable"),
@@ -334,7 +344,10 @@ fn balanced_template_region_consumes_nested_templates_from_source() {
             TokenTag::TEMPLATE_CLOSE,
         ]
     );
-    assert_eq!(end, TokenIndex::try_from_index(6).expect("index should fit"));
+    assert_eq!(
+        end,
+        TokenIndex::try_from_index(6).expect("index should fit")
+    );
     assert_eq!(cursor.peek().map(|token| token.tag()), Some(TokenTag::EOF));
 }
 
@@ -370,7 +383,11 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_bare_symbo
     let name = string_table.intern("value");
     let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![FixturePart::Symbol(name), FixturePart::Static(TokenTag::NEWLINE), FixturePart::Static(TokenTag::EOF)],
+        vec![
+            FixturePart::Symbol(name),
+            FixturePart::Static(TokenTag::NEWLINE),
+            FixturePart::Static(TokenTag::EOF),
+        ],
     );
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
@@ -406,7 +423,9 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_dot_member
     assert_eq!(references.len(), 1);
     assert_eq!(string_table.resolve(references[0].name), "config");
     assert_eq!(
-        references[0].dot_member.map(|member| string_table.resolve(member)),
+        references[0]
+            .dot_member
+            .map(|member| string_table.resolve(member)),
         Some("setting")
     );
     assert!(!references[0].followed_by_call);
@@ -626,7 +645,11 @@ fn eof_in_parenthesis_inside_template_reports_innermost_paren() {
     let mut string_table = StringTable::new();
     let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![FixturePart::Static(TokenTag::TEMPLATE_HEAD), FixturePart::Static(TokenTag::OPEN_PARENTHESIS), FixturePart::Static(TokenTag::EOF)],
+        vec![
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::EOF),
+        ],
     );
 
     let error = scan_initializer(&owner, &mut string_table)
@@ -642,7 +665,11 @@ fn eof_in_template_inside_parenthesis_reports_innermost_template() {
     let mut string_table = StringTable::new();
     let owner = source_tokens_from_parts(
         SourceId::COMPILATION_ROOT,
-        vec![FixturePart::Static(TokenTag::OPEN_PARENTHESIS), FixturePart::Static(TokenTag::TEMPLATE_HEAD), FixturePart::Static(TokenTag::EOF)],
+        vec![
+            FixturePart::Static(TokenTag::OPEN_PARENTHESIS),
+            FixturePart::Static(TokenTag::TEMPLATE_HEAD),
+            FixturePart::Static(TokenTag::EOF),
+        ],
     );
 
     let error = scan_initializer(&owner, &mut string_table)

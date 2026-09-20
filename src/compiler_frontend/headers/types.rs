@@ -26,7 +26,6 @@ use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
-use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
@@ -42,35 +41,21 @@ use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-/// One canonical source-token owner plus its path identities.
+/// One canonical source-token owner.
 ///
-/// WHAT: bundles the sole canonical `SourceTokens` allocation for a `SourceId` with the
-/// logical `PathId` and the optional canonical OS `PathBuf` for that source.
-/// WHY: `SourceTokens` carries no path identity and must not store an OS path, so the
-/// header stage retains those identities alongside the owner in one table instead of three
-/// parallel maps keyed by `SourceId`.
+/// WHAT: bundles the sole canonical `SourceTokens` allocation for a `SourceId`.
+/// WHY: logical and filesystem source identities belong to `SourceDatabase`; retaining them beside
+/// the token owner duplicated the authoritative source record.
 #[derive(Clone, Debug)]
 pub(crate) struct SourceTokenOwner {
     tokens: Arc<SourceTokens>,
-    logical_path: PathId,
-    canonical_os_path: Option<PathBuf>,
 }
 
 impl SourceTokenOwner {
-    pub(crate) fn new(
-        tokens: Arc<SourceTokens>,
-        logical_path: PathId,
-        canonical_os_path: Option<PathBuf>,
-    ) -> Self {
-        Self {
-            tokens,
-            logical_path,
-            canonical_os_path,
-        }
+    pub(crate) fn new(tokens: Arc<SourceTokens>) -> Self {
+        Self { tokens }
     }
 
     pub(crate) fn tokens(&self) -> &Arc<SourceTokens> {
@@ -81,11 +66,7 @@ impl SourceTokenOwner {
         &self.tokens
     }
 
-    pub(crate) fn logical_path(&self) -> PathId {
-        self.logical_path
-    }
-
-    /// Source identity carried by the canonical token owner.
+    /// Source identity carried by the canonical token store.
     pub(crate) fn source_id(&self) -> SourceId {
         self.tokens.source()
     }
@@ -143,14 +124,6 @@ impl SourceTokenOwner {
     pub(crate) fn into_tokens(self) -> Arc<SourceTokens> {
         self.tokens
     }
-
-    pub(crate) fn os_path(&self) -> Option<&Path> {
-        self.canonical_os_path.as_deref()
-    }
-
-    pub(crate) fn os_path_cloned(&self) -> Option<PathBuf> {
-        self.canonical_os_path.clone()
-    }
 }
 
 /// One canonical token owner per tokenized `SourceId`.
@@ -171,9 +144,9 @@ pub struct PreparedHeaderSyntax {
     pub headers: Vec<Header>,
     /// One canonical source owner per tokenized `SourceId`.
     ///
-    /// Each owner bundles the sole canonical `SourceTokens` allocation published by the lexer
-    /// with its logical path and optional canonical OS path. Path rows remain separate until the
-    /// prepared-file freeze and are never rebuilt from retained token ranges.
+    /// Each owner bundles the sole canonical `SourceTokens` allocation published by the lexer.
+    /// Logical source paths remain in module symbol metadata and filesystem identities remain in
+    /// `SourceDatabase`; neither is reconstructed from retained token ranges.
     pub(crate) source_token_owners: SourceTokenOwners,
     /// Provider-independent source `#Config` declarations, normalized from top-level constant
     /// shells before any provider binding or AST expression resolution.
@@ -262,13 +235,12 @@ pub struct TopLevelConstFragment {
 
 /// Optional settings that affect module header parsing.
 ///
-/// WHAT: bundles optional entry identity and a borrowed path resolver for one parse invocation.
-/// WHY: the parser is called from both production and tests, and grouping these keeps the API concise.
-///      The resolver is build-lifetime immutable data, so options borrow it instead of cloning it.
+/// WHAT: bundles optional entry identity and the semantic role of the active module root.
+/// WHY: role selection is a caller-owned decision; filesystem and provider resolution stay in the
+///      later header-binding stage.
 #[derive(Clone, Copy)]
-pub struct HeaderParseOptions<'a> {
+pub struct HeaderParseOptions {
     pub entry_file_id: Option<SourceId>,
-    pub project_path_resolver: Option<&'a ProjectPathResolver>,
     /// An explicit role for the active entry file, when the caller is compiling a transient
     /// selection rather than a graph-owned module root.
     ///
@@ -283,11 +255,10 @@ pub struct HeaderParseOptions<'a> {
     pub active_root_role: ModuleRootRole,
 }
 
-impl Default for HeaderParseOptions<'_> {
+impl Default for HeaderParseOptions {
     fn default() -> Self {
         Self {
             entry_file_id: None,
-            project_path_resolver: None,
             entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         }
@@ -1470,10 +1441,8 @@ impl FileRole {
 pub struct FileFrontendPrepareOutput {
     /// Complete logical identity of the prepared source file in the active path table.
     ///
-    /// WHAT: the `PathId` interned for this file through the owning `PathInternerFork`,
-    ///      shared with the canonical source owner and authored path rows.
-    /// WHY: tokenizer and dependency owners share one compact path domain; the
-    ///      filesystem `canonical_os_path` remains the only `PathBuf` identity for IO.
+    /// WHAT: the `PathId` interned for this file through the owning `PathInternerFork`, retained
+    /// for module symbols and authored path facts.
     pub source_file: PathId,
     /// Stable source identity used by the prepared-file invariant gate to validate every retained
     /// header range/sequence and dependency shell before module aggregation.
@@ -1507,12 +1476,6 @@ pub struct FileFrontendPrepareOutput {
     pub structural_file_references: PreparedFileReferenceTable,
     /// One flat selection store for all dependency clauses authored by this file.
     pub dependency_selections: Vec<DependencySelection>,
-    /// Canonical OS filesystem path for this source file, if available.
-    ///
-    /// WHAT: the real filesystem path used by Stage 0 path resolution.
-    /// WHY: dependency-only files and files without declaration headers still need path metadata
-    /// for module membership and public export data registration.
-    pub canonical_os_path: Option<std::path::PathBuf>,
     pub headers: Vec<Header>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
     /// The canonical `SourceTokens` owner retained for this file after header parsing.
@@ -1779,7 +1742,6 @@ impl FileFrontendPrepareOutput {
         &mut self,
         final_file_id: SourceId,
         final_logical_path: PathId,
-        canonical_os_path: std::path::PathBuf,
         path_fork: &mut PathInternerFork,
     ) -> Result<(), CompilerError> {
         let provisional_source_file = self.source_file;
@@ -1789,7 +1751,6 @@ impl FileFrontendPrepareOutput {
         self.validate_source_rebinding(provisional_source_file, &*path_fork)?;
         self.source_file = final_logical_path;
         self.file_id = final_file_id;
-        self.canonical_os_path = Some(canonical_os_path);
         if let Some(source) = self.source_token_stream.as_mut() {
             Arc::get_mut(source)
                 .ok_or_else(|| {

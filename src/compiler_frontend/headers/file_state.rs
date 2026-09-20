@@ -18,11 +18,11 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
-use std::sync::Arc;
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Mutable parser state for one source file during header splitting.
 ///
@@ -175,12 +175,11 @@ impl HeaderFileParseState {
     pub(super) fn into_non_entry_output(
         self,
         owner: SourceTokenOwner,
+        source_file: crate::compiler_frontend::symbols::path_interner::PathId,
         path_syntax: Arc<PathSyntaxTable>,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
         let file_id = owner.source_id();
-        let source_file = owner.logical_path();
-        let canonical_os_path = owner.os_path_cloned();
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let token_stats = owner.token_stats();
@@ -195,7 +194,6 @@ impl HeaderFileParseState {
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
             dependency_selections: self.dependency_selections,
-            canonical_os_path,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
             source_token_stream: Some(source_token_stream),
@@ -209,13 +207,12 @@ impl HeaderFileParseState {
     pub(super) fn into_entry_output(
         mut self,
         mut owner: SourceTokenOwner,
+        source_file: crate::compiler_frontend::symbols::path_interner::PathId,
         path_syntax: Arc<PathSyntaxTable>,
         end_index: TokenIndex,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
         let file_id = owner.source_id();
-        let source_file = owner.logical_path();
-        let canonical_os_path = owner.os_path_cloned();
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
@@ -251,7 +248,6 @@ impl HeaderFileParseState {
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
             dependency_selections: self.dependency_selections,
-            canonical_os_path,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
             const_template_count: self.const_template_count,

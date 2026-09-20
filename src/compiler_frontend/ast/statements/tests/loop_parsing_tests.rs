@@ -40,7 +40,7 @@ fn malformed_loop_header_payload_stays_infrastructure_error_while_scanning_for_c
     let range = owner
         .full_range()
         .expect("the canonical test owner should expose a full range");
-    let mut token_stream = AstCursor::from_source_tokens(&owner, None, range)
+    let mut token_stream = AstCursor::from_source_tokens(&owner, range)
         .expect("the malformed canonical owner should still construct a cursor");
 
     let error = super::find_loop_header_colon_index(&mut token_stream)
@@ -68,7 +68,7 @@ fn malformed_loop_header_payload_stays_infrastructure_error_while_checking_empty
     let range = owner
         .full_range()
         .expect("the canonical test owner should expose a full range");
-    let mut window = AstCursor::from_source_tokens(&owner, None, range)
+    let mut window = AstCursor::from_source_tokens(&owner, range)
         .expect("the malformed canonical owner should still construct a cursor");
 
     let error = super::is_empty_header_window(&mut window)
@@ -356,9 +356,8 @@ fn rejects_range_loop_with_bare_dual_bindings() {
 
 #[test]
 fn rejects_string_literal_as_range_binding() {
-    let payload = parse_loop_fixture_diagnostic(
-        "loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;",
-    );
+    let payload =
+        parse_loop_fixture_diagnostic("loop 0 to 10 |\"item\"|:\n    io.line([: [\"value\"]])\n;");
 
     assert!(matches!(
         payload,

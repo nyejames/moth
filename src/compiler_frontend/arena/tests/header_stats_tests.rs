@@ -2,11 +2,11 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::parse_single_file_headers;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 
@@ -91,9 +91,10 @@ fn multi_file_declarations_are_aggregated() {
             &mut span_builder,
         )
         .expect("source should tokenize");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         prepare_file_from_tokens(
             owner,
+            lexed.logical_path,
             lexed.path_syntax,
             &entry_path,
             &HeaderParseOptions::default(),

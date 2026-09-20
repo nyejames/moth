@@ -155,10 +155,7 @@ fn lexer_numeric_tokens_carry_checked_side_store_handles() {
         .collect::<Vec<_>>();
     assert_eq!(numeric_positions.len(), 2);
     assert_eq!(owner.numeric_literal_store().len(), 2);
-    assert_eq!(
-        owner.numeric_literal_store().owner_source(),
-        Some(source)
-    );
+    assert_eq!(owner.numeric_literal_store().owner_source(), Some(source));
     for (expected_row, token_index) in numeric_positions.iter().enumerate() {
         let token = token_at(owner, *token_index);
         let handle = token
@@ -296,10 +293,7 @@ fn canonical_path_tokens_resolve_after_preparation_path_remap() {
     let utils_helper = path_syntax
         .try_push_for_source(
             local_paths
-                .try_intern_components(&[
-                    local_table.intern("utils"),
-                    local_table.intern("helper"),
-                ])
+                .try_intern_components(&[local_table.intern("utils"), local_table.intern("helper")])
                 .expect("test path fits"),
             source,
             LocalSpan::source_start(),
@@ -322,11 +316,7 @@ fn canonical_path_tokens_resolve_after_preparation_path_remap() {
     let owner = finish_tokens(builder);
 
     assert_eq!(
-        path_strings(
-            &global_paths,
-            path_remap.get(src_path_local),
-            &global_table
-        ),
+        path_strings(&global_paths, path_remap.get(src_path_local), &global_table),
         vec!["module.moth"]
     );
     assert_eq!(token_at(owner.as_ref(), 0).tag(), TokenTag::PATH);
@@ -386,11 +376,7 @@ fn canonical_preparing_path_remap_updates_owned_path_table() {
     let owner = finish_tokens(builder);
 
     assert_eq!(
-        path_strings(
-            &global_paths,
-            path_remap.get(source_path),
-            &global_table
-        ),
+        path_strings(&global_paths, path_remap.get(source_path), &global_table),
         vec!["module.moth"]
     );
     let path = token_at(owner.as_ref(), 0)

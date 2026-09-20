@@ -182,7 +182,6 @@ pub(crate) fn compile_project_config_file(
     } = compile_config_source(
         ConfigCompilationRequest {
             authored_path: config_path,
-            canonical_path: &canonical_config_path,
             file_id: config_file_id,
             source_code,
             style_directives: services.style_directives,

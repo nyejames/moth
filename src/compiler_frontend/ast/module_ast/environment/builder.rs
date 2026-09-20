@@ -807,16 +807,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .source_path_for_header(header)
             .expect("header body range has no prepared source-path identity")
     }
-    pub(crate) fn token_owner_parts(
+    pub(crate) fn token_owner(
         &self,
         source: SourceId,
-    ) -> Option<(
-        Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>,
-        Option<std::path::PathBuf>,
-    )> {
+    ) -> Option<Arc<crate::compiler_frontend::tokenizer::tokens::SourceTokens>> {
         self.source_token_owners
             .get(&source)
-            .map(|owner| (Arc::clone(owner.tokens()), owner.os_path_cloned()))
+            .map(|owner| Arc::clone(owner.tokens()))
     }
     /// Resolve the declaration-site generic parameter scope for one declaration.
     ///

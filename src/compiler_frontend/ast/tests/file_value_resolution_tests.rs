@@ -28,11 +28,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
 };
-use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
@@ -370,7 +370,6 @@ fn compile_fixture(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
         entry_file_id: Some(file_id_for("@page.moth")),
-        project_path_resolver: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -394,10 +393,11 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth tokenization should succeed");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
         let output = prepare_file_from_tokens(
             owner,
+            interned_path,
             path_syntax,
             &entry_path,
             &options,
@@ -431,11 +431,12 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth template tokenization should succeed");
-        let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
+        let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
 
         let mut output = prepare_moth_template_file(
             owner,
+            interned_path,
             path_syntax,
             &mut string_table,
             &mut path_fork,
@@ -458,7 +459,6 @@ fn compile_fixture(
                 source_code: source,
                 source_file: interned_path,
                 file_id: file_id_for(path),
-                canonical_os_path: None,
             },
             &mut string_table,
             &mut path_fork,
@@ -668,10 +668,11 @@ fn resolve_file_value_fixture(
         &mut span_builder,
     )
     .expect("file-value fixture should tokenize");
-    let owner = SourceTokenOwner::new(lexed.tokens, lexed.logical_path, None);
     let path_syntax = lexed.path_syntax;
+    let owner = SourceTokenOwner::new(lexed.tokens);
     let mut prepared_output = prepare_file_from_tokens(
         owner,
+        source_path,
         path_syntax,
         &source_path_buf,
         &HeaderParseOptions::default(),
@@ -740,12 +741,8 @@ fn resolve_file_value_fixture(
     let canonical_range = canonical_owner
         .full_range()
         .expect("file-value fixture should expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(
-        canonical_owner,
-        prepared_output.canonical_os_path.clone(),
-        canonical_range,
-    )
-    .expect("file-value fixture should expose an AST cursor");
+    let mut cursor = AstCursor::from_source_tokens(canonical_owner, canonical_range)
+        .expect("file-value fixture should expose an AST cursor");
     cursor
         .set_position(path_token_index)
         .expect("file-value fixture path position must remain in canonical range");

@@ -45,7 +45,6 @@ impl ModuleMaterialisationContext {
                     frozen_identity_handle: frozen_identity_handle.clone(),
                     source_owner: StableBodyOwner {
                         source_tokens: Arc::clone(&empty_source_owner),
-                        canonical_os_path: None,
                     },
                     token_range: empty_token_range,
                     token_sequence: None,

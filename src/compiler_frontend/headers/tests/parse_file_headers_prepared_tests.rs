@@ -72,6 +72,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let mut outputs = [prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         &file_path,
         &options,
@@ -92,19 +93,22 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("a later source span should fit");
     let resolver = span_builder.resolver();
-    let literal_span = prepared.headers.iter().find_map(|header| {
-        let mut cursor = prepared_header_body_range(&prepared, header);
-        while let Some(token) = cursor.advance() {
-            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
-                return Some(token.span());
+    let literal_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| {
+            let mut cursor = prepared_header_body_range(&prepared, header);
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    return Some(token.span());
+                }
+                if token.is_eof() {
+                    break;
+                }
             }
-            if token.is_eof() {
-                break;
-            }
-        }
-        None
-    })
-    .expect("the retained header must keep its long string literal");
+            None
+        })
+        .expect("the retained header must keep its long string literal");
     let resolved = literal_span.resolve_with(resolver);
 
     assert_eq!(
@@ -144,6 +148,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let mut outputs = [prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
@@ -155,19 +160,22 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     )
     .expect("preparation should succeed")];
     let output = &outputs[0];
-    let literal_span = output.headers.iter().find_map(|header| {
-        let mut cursor = output_header_body_range(output, header);
-        while let Some(token) = cursor.advance() {
-            if token.tag() == TokenTag::STRING_SLICE_LITERAL {
-                return Some(token.span());
+    let literal_span = output
+        .headers
+        .iter()
+        .find_map(|header| {
+            let mut cursor = output_header_body_range(output, header);
+            while let Some(token) = cursor.advance() {
+                if token.tag() == TokenTag::STRING_SLICE_LITERAL {
+                    return Some(token.span());
+                }
+                if token.is_eof() {
+                    break;
+                }
             }
-            if token.is_eof() {
-                break;
-            }
-        }
-        None
-    })
-    .expect("the function body should retain its long literal");
+            None
+        })
+        .expect("the function body should retain its long literal");
 
     let diagnostics = match prepare_header_syntax(
         &mut outputs,
@@ -352,12 +360,16 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     .expect("source should tokenize");
     let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let long_span = {
-        let range = owner.full_range().expect("canonical source range should fit");
+        let range = owner
+            .full_range()
+            .expect("canonical source range should fit");
         let mut cursor = owner
             .cursor(range)
             .expect("canonical source cursor should fit");
         loop {
-            let token = cursor.advance().expect("source should contain a string literal");
+            let token = cursor
+                .advance()
+                .expect("source should contain a string literal");
             if token.tag() == TokenTag::STRING_SLICE_LITERAL {
                 break token.span();
             }
@@ -368,6 +380,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
 
     let error = match parse_file_headers_with_table(
         owner,
+        interned_path,
         path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
@@ -434,6 +447,7 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
     let (owner, path_syntax) = super::canonical_handoff(file_tokens);
     let output = prepare_file_from_tokens(
         owner,
+        interned_path,
         path_syntax,
         &file_path,
         &HeaderParseOptions::default(),
