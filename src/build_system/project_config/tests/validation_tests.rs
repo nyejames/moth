@@ -643,9 +643,11 @@ fn validate_and_apply_with_surface(
                 span: None,
                 name_span: None,
                 direct_field_spans: Vec::new(),
+                direct_field_dependencies: Vec::new(),
             })
             .collect(),
         resolution_records: Vec::new(),
+        project_field_dependencies: Vec::new(),
     };
     let mut config = Config::new(PathBuf::from("project"));
 
@@ -927,8 +929,10 @@ fn rejects_grouped_project_entry_root_symlink_outside_the_project() {
             span: None,
             name_span: None,
             direct_field_spans: Vec::new(),
+            direct_field_dependencies: Vec::new(),
         }],
         resolution_records: Vec::new(),
+        project_field_dependencies: Vec::new(),
     };
     let mut config = Config::new(root.clone());
     let surface = BuilderSurface::with_mandatory_core();
@@ -967,8 +971,10 @@ fn rejects_grouped_project_entry_root_that_is_a_regular_file() {
             span: None,
             name_span: None,
             direct_field_spans: Vec::new(),
+            direct_field_dependencies: Vec::new(),
         }],
         resolution_records: Vec::new(),
+        project_field_dependencies: Vec::new(),
     };
     let mut config = Config::new(root);
     let surface = BuilderSurface::with_mandatory_core();
@@ -1168,6 +1174,58 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
     assert_eq!(config.html_section.origin.as_deref(), Some("/docs"));
     assert_eq!(config.html_section.html_lang.as_deref(), Some("en-GB"));
     assert_eq!(config.html_section.dev_output.as_deref(), Some("site/dev"));
+}
+
+#[test]
+fn preserves_project_shape_diagnostic_after_dependency_projection() {
+    let mut string_table = StringTable::new();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code: "project #= \"docs\"\n",
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .result
+    .expect("a non-record project declaration should reach schema validation");
+    let project_span = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .and_then(|declaration| declaration.span);
+
+    let mut config = Config::new(PathBuf::from("project"));
+    let errors = apply_result(validate_and_apply_config_declarations(
+        &mut config,
+        &compiled,
+        &surface.config_schemas,
+        &mut string_table,
+    ))
+    .expect_err("a non-record project declaration must be rejected by schema validation");
+    let diagnostic = errors
+        .first()
+        .expect("the shape diagnostic should be present");
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::InvalidConfigValueShape { .. },
+            ..
+        }
+    ));
+    assert_eq!(diagnostic.primary_span, project_span);
 }
 
 // -------------------------

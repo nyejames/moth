@@ -66,6 +66,7 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
     parse_expectation_for_type_id,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Body-local declaration parsing shares the AST body error lane.
 ///
@@ -656,6 +657,24 @@ pub fn resolve_declaration_syntax(
             Some(context),
         )?
     };
+    // Declaration-boundary config bootstrap permits required and optional contracts to omit `=`.
+    // The config owner validates the contract and supplies a provider/default before the ordinary
+    // constant fold; do not force a second initializer parser or invent a placeholder value here.
+    if config_resolution_context
+        && declaration_syntax.config_qualifier.is_some()
+        && declaration_syntax.initializer_range.is_none()
+    {
+        return Ok(Declaration {
+            id: qualified_name,
+            value: Expression::no_value(
+                declaration_syntax.span,
+                DataType::Inferred,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
+            config_qualifier,
+        });
+    }
     if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
         let name = path_fork.component(qualified_name).ok_or_else(|| {
             CompilerError::compiler_error(
@@ -838,7 +857,12 @@ pub fn resolve_declaration_syntax(
                 create_expression_with_trailing_newline_policy(input)?
             };
 
-            if let Some(declared_type_id) = declared_type_id {
+            if config_resolution_context && declaration_syntax.config_qualifier.is_some() {
+                // Config bootstrap validates the authored fallback itself. Do not let the
+                // declaration's explicit annotation coerce or reject the fallback first, because
+                // an explicit provider must not mask a malformed authored default.
+                expression
+            } else if let Some(declared_type_id) = declared_type_id {
                 // This is an explicit typed boundary: apply ordinary contextual coercions in
                 // one shared path.
                 coerce_expression_to_explicit_type_boundary(

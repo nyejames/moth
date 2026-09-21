@@ -67,6 +67,7 @@ pub fn load_project_config(
         // next frontend invocation, even when the missing file is fatal for a directory project.
         config.project_config_loaded = false;
         config.config_resolution_records.clear();
+        config.project_field_config_dependencies.clear();
         config.extra_project_fields.clear();
         if config.entry_dir.is_dir() {
             return Err(CompilerMessages::from_diagnostic(
@@ -117,6 +118,7 @@ pub(crate) fn compile_project_config_file(
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
+    config.project_field_config_dependencies.clear();
     config.extra_project_fields.clear();
     config.setting_spans.clear();
     config.html_section = crate::projects::settings::HtmlSectionConfig::default();
@@ -210,8 +212,11 @@ pub(crate) fn compile_project_config_file(
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let (compiled_config, validated_output_settings) = validated_config?;
-    // Retain provenance until the build boundary projects source providers and `@project`.
+
+    // Retain compiler-owned provenance until the build boundary projects source providers,
+    // receiving fields and the private input-contract records.
     config.config_resolution_records = compiled_config.resolution_records;
+    config.project_field_config_dependencies = compiled_config.project_field_dependencies;
     config.project_config_loaded = true;
     Ok(validated_output_settings)
 }

@@ -36,7 +36,12 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-/// Resolve direct-project `#Config of T` field metadata before the ordinary const store fold.
+/// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
+///
+/// Top-level declarations are the bootstrap owner. A grouped project field may still carry the
+/// legacy qualifier until live inputs migrate, but the declaration-boundary path records its
+/// input contract separately and only records a receiving project field when a folded field
+/// depends on that input.
 pub(super) fn resolve_direct_project_config_qualifiers(
     declaration: &mut Declaration,
     scope_context: &ScopeContext,
@@ -45,21 +50,184 @@ pub(super) fn resolve_direct_project_config_qualifiers(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    let declaration_name = path_fork.component(declaration.id);
     if let Some(qualifier) = declaration.config_qualifier.take() {
-        return Err(config_expression_error(
-            path_fork.component(declaration.id),
-            InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
-            qualifier.qualifier_span,
-        ));
+        let Some(declaration_name) = declaration_name else {
+            return Err(config_expression_error(
+                None,
+                InvalidConfigReason::ConfigContractNameInvalid,
+                qualifier.qualifier_span,
+            ));
+        };
+        let declaration_text = string_table.resolve(declaration_name).to_owned();
+        let input_name = BuildInputName::new(&declaration_text).map_err(|_| {
+            config_expression_error(
+                Some(declaration_name),
+                InvalidConfigReason::ConfigContractNameInvalid,
+                qualifier.qualifier_span,
+            )
+        })?;
+        let Some(contract) = build_input_type_from_parsed(&qualifier.type_annotation) else {
+            return Err(config_expression_error(
+                Some(declaration_name),
+                InvalidConfigReason::ConfigQualifierUnsupportedType,
+                parsed_type_span(&qualifier.type_annotation),
+            ));
+        };
+        let authored_default = normalize_config_default(
+            declaration_name,
+            &declaration.value,
+            qualifier.default_none,
+            contract,
+            scope_context,
+            type_interner.environment(),
+            string_table,
+        )?;
+        let (contract_required, contract_default) = match &authored_default {
+            AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
+            AuthoredConfigDefault::None { .. } => (false, None),
+            AuthoredConfigDefault::Value { value, .. } => (false, Some(value.clone())),
+        };
+        let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
+            Some((
+                entry.value(),
+                BuildConfigValueOrigin::ExplicitInput,
+                Some(entry.location().clone()),
+                build_config_input_argument_index(entry.location()),
+            ))
+        } else {
+            services
+                .builder_global(&input_name)
+                .map(|value| (value, BuildConfigValueOrigin::BuilderGlobal, None, None))
+        };
+
+        if let Some((value, origin, value_location, argument_index)) = configured_value {
+            if !contract.accepts_primitive(value.primitive_type()) {
+                return Err(config_input_type_mismatch(
+                    Some(declaration_name),
+                    value.primitive_type().name(),
+                    contract,
+                    qualifier.qualifier_span,
+                    argument_index,
+                    string_table,
+                ));
+            }
+            declaration.value =
+                expression_for_build_value(value, contract, None, type_interner, string_table);
+            services.record(config_resolution_record(
+                declaration_name,
+                &declaration_text,
+                input_name.clone(),
+                None,
+                contract,
+                contract_required,
+                contract_default.clone(),
+                Some(value.clone()),
+                origin,
+                qualifier.qualifier_span,
+                value_location,
+            ));
+        } else {
+            match authored_default {
+                AuthoredConfigDefault::Missing => {
+                    if !contract.is_optional() {
+                        return Err(config_expression_error(
+                            Some(declaration_name),
+                            InvalidConfigReason::MissingConfigInput,
+                            qualifier.qualifier_span,
+                        ));
+                    }
+                    let value_span = declaration.value.span;
+                    declaration.value = option_none_expression(contract, value_span, type_interner);
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
+                        None,
+                        contract,
+                        contract_required,
+                        contract_default.clone(),
+                        None,
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        None,
+                    ));
+                }
+                AuthoredConfigDefault::None { span } => {
+                    if matches!(declaration.value.kind, ExpressionKind::NoValue) {
+                        declaration.value = option_none_expression(contract, span, type_interner);
+                    }
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
+                        None,
+                        contract,
+                        contract_required,
+                        contract_default.clone(),
+                        None,
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        span.map(BuildConfigValueLocation::Source),
+                    ));
+                }
+                AuthoredConfigDefault::Value {
+                    value,
+                    span,
+                    expression_is_optional,
+                } => {
+                    if contract.is_optional() && !expression_is_optional {
+                        let inner = std::mem::replace(
+                            &mut declaration.value,
+                            Expression::no_value(
+                                qualifier.qualifier_span,
+                                DataType::Inferred,
+                                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
+                            ),
+                        );
+                        declaration.value =
+                            expression_for_optional_default(inner, contract, type_interner);
+                    }
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
+                        None,
+                        contract,
+                        contract_required,
+                        contract_default,
+                        Some(value),
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        span.map(BuildConfigValueLocation::Source),
+                    ));
+                }
+            }
+        }
+        declaration.value.synthetic_interface_provenance =
+            declaration.value.synthetic_interface_provenance.union(
+                &SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+                    SyntheticInterfaceClass::ProjectContext,
+                    "source-config",
+                    input_name.as_str(),
+                )),
+            );
+        services.record_input_provenance(
+            input_name.clone(),
+            declaration.value.synthetic_interface_provenance.clone(),
+        );
+        services.record_declaration_dependencies(declaration.id, vec![input_name]);
+        return Ok(());
     }
 
-    let is_project = path_fork
-        .component(declaration.id)
-        .is_some_and(|name| string_table.resolve(name) == "project");
+    let is_project = declaration_name.is_some_and(|name| string_table.resolve(name) == "project");
     let ExpressionKind::AnonymousConstRecord { fields } = &mut declaration.value.kind else {
+        let dependencies = expression_dependencies(&declaration.value, services);
+        services.record_declaration_dependencies(declaration.id, dependencies);
         return Ok(());
     };
 
+    let mut declaration_dependencies = Vec::new();
     for field in fields {
         let field_name = path_fork.component(field.id);
         if let Some(qualifier) = field.config_qualifier.take() {
@@ -121,7 +289,6 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                 type_interner.environment(),
                 string_table,
             )?;
-            let qualifier_span = qualifier.qualifier_span;
             let (contract_required, contract_default) = match &authored_default {
                 AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
                 AuthoredConfigDefault::None { .. } => (false, None),
@@ -146,7 +313,7 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                         Some(field_name),
                         value.primitive_type().name(),
                         contract,
-                        qualifier_span,
+                        qualifier.qualifier_span,
                         argument_index,
                         string_table,
                     ));
@@ -156,12 +323,14 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                 services.record(config_resolution_record(
                     field_name,
                     &field_text,
+                    input_name.clone(),
+                    Some(field_name),
                     contract,
                     contract_required,
                     contract_default.clone(),
                     Some(value.clone()),
                     origin,
-                    qualifier_span,
+                    qualifier.qualifier_span,
                     value_location,
                 ));
             } else {
@@ -171,7 +340,7 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                             return Err(config_expression_error(
                                 Some(field_name),
                                 InvalidConfigReason::MissingConfigInput,
-                                qualifier_span,
+                                qualifier.qualifier_span,
                             ));
                         }
                         let value_span = field.value.span;
@@ -179,12 +348,14 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                         services.record(config_resolution_record(
                             field_name,
                             &field_text,
+                            input_name.clone(),
+                            Some(field_name),
                             contract,
                             contract_required,
                             contract_default.clone(),
                             None,
                             BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
+                            qualifier.qualifier_span,
                             None,
                         ));
                     }
@@ -195,12 +366,14 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                         services.record(config_resolution_record(
                             field_name,
                             &field_text,
+                            input_name.clone(),
+                            Some(field_name),
                             contract,
                             contract_required,
                             contract_default.clone(),
                             None,
                             BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
+                            qualifier.qualifier_span,
                             span.map(BuildConfigValueLocation::Source),
                         ));
                     }
@@ -213,7 +386,7 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                             let inner = std::mem::replace(
                                 &mut field.value,
                                 Expression::no_value(
-                                    qualifier_span,
+                                    qualifier.qualifier_span,
                                     DataType::Inferred,
                                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                                 ),
@@ -224,12 +397,14 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                         services.record(config_resolution_record(
                             field_name,
                             &field_text,
+                            input_name.clone(),
+                            Some(field_name),
                             contract,
                             contract_required,
                             contract_default,
                             Some(value),
                             BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
+                            qualifier.qualifier_span,
                             span.map(BuildConfigValueLocation::Source),
                         ));
                     }
@@ -243,9 +418,108 @@ pub(super) fn resolve_direct_project_config_qualifiers(
                         field_text,
                     )),
                 );
+            continue;
+        }
+
+        let dependencies = expression_dependencies(&field.value, services);
+        declaration_dependencies.extend(dependencies.iter().cloned());
+        if is_project && !dependencies.is_empty() {
+            let Some(field_name) = field_name else {
+                return Err(config_expression_error(
+                    None,
+                    InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
+                    field.value.span,
+                ));
+            };
+            let field_text = string_table.resolve(field_name);
+            if services.project_field_policy(field_text) != ProjectFieldConfigPolicy::Configurable {
+                return Err(config_expression_error(
+                    Some(field_name),
+                    InvalidConfigReason::ConfigQualifierFixedField,
+                    field.value.span,
+                ));
+            }
+            services.record_project_field_dependency(field_name, dependencies.clone());
+        }
+        services.record_declaration_dependencies(field.id, dependencies);
+    }
+    declaration_dependencies.sort();
+    declaration_dependencies.dedup();
+    services.record_declaration_dependencies(declaration.id, declaration_dependencies);
+    Ok(())
+}
+
+fn expression_dependencies(
+    expression: &Expression,
+    services: &ConfigResolutionServices,
+) -> Vec<BuildInputName> {
+    fn visit(
+        expression: &Expression,
+        services: &ConfigResolutionServices,
+        dependencies: &mut Vec<BuildInputName>,
+    ) {
+        match &expression.kind {
+            ExpressionKind::Reference(path) => {
+                dependencies.extend(services.declaration_dependencies(*path));
+            }
+            ExpressionKind::FieldAccess { base, .. }
+            | ExpressionKind::OptionPropagation { value: base }
+            | ExpressionKind::Coerced { value: base, .. }
+            | ExpressionKind::HandledFallibleExpression { value: base, .. } => {
+                visit(base, services, dependencies);
+            }
+            ExpressionKind::Copy(place) => visit_place(place, services, dependencies),
+            ExpressionKind::Collection(values) => {
+                for value in values {
+                    visit(value, services, dependencies);
+                }
+            }
+            ExpressionKind::Range(start, end) => {
+                visit(start, services, dependencies);
+                visit(end, services, dependencies);
+            }
+            ExpressionKind::AnonymousConstRecord { fields }
+            | ExpressionKind::StructInstance(fields)
+            | ExpressionKind::ChoiceConstruct { fields, .. } => {
+                for field in fields {
+                    visit(&field.value, services, dependencies);
+                }
+            }
+            ExpressionKind::Runtime(rpn) => {
+                for item in &rpn.items {
+                    if let crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem::Operand(
+                        operand,
+                    ) = item
+                    {
+                        visit(operand, services, dependencies);
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    Ok(())
+
+    fn visit_place(
+        place: &crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpression,
+        services: &ConfigResolutionServices,
+        dependencies: &mut Vec<BuildInputName>,
+    ) {
+        match &place.kind {
+            crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionKind::Local(
+                path,
+            ) => dependencies.extend(services.declaration_dependencies(*path)),
+            crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionKind::Field {
+                base,
+                ..
+            } => visit_place(base, services, dependencies),
+        }
+    }
+
+    let mut dependencies = Vec::new();
+    visit(expression, services, &mut dependencies);
+    dependencies.sort();
+    dependencies.dedup();
+    dependencies
 }
 
 /// A direct project's authored default after config-specific primitive validation.
@@ -336,6 +610,8 @@ fn normalize_config_default(
 fn config_resolution_record(
     field_name: StringId,
     field_text: &str,
+    input_name: BuildInputName,
+    project_field_name: Option<StringId>,
     contract: BuildInputType,
     required: bool,
     default: Option<PrimitiveBuildValue>,
@@ -347,6 +623,8 @@ fn config_resolution_record(
     let fingerprint = build_config_fingerprint(field_text, contract, value.as_ref());
     ConfigResolutionRecord {
         field_name,
+        input_name,
+        project_field_name,
         contract,
         required,
         default,

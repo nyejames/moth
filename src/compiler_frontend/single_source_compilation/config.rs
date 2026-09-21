@@ -15,7 +15,7 @@
 //! `config.moth` accepts — and the authored key-name spans config diagnostics underline. Config
 //! key schema and the application of folded values to project settings stay build-owned.
 
-use crate::builder_surface::config_schema::ProjectFieldConfigPolicies;
+use crate::builder_surface::config_schema::{ProjectFieldConfigPolicies, ProjectFieldConfigPolicy};
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
@@ -24,7 +24,8 @@ use crate::compiler_frontend::ast::const_values::store::{
 };
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::build_config::{
-    BuildConfigInputSet, BuilderConfigGlobalSet, ConfigResolutionRecord, ConfigResolutionServices,
+    BuildConfigInputSet, BuildConfigProjectFieldDependency, BuildInputName, BuilderConfigGlobalSet,
+    ConfigResolutionRecord, ConfigResolutionServices, FoldedConfigProjectFieldDependency,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
@@ -84,14 +85,18 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     /// Builder-schema policy for direct grouped-project fields.
     pub(crate) project_field_config_policies: ProjectFieldConfigPolicies,
 }
+
 /// The folded config source a caller validates and applies.
 pub(crate) struct CompiledConfigSource {
     /// One owned folded declaration per authored top-level compile-time constant, in the
     /// declaration-table order the module store produces.
     pub(crate) declarations: Vec<FoldedConfigDeclaration>,
-    /// Direct-project qualifier resolution facts retained for later compiler phases.
+    /// Direct-project qualifier and declaration-owned bootstrap resolution facts retained for
+    /// later compiler phases.
     #[allow(dead_code)]
     pub(crate) resolution_records: Vec<ConfigResolutionRecord>,
+    /// Receiving project fields whose folded values depend on declaration-owned inputs.
+    pub(crate) project_field_dependencies: Vec<FoldedConfigProjectFieldDependency>,
 }
 
 /// The semantic config result plus the source-local span owner produced while compiling it.
@@ -116,6 +121,7 @@ pub(crate) struct FoldedConfigDeclaration {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) name_span: Option<SourceSpan>,
     pub(crate) direct_field_spans: Vec<Option<SourceSpan>>,
+    pub(crate) direct_field_dependencies: Vec<Vec<BuildInputName>>,
 }
 
 /// Compile one authored `config.moth` to owned folded declarations and retain its source spans.
@@ -332,8 +338,6 @@ fn compile_prepared_config_source(
         ));
     }
 
-    // Project every authored top-level folded constant into the owned folded-value vocabulary
-    // while the donor-local type environment and string table are still in scope.
     let declarations = project_authored_config_declarations(
         &ast,
         authored_scope,
@@ -341,12 +345,124 @@ fn compile_prepared_config_source(
         request.binding_packages,
         string_table,
         path_fork,
+        &config_resolution,
+    )?;
+    let project_field_dependencies = project_config_field_dependencies(
+        &declarations,
+        config_resolution.take_project_field_dependencies(),
+        string_table,
     )?;
 
     Ok(CompiledConfigSource {
         declarations,
         resolution_records: config_resolution.take_records(),
+        project_field_dependencies,
     })
+}
+/// Pair retained dependency identities with the already projected folded project fields.
+///
+/// The compiler service owns this join while field type identities, values and spans remain
+/// available. Build validation receives only these owned records.
+fn project_config_field_dependencies(
+    declarations: &[FoldedConfigDeclaration],
+    dependencies: Vec<BuildConfigProjectFieldDependency>,
+    string_table: &mut StringTable,
+) -> Result<Vec<FoldedConfigProjectFieldDependency>, CompilerMessages> {
+    let mut dependencies = dependencies;
+    let Some(project) = declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+    else {
+        if dependencies.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(CompilerMessages::from_error(
+            CompilerError::compiler_error(
+                "config project-field dependency was recorded without a project declaration",
+            ),
+            string_table.clone(),
+        ));
+    };
+    let (fields, fallback_dependencies) = match &project.value {
+        PublicFoldedValue::Record(fields) => {
+            let fallback_dependencies = project
+                .direct_field_dependencies
+                .iter()
+                .enumerate()
+                .filter(|(_, names)| !names.is_empty())
+                .filter_map(|(index, names)| {
+                    fields
+                        .get(index)
+                        .map(|field| BuildConfigProjectFieldDependency {
+                            field_name: string_table.intern(&field.name),
+                            input_names: names.clone(),
+                        })
+                })
+                .collect::<Vec<_>>();
+            (fields, fallback_dependencies)
+        }
+        _ if dependencies.is_empty()
+            && project
+                .direct_field_dependencies
+                .iter()
+                .all(|names| names.is_empty()) =>
+        {
+            return Ok(Vec::new());
+        }
+        _ => {
+            return Err(CompilerMessages::from_error(
+                CompilerError::compiler_error(
+                    "config project-field dependency was recorded for a non-record project value",
+                ),
+                string_table.clone(),
+            ));
+        }
+    };
+
+    for fallback in fallback_dependencies {
+        if let Some(existing) = dependencies
+            .iter_mut()
+            .find(|dependency| dependency.field_name == fallback.field_name)
+        {
+            existing.input_names.extend(fallback.input_names);
+            existing.input_names.sort();
+            existing.input_names.dedup();
+        } else {
+            dependencies.push(fallback);
+        }
+    }
+    if dependencies.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut projected = Vec::with_capacity(dependencies.len());
+    for dependency in dependencies {
+        let field_name = string_table.resolve(dependency.field_name);
+        let Some((field_index, field)) = fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.name == field_name)
+        else {
+            return Err(CompilerMessages::from_error(
+                CompilerError::compiler_error(format!(
+                    "config dependency field '{field_name}' was absent from folded project value",
+                )),
+                string_table.clone(),
+            ));
+        };
+        projected.push(FoldedConfigProjectFieldDependency {
+            field_name: dependency.field_name,
+            input_names: dependency.input_names,
+            type_identity: field.type_identity.clone(),
+            value: field.value.clone(),
+            span: project
+                .direct_field_spans
+                .get(field_index)
+                .copied()
+                .flatten(),
+        });
+    }
+    Ok(projected)
 }
 
 // -------------------------
@@ -473,8 +589,9 @@ fn project_authored_config_declarations(
     authored_scope: PathId,
     authored_key_name_provenance: &HashMap<PathId, Option<SourceSpan>>,
     binding_packages: &ExternalPackageRegistry,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
     path_fork: &PathInternerFork,
+    config_resolution: &ConfigResolutionServices,
 ) -> Result<Vec<FoldedConfigDeclaration>, CompilerMessages> {
     let nominal_origins = ConfigNominalOriginResolver {
         type_environment: &ast.type_environment,
@@ -529,6 +646,34 @@ fn project_authored_config_declarations(
                 string_table.clone(),
             ));
         }
+        let direct_field_dependencies =
+            project_direct_field_dependencies(&ast.const_values, value_id, config_resolution)
+                .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        if string_table.resolve(name) == "project"
+            && let PublicFoldedValue::Record(fields) = &value
+        {
+            for (index, dependencies) in direct_field_dependencies.iter().enumerate() {
+                if dependencies.is_empty() {
+                    continue;
+                }
+                let Some(field) = fields.get(index) else {
+                    continue;
+                };
+                if config_resolution.project_field_policy(&field.name)
+                    == ProjectFieldConfigPolicy::FixedOnly
+                {
+                    let field_name = string_table.intern(&field.name);
+                    return Err(CompilerMessages::from_diagnostic(
+                        config_diagnostic(
+                            Some(field_name),
+                            InvalidConfigReason::ConfigQualifierFixedField,
+                            direct_field_spans.get(index).copied().flatten(),
+                        ),
+                        string_table.clone(),
+                    ));
+                }
+            }
+        }
 
         let name_span = authored_key_name_provenance
             .get(path)
@@ -542,6 +687,7 @@ fn project_authored_config_declarations(
             span: metadata.span,
             name_span,
             direct_field_spans,
+            direct_field_dependencies,
         });
     }
 
@@ -573,6 +719,36 @@ fn project_direct_field_spans(
             project_direct_field_spans(const_values, *inner)
         }
 
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn project_direct_field_dependencies(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    config_resolution: &ConfigResolutionServices,
+) -> Result<Vec<Vec<BuildInputName>>, CompilerError> {
+    let Some(payload) = const_values.payload(value_id) else {
+        return Err(CompilerError::compiler_error(
+            "config field-dependency projection: missing const-store value",
+        ));
+    };
+    match payload {
+        ConstValuePayload::Record(fields) => Ok(fields
+            .iter()
+            .map(|field| {
+                const_values
+                    .metadata(field.value)
+                    .map(|metadata| {
+                        config_resolution
+                            .input_names_for_provenance(&metadata.synthetic_interface_provenance)
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()),
+        ConstValuePayload::OptionSome(inner) | ConstValuePayload::Coerced(inner) => {
+            project_direct_field_dependencies(const_values, *inner, config_resolution)
+        }
         _ => Ok(Vec::new()),
     }
 }

@@ -23,9 +23,10 @@
 //! resolution phases that produce them.
 //!
 
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
-use crate::compiler_frontend::folded_value::FiniteFloat;
+use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
@@ -33,12 +34,13 @@ use crate::compiler_frontend::numeric_text::parse::{
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -771,25 +773,53 @@ fn fingerprint_feed_string(hash: &mut u64, value: &str) {
     fingerprint_feed_u64(hash, value.len() as u64);
     fingerprint_feed(hash, value.as_bytes());
 }
-
-/// Provenance retained for one resolved direct-project `#Config` field.
+/// Provenance retained for one resolved direct-project `#Config` field or declaration-owned
+/// bootstrap input.
+///
+/// A declaration-owned input and the project field that receives it are separate identities.
+/// `input_name` is the contract used by command/provider resolution; `project_field_name` is
+/// present only for the legacy direct-field form. Declaration-boundary bootstrap records leave it
+/// absent, and the folded project-field dependency handoff retains the receiving field separately.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConfigResolutionRecord {
     pub(crate) field_name: StringId,
+    pub(crate) input_name: BuildInputName,
+    pub(crate) project_field_name: Option<StringId>,
     pub(crate) contract: BuildInputType,
-    /// Whether the authored direct-project contract had no satisfiable value by default.
+    /// Whether the authored contract had no satisfiable value by default.
     ///
     /// This is retained separately from the selected value: explicit inputs and builder globals
     /// replace the authored default, but boundary compatibility still compares the original
     /// required/default contract facts with source declarations.
     pub(crate) required: bool,
-    /// The normalized authored default, if the direct-project contract declared one.
+    /// The normalized authored default, if the contract declared one.
     pub(crate) default: Option<PrimitiveBuildValue>,
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
     pub(crate) qualifier_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
+}
+
+/// A folded project-field dependency on one or more declaration-owned config inputs.
+///
+/// This is intentionally a narrow handoff fact. The compiler records dependencies while the AST
+/// still owns declaration paths; the config service later pairs this identity with the owned folded
+/// field value. Build code consumes the finished record and never walks AST values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct BuildConfigProjectFieldDependency {
+    pub(crate) field_name: StringId,
+    pub(crate) input_names: Vec<BuildInputName>,
+}
+
+/// Folded value paired with the receiving project field at the compiler/build boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FoldedConfigProjectFieldDependency {
+    pub(crate) field_name: StringId,
+    pub(crate) input_names: Vec<BuildInputName>,
+    pub(crate) type_identity: CanonicalTypeIdentity,
+    pub(crate) value: PublicFoldedValue,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Compiler-owned inputs used while config constants are folded.
@@ -803,6 +833,14 @@ pub(crate) struct ConfigResolutionServices {
     builder_globals: BuilderConfigGlobalSet,
     project_field_policies: crate::builder_surface::config_schema::ProjectFieldConfigPolicies,
     records: RefCell<Vec<ConfigResolutionRecord>>,
+    declaration_dependencies: RefCell<FxHashMap<PathId, Vec<BuildInputName>>>,
+    project_field_dependencies: RefCell<Vec<BuildConfigProjectFieldDependency>>,
+    input_provenances: RefCell<
+        FxHashMap<
+            BuildInputName,
+            crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+        >,
+    >,
 }
 
 impl ConfigResolutionServices {
@@ -816,6 +854,9 @@ impl ConfigResolutionServices {
             builder_globals: builder_globals.clone(),
             project_field_policies,
             records: RefCell::new(Vec::new()),
+            declaration_dependencies: RefCell::new(FxHashMap::default()),
+            project_field_dependencies: RefCell::new(Vec::new()),
+            input_provenances: RefCell::new(FxHashMap::default()),
         })
     }
 
@@ -843,6 +884,80 @@ impl ConfigResolutionServices {
 
     pub(crate) fn take_records(&self) -> Vec<ConfigResolutionRecord> {
         std::mem::take(&mut *self.records.borrow_mut())
+    }
+
+    /// Publish dependency names for one declaration or record field after its initializer is
+    /// parsed. Source order guarantees every referenced declaration is already in this map.
+    pub(crate) fn record_declaration_dependencies(
+        &self,
+        declaration: PathId,
+        mut input_names: Vec<BuildInputName>,
+    ) {
+        input_names.sort();
+        input_names.dedup();
+        self.declaration_dependencies
+            .borrow_mut()
+            .insert(declaration, input_names);
+    }
+
+    pub(crate) fn declaration_dependencies(&self, declaration: PathId) -> Vec<BuildInputName> {
+        self.declaration_dependencies
+            .borrow()
+            .get(&declaration)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn record_project_field_dependency(
+        &self,
+        field_name: StringId,
+        mut input_names: Vec<BuildInputName>,
+    ) {
+        input_names.sort();
+        input_names.dedup();
+        if input_names.is_empty() {
+            return;
+        }
+        self.project_field_dependencies
+            .borrow_mut()
+            .push(BuildConfigProjectFieldDependency {
+                field_name,
+                input_names,
+            });
+    }
+
+    pub(crate) fn take_project_field_dependencies(&self) -> Vec<BuildConfigProjectFieldDependency> {
+        std::mem::take(&mut *self.project_field_dependencies.borrow_mut())
+    }
+
+    pub(crate) fn record_input_provenance(
+        &self,
+        input_name: BuildInputName,
+        provenance: crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+    ) {
+        self.input_provenances
+            .borrow_mut()
+            .insert(input_name, provenance);
+    }
+
+    /// Recover every declaration-owned input represented in an aggregate folded provenance.
+    ///
+    /// Each retained input provenance is a subset of the folded field provenance when that input
+    /// contributed to the value. Sort the result because the provenance map is hash-backed.
+    pub(crate) fn input_names_for_provenance(
+        &self,
+        provenance: &crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+    ) -> Vec<BuildInputName> {
+        let mut names = self
+            .input_provenances
+            .borrow()
+            .iter()
+            .filter(|(_, input_provenance)| input_provenance.is_subset_of(provenance))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
     }
 }
 

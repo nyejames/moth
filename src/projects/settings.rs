@@ -4,8 +4,9 @@
 //!       configuration structures shared across the compiler and build system.
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
-
-use crate::compiler_frontend::build_config::ConfigResolutionRecord;
+use crate::compiler_frontend::build_config::{
+    ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
+};
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
@@ -135,7 +136,10 @@ pub struct Config {
     /// defaults must not become fixed project providers for source build-config contracts.
     pub(crate) project_config_loaded: bool,
     /// Direct project `#Config` resolution records retained only until build-boundary projection.
-    /// Successful build results clear this transient bootstrap handoff.
+    /// Declaration-owned config dependencies projected onto receiving project fields.
+    pub(crate) project_field_config_dependencies: Vec<FoldedConfigProjectFieldDependency>,
+    /// Direct project and declaration-owned input resolution records retained until build-boundary
+    /// provider projection.
     pub(crate) config_resolution_records: Vec<ConfigResolutionRecord>,
 }
 
@@ -153,6 +157,7 @@ impl Config {
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
+            project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }
     }
@@ -249,6 +254,7 @@ impl Default for Config {
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
+            project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }
     }

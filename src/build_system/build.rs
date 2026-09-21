@@ -1847,9 +1847,10 @@ pub fn build_project(
     } else {
         None
     };
-    // Direct-project resolution records are consumed by the semantic boundary and are not
+    // Compiler-owned config handoffs are consumed by the semantic boundary and are not
     // retained in the successful build result.
     config.config_resolution_records.clear();
+    config.project_field_config_dependencies.clear();
     let source_database = project_source_files;
     Ok(BuildResult {
         project,
