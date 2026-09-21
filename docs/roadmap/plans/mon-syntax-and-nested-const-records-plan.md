@@ -2,12 +2,11 @@
 
 ## Status
 
-- Status: queued, with the maintainer's syntax direction accepted.
-- Current slice: not started.
-- Blockers: the source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; the separate
-  post-Phase-3 compiler cleanup must be completed before this plan starts.
-- Next action: refresh the activation tree, record the baseline in working notes and start Phase 0
-  only after the cleanup prerequisite is merged.
+- Status: ready to activate, with the maintainer's syntax direction accepted.
+- Current slice: Phase 0 - refresh and inventory.
+- Blockers: none. The source/token-layout Phase 3 closeout and maintainer-managed post-Phase-3
+  cleanup are accepted on main.
+- Next action: refresh the activation tree, record the baseline in working notes and start Phase 0.
 
 ## Purpose and authority
 
@@ -27,18 +26,14 @@ Those references own source semantics. This plan owns implementation, deletion, 
 
 ## Activation gate
 
-The roadmap now names a post-Phase-3 compiler tidy-up. The maintainer will also run additional cleanup before MON without adding another roadmap item. Its absence from the roadmap is not evidence of completion. Do not invent its filename or scope, add a placeholder row or absorb its work into this plan.
+Activation is released. Source-owned fixed tokens, retained syntax ranges, the complete Phase 3 exit
+and the maintainer-managed post-Phase-3 cleanup are accepted on main.
 
-Before source edits, establish all of the following from the accepted tree and the maintainer's launch instruction:
+At Phase 0, record the full implementation SHA, worktree status and baseline results in local working
+notes. Reload the published MON contracts and refresh all implementation locators before source
+edits. Use a dedicated implementation worktree and leave any unrelated worktree unchanged.
 
-1. Source-owned fixed tokens, retained syntax ranges and the complete Phase 3 exit are accepted and merged.
-2. The listed tidy-up and any additional maintainer-managed cleanup are complete and accepted.
-3. The launch instruction releases MON implementation after those cleanups. If completion or release is unestablished, report the unmet gate and stop before code changes.
-4. The MON documentation changes are present. Reload their contracts and refresh all implementation locators after the cleanups.
-
-Record the accepted cleanup revisions, release instruction, full implementation SHA, worktree status and baseline results in local working notes. Keep a queued plan free of a preselected implementation SHA. Use a dedicated implementation worktree and leave any unrelated worktree unchanged.
-
-Complete MON before Wiring, native result slots/Core constant evaluation and explicit data-layout Phase 4 reactivation. General directives consume the delivered shared parser later. Runtime records keep their numeric-semantics prerequisite. Existing package pauses remain in force. The roadmap owns serial order, subject to the explicit additional-cleanup gate above.
+Complete MON before Wiring, native result slots/Core constant evaluation and explicit data-layout Phase 4 reactivation. General directives consume the delivered shared parser later. Runtime records keep their numeric-semantics prerequisite. Existing package pauses remain in force. The roadmap owns serial order.
 
 Use the delivered token/cursor and diagnostic APIs. Preserve exact spans and fixed layouts. This plan neither resumes later diagnostic-layout phases nor restores adapters deleted by prior work.
 

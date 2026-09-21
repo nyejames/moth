@@ -19,9 +19,8 @@ plans under this directory.
 ```text
 STATUS: paused by the user after the `@core/math` and `@core/time` batch
 CURRENT_SLICE: none - `@core/math` and `@core/time` are delivered, each with its accepted contract published in the canonical reference before implementation
-BLOCKERS: package development remains paused under the roadmap order until the post-Phase-3
-compiler cleanup, MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
-checkpoints are merged; data-layout Phase 3 closeout `4cfd9d492` is accepted.
+BLOCKERS: package development remains paused under the roadmap order until MON syntax, MON Rust
+tooling, Wiring V1 and native result-slot/Core const-eval checkpoints are merged; data-layout Phase 3 closeout `4cfd9d492` is accepted.
 NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing those
 roadmap prerequisites, then rerun the complete package gate.
 ```
@@ -39,9 +38,8 @@ own Phase 2 (`@core/text` v1) has not started, and the checkpoint order below is
 The foundation and documentation baseline is merged into main. Phase 1 and the Phase 0
 implementation are delivered there. Data-layout Phase 3 implementation and diagnostic provenance
 are complete at `6309adf6d`, with R5 closeout accepted at `4cfd9d492`; the package lane remains
-paused under the serial roadmap order for compiler cleanup, MON syntax, MON Rust tooling, Wiring
-V1 and native result slots/Core const evaluation. The roadmap previously allowed isolated package
-work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; that permission
+paused under the serial roadmap order for MON syntax, MON Rust tooling, Wiring V1 and native
+result slots/Core const evaluation. The roadmap previously allowed isolated package work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; that permission
 is spent and this is the one current schedule.
 Integrating at the accepted Phase 2 continuation checkpoint (`c17672bb5`, diagnostic correction
 plus validation-lane stabilization) is a synchronisation event only: it does not reopen the package
@@ -700,9 +698,8 @@ The checkpoint must provide:
 Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
 owners directly and remove any planning assumptions made obsolete by the implementation. This
 checkpoint alone would pause package work only while the shared result representation is actually
-changing under it; the user's current scheduling pause continues through the ordered post-Phase-3
-compiler cleanup, MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
-checkpoints. The accepted Phase 2 data-layout continuation checkpoint synchronises the branch and
+changing under it; the user's current scheduling pause continues through the ordered MON syntax,
+MON Rust tooling, Wiring V1 and native result-slot/Core const-eval checkpoints. The accepted Phase 2 data-layout continuation checkpoint synchronises the branch and
 does not reopen that pause.
 
 ### Phase 2 - `@core/text` current v1 slice

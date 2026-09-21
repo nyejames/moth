@@ -16,14 +16,14 @@ remains gated behind the roadmap sequence and explicit reactivation.
 Validation provenance: the executable Phase 3 closeout is attached to its recorded code/evidence
 checkpoint. The manually dispatched `Validate and deploy` workflow at `7afdcc4e16` is the final
 pre-merge platform evidence and is intentionally not green: native and feature-configured Clippy
-configurations report the known `clippy::result_large_err` failures caused by the current
-`CompilerMessages` representation, including `Result` call sites whose `Err` variant is at least
-128 bytes. These are deferred diagnostic-layout failures owned by later phases; this closeout does
+configurations at that checkpoint report the known `clippy::result_large_err` failures from the
+`CompilerMessages` representation recorded there, including `Result` call sites whose `Err`
+variant is at least 128 bytes. These are deferred diagnostic-layout failures owned by later phases; this closeout does
 not box `CompilerMessages` or suppress the lint. The other exercised validation families remain
 recorded as passed, and the generic scaling exception remains separately accepted without changing
 its budget. Detailed measurements and the complete disposition live in
 `benchmarks/frontend-optimization-results.md`.
-After the Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+After the Phase 3 closeout, this plan pauses through the roadmap order: MON
 syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
 const evaluation, with Phase 4 resuming only after explicit reactivation.
 
@@ -102,14 +102,13 @@ ACTIVE_PLAN:
   live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
 - Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
   are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
-- NEXT_SUBSTEP: start the separate post-Phase-3 compiler tidy-up checkpoint, then follow the
-  roadmap's MON, MON Rust tooling, Wiring and native result-slot/Core const-eval sequence before
-  explicitly reactivating Phase 4.
+- NEXT_SUBSTEP: remain paused while MON syntax, MON Rust tooling, Wiring and native
+  result-slot/Core const-eval checkpoints land, then explicitly reactivate Phase 4.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
   `4cfd9d492`.
-- Non-goals: diagnostic compact-record work; package implementation; compiler tidy-up, MON syntax
-  and nested const records, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
+- Non-goals: diagnostic compact-record work; package implementation; MON syntax and nested const
+  records, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
   implementation before their owning roadmap checkpoints; Phase 4 reactivation before the explicit
   gate.
 
@@ -131,15 +130,15 @@ CURRENT_WORKSPACE_STATE:
   inherited generic `n^1.70` exception. No budget was raised or loosened and no no-worsening claim is
   made.
 - Known deferred validation: the manual workflow at `7afdcc4e16` reports `result_large_err` in
-  current `CompilerMessages` result boundaries, including `Err` variants at least 128 bytes. The
-  later diagnostic-layout phases own the compact representation; no boxing or lint suppression is
+  the Phase 3 checkpoint's `CompilerMessages` result boundaries, including `Err` variants at least
+  128 bytes. The later diagnostic-layout phases own the compact representation; no boxing or lint suppression is
   accepted, and fresh validation is required when the next implementation checkpoint activates.
-- After Phase 3 closeout, this plan pauses through the roadmap order: compiler tidy-up, then MON
+- After Phase 3 closeout, this plan pauses through the roadmap order: MON
   syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
   evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
   reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
 
-MERGE_STATE:
+HISTORICAL_PHASE_3_MERGE_STATE:
 - branch: `diagnostic-data-layout-changes`
 - candidate HEAD: `7afdcc4e16fc72e8cb66c2139eabd4e23634f797`
 - current `main`: `b1d2d2f0edc09db8a9dca25df29d7a5669c06775`
@@ -246,7 +245,7 @@ DECISIONS_ALREADY_MADE:
 BLOCKERS / RISKS:
 
 - Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
-  `4cfd9d492`; the separate post-Phase-3 compiler tidy-up checkpoint follows closeout.
+  `4cfd9d492`; the post-Phase-3 compiler tidy-up is also accepted on main.
 - User-facing diagnostic improvement remains paused until the Phase 4 reactivation gate is satisfied.
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
 - compact-ID merge order must remain deterministic across file and module parallelism.
@@ -286,8 +285,8 @@ DOCS_IMPACT:
   exception
 - authorised docs updates for this 3H closeout: the plan, the architecture status, the compiler
   implementation overview and the benchmark evidence
-- next action: start the separate post-Phase-3 compiler tidy-up checkpoint; preserve the roadmap
-  sequence before Phase 4
+- next action: preserve the MON syntax, MON Rust tooling, Wiring and native result-slot/Core
+  const-eval sequence before Phase 4
 - `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
   Phase 1 standing-contracts section).
 
@@ -908,9 +907,9 @@ is explicitly accepted without changing the budget or making a no-worsening clai
 
 The executable closeout evidence is attached to the code/evidence checkpoint, not later
 documentation HEAD. The manual `Validate and deploy` workflow at `7afdcc4e16` is intentionally not
-green: the known `clippy::result_large_err` failures remain in current `CompilerMessages` result
-boundaries, including `Err` variants at least 128 bytes. This is deferred diagnostic-layout work
-owned by later phases. Do not box `CompilerMessages`, add lint allowances or suppress the lint.
+green: the known `clippy::result_large_err` failures remain in the Phase 3 checkpoint's
+`CompilerMessages` result boundaries, including `Err` variants at least 128 bytes. This is deferred
+diagnostic-layout work owned by later phases. Do not box `CompilerMessages`, add lint allowances or suppress the lint.
 The other exercised validation families, the owner-ledger smokes and the separate timer-erasure
 result remain recorded as evidence; none changes the non-green workflow disposition.
 
@@ -950,13 +949,12 @@ checkpoint-scoped as described above; the generic scaling exception and deferred
 ### Phase 4 reactivation gate
 
 Phase 4 starts only when all of the following are true. Until then the plan pauses after accepted
-Phase 3 through the roadmap order: compiler tidy-up, then MON syntax and nested const records, MON
-Rust tooling, Wiring V1, then native result slots and Core const evaluation.
+Phase 3 and the completed post-Phase-3 tidy-up through the roadmap order: MON syntax and nested const
+records, MON Rust tooling, Wiring V1, then native result slots and Core const evaluation.
 
-- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted compiler
-  tidy-up checkpoint, then the accepted MON syntax and nested const records checkpoint, then the
-  accepted MON Rust tooling checkpoint, then the accepted Wiring V1 checkpoint and then the accepted
-  native result-slot and Core const-eval checkpoint
+- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted MON syntax and
+  nested const records checkpoint, then the accepted MON Rust tooling checkpoint, then the accepted
+  Wiring V1 checkpoint and then the accepted native result-slot and Core const-eval checkpoint
 - [ ] re-run the owning validation gate after the rebase
 - [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments and
   generated functions as they exist after those semantic checkpoints merged

@@ -6,10 +6,10 @@ Intended repository path: `docs/roadmap/plans/wiring-v1-cleanup-and-foundations-
 
 - Status: queued, with the design interview accepted.
 - Current slice: not started.
-- Blockers: source/token-layout Phase 3 closeout is accepted at `4cfd9d492`; compiler cleanup, MON
-  syntax and MON Rust tooling checkpoints must be merged into the activation branch.
+- Blockers: MON syntax and MON Rust tooling checkpoints must be merged into the activation branch.
+  Source/token-layout Phase 3 and the post-Phase-3 compiler cleanup are already accepted on main.
 - Next action: establish the current baseline, pause the compact-diagnostics migration before Phase
-  4 and start Phase 0 below after those prerequisites are complete.
+  4 and start Phase 0 below after the remaining prerequisites are complete.
 
 ## Purpose
 
@@ -58,7 +58,7 @@ The roadmap owns ordering. Name prerequisites and resume conditions in neighbour
 Suggested entry in `docs/roadmap/roadmap.md`, placed before the separately paused diagnostics-improvement entry and accompanied by the explicit Phase 3/4 interlude note:
 
 ```markdown
-- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations-plan.md) - Queued interlude after source/token-layout Phase 3 and maintainer-selected merges, before compact-diagnostics Phase 4
+- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations-plan.md) - Queued after MON syntax and MON Rust tooling, before native result slots and compact-diagnostics Phase 4
 ```
 
 Delete this plan and its roadmap entry in the commit that completes the work. The final status and remaining deferred work belong in permanent documentation and the progress matrix.

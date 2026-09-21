@@ -24,8 +24,8 @@ NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner 
 
 The package-foundation baseline this plan waited on is merged, so the compiler-owned native
 result-slot and Core const-eval prerequisite is the only remaining blocker owned here. The umbrella
-package lane remains paused under the roadmap order for compiler cleanup, MON syntax, MON Rust
-tooling, Wiring V1 and native result slots/Core const evaluation; data-layout Phase 3 closeout
+package lane remains paused under the roadmap order for MON syntax, MON Rust tooling, Wiring V1
+and native result slots/Core const evaluation; data-layout Phase 3 closeout
 `4cfd9d492` is accepted.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a

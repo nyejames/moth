@@ -4,7 +4,7 @@
 
 - Status: queued, with the format interview accepted and the first delivery narrowed to Rust tooling.
 - Current slice: not started.
-- Blockers: the shared parenthesised MON syntax and nested const-record checkpoint must be accepted after its own required cleanup checkpoints.
+- Blockers: the shared parenthesised MON syntax and nested const-record checkpoint must be accepted.
 - Next action: establish the activation baseline and start Phase 0.
 
 ## Purpose and delivery boundary
@@ -28,7 +28,7 @@ Rust calls execute at host runtime. That is not a claim that compiled Moth progr
 
 ## Sequencing and activation
 
-The roadmap owns serial order. The required interlude is shared MON syntax, this Rust-facing MON checkpoint, Wiring, native result slots/Core constant evaluation and explicit data-layout Phase 4 reactivation. Existing package pauses and prerequisite cleanup gates remain in force.
+The roadmap owns serial order. The required interlude is shared MON syntax, this Rust-facing MON checkpoint, Wiring, native result slots/Core constant evaluation and explicit data-layout Phase 4 reactivation. Existing package pauses remain in force.
 
 V1 does not wait for general directives, runtime anonymous records, the later numeric implementation, collector-free memory or the completed Wasm backend. It neither implements those features early nor replaces their owners. Retain exact numeric data independently of whether a corresponding Moth runtime type has landed.
 
