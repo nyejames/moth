@@ -33,7 +33,7 @@ pub fn lower_hir_to_js(
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
 ) -> Result<JsModule, CompilerError> {
-    let mut emitter = JsEmitter::new(
+    let emitter = JsEmitter::new(
         hir,
         borrow_analysis,
         string_table,
@@ -116,7 +116,7 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn lower_module(&mut self) -> Result<JsModule, CompilerError> {
+    fn lower_module(mut self) -> Result<JsModule, CompilerError> {
         if let JsFunctionEmissionPolicy::Selected(selection) = &self.config.function_emission_policy
         {
             selection.validate_for_hir(self.hir)?;
@@ -169,9 +169,9 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         Ok(JsModule {
-            source: self.out.clone(),
-            function_name_by_id: self.function_name_by_id.clone(),
-            referenced_external_functions: self.referenced_external_functions.clone(),
+            source: self.out,
+            function_name_by_id: self.function_name_by_id,
+            referenced_external_functions: self.referenced_external_functions,
         })
     }
 
