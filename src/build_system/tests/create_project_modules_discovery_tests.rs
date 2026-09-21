@@ -11,7 +11,7 @@ fn discover_modules_uses_reachable_files_only() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::create_dir_all(src.join("errors")).expect("should create errors folder");
@@ -68,7 +68,7 @@ fn discover_modules_resolves_relative_child_dependencies() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -117,7 +117,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -178,7 +178,7 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -237,7 +237,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n")
@@ -328,7 +328,7 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n")
@@ -384,7 +384,7 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
     fs::create_dir_all(src.join("assets")).expect("should create assets directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -438,7 +438,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     fs::create_dir_all(&src).expect("should create source directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -514,7 +514,7 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
     fs::create_dir_all(&src).expect("should create source directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "helpers = @missing.moth\n#[:ok]\n")
@@ -565,7 +565,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
     fs::create_dir_all(&src).expect("should create source directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -628,7 +628,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     fs::create_dir_all(src.join("support")).expect("should create support module directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -708,7 +708,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     fs::create_dir_all(&support).expect("should create support module directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -793,7 +793,7 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
     fs::create_dir_all(nested.join("assets")).expect("should create nested module directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@a.moth"), "#[:ok]\n").expect("should write first root");
@@ -1156,7 +1156,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
     fs::create_dir_all(src.join("assets")).expect("should create assets directory");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "unused #= @docs/one.mtf\n#[:ok]\n")

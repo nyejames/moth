@@ -534,42 +534,18 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
 }
 
 #[test]
-fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
+fn effective_project_fields_classify_fixed_and_metadata_kinds() {
     let mut config = Config::new(PathBuf::from("/project"));
     config.project_name = "docs".to_owned();
     config.entry_root = PathBuf::from("src");
     config.project_config_loaded = true;
-
-    let mut string_table = StringTable::new();
-    let direct_contract = BuildInputType::Optional(PrimitiveBuildInputType::String);
-    let direct_value = Some(PrimitiveBuildValue::String("configured".to_owned()));
-    let direct_name = "configured";
-    let direct_field_name = string_table.intern(direct_name);
-    config
-        .config_resolution_records
-        .push(ConfigResolutionRecord {
-            field_name: direct_field_name,
-            input_name: BuildInputName::new(direct_name).expect("valid input"),
-            project_field_name: Some(direct_field_name),
-            contract: direct_contract,
-            required: false,
-            default: None,
-            value: direct_value.clone(),
-            origin: BuildConfigValueOrigin::ExplicitInput,
-            fingerprint: build_config_fingerprint(
-                direct_name,
-                direct_contract,
-                direct_value.as_ref(),
-            ),
-            qualifier_span: None,
-            value_location: None,
-        });
     config.extra_project_fields.push(ProjectMetadataField {
         name: "complex".to_owned(),
         type_identity: CanonicalTypeIdentity::AnonymousConstRecord,
         value: PublicFoldedValue::Record(Vec::new()),
         span: None,
     });
+    let mut string_table = StringTable::new();
 
     let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
         .expect("the effective project snapshot should build");
@@ -579,13 +555,13 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
             .iter()
             .map(|field| field.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["configured", "name", "entry_root", "complex"]
+        vec!["name", "entry_root", "complex"]
     );
     assert!(matches!(
         &fields[0].kind,
-        super::config_boundary::EffectiveProjectFieldKind::DirectConfig {
-            contract: BuildInputType::Optional(PrimitiveBuildInputType::String),
-            required: false,
+        super::config_boundary::EffectiveProjectFieldKind::FixedPrimitive {
+            value_type: BuildInputType::Primitive(PrimitiveBuildInputType::String),
+            required: true,
             ..
         }
     ));
@@ -599,14 +575,6 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
     ));
     assert!(matches!(
         &fields[2].kind,
-        super::config_boundary::EffectiveProjectFieldKind::FixedPrimitive {
-            value_type: BuildInputType::Primitive(PrimitiveBuildInputType::String),
-            required: true,
-            ..
-        }
-    ));
-    assert!(matches!(
-        &fields[3].kind,
         super::config_boundary::EffectiveProjectFieldKind::Metadata
     ));
 
@@ -615,12 +583,7 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
         .map(|fact| fact.name().as_str().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(fixed_names, vec!["name", "entry_root"]);
-
-    let direct_names = super::config_boundary::direct_project_contract_facts(&fields)
-        .into_iter()
-        .map(|fact| fact.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(direct_names, vec!["configured"]);
+    assert!(super::config_boundary::input_contract_facts(&fields).is_empty());
 }
 
 #[test]
@@ -640,7 +603,6 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
         .push(ConfigResolutionRecord {
             field_name: input_field_name,
             input_name: input_name.clone(),
-            project_field_name: None,
             contract: input_contract,
             required: false,
             default: input_value.clone(),
@@ -689,7 +651,7 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
         .map(|fact| fact.name().as_str().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(fixed_names, vec!["name", "entry_root"]);
-    let direct_names = super::config_boundary::direct_project_contract_facts(&fields)
+    let direct_names = super::config_boundary::input_contract_facts(&fields)
         .into_iter()
         .map(|fact| fact.name().as_str().to_owned())
         .collect::<Vec<_>>();

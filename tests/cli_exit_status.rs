@@ -57,7 +57,7 @@ fn write_directory_html_project(root: &Path, page_source: &str) {
     fs::create_dir_all(&src).expect("src should be created");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");
     fs::write(src.join("@page.moth"), page_source).expect("page source should be written");

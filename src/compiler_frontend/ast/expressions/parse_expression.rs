@@ -233,6 +233,13 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
     let mut next_number_negative = false;
     while input.token_stream.position() < input.token_stream.length() {
         let token = input.token_stream.current_tag();
+        if input.stop_at_named_entry
+            && matches!(expression.last(), Some(ExpressionRpnItem::Operand(_)))
+            && token == TokenTag::SYMBOL
+            && input.token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
+        {
+            break;
+        }
         ast_log!("Parsing expression: ", #token);
         let mut dispatch_state = ExpressionDispatchState {
             expected_type: input.expected_type,

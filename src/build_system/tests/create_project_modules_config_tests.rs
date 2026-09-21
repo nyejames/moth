@@ -9,7 +9,7 @@ fn parses_config_constant_declarations() {
 
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    template_const_loop_iteration_limit = 10001,\n|\nhtml #= |\n    page_url_style = \"trailing_slash\",\n    redirect_index_html = true,\n|\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    template_const_loop_iteration_limit = 10001,\n)\nhtml #= (\n    page_url_style = \"trailing_slash\",\n    redirect_index_html = true,\n)\n",
     )
     .expect("should write config");
 
@@ -43,12 +43,12 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
     let cases = [
         (
             "successful",
-            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
             false,
         ),
         (
             "diagnosed",
-            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    release_output = \"src/out\",\n|\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    release_output = \"src/out\",\n)\n",
             true,
         ),
     ];
@@ -133,7 +133,7 @@ fn persists_direct_project_config_resolution_records_in_live_config() {
     let config_path = root.join(settings::CONFIG_FILE_NAME);
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
+        "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
     )
     .expect("should write config");
 
@@ -154,7 +154,7 @@ fn loads_canonical_config_file_from_project_root() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::create_dir_all(root.join("src/alpha")).expect("should create first module directory");
@@ -294,7 +294,7 @@ fn loads_canonical_config_file_from_project_root() {
 
 #[test]
 fn applies_grouped_project_record_to_config_fields() {
-    // The grouped `project #= |...|` record validates against the project schema root and
+    // The grouped `project #= (...)` record validates against the project schema root and
     // applies its compiler-owned fields; open metadata is accepted and dropped.
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -303,7 +303,7 @@ fn applies_grouped_project_record_to_config_fields() {
 
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    custom_channel = \"alpha\",\n|\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    custom_channel = \"alpha\",\n)\n",
     )
     .expect("should write config");
 
@@ -328,7 +328,7 @@ fn grouped_project_record_accepts_declare_first_helper_records() {
 
     fs::write(
         &config_path,
-        "project_metadata #= |\n    channel = \"alpha\",\n|\nproject #= |\n    name = \"docs\",\n    metadata = project_metadata,\n|\n",
+        "project_metadata #= (\n    channel = \"alpha\",\n)\nproject #= (\n    name = \"docs\",\n    metadata = project_metadata,\n)\n",
     )
     .expect("should write config");
 
@@ -465,7 +465,7 @@ fn rejects_section_output_inside_or_equal_to_entry_root() {
     // authoring path.
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    release_output = \"src/out\",\n|\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    release_output = \"src/out\",\n)\n",
     )
     .expect("should write config");
 
@@ -543,7 +543,7 @@ fn parses_config_explicit_hash_binding_mode() {
 
     fs::write(
         &config_path,
-        "version #String = \"1.0\"\nproject #= |\n    name = \"docs\",\n    entry_root = \"src\",\n    version = version,\n|\n",
+        "version #String = \"1.0\"\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = version,\n)\n",
     )
     .expect("should write config");
 
@@ -595,11 +595,11 @@ fn rejects_config_named_support_type_declarations() {
     let cases = [
         (
             "struct",
-            "SupportType = |\n    value String,\n|\nproject #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "SupportType = |\n   value String,\n|\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
         ),
         (
             "choice",
-            "Mode ::\n    Ready,\n;\nproject #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "Mode ::\n    Ready,\n;\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
         ),
         (
             "alias",
@@ -807,7 +807,7 @@ fn ordinary_package_folder_does_not_collide_with_entry_root() {
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -842,7 +842,7 @@ fn accepts_config_const_record_field_projection() {
 
     fs::write(
         &config_path,
-        "Defaults #= |\n    entry_root = \"src\",\n|\n\nproject #= |\n    name = \"docs\",\n    entry_root = Defaults.entry_root,\n|\n",
+        "Defaults #= (\n    entry_root = \"src\",\n)\n\nproject #= (\n    name = \"docs\",\n    entry_root = Defaults.entry_root,\n)\n",
     )
     .expect("should write config");
 
@@ -866,7 +866,7 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@core//math sin\n#[:ok]\n")
@@ -945,7 +945,7 @@ fn accepts_folded_template_initializer_for_compile_time_config_binding() {
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
 
-    fs::write(&config_path, "project #= |\n    name = [:docs],\n|\n").expect("should write config");
+    fs::write(&config_path, "project #= (\n    name = [:docs],\n)\n").expect("should write config");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -967,7 +967,7 @@ fn accepts_config_local_reference_to_earlier_private_const() {
 
     fs::write(
         &config_path,
-        "version #= \"0.2.0\"\nproject #= |\n    name = \"docs\",\n    version = version,\n    author = version,\n|\n",
+        "version #= \"0.2.0\"\nproject #= (\n    name = \"docs\",\n    version = version,\n    author = version,\n)\n",
     )
     .expect("should write config");
 
@@ -1081,7 +1081,7 @@ fn accepts_config_scalar_private_helper() {
 
     fs::write(
         &config_path,
-        "helper #= \"src\"\nproject #= |\n    name = \"docs\",\n    entry_root = helper,\n|\n",
+        "helper #= \"src\"\nproject #= (\n    name = \"docs\",\n    entry_root = helper,\n)\n",
     )
     .expect("should write config");
 
@@ -1132,7 +1132,7 @@ fn accepts_valid_bool_config_keys() {
 
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n|\nhtml #= |\n    redirect_index_html = false,\n    html_inject_core_css = true,\n|\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    redirect_index_html = false,\n    html_inject_core_css = true,\n)\n",
     )
     .expect("should write config");
 
@@ -1154,7 +1154,7 @@ fn rejects_core_string_key_with_bool_value() {
 
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    entry_root = true,\n|\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = true,\n)\n",
     )
     .expect("should write config");
 
@@ -1183,7 +1183,7 @@ fn rejects_backend_bool_key_with_string_value() {
 
     fs::write(
         &config_path,
-        "html #= |\n    redirect_index_html = \"false\",\n|\n",
+        "html #= (\n    redirect_index_html = \"false\",\n)\n",
     )
     .expect("should write config");
 
@@ -1213,7 +1213,7 @@ fn accepts_config_local_reference_after_shape_enforcement() {
 
     fs::write(
         &config_path,
-        "version #= \"0.2.0\"\nproject #= |\n    name = \"docs\",\n    entry_root = version,\n|\n",
+        "version #= \"0.2.0\"\nproject #= (\n    name = \"docs\",\n    entry_root = version,\n)\n",
     )
     .expect("should write config");
 
@@ -1238,7 +1238,7 @@ fn detects_duplicate_top_level_config_constants() {
 
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n|\nproject #= |\n    name = \"other\",\n|\n",
+        "project #= (\n    name = \"docs\",\n)\nproject #= (\n    name = \"other\",\n)\n",
     )
     .expect("should write config");
 
@@ -1275,7 +1275,7 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
     let config_path = root.join("config.moth");
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n|\nproject #= |\n    name = \"other\",\n|\n",
+        "project #= (\n    name = \"docs\",\n)\nproject #= (\n    name = \"other\",\n)\n",
     )
     .expect("should write config");
 
@@ -1318,7 +1318,7 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     let config_path = root.join("config.moth");
     fs::write(
         &config_path,
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1344,7 +1344,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n").expect("should write lib file");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1397,7 +1397,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
         .expect("should write builder package root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1433,7 +1433,7 @@ fn entry_root_requires_at_least_one_root_entry_file() {
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

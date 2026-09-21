@@ -1440,7 +1440,7 @@ fn write_cross_module_project(
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(module_a.join("@pageA.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
@@ -1568,7 +1568,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
@@ -1631,7 +1631,7 @@ fn direct_selection_resolves_source_package_facade() {
     fs::create_dir_all(&package_root).expect("should create helper package dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");

@@ -217,7 +217,7 @@ fn frontend_benchmark_retains_source_package_warning() {
     std::fs::create_dir_all(&src).expect("should create entry root");
     std::fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");

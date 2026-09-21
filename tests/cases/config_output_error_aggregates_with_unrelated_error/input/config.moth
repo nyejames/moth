@@ -1,6 +1,6 @@
-project #= |
+project #= (
     entry_root = "src",
-|
-html #= |
+)
+html #= (
     dev_output = "../dev",
-|
+)

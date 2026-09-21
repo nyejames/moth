@@ -1,11 +1,11 @@
-project #= |
+project #= (
     name = "test_project",
     entry_root = "src",
     version = "1.0.0",
     author = "Test Author",
     license = "MIT",
-|
-html #= |
+)
+html #= (
     dev_output = "dev",
     release_output = "release",
-|
+)

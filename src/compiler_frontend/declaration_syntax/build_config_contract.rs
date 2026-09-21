@@ -3,7 +3,7 @@
 //! WHAT: parses the exact `#Config of T` qualifier into declaration metadata shared by header and
 //! AST declaration parsing.
 //! WHY: `#Config` is source syntax metadata, not a semantic type or expression category. Keeping
-//! its parser here lets source contracts and anonymous const-record fields use one grammar owner.
+//! its parser here lets declaration-owned source contracts use one grammar owner.
 
 use super::{DeclarationCursor, cursor_current_span};
 use crate::compiler_frontend::build_config::{
@@ -60,8 +60,8 @@ pub(crate) struct SourceBuildConfigContract {
 /// Convert one parsed type annotation into the build-input contract vocabulary.
 ///
 /// Only one primitive or one optional primitive is accepted. Keeping this conversion beside the
-/// qualifier grammar lets source-header preparation and direct project resolution share exactly
-/// the same type boundary.
+/// qualifier grammar lets source-header preparation and declaration-owned resolution share
+/// exactly the same type boundary.
 pub(crate) fn build_input_type_from_parsed(parsed: &ParsedTypeRef) -> Option<BuildInputType> {
     let primitive = match parsed {
         ParsedTypeRef::BuiltinString { .. } => PrimitiveBuildInputType::String,

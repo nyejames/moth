@@ -773,18 +773,14 @@ fn fingerprint_feed_string(hash: &mut u64, value: &str) {
     fingerprint_feed_u64(hash, value.len() as u64);
     fingerprint_feed(hash, value.as_bytes());
 }
-/// Provenance retained for one resolved direct-project `#Config` field or declaration-owned
-/// bootstrap input.
+/// Provenance retained for one declaration-owned bootstrap input.
 ///
-/// A declaration-owned input and the project field that receives it are separate identities.
-/// `input_name` is the contract used by command/provider resolution; `project_field_name` is
-/// present only for the legacy direct-field form. Declaration-boundary bootstrap records leave it
-/// absent, and the folded project-field dependency handoff retains the receiving field separately.
+/// The declaration name and any receiving project field remain separate identities. The input
+/// contract is published privately; a folded project-field dependency carries the receiving field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConfigResolutionRecord {
     pub(crate) field_name: StringId,
     pub(crate) input_name: BuildInputName,
-    pub(crate) project_field_name: Option<StringId>,
     pub(crate) contract: BuildInputType,
     /// Whether the authored contract had no satisfiable value by default.
     ///
@@ -825,7 +821,7 @@ pub(crate) struct FoldedConfigProjectFieldDependency {
 /// Compiler-owned inputs used while config constants are folded.
 ///
 /// The service owns resolution; this carrier only snapshots typed inputs, builder globals and the
-/// schema-derived direct-project policy. It deliberately contains no build `Config`, target or
+/// schema-derived project-field policy. It deliberately contains no build `Config`, target or
 /// platform identity.
 #[derive(Clone, Debug)]
 pub(crate) struct ConfigResolutionServices {
@@ -870,12 +866,6 @@ impl ConfigResolutionServices {
 
     pub(crate) fn project_field_policy(&self, field_name: &str) -> ProjectFieldConfigPolicy {
         self.project_field_policies.policy_for(field_name)
-    }
-    pub(crate) fn project_field_shape(
-        &self,
-        field_name: &str,
-    ) -> Option<&crate::builder_surface::config_schema::ConfigFieldShape> {
-        self.project_field_policies.shape_for(field_name)
     }
 
     pub(crate) fn record(&self, record: ConfigResolutionRecord) {

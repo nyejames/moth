@@ -2,12 +2,11 @@
 
 ## Status
 
-- Status: Phase 1 argument parsing consolidation accepted; implementation active.
-- Current slice: Phase 2A - cut over syntax and nested const values.
+- Status: Phase 2B syntax, nested-value and config cutover accepted; implementation active.
+- Current slice: Phase 3 - complete documentation and future-plan cutover.
 - Blockers: none. The source/token-layout Phase 3 closeout and maintainer-managed post-Phase-3
   cleanup are accepted on main.
-- Next action: integrate parenthesized grouping and recursive const-record construction through the
-  shared argument owner.
+- Next action: apply the remaining language, architecture and queued-plan publication edits.
 
 ## Purpose and authority
 
@@ -175,9 +174,9 @@ Exit: existing supported consumers validate on one path. Published syntax contra
 
 - [x] Integrate grouping/record classification, empty and single-field const records and recursive construction through the shared owner.
 - [x] Preserve visibility, ordering, folded projection, provenance and nominal identity. Retarget runtime deferral to the final syntax.
-- [ ] Complete the required declaration-boundary config resolution and update live configs, scaffolds, executable fixtures, embedded Rust snippets and benchmark inputs atomically.
-- [ ] Delete the displaced parser, scans, state, diagnostics and tests. Simplify the surviving declaration/parameter owners.
-- [ ] Prove the contracts in the test table below before accepting the cutover.
+- [x] Complete the required declaration-boundary config resolution and update live configs, scaffolds, executable fixtures, embedded Rust snippets and benchmark inputs atomically.
+- [x] Delete the displaced parser, scans, state, diagnostics and tests. Simplify the surviving declaration/parameter owners.
+- [x] Prove the contracts in the test table below before accepting the cutover.
 
 Exit: only final value syntax is accepted and all executable inputs use it. Named nominal construction remains explicit. Runtime records and the MON format remain deferred.
 

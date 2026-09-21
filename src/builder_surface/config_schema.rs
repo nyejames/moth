@@ -39,14 +39,12 @@ pub enum ProjectFieldConfigPolicy {
     Configurable,
 }
 
-/// Schema-derived direct-project qualifier policy passed to compiler config folding.
+/// Schema-derived direct-project configuration policy passed to compiler config folding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFieldConfigPolicies {
     by_name: std::collections::BTreeMap<&'static str, ProjectFieldConfigPolicy>,
     /// Policy applied to direct project fields that are not declared by the schema.
     unknown_policy: ProjectFieldConfigPolicy,
-    /// Value shapes for every direct project field declared by the schema.
-    shapes: std::collections::BTreeMap<&'static str, ConfigFieldShape>,
 }
 
 impl Default for ProjectFieldConfigPolicies {
@@ -54,7 +52,6 @@ impl Default for ProjectFieldConfigPolicies {
         Self {
             by_name: std::collections::BTreeMap::new(),
             unknown_policy: ProjectFieldConfigPolicy::FixedOnly,
-            shapes: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -67,16 +64,8 @@ impl ProjectFieldConfigPolicies {
             .unwrap_or(self.unknown_policy)
     }
 
-    pub(crate) fn shape_for(&self, field_name: &str) -> Option<&ConfigFieldShape> {
-        self.shapes.get(field_name)
-    }
-
     pub(crate) fn insert(&mut self, field_name: &'static str, policy: ProjectFieldConfigPolicy) {
         self.by_name.insert(field_name, policy);
-    }
-
-    fn insert_shape(&mut self, field_name: &'static str, shape: ConfigFieldShape) {
-        self.shapes.insert(field_name, shape);
     }
 }
 
@@ -326,8 +315,8 @@ impl ConfigSchema {
         &self.fields[id.0]
     }
 
-    /// Snapshot the root field policy and shape for the compiler-owned direct-project qualifier
-    /// pass. Unknown direct project metadata remains configurable; the standalone default stays
+    /// Snapshot the root field policy for compiler-owned direct-project dependency checks.
+    /// Unknown direct project metadata remains configurable; the standalone default stays
     /// conservative for callers that do not have the open builtin project schema.
     pub(crate) fn project_field_config_policies(&self) -> ProjectFieldConfigPolicies {
         let mut policies = ProjectFieldConfigPolicies {
@@ -337,7 +326,6 @@ impl ConfigSchema {
         for field_id in self.node(self.root).field_ids() {
             let field = self.field(*field_id);
             policies.insert(field.name, field.config_policy);
-            policies.insert_shape(field.name, field.shape.clone());
         }
         policies
     }

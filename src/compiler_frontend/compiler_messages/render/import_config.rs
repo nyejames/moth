@@ -79,11 +79,6 @@ pub(crate) fn invalid_config_message(
         InvalidConfigReason::ConfigQualifierFixedField => format!(
             "Project field '{key_label}' is fixed-only and cannot use `#Config`."
         ),
-        InvalidConfigReason::ConfigQualifierSchemaTypeMismatch { declared, expected } => format!(
-            "Project field '{key_label}' declares `#Config of {}` but its schema requires {}.",
-            string_table.resolve(*declared),
-            string_table.resolve(*expected)
-        ),
         InvalidConfigReason::ProjectGlobalsNameReserved => {
             "The name `project` is reserved for the explicit `@project` project-globals dependency and cannot be claimed by a module or source package.".to_owned()
         }
@@ -91,10 +86,7 @@ pub(crate) fn invalid_config_message(
             "Config field '{key_label}' must use a lower_snake_case name so it can be supplied as a build input."
         ),
         InvalidConfigReason::ConfigQualifierInvalidPlacement => {
-            "`#Config` is valid only on a top-level source compile-time declaration or a direct field of the grouped `project` record.".to_owned()
-        }
-        InvalidConfigReason::ConfigQualifierInvalidProjectPlacement => {
-            "`config.moth` permits `#Config` only on a direct field of the grouped `project` record.".to_owned()
+            "`#Config` is valid only on a top-level source compile-time declaration.".to_owned()
         }
         InvalidConfigReason::ConfigQualifierUnsupportedType => {
             "`#Config` accepts only String, Int, Float, Bool, Char and matching optional forms."

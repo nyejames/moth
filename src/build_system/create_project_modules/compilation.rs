@@ -944,8 +944,7 @@ fn compile_directory_frontend_in_premerge_lane(
             config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
-        let direct_project_facts =
-            config_boundary::direct_project_contract_facts(&effective_project_fields);
+        let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
         let project_fallback = config.setting_span("project");
         // All canonical project and source-package inventories are complete now. Prepare transient
         // jobs only after that global provider-discovery barrier so each job forks final canonical

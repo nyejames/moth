@@ -15,7 +15,7 @@
 //! Body-local `#` constants are unrelated to this session. They stay on the normal lexical
 //! `ScopeContext` built during body emission.
 
-use super::config_resolution::resolve_direct_project_config_qualifiers;
+use super::config_resolution::resolve_config_declaration;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
@@ -380,7 +380,7 @@ impl ConstantResolutionSession {
         // span left empty by synthetic content lowering.
         declaration.binding_span = header.name_span;
         if let Some(config_resolution) = &self.module_view.config_resolution {
-            resolve_direct_project_config_qualifiers(
+            resolve_config_declaration(
                 &mut declaration,
                 &scope_context,
                 &mut type_interner,

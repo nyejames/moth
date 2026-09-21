@@ -556,18 +556,18 @@ fraction_underscore #= 1_000.5
 exponent_underscore #= 1_0e6
 mixed_fraction #= 123.456e-7
 -- project modules and packages
-project #= {
+project #= (
     name = "highlight-stress",
     version = "0.1.0",
     entry_root = "src",
     builder = "html",
-}
+)
 
-config #= {
+config #= (
     theme = "dark",
     accent = "#fdbe82",
     code_font_size = "0.95rem",
-}
+)
 
 -- application entry
 start:
@@ -1202,15 +1202,15 @@ find |table {String = Int}, key String| -> Maybe Int:
 ;
 
 -- Example: nested records
-profile #= {
+profile #= (
     name = "Priya",
-    address = {
+    address = (
         street = "1 Main Street",
         city = "London",
         postcode = "N1 1AA",
-    },
+    ),
     tags = {"rust", "moth", "docs"},
-}
+)
 
 -- Example: error ladder
 run |step_name String| -> Bool:

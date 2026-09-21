@@ -2499,14 +2499,6 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
             "Each const-record parameter needs a value. Write `name = value`.",
             "AnonymousRecordFieldNotNamed",
         ),
-        (
-            CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::NestedAnonymousConstRecord,
-                span(source_path),
-            ),
-            "Declare the inner struct or record first, then use that name as a parameter value.",
-            "NestedAnonymousConstRecord",
-        ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);
 

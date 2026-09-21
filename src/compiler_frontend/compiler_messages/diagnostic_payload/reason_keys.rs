@@ -778,11 +778,9 @@ define_stable_reason_keys! {
         &InvalidConfigReason::ValueCouldNotFold => "invalid_config.value_could_not_fold",
         &InvalidConfigReason::EmptyProjectSetting => "invalid_config.empty_project_setting",
         &InvalidConfigReason::ConfigQualifierFixedField => "invalid_config.config_qualifier_fixed_field",
-        &InvalidConfigReason::ConfigQualifierSchemaTypeMismatch { .. } => "invalid_config.config_qualifier_schema_type_mismatch",
         &InvalidConfigReason::ProjectGlobalsNameReserved => "invalid_config.project_globals_name_reserved",
         &InvalidConfigReason::ConfigContractNameInvalid => "invalid_config.config_contract_name_invalid",
         &InvalidConfigReason::ConfigQualifierInvalidPlacement => "invalid_config.config_qualifier_invalid_placement",
-        &InvalidConfigReason::ConfigQualifierInvalidProjectPlacement => "invalid_config.config_qualifier_invalid_project_placement",
         &InvalidConfigReason::ConfigQualifierUnsupportedType => "invalid_config.config_qualifier_unsupported_type",
         &InvalidConfigReason::ConfigContractConflict { .. } => "invalid_config.config_contract_conflict",
         &InvalidConfigReason::UnknownBuildConfigInput { .. } => "invalid_config.unknown_build_config_input",
@@ -1476,7 +1474,6 @@ define_stable_reason_keys! {
     &InvalidExpressionReason::ExtensionlessFileValue => "invalid_expression.extensionless_file_value",
     &InvalidExpressionReason::EmptyRuntimeAnonymousRecord => "invalid_expression.empty_runtime_anonymous_record",
     &InvalidExpressionReason::AnonymousRecordFieldNotNamed => "invalid_expression.anonymous_record_field_not_named",
-    &InvalidExpressionReason::NestedAnonymousConstRecord => "invalid_expression.nested_anonymous_const_record",
     },
 
     InvalidStandaloneStatementReason => {

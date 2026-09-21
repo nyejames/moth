@@ -606,7 +606,7 @@ fn parse_call_arguments_inner(
             })
             .unwrap_or(CastTargetContext::None);
         let mut cast_target_context = cast_target_context;
-        let input = ExpressionParseInput::without_boundary_catch(
+        let mut input = ExpressionParseInput::without_boundary_catch(
             ExpressionParseResources {
                 token_stream,
                 scope_context: context,
@@ -619,6 +619,12 @@ fn parse_call_arguments_inner(
             },
             false,
         );
+        if matches!(
+            receiving_context.naming_policy,
+            CallArgumentNamingPolicy::NamedOnly
+        ) {
+            input.stop_at_named_entry = true;
+        }
         let value = create_expression_with_trailing_newline_policy(input)?;
         validate_argument_value_policy(&value, context, path_fork, receiving_context)?;
 

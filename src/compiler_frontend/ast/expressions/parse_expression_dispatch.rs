@@ -3,9 +3,7 @@
 //! WHAT: routes one token at a time through expression-position parsing.
 //! WHY: keeps delimiter/grammar ownership explicit while specialized helpers own detailed token families.
 
-use super::anonymous_const_record::{
-    parse_anonymous_const_record_expression, parse_parenthesized_anonymous_const_record_expression,
-};
+use super::anonymous_const_record::parse_parenthesized_anonymous_const_record_expression;
 use super::call_arguments::{ParenthesizedExpressionKind, classify_parenthesized_expression};
 use super::error::ExpressionParseError;
 use super::eval_expression::evaluate_expression;
@@ -440,15 +438,6 @@ pub(super) fn dispatch_expression_token(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    // A following `name =` starts the next const-record parameter, not a second operand.
-    if context.inside_anonymous_const_record
-        && matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_)))
-        && token == TokenTag::SYMBOL
-        && token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
-    {
-        return Ok(ExpressionTokenStep::Break);
-    }
-
     // Reject definite adjacency before semantic name, call or constructor parsing.
     if is_value_operand_start_token(token) {
         reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
@@ -864,7 +853,7 @@ pub(super) fn dispatch_expression_token(
 
         TokenTag::TYPE_PARAMETER_BRACKET => {
             // A complete operand precedes `|`: there is no binary `|` operator. Runtime
-            // `||` is the C-family `or` mistake; nested record literals are rejected.
+            // `||` is the C-family `or` mistake.
             if matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_))) {
                 if !context.kind.is_constant_context()
                     && let Some(error) =
@@ -875,42 +864,13 @@ pub(super) fn dispatch_expression_token(
                 return Ok(ExpressionTokenStep::Break);
             }
 
-            if context.inside_anonymous_const_record {
-                return Err(CompilerDiagnostic::invalid_expression(
-                    InvalidExpressionReason::NestedAnonymousConstRecord,
-                    Some(token_stream.current_span()),
-                )
-                .into());
+            if let Some(error) =
+                check_expression_common_mistake(token_stream, state.expression.is_empty())
+            {
+                return Err(error.into());
             }
 
-            if context.kind.is_constant_context() {
-                let record = parse_anonymous_const_record_expression(
-                    token_stream,
-                    context,
-                    type_interner,
-                    string_table,
-                    path_fork,
-                )?;
-
-                push_expression_operand(
-                    token_stream,
-                    context,
-                    type_interner,
-                    string_table,
-                    state.expression,
-                    state.allow_boundary_catch,
-                    record,
-                    path_fork,
-                )?;
-
-                Ok(ExpressionTokenStep::Continue)
-            } else {
-                Err(CompilerDiagnostic::deferred_feature_reason(
-                    DeferredFeatureReason::RuntimeAnonymousRecord,
-                    Some(token_stream.current_span()),
-                )
-                .into())
-            }
+            Err(unexpected_token_at_current(token_stream, token, string_table)?.into())
         }
 
         TokenTag::ADD_ASSIGN => {

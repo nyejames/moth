@@ -2,11 +2,11 @@
 //!
 //! WHAT: exercises the recursive validator against hand-built schemas and folded values:
 //! nested records, required fields, schema defaults, closed string domains, collection
-//! handling and the unknown-field policies of record nodes. The grouped `project #= |...|`
+//! handling and the unknown-field policies of record nodes. The grouped `project #= (...)`
 //! record path runs through the production entry point against the real builder surface
 //! schemas, covering application to `Config`. Unregistered top-level names stay private
 //! helpers; a missing grouped `project` or required builder section is rejected. The grouped
-//! `html #= |...|` section path covers the same production dispatch against the HTML builder's
+//! `html #= (...)` section path covers the same production dispatch against the HTML builder's
 //! closed section schema, its typed section storage that the builder's readers consume
 //! directly, the grouped output roots that drive directory output resolution, and the
 //! inactive-section behaviour when no builder registered the schema.
@@ -1147,7 +1147,7 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\n\nhtml #= |\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n|\n",
+            source_code: "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n\nhtml #= (\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
@@ -1465,7 +1465,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    custom_note = \"open\",\n|\n",
+            source_code: "project #= (\n    name = \"docs\",\n    custom_note = \"open\",\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -1550,7 +1550,7 @@ fn applies_direct_project_config_global_through_validation() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
+            source_code: "version #Config of String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &inputs,
@@ -1586,7 +1586,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
+            source_code: "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &inputs,

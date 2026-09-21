@@ -9,7 +9,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     fs::create_dir_all(dir.join("independent")).expect("should create independent module");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
@@ -95,7 +95,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"snapshot\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"snapshot\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let root_source = "title String = \"home\"\n";
@@ -148,7 +148,7 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"selected_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"selected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let selected_path = dir.join("src/@page.moth");
@@ -196,7 +196,7 @@ fn unselected_preload_read_failure_stays_inert() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"unselected_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"unselected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "title String = \"home\"\n")
@@ -261,7 +261,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     fs::create_dir_all(dir.join("src")).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
@@ -325,7 +325,7 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
@@ -391,7 +391,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     fs::create_dir_all(&package_root).expect("should create package directory");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -576,7 +576,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");

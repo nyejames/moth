@@ -59,7 +59,7 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
-/// Typed results of one validated `html #= |...|` builder section.
+/// Typed results of one validated `html #= (...)` builder section.
 ///
 /// WHAT: each html section field in its validated form. Fields the record omits stay `None`
 /// unless their schema declares a default, which then stands.

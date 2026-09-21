@@ -149,7 +149,7 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
 
     fs::write(
         root.join(CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= |\n    dev_output = \"preview\",\n|\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n)\n",
     )
     .expect("should write config");
 
@@ -192,7 +192,7 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         }
         fs::write(
             root.join(CONFIG_FILE_NAME),
-            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
 
@@ -223,7 +223,7 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
 
     fs::write(
         root.join(CONFIG_FILE_NAME),
-        "html #= |\n    dev_output = \"\",\n|\n",
+        "html #= (\n    dev_output = \"\",\n)\n",
     )
     .expect("should write config");
 

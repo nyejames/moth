@@ -69,6 +69,9 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     pub(crate) cast_target_context: &'a mut CastTargetContext,
     pub(crate) value_mode: &'a ValueMode,
     pub(crate) trailing_policy: ExpressionTrailingPolicy,
+    /// Stop a named-only value before an adjacent `name = value` entry so the shared list owner
+    /// can report its missing comma.
+    pub(crate) stop_at_named_entry: bool,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -91,6 +94,7 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             cast_target_context: resources.cast_target_context,
             value_mode: resources.value_mode,
             trailing_policy,
+            stop_at_named_entry: false,
             string_table: resources.string_table,
             path_fork: resources.path_fork,
         }

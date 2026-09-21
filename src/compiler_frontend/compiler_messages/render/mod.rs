@@ -715,9 +715,6 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
         InvalidExpressionReason::AnonymousRecordFieldNotNamed => {
             "Each const-record parameter needs a value. Write `name = value`.".to_owned()
         }
-        InvalidExpressionReason::NestedAnonymousConstRecord => {
-            "Do not nest a `|...|` parameter list inside another. Declare the inner struct or record first, then use that name as a parameter value.".to_owned()
-        }
     }
 }
 

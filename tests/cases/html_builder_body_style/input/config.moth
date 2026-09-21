@@ -1,7 +1,7 @@
-project #= |
+project #= (
     name = "test_project",
     entry_root = "src",
-|
-html #= |
+)
+html #= (
     html_body_style = "margin: 0;",
-|
+)
