@@ -16,8 +16,6 @@ This is due to be fixed with the completion of the diagnostic data layout plan.
 
 # Plans
 
-- [Post-Phase-3 compiler cleanup](./plans/moth-post-phase-3-tidy-up-plan.md). Complete this separate maintainer-selected checkpoint after the final Phase 3 closeout and before the MON syntax cutover.
-
 - [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Queued after final Phase 3 closeout and the separate cleanup checkpoint. Deliver parenthesised value construction through the shared argument parser, inline nested const records and a complete source/documentation cutover before MON Rust tooling and later directive work. Runtime records and MON serialisation remain separate follow-ups.
 
 - [MON v1: Rust-facing compiler tooling](./plans/mon-rust-tooling-v1-plan.md) - Queued immediately after the MON syntax checkpoint. Deliver literal-data encoding, nested-value encoding, strict schema-checked decoding and bounded fail-fast errors through the Moth Rust library for engine save files and other native consumers. Moth directives, source operations, backend integration and the static MON project builder remain deferred to the final roadmap entry.
