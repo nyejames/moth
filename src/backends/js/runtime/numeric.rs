@@ -13,7 +13,6 @@ use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::builtins::casts::numeric_limits::{I32_MAX, I32_MIN};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use std::collections::HashSet;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits the checked numeric helper groups needed by reachable HIR statements.
@@ -24,60 +23,50 @@ impl<'hir> JsEmitter<'hir> {
     /// WHY: demand-driven emission keeps arithmetic-only bundles from growing a Float-formatting
     ///      prelude while still giving every checked numeric statement one carrier contract.
     pub(crate) fn emit_runtime_numeric_helpers(&mut self, usage: NumericRuntimeHelperUsage) {
-        let mut emitted = HashSet::<&'static str>::new();
-
         if usage.numeric_ops {
-            self.emit_numeric_int_range_constants(&mut emitted);
+            self.emit_numeric_int_range_constants();
         }
-        self.emit_numeric_trap_helper(&mut emitted);
+        self.emit_numeric_trap_helper();
 
         if usage.numeric_ops {
-            self.emit_int_ok_helper(&mut emitted);
-            self.emit_int_check_helper(&mut emitted);
+            self.emit_int_ok_helper();
+            self.emit_int_check_helper();
 
             // Int helpers
-            self.emit_int_add_helper(&mut emitted);
-            self.emit_int_sub_helper(&mut emitted);
-            self.emit_int_mul_helper(&mut emitted);
-            self.emit_int_div_helper(&mut emitted);
-            self.emit_int_mod_helper(&mut emitted);
-            self.emit_int_pow_helper(&mut emitted);
-            self.emit_int_neg_helper(&mut emitted);
+            self.emit_int_add_helper();
+            self.emit_int_sub_helper();
+            self.emit_int_mul_helper();
+            self.emit_int_div_helper();
+            self.emit_int_mod_helper();
+            self.emit_int_pow_helper();
+            self.emit_int_neg_helper();
 
             // Float arithmetic helpers
-            self.emit_float_add_helper(&mut emitted);
-            self.emit_float_sub_helper(&mut emitted);
-            self.emit_float_mul_helper(&mut emitted);
-            self.emit_float_div_helper(&mut emitted);
-            self.emit_float_mod_helper(&mut emitted);
-            self.emit_float_pow_helper(&mut emitted);
-            self.emit_float_neg_helper(&mut emitted);
+            self.emit_float_add_helper();
+            self.emit_float_sub_helper();
+            self.emit_float_mul_helper();
+            self.emit_float_div_helper();
+            self.emit_float_mod_helper();
+            self.emit_float_pow_helper();
+            self.emit_float_neg_helper();
         }
 
         if usage.format_float {
-            self.emit_format_float_helper(&mut emitted);
+            self.emit_format_float_helper();
         }
 
         if usage.validate_float {
-            self.emit_float_validate_helper(&mut emitted);
+            self.emit_float_validate_helper();
         }
     }
 
-    fn emit_numeric_int_range_constants(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_numeric_int_range_constants") {
-            return;
-        }
-
+    fn emit_numeric_int_range_constants(&mut self) {
         self.emit_line(&format!("const __BS_INT_MIN = {I32_MIN};"));
         self.emit_line(&format!("const __BS_INT_MAX = {I32_MAX};"));
         self.emit_line("");
     }
 
-    fn emit_numeric_trap_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_numeric_trap") {
-            return;
-        }
-
+    fn emit_numeric_trap_helper(&mut self) {
         self.emit_line("function __moth_numeric_trap(carrier) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (carrier && carrier.tag === \"ok\") {");
@@ -96,35 +85,19 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_int_add_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_add") {
-            return;
-        }
-
+    fn emit_int_add_helper(&mut self) {
         self.emit_int_binary_helper("__moth_int_add", "a + b")
     }
 
-    fn emit_int_sub_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_sub") {
-            return;
-        }
-
+    fn emit_int_sub_helper(&mut self) {
         self.emit_int_binary_helper("__moth_int_sub", "a - b")
     }
 
-    fn emit_int_mul_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_mul") {
-            return;
-        }
-
+    fn emit_int_mul_helper(&mut self) {
         self.emit_int_binary_helper("__moth_int_mul", "a * b")
     }
 
-    fn emit_int_div_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_div") {
-            return;
-        }
-
+    fn emit_int_div_helper(&mut self) {
         self.emit_line("function __moth_int_div(a, b) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (b === 0) {");
@@ -143,11 +116,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_int_mod_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_mod") {
-            return;
-        }
-
+    fn emit_int_mod_helper(&mut self) {
         self.emit_line("function __moth_int_mod(a, b) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (b === 0) {");
@@ -166,11 +135,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_int_pow_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_pow") {
-            return;
-        }
-
+    fn emit_int_pow_helper(&mut self) {
         let invalid_exponent_call = Self::error_result_call(BuiltinErrorCode::InvalidExponent);
 
         self.emit_line("function __moth_int_pow(a, b) {");
@@ -185,11 +150,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_int_neg_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_neg") {
-            return;
-        }
-
+    fn emit_int_neg_helper(&mut self) {
         self.emit_line("function __moth_int_neg(a) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (a === __BS_INT_MIN) {");
@@ -203,51 +164,27 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_float_add_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_add") {
-            return;
-        }
-
+    fn emit_float_add_helper(&mut self) {
         self.emit_float_binary_helper("__moth_float_add", "a + b")
     }
 
-    fn emit_float_sub_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_sub") {
-            return;
-        }
-
+    fn emit_float_sub_helper(&mut self) {
         self.emit_float_binary_helper("__moth_float_sub", "a - b")
     }
 
-    fn emit_float_mul_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_mul") {
-            return;
-        }
-
+    fn emit_float_mul_helper(&mut self) {
         self.emit_float_binary_helper("__moth_float_mul", "a * b")
     }
 
-    fn emit_float_div_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_div") {
-            return;
-        }
-
+    fn emit_float_div_helper(&mut self) {
         self.emit_float_divmod_helper("__moth_float_div", "a / b")
     }
 
-    fn emit_float_mod_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_mod") {
-            return;
-        }
-
+    fn emit_float_mod_helper(&mut self) {
         self.emit_float_divmod_helper("__moth_float_mod", "a % b")
     }
 
-    fn emit_float_pow_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_pow") {
-            return;
-        }
-
+    fn emit_float_pow_helper(&mut self) {
         self.emit_line("function __moth_float_pow(a, b) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const result = Math.pow(a, b);");
@@ -262,11 +199,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_float_neg_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_neg") {
-            return;
-        }
-
+    fn emit_float_neg_helper(&mut self) {
         self.emit_line("function __moth_float_neg(a) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const result = -a;");
@@ -334,11 +267,7 @@ impl<'hir> JsEmitter<'hir> {
         format!("return __moth_error_result(\"{message}\", {code_value});")
     }
 
-    fn emit_int_ok_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_ok") {
-            return;
-        }
-
+    fn emit_int_ok_helper(&mut self) {
         self.emit_line("function __moth_int_ok(value) {");
         self.with_indent(|emitter| {
             // Moth `Int` is i32, which has no negative zero. JS arithmetic can create `-0`
@@ -356,11 +285,7 @@ impl<'hir> JsEmitter<'hir> {
     ///      through `__moth_int_ok` so JS `-0` is normalized at the success boundary.
     /// WHY: the i32 range check and `-0` normalization were duplicated across every integer helper;
     ///      centralising them keeps the helper bodies small and prevents the range logic from drifting.
-    fn emit_int_check_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_int_check") {
-            return;
-        }
-
+    fn emit_int_check_helper(&mut self) {
         let overflow_call = Self::error_result_call(BuiltinErrorCode::IntOverflow);
 
         self.emit_line("function __moth_int_check(value) {");
@@ -378,11 +303,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_float_validate_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_float_validate") {
-            return;
-        }
-
+    fn emit_float_validate_helper(&mut self) {
         let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatBoundaryNonFinite);
 
         self.emit_line("function __moth_float_validate(value) {");
@@ -398,11 +319,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_format_float_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_format_float") {
-            return;
-        }
-
+    fn emit_format_float_helper(&mut self) {
         let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatFormatInvariant);
 
         self.emit_line("function __moth_format_float(value) {");
