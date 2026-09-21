@@ -59,7 +59,9 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every other currently listed roadmap item. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+
+- [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
 
 ## Adding and maintaining plans
 
