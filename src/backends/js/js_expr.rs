@@ -161,7 +161,6 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirExpressionKind::Cast { source, policy } => {
-                self.used_cast_policies.insert(*policy);
                 let lowered_source = self.lower_expr(source)?;
                 match js_cast_helper_for_policy(*policy) {
                     Some(helper) => Ok(format!("{helper}({lowered_source})")),

@@ -17,6 +17,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueI
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -66,7 +67,7 @@ pub(crate) struct JsEmitter<'hir> {
         HashSet<crate::compiler_frontend::external_packages::ExternalFunctionId>,
     /// Whether choice equality was lowered, requiring the runtime helper.
     pub(crate) used_choice_equality: bool,
-    /// Builtin cast policies referenced while lowering emitted JS functions.
+    /// Builtin cast policies collected pre-emission by `collect_used_cast_policies`.
     /// Used to conditionally emit the matching runtime helpers.
     pub(crate) used_cast_policies: HashSet<BuiltinCastPolicyId>,
     /// Whether emitted reachable JS uses reactive sources.
@@ -125,10 +126,16 @@ impl<'hir> JsEmitter<'hir> {
 
         let functions = self.functions_to_emit();
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
-        let emitted_code_uses_numeric_helpers =
+        let mut emitted_code_uses_numeric_helpers =
             self.emitted_functions_use_numeric_helpers(&functions)?;
         self.emitted_functions_use_reactivity(&functions)?;
         self.collect_used_cast_policies(&functions)?;
+        if self
+            .used_cast_policies
+            .contains(&BuiltinCastPolicyId::FloatToString)
+        {
+            emitted_code_uses_numeric_helpers.format_float = true;
+        }
         self.emit_runtime_prelude(
             emitted_code_uses_maps,
             emitted_code_uses_numeric_helpers,
@@ -218,17 +225,9 @@ impl<'hir> JsEmitter<'hir> {
                         _ => {}
                     }
 
-                    if statement_uses_float_to_string_cast(&statement.kind) {
-                        usage.format_float = true;
-                    }
-
                     if usage.numeric_ops && usage.format_float && usage.validate_float {
                         return Ok(usage);
                     }
-                }
-
-                if terminator_uses_float_to_string_cast(&block.terminator) {
-                    usage.format_float = true;
                 }
             }
         }
@@ -739,9 +738,11 @@ fn collect_statement_cast_policies(
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
     match statement {
-        HirStatementKind::Assign { value, .. }
-        | HirStatementKind::Expr(value)
-        | HirStatementKind::PushRuntimeFragment { value, .. } => {
+        HirStatementKind::Assign { target, value } => {
+            collect_place_cast_policies(target, policies);
+            collect_expression_cast_policies(value, policies);
+        }
+        HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_cast_policies(value, policies);
         }
 
@@ -782,12 +783,6 @@ fn collect_statement_cast_policies(
     }
 }
 
-fn statement_uses_float_to_string_cast(statement: &HirStatementKind) -> bool {
-    let mut policies = HashSet::new();
-    collect_statement_cast_policies(statement, &mut policies);
-    policies.contains(&BuiltinCastPolicyId::FloatToString)
-}
-
 fn collect_terminator_cast_policies(
     terminator: &HirTerminator,
     policies: &mut HashSet<BuiltinCastPolicyId>,
@@ -825,12 +820,6 @@ fn collect_terminator_cast_policies(
         | HirTerminator::Uninitialized
         | HirTerminator::RuntimeFailure { .. } => {}
     }
-}
-
-fn terminator_uses_float_to_string_cast(terminator: &HirTerminator) -> bool {
-    let mut policies = HashSet::new();
-    collect_terminator_cast_policies(terminator, &mut policies);
-    policies.contains(&BuiltinCastPolicyId::FloatToString)
 }
 
 fn collect_pattern_cast_policies(
@@ -918,8 +907,20 @@ fn collect_expression_cast_policies(
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. }
-        | HirExpressionKind::Load(_)
-        | HirExpressionKind::Copy(_) => {}
+        | HirExpressionKind::StructuralString { .. } => {}
+        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+            collect_place_cast_policies(place, policies);
+        }
+    }
+}
+
+fn collect_place_cast_policies(place: &HirPlace, policies: &mut HashSet<BuiltinCastPolicyId>) {
+    match place {
+        HirPlace::Local(_) => {}
+        HirPlace::Field { base, .. } => collect_place_cast_policies(base, policies),
+        HirPlace::Index { base, index } => {
+            collect_place_cast_policies(base, policies);
+            collect_expression_cast_policies(index, policies);
+        }
     }
 }
