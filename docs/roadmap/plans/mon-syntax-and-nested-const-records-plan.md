@@ -173,8 +173,8 @@ Exit: existing supported consumers validate on one path. Published syntax contra
 
 ### Phase 2: Cut over syntax, nested values and config
 
-- [ ] Integrate grouping/record classification, empty and single-field const records and recursive construction through the shared owner.
-- [ ] Preserve visibility, ordering, folded projection, provenance and nominal identity. Retarget runtime deferral to the final syntax.
+- [x] Integrate grouping/record classification, empty and single-field const records and recursive construction through the shared owner.
+- [x] Preserve visibility, ordering, folded projection, provenance and nominal identity. Retarget runtime deferral to the final syntax.
 - [ ] Complete the required declaration-boundary config resolution and update live configs, scaffolds, executable fixtures, embedded Rust snippets and benchmark inputs atomically.
 - [ ] Delete the displaced parser, scans, state, diagnostics and tests. Simplify the surviving declaration/parameter owners.
 - [ ] Prove the contracts in the test table below before accepting the cutover.

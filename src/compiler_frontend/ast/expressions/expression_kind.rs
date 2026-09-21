@@ -256,7 +256,7 @@ pub enum ExpressionKind {
     /// Struct instance construction literal.
     StructInstance(Vec<Declaration>),
 
-    /// Anonymous compile-time record literal (`| field = value, ... |`).
+    /// Anonymous compile-time record literal (`(field = value, ...)`).
     ///
     /// WHAT: carries ordered, named field declarations parsed in a compile-time receiving
     ///       context. The record is a member group, not a runtime value or structural type.

@@ -3,7 +3,10 @@
 //! WHAT: routes one token at a time through expression-position parsing.
 //! WHY: keeps delimiter/grammar ownership explicit while specialized helpers own detailed token families.
 
-use super::anonymous_const_record::parse_anonymous_const_record_expression;
+use super::anonymous_const_record::{
+    parse_anonymous_const_record_expression, parse_parenthesized_anonymous_const_record_expression,
+};
+use super::call_arguments::{ParenthesizedExpressionKind, classify_parenthesized_expression};
 use super::error::ExpressionParseError;
 use super::eval_expression::evaluate_expression;
 use super::expression::{Expression, ExpressionKind, Operator};
@@ -470,6 +473,47 @@ pub(super) fn dispatch_expression_token(
 
         TokenTag::OPEN_PARENTHESIS => {
             let group_span = Some(token_stream.current_postfix_operator_span());
+            let parenthesized_kind = classify_parenthesized_expression(token_stream);
+            if !matches!(parenthesized_kind, ParenthesizedExpressionKind::Group) {
+                if !context.kind.is_constant_context() {
+                    if matches!(parenthesized_kind, ParenthesizedExpressionKind::Empty) {
+                        return Err(CompilerDiagnostic::invalid_expression(
+                            InvalidExpressionReason::EmptyRuntimeAnonymousRecord,
+                            Some(token_stream.current_span()),
+                        )
+                        .into());
+                    }
+
+                    return Err(CompilerDiagnostic::deferred_feature_reason(
+                        DeferredFeatureReason::RuntimeAnonymousRecord,
+                        Some(token_stream.current_span()),
+                    )
+                    .into());
+                }
+
+                let record = parse_parenthesized_anonymous_const_record_expression(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    path_fork,
+                )?;
+                push_expression_operand_with_span(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    state.expression,
+                    state.allow_boundary_catch,
+                    ExpressionOperandInput {
+                        operand: record,
+                        wrapper_span: group_span,
+                    },
+                    path_fork,
+                )?;
+                return Ok(ExpressionTokenStep::Continue);
+            }
+
             token_stream.advance();
             let mut grouped_expected_type = *state.expected_type;
             let mut grouped_cast_target_context = CastTargetContext::None;

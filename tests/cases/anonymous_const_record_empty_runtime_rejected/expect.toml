@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0023"]
-message_contains = ["Each const-record parameter needs a value"]
+message_contains = ["outside the initial runtime surface"]

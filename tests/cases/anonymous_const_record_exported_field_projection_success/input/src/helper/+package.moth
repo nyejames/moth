@@ -1,10 +1,10 @@
-inner #= |
+inner #= (
     x = 3,
-|
+)
 
 export:
-    labels #= |
+    labels #= (
         first = "a",
         inner = inner,
-    |
+    )
 ;

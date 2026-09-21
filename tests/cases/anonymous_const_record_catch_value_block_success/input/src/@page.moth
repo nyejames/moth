@@ -4,9 +4,9 @@ load || -> String, Error!:
 
 show || -> String:
     value = load() catch:
-        fallback #= |
+        fallback #= (
             text = "fallback",
-        |
+        )
 
         then fallback.text
     ;

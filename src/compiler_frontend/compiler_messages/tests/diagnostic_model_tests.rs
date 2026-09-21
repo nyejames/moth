@@ -2485,6 +2485,14 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
         ),
         (
             CompilerDiagnostic::invalid_expression(
+                InvalidExpressionReason::EmptyRuntimeAnonymousRecord,
+                span(source_path),
+            ),
+            "Empty anonymous records are outside the initial runtime surface.",
+            "EmptyRuntimeAnonymousRecord",
+        ),
+        (
+            CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
                 span(source_path),
             ),

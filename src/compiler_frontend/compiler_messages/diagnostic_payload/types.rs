@@ -1807,6 +1807,9 @@ pub enum InvalidExpressionReason {
     MothFileHasNoValue,
     /// A value-position path is missing the explicit file extension the language requires.
     ExtensionlessFileValue,
+    /// A runtime expression used the empty anonymous-record shape, which is not in the initial
+    /// runtime surface.
+    EmptyRuntimeAnonymousRecord,
     /// A record literal field was not written as `name = value`.
     AnonymousRecordFieldNotNamed,
     /// A record literal appeared as a field value of another record literal.

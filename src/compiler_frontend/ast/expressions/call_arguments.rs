@@ -30,7 +30,8 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
-    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidGenericInstantiationReason,
+    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
+    InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
@@ -68,6 +69,46 @@ pub(crate) enum CallArgumentValuePolicy {
     ConstRequired,
 }
 
+/// Classification of an expression that starts with an opening parenthesis.
+///
+/// WHAT: inspects only the first significant token and its immediate successor.
+/// WHY: anonymous records and ordinary grouping share delimiters; nested calls and later
+/// separators belong to their own parsers and must not affect this local decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParenthesizedExpressionKind {
+    Empty,
+    NamedEntries,
+    Group,
+}
+
+/// Classify a parenthesized expression without advancing the cursor.
+///
+/// The caller must leave the cursor on `(`. Newlines immediately after the opener are trivia;
+/// a newline between a label and `=` is not part of the named-entry recognizer.
+pub(crate) fn classify_parenthesized_expression(
+    token_stream: &AstCursor,
+) -> ParenthesizedExpressionKind {
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS {
+        return ParenthesizedExpressionKind::Group;
+    }
+
+    let mut first_index = token_stream.position().saturating_add(1);
+    while lookahead_tag_at(token_stream, first_index) == Some(TokenTag::NEWLINE) {
+        first_index = first_index.saturating_add(1);
+    }
+
+    match lookahead_tag_at(token_stream, first_index) {
+        Some(TokenTag::CLOSE_PARENTHESIS) => ParenthesizedExpressionKind::Empty,
+        Some(TokenTag::SYMBOL)
+            if lookahead_tag_at(token_stream, first_index.saturating_add(1))
+                == Some(TokenTag::ASSIGN) =>
+        {
+            ParenthesizedExpressionKind::NamedEntries
+        }
+        _ => ParenthesizedExpressionKind::Group,
+    }
+}
+
 /// Surface diagnostic descriptor for one call-shaped owner.
 ///
 /// WHAT: carries the existing call/builtin diagnostic lane and no-argument builtin policy.
@@ -85,6 +126,8 @@ pub(crate) enum CallArgumentSyntax {
         member_name: Option<StringId>,
         takes_no_arguments: bool,
     },
+    /// Anonymous const-record fields have no callee or declaration-order slots.
+    AnonymousConstRecord,
 }
 
 /// Diagnostic identity carried by the shared argument owner.
@@ -111,6 +154,7 @@ impl CallArgumentDiagnosticContext {
             CallArgumentSyntax::Supported { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
             CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => member_name,
+            CallArgumentSyntax::AnonymousConstRecord => None,
         };
 
         Self {
@@ -153,6 +197,7 @@ impl CallArgumentReceivingContext {
             | CallArgumentSyntax::UnsupportedBuiltinMember { .. } => {
                 CallArgumentNamingPolicy::PositionalOnly
             }
+            CallArgumentSyntax::AnonymousConstRecord => CallArgumentNamingPolicy::NamedOnly,
         };
 
         Self {
@@ -476,8 +521,8 @@ fn parse_call_arguments_inner(
         ) && named_target.is_none()
         {
             // A named-only receiver has no signature-slot diagnostic to report here. Keep the
-            // parser-level ownership truthful by rejecting the positional token directly; Phase
-            // 2 field validation owns duplicate/unknown-label diagnostics.
+            // parser-level ownership truthful by rejecting the positional token directly; record
+            // conversion owns field identity validation after the shared list is retained.
             let found = token_stream
                 .current_diagnostic_token(string_table)
                 .map_err(|error| {
@@ -487,7 +532,16 @@ fn parse_call_arguments_inner(
                     )
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(found, argument_span).into());
+            let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
+            {
+                CompilerDiagnostic::invalid_expression(
+                    InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                    current_span(token_stream),
+                )
+            } else {
+                CompilerDiagnostic::unexpected_token_from_tag(found, argument_span)
+            };
+            return Err(diagnostic.into());
         }
 
         let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
@@ -513,11 +567,16 @@ fn parse_call_arguments_inner(
                     )
                 })?
                 .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                found,
-                current_span(token_stream),
-            )
-            .into());
+            let diagnostic = if matches!(argument_syntax, CallArgumentSyntax::AnonymousConstRecord)
+            {
+                CompilerDiagnostic::invalid_expression(
+                    InvalidExpressionReason::AnonymousRecordFieldNotNamed,
+                    current_span(token_stream),
+                )
+            } else {
+                CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+            };
+            return Err(diagnostic.into());
         }
 
         let parameter_expectation = parameter_slot
@@ -604,11 +663,20 @@ fn parse_call_arguments_inner(
                     .unwrap_or_else(|| {
                         DiagnosticToken::from_static_tag(token_stream.current_tag())
                     });
-                return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                    found,
-                    current_span(token_stream),
-                )
-                .into());
+                let diagnostic = if matches!(
+                    receiving_context.naming_policy,
+                    CallArgumentNamingPolicy::NamedOnly
+                ) && current_token_starts_named_entry(token_stream)
+                {
+                    CompilerDiagnostic::expected_token_from_tags(
+                        TokenTag::COMMA,
+                        Some(found),
+                        current_span(token_stream),
+                    )
+                } else {
+                    CompilerDiagnostic::unexpected_token_from_tag(found, current_span(token_stream))
+                };
+                return Err(diagnostic.into());
             }
         };
 
@@ -690,6 +758,7 @@ struct ParameterSlotRouter<'a> {
     expectations: Option<&'a [ParameterExpectation]>,
     receiving_context: CallArgumentReceivingContext,
     parameter_name_to_slot: FxHashMap<StringId, usize>,
+    named_target_spans: Option<FxHashMap<StringId, Option<SourceSpan>>>,
     positional_cursor: usize,
     saw_named_argument: bool,
     occupied_parameter_slots: Option<Vec<bool>>,
@@ -709,11 +778,17 @@ impl<'a> ParameterSlotRouter<'a> {
                     .collect()
             })
             .unwrap_or_default();
+        let named_target_spans = matches!(
+            receiving_context.naming_policy,
+            CallArgumentNamingPolicy::NamedOnly
+        )
+        .then(FxHashMap::default);
 
         Self {
             expectations,
             receiving_context,
             parameter_name_to_slot,
+            named_target_spans,
             positional_cursor: 0,
             saw_named_argument: false,
             occupied_parameter_slots: expectations.map(|items| vec![false; items.len()]),
@@ -725,6 +800,20 @@ impl<'a> ParameterSlotRouter<'a> {
         named_target: Option<&(StringId, Option<SourceSpan>)>,
         argument_span: Option<SourceSpan>,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
+        if let Some(named_target_spans) = self.named_target_spans.as_mut()
+            && let Some((target_name, target_span)) = named_target
+        {
+            if let Some(first_span) = named_target_spans.get(target_name) {
+                return Err(CompilerDiagnostic::duplicate_declaration(
+                    *target_name,
+                    *first_span,
+                    *target_span,
+                )
+                .into());
+            }
+            named_target_spans.insert(*target_name, *target_span);
+        }
+
         let Some(expectations) = self.expectations else {
             if named_target.is_some() {
                 self.saw_named_argument = true;
@@ -788,6 +877,8 @@ impl<'a> ParameterSlotRouter<'a> {
                     self.mark_slot_occupied(slot, *target_span)?;
                     return Ok(Some(ParameterSlot::new(slot)));
                 }
+
+                CallArgumentSyntax::AnonymousConstRecord => return Ok(None),
             }
         }
 
@@ -864,7 +955,8 @@ impl<'a> ParameterSlotRouter<'a> {
         match self.receiving_context.diagnostics.syntax {
             CallArgumentSyntax::Supported { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
-            CallArgumentSyntax::UnsupportedBuiltinMember { .. } => None,
+            CallArgumentSyntax::UnsupportedBuiltinMember { .. }
+            | CallArgumentSyntax::AnonymousConstRecord => None,
         }
     }
 }
@@ -886,6 +978,11 @@ fn lookahead_tag_at(token_stream: &AstCursor, index: usize) -> Option<TokenTag> 
 
 fn next_token_tag(token_stream: &AstCursor) -> Option<TokenTag> {
     token_stream.token_ref_at_offset(1).map(|token| token.tag())
+}
+
+fn current_token_starts_named_entry(token_stream: &AstCursor) -> bool {
+    token_stream.current_tag() == TokenTag::SYMBOL
+        && next_token_tag(token_stream) == Some(TokenTag::ASSIGN)
 }
 
 fn reject_simple_generic_argument_type_ascription(

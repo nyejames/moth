@@ -1,5 +1,5 @@
-inner #= |
+inner #= (
     x = 1,
-|
+)
 
 items #= { inner }

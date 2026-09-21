@@ -1,4 +1,4 @@
 show_labels || -> String:
-    labels #= | first = "a" |
+    labels #= (first = "a")
     return labels
 ;

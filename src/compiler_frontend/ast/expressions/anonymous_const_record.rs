@@ -1,20 +1,26 @@
-//! Anonymous const-record literal parsing.
+//! Anonymous const-record expression construction.
 //!
-//! WHAT: parses `| name = value, ... |` record literals in expression position when the
-//! receiving context requires a compile-time value, and produces one
-//! [`ExpressionKind::AnonymousConstRecord`] operand.
-//! WHY: this grammar owns `name = value` record fields only. Struct shells, choice payloads,
-//! receiver signatures and function parameters keep their `field Type` owners in
-//! `declaration_syntax`; runtime-position pipes report a deferred-feature diagnostic through
-//! the expression dispatcher instead of entering this parser.
+//! WHAT: converts shared parenthesised named arguments into the existing
+//! [`ExpressionKind::AnonymousConstRecord`] operand. The legacy pipe parser remains
+//! temporarily for pre-cutover config inputs and is removed with Phase 2B migration.
+//! WHY: shared call-argument parsing owns delimiters, separators and recursive values; this
+//! module owns only record-field identity, duplicate/keyword validation and construction.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
+use crate::compiler_frontend::ast::expressions::call_arguments::{
+    CallArgumentDiagnosticContext, CallArgumentNamingPolicy, CallArgumentReceivingContext,
+    CallArgumentSyntax, CallArgumentSyntaxContext, CallArgumentValuePolicy,
+    parse_call_arguments_with_receiving_context,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticToken, InvalidExpressionReason,
+};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     parse_build_config_qualifier, starts_build_config_qualifier_at_cursor,
@@ -73,17 +79,77 @@ fn looks_like_nested_record_literal_at_cursor(
     )
 }
 
-/// Parse one anonymous const record from `| name = value, ... |` syntax.
+/// Parse a parenthesised anonymous const record through the shared argument owner.
 ///
-/// ENTRY INVARIANT: the stream is positioned on the opening `|` and the receiving context is
-/// compile-time (`Constant` or `ConstantHeader`).
-/// EXIT INVARIANT: the stream is positioned on the token after the closing `|`.
+/// The shared parser owns the opening delimiter, separators, named-entry lookahead and recursive
+/// value expressions. This helper only turns the retained named arguments into the existing
+/// anonymous-record expression representation.
+pub(super) fn parse_parenthesized_anonymous_const_record_expression(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<Expression, ExpressionParseError> {
+    let record_span = current_span(token_stream);
+    let mut record_context = context.clone();
+    // Keep the existing expression boundary rule until Phase 2B deletes the legacy pipe
+    // parser and its scope flag. The shared list owner still owns every delimiter and value.
+    record_context.inside_anonymous_const_record = true;
+
+    let receiving_context = CallArgumentReceivingContext::with_policies(
+        CallArgumentDiagnosticContext::from_syntax(CallArgumentSyntax::AnonymousConstRecord)
+            .with_opening_span(record_span),
+        CallArgumentNamingPolicy::NamedOnly,
+        CallArgumentValuePolicy::ConstRequired,
+    );
+    let arguments = parse_call_arguments_with_receiving_context(
+        token_stream,
+        &record_context,
+        type_interner,
+        string_table,
+        receiving_context,
+        None,
+        CallArgumentSyntaxContext::Ordinary,
+        path_fork,
+    )?;
+
+    let mut fields = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        let field_name = argument.target_param.ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "named-only anonymous record argument had no field name",
+            )
+        })?;
+        let binding_span = argument.target_span;
+        ensure_not_keyword_shadow_identifier(field_name, binding_span, string_table)
+            .map_err(ExpressionParseError::from)?;
+
+        if argument.access_mode != CallAccessMode::Shared {
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(
+                DiagnosticToken::from_static_tag(TokenTag::MUTABLE),
+                argument.marker_span.or(argument.span),
+            )
+            .into());
+        }
+
+        let field_id = path_fork
+            .try_intern_child(PathId::ROOT, field_name)
+            .expect("anonymous record field path table exhausted");
+        fields.push(Declaration {
+            id: field_id,
+            value: argument.value,
+            binding_span,
+            config_qualifier: None,
+        });
+    }
+    Ok(finish_record(fields, record_span, type_interner))
+}
+
+/// Parse the legacy anonymous const-record form `| name = value, ... |`.
 ///
-/// WHAT: parses named, ordered, unique `field = expression` entries with an optional trailing
-/// comma and returns the record expression. Nested `|...|` field values are rejected; declare
-/// the child first and name it.
-/// WHY: this is the single anonymous-record grammar owner. Struct shells (`field Type`),
-/// choice payloads and signature member lists keep their own parsers.
+/// This path remains only until Phase 2B migrates config and other live inputs. New source uses
+/// [`parse_parenthesized_anonymous_const_record_expression`] through the shared argument owner.
 pub(super) fn parse_anonymous_const_record_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,

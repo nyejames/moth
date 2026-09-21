@@ -1474,6 +1474,7 @@ define_stable_reason_keys! {
     &InvalidExpressionReason::UnresolvedStackShape => "invalid_expression.unresolved_stack_shape",
     &InvalidExpressionReason::MothFileHasNoValue => "invalid_expression.moth_file_has_no_value",
     &InvalidExpressionReason::ExtensionlessFileValue => "invalid_expression.extensionless_file_value",
+    &InvalidExpressionReason::EmptyRuntimeAnonymousRecord => "invalid_expression.empty_runtime_anonymous_record",
     &InvalidExpressionReason::AnonymousRecordFieldNotNamed => "invalid_expression.anonymous_record_field_not_named",
     &InvalidExpressionReason::NestedAnonymousConstRecord => "invalid_expression.nested_anonymous_const_record",
     },
