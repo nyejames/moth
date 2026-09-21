@@ -22,21 +22,18 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) fn fold_expression_kind_to_string(
     kind: &ExpressionKind,
     string_table: &StringTable,
-) -> Option<FoldedStringPiece> {
+) -> Option<String> {
     match kind {
-        ExpressionKind::StringSlice(string) => Some(FoldedStringPiece::Text(
-            string_table.resolve(*string).to_owned(),
-        )),
+        ExpressionKind::StringSlice(string) => Some(string_table.resolve(*string).to_owned()),
         ExpressionKind::Float(value) => {
             // Compile-time Float values are finite by language contract, but the
             // formatter still returns a Result. Fold non-finite values away from
             // the compile-time path rather than panicking on an internal invariant.
-            let text = format_finite_float(*value).ok()?;
-            Some(FoldedStringPiece::Text(text))
+            format_finite_float(*value).ok()
         }
-        ExpressionKind::Int(value) => Some(FoldedStringPiece::Text(value.to_string())),
-        ExpressionKind::Bool(value) => Some(FoldedStringPiece::Text(value.to_string())),
-        ExpressionKind::Char(value) => Some(FoldedStringPiece::Char(*value)),
+        ExpressionKind::Int(value) => Some(value.to_string()),
+        ExpressionKind::Bool(value) => Some(value.to_string()),
+        ExpressionKind::Char(value) => Some(value.to_string()),
         ExpressionKind::Coerced { value, .. } => {
             // Contextual coercion nodes do not change the rendered scalar value;
             // delegate to the inner expression so coerced literals fold the same
@@ -45,18 +42,6 @@ pub(crate) fn fold_expression_kind_to_string(
         }
         _ => None,
     }
-}
-
-/// The result of folding an expression kind into string content.
-///
-/// WHAT: discriminates between the different outcomes of compile-time string
-/// coercion so callers can handle each case appropriately.
-#[derive(Debug, PartialEq)]
-pub(crate) enum FoldedStringPiece {
-    /// A plain text fragment that can be appended directly.
-    Text(String),
-    /// A single character to push onto the string buffer.
-    Char(char),
 }
 
 #[cfg(test)]

@@ -4,27 +4,22 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::type_coercion::string::{
-    FoldedStringPiece, fold_expression_kind_to_string,
-};
+use crate::compiler_frontend::type_coercion::string::fold_expression_kind_to_string;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
 fn int_folds_to_string() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Int(42), &table);
-    let Some(FoldedStringPiece::Text(s)) = result else {
-        panic!("expected Text piece for Int");
-    };
-    assert_eq!(s, "42");
+    assert_eq!(result.as_deref(), Some("42"));
 }
 
 #[test]
 fn float_folds_to_string() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Float(3.125), &table);
-    let Some(FoldedStringPiece::Text(s)) = result else {
-        panic!("expected Text piece for Float");
+    let Some(s) = result else {
+        panic!("expected text for Float");
     };
     assert!(s.contains("3.125"), "unexpected float string: {s}");
 }
@@ -33,38 +28,35 @@ fn float_folds_to_string() {
 fn float_one_folds_without_trailing_decimal() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Float(1.0), &table);
-    assert_eq!(result, Some(FoldedStringPiece::Text("1".to_string())));
+    assert_eq!(result, Some("1".to_string()));
 }
 
 #[test]
 fn float_small_value_uses_moth_exponent_form() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Float(0.0000001), &table);
-    assert_eq!(result, Some(FoldedStringPiece::Text("1e-7".to_string())));
+    assert_eq!(result, Some("1e-7".to_string()));
 }
 
 #[test]
 fn float_large_value_uses_signed_exponent() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Float(1e21), &table);
-    assert_eq!(result, Some(FoldedStringPiece::Text("1e+21".to_string())));
+    assert_eq!(result, Some("1e+21".to_string()));
 }
 
 #[test]
 fn bool_folds_to_string() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Bool(true), &table);
-    let Some(FoldedStringPiece::Text(s)) = result else {
-        panic!("expected Text piece for Bool");
-    };
-    assert_eq!(s, "true");
+    assert_eq!(result.as_deref(), Some("true"));
 }
 
 #[test]
-fn char_folds_to_char_piece() {
+fn char_folds_to_text() {
     let table = StringTable::new();
     let result = fold_expression_kind_to_string(&ExpressionKind::Char('x'), &table);
-    assert!(matches!(result, Some(FoldedStringPiece::Char('x'))));
+    assert_eq!(result, Some("x".to_string()));
 }
 
 #[test]
@@ -72,10 +64,7 @@ fn string_slice_folds_to_text() {
     let mut table = StringTable::new();
     let id = table.intern("hello");
     let result = fold_expression_kind_to_string(&ExpressionKind::StringSlice(id), &table);
-    let Some(FoldedStringPiece::Text(s)) = result else {
-        panic!("expected Text piece for StringSlice");
-    };
-    assert_eq!(s, "hello");
+    assert_eq!(result.as_deref(), Some("hello"));
 }
 
 #[test]
@@ -86,7 +75,7 @@ fn coerced_scalar_delegates_to_inner_value() {
 
     let result = fold_expression_kind_to_string(&expression.kind, &table);
 
-    assert_eq!(result, Some(FoldedStringPiece::Text("42".to_string())));
+    assert_eq!(result, Some("42".to_string()));
 }
 
 #[test]

@@ -207,8 +207,8 @@ pub(crate) enum TemplateIrNodeKind {
         ///
         /// WHAT: carries the root, phase, and view context needed to build a
         /// precise [`TirView`](super::view::TirView) when this child is folded.
-        /// WHY: a bare `TemplateIrId` is not enough for precise folding or for
-        /// cache keys that include phase and overlay context.
+        /// WHY: a bare `TemplateIrId` is not enough for precise folding or
+        /// traversal keys that include phase and overlay context.
         reference: TemplateTirChildReference,
 
         /// Document-order occurrence ID assigned when this node is emitted.

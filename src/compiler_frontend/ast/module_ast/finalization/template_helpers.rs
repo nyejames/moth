@@ -63,8 +63,8 @@ pub(super) fn finalize_template_value(
         reference.context,
     )?;
 
-    // Preparation validates and classifies the exact view before cache lookup
-    // or folding. Its compact result is the sole final-value decision source.
+    // Preparation validates and classifies the exact view before reducer
+    // folding. Its compact result is the sole final-value decision source.
     let preparation = prepare_tir_view(&view, preparation_mode)?;
     let fold_preparation = match preparation.outcome {
         TemplatePreparationOutcome::Helper(kind) => {

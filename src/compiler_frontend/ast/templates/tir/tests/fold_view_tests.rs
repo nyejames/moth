@@ -97,7 +97,7 @@ fn fold_prepared_view(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
     ));
-    // This convenience helper exposes only text; the cache provenance invariant has its own test.
+    // This convenience helper exposes only text; the reducer provenance invariant has its own test.
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view.clone(), context)?;
     Ok(emission)

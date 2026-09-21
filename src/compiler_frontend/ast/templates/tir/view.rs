@@ -392,7 +392,7 @@ impl<'a> TirView<'a> {
         self.identity.context
     }
 
-    /// Returns the exact identity for effective reads and cache keys.
+    /// Returns the exact identity used for effective reads and traversal keys.
     pub(crate) fn identity(&self) -> TirViewIdentity {
         self.identity
     }

@@ -41,9 +41,7 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::type_coercion::string::{
-    FoldedStringPiece, fold_expression_kind_to_string,
-};
+use crate::compiler_frontend::type_coercion::string::fold_expression_kind_to_string;
 
 use super::control_flow::{fold_tir_branch_chain_with_insertion, fold_tir_loop};
 use super::estimate::{
@@ -501,12 +499,11 @@ pub(crate) fn fold_prepared_const_template_pattern(
     }
 }
 
-/// Folds one exact Composed-or-later view, consulting the phase-local cache.
+/// Folds one exact Composed-or-later view through the shared reducer.
 ///
-/// WHAT: validates the view's structural and overlay authority before looking
-///       up its precise cache key, then reduces and caches the exact result
-///       when no loop bindings are active.
-/// WHY: the root and repeated structural child/source folds share one cache
+/// WHAT: validates the view's structural and overlay authority, then reduces
+///       the exact view directly.
+/// WHY: the root and repeated structural child/source folds share one reducer
 ///      owner without preparing or classifying recursively. Parsed structural
 ///      children and virtual injected-wrapper folds intentionally bypass this
 ///      helper because their reduction semantics are different.
@@ -958,19 +955,11 @@ fn fold_tir_dynamic_expression(
     }
 
     match fold_expression_kind_to_string(&expression_ref.kind, fold_context.string_table) {
-        Some(FoldedStringPiece::Text(text)) => {
+        Some(text) => {
             output_state.append_text(&text);
             output_state.emitted_output = true;
             Ok(None)
         }
-
-        Some(FoldedStringPiece::Char(ch)) => {
-            let text = ch.to_string();
-            output_state.append_text(&text);
-            output_state.emitted_output = true;
-            Ok(None)
-        }
-
         None => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
             expression_span,
@@ -1026,7 +1015,7 @@ fn nested_template_value(expression: &Expression) -> Option<&Template> {
 ///       parent expression authority; Composed references additionally carry
 ///       their slot and wrapper dimensions.
 /// WHY: child-template nodes carry enough identity for precise view-based
-///      folding. Reading the root from the active store keeps cache and
+///      folding. Reading the root from the active store keeps exact-view and
 ///      overlay identity intact.
 fn fold_child_template_reference(
     reference: &TemplateTirChildReference,
@@ -1085,9 +1074,9 @@ enum FoldTemplateReference<'reference> {
 /// enters the canonical template fold path.
 ///
 /// Structural child and nested AST references use their named `TirView`
-/// transitions. Every Composed-or-later exact child view uses the shared cache;
-/// Parsed structural children use the direct reducer because their referenced
-/// overlay dimensions are not active yet.
+/// transitions. Every Composed-or-later exact child view uses the shared
+/// exact-view reducer; Parsed structural children use the direct reducer
+/// because their referenced overlay dimensions are not active yet.
 fn fold_template_reference(
     reference: FoldTemplateReference<'_>,
     fold_context: &mut TirFoldContext<'_>,

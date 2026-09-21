@@ -44,41 +44,27 @@ pub(super) fn apply_wrapper_context_overlay_to_child_emission(
     fold_input: &FoldTraversalInput<'_, '_>,
     context: Option<&TirWrapperContext>,
 ) -> Result<TemplateFoldResult, TemplateError> {
-    let store = fold_input.view.store();
-    let TemplateFoldResult {
-        emission,
-        provenance,
-        projection_pieces,
-    } = result;
     let Some(context) = context else {
-        return Ok(TemplateFoldResult::with_projection(
-            emission,
-            provenance,
-            projection_pieces,
-        ));
+        return Ok(result);
     };
 
     // `$fresh` suppresses parent-applied wrappers at this occurrence. The
     // inherited wrapper set is omitted from the overlay when suppressed, but
     // honor the flag explicitly in case it coexists with a wrapper set ref.
     if context.skip_parent_child_wrappers {
-        return Ok(TemplateFoldResult::with_projection(
-            emission,
-            provenance,
-            projection_pieces,
-        ));
+        return Ok(result);
     }
 
-    let wrapper_set_ref = match context.inherited_wrapper_set {
-        Some(wrapper_set_ref) => wrapper_set_ref,
-        None => {
-            return Ok(TemplateFoldResult::with_projection(
-                emission,
-                provenance,
-                projection_pieces,
-            ));
-        }
+    let Some(wrapper_set_ref) = context.inherited_wrapper_set else {
+        return Ok(result);
     };
+
+    let store = fold_input.view.store();
+    let TemplateFoldResult {
+        emission,
+        provenance,
+        projection_pieces,
+    } = result;
 
     let wrapper_set = store.get_wrapper_set(wrapper_set_ref).ok_or_else(|| {
         CompilerError::compiler_error(
