@@ -2,11 +2,11 @@
 
 ## Status
 
-- Status: ready to activate, with the maintainer's syntax direction accepted.
-- Current slice: Phase 0 - refresh and inventory.
+- Status: Phase 0 refresh and inventory accepted; implementation active.
+- Current slice: Phase 1 - consolidate argument parsing.
 - Blockers: none. The source/token-layout Phase 3 closeout and maintainer-managed post-Phase-3
   cleanup are accepted on main.
-- Next action: refresh the activation tree, record the baseline in working notes and start Phase 0.
+- Next action: extend the shared argument owner and route existing consumers through its one list loop.
 
 ## Purpose and authority
 
@@ -154,11 +154,11 @@ Commit accepted phases separately. Each code-bearing phase includes focused test
 
 ### Phase 0: Refresh and inventory
 
-- [ ] Satisfy the activation gate and record the accepted tree and baseline locally.
-- [ ] Read the published contracts. Treat the documentation work above as done, while checking for changes introduced by either cleanup.
-- [ ] Trace current parser consumers, declaration/header classification, nested folded values and config resolution. Revalidate the locators below against actual ownership.
-- [ ] Produce one local checklist of exact paths with dispositions: prepared, change with parser/config, change at closeout, unaffected with reason or external handoff. Include all queued plans and embedded snippets.
-- [ ] Identify primary test owners and the smallest shared context change. Fix ownership conflicts directly rather than retaining duplicate paths.
+- [x] Satisfy the activation gate and record the accepted tree and baseline locally.
+- [x] Read the published contracts. Treat the documentation work above as done, while checking for changes introduced by either cleanup.
+- [x] Trace current parser consumers, declaration/header classification, nested folded values and config resolution. Revalidate the locators below against actual ownership.
+- [x] Produce one local checklist of exact paths with dispositions: prepared, change with parser/config, change at closeout, unaffected with reason or external handoff. Include all queued plans and embedded snippets.
+- [x] Identify primary test owners and the smallest shared context change. Fix ownership conflicts directly rather than retaining duplicate paths.
 
 Exit: a current owner map and complete cutover checklist, not another design interview or speculative parser framework.
 
