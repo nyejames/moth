@@ -2,39 +2,42 @@
 //!
 //! WHAT:
 //! - Shared helpers for parsing parenthesized arguments after `$directive` tokens.
-//! - Common validation for empty parens, missing close-paren, extra commas, and
-//!   compile-time constness.
+//! - Directive-level validation for empty arguments and single-argument arity.
 //!
 //! WHY:
-//! - Directive argument syntax was duplicated across `$children`, handler styles,
-//!   `$slot`, `$insert`, and `$code`. Centralizing it eliminates drift and makes
-//!   new directives easier to add correctly.
+//! - The shared call-argument owner handles parentheses, separators, newlines,
+//!   named-entry recognition, access markers, and expression boundaries.
+//! - Directive modules retain semantic validation: type checking, compile-time
+//!   restrictions, and normalization into template/style state.
 //!
 //! ## Ownership boundary
 //!
-//! - **This module** owns token-level syntax: `(` detection, paren balancing,
-//!   single-expression parsing, string-literal extraction.
-//! - **Directive modules** own semantic validation: type checking, compile-time
-//!   restrictions, and normalization into template/style state.
+//! - **This module** owns directive-level token lookahead and the one-argument
+//!   arity/category adapter.
+//! - **The shared call-argument owner** owns the parenthesized list syntax.
 //! - **Slot modules** own slot schema and composition; they do not parse tokens.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
+use crate::compiler_frontend::ast::expressions::call_arguments::{
+    CallArgumentDiagnosticContext, CallArgumentNamingPolicy, CallArgumentReceivingContext,
+    CallArgumentSyntax, CallArgumentSyntaxContext, CallArgumentValuePolicy,
+    parse_call_arguments_with_receiving_context,
+};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidTemplateDirectiveReason,
+    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
+    InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Typed result shared by directive-argument parsing helpers.
 type DirectiveArgsResult<T> = Result<T, TemplateError>;
@@ -138,18 +141,14 @@ pub(crate) fn expect_directive_close_paren(
     .into())
 }
 
-/// Parses a single compile-time expression inside already-opened directive
-/// parentheses.
+/// Parses one implemented-directive argument list through the shared call
+/// argument owner, then applies the directive's positional single-argument
+/// contract.
 ///
-/// The caller must have already advanced past `(` (e.g. via
-/// `advance_into_directive_arguments`). On success the parser is positioned
-/// at the closing `)` token.
-///
-/// Performs generic validation:
-/// - rejects empty parentheses
-/// - rejects extra comma-separated arguments
-/// - expects `)` after the expression
-fn parse_single_expression_in_directive_parens(
+/// The shared owner consumes the opening and closing parentheses. This adapter
+/// restores the cursor to the closing `)` so the template-head parser keeps its
+/// existing separator-advance contract.
+fn parse_single_directive_argument(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -157,14 +156,17 @@ fn parse_single_expression_in_directive_parens(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<Expression> {
-    reject_empty_directive_parens(directive_name, token_stream)?;
+    // The caller is still on the directive token. Keep the opening-paren
+    // position so the shared owner receives exactly the cursor shape it owns.
+    token_stream.advance();
+    let opening_position = token_stream.position();
 
-    // Skip leading newlines after `(` so a whitespace-only empty argument
-    // stays on the empty-arguments owner instead of a close-paren diagnostic.
+    // Preserve the directive-owned empty and template-boundary diagnostics
+    // before handing the parenthesized list to the shared parser.
+    token_stream.advance();
+    reject_empty_directive_parens(directive_name, token_stream)?;
     token_stream.skip_newlines();
     reject_empty_directive_parens(directive_name, token_stream)?;
-
-    // Keep empty template-boundary arguments on the directive-specific diagnostic path.
     if ends_directive_argument_without_expression(token_stream.current_tag()) {
         return Err(with_current_token_span(
             token_stream,
@@ -177,37 +179,105 @@ fn parse_single_expression_in_directive_parens(
         .into());
     }
 
-    let mut inferred = ExpectedType::Infer;
-    let expression = create_expression(
+    token_stream
+        .set_position(opening_position)
+        .map_err(TemplateError::from)?;
+
+    let syntax = CallArgumentSyntax::Supported {
+        callee_name: Some(directive_name),
+    };
+    let receiving_context = CallArgumentReceivingContext::with_policies(
+        CallArgumentDiagnosticContext::from_syntax(syntax),
+        CallArgumentNamingPolicy::PositionalOnly,
+        CallArgumentValuePolicy::Ordinary,
+    );
+    let arguments = parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
-        &mut inferred,
-        &ValueMode::ImmutableOwned,
-        false,
         string_table,
+        receiving_context,
+        None,
+        CallArgumentSyntaxContext::Ordinary,
         path_fork,
     )
-    .map_err(TemplateError::from)?;
-
-    if token_stream.current_tag() == TokenTag::COMMA {
-        let found = token_stream
-            .current_diagnostic_token(string_table)
-            .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "template directive extra-argument diagnostic",
-                )
+    .map_err(|error| {
+        let error = TemplateError::from(error);
+        if token_stream.current_tag() == TokenTag::EOF {
+            error.map_diagnostic(|diagnostic| {
+                if matches!(
+                    diagnostic.payload,
+                    DiagnosticPayload::UnexpectedToken { .. }
+                ) {
+                    return with_current_token_span(
+                        token_stream,
+                        CompilerDiagnostic::expected_token_from_tags(
+                            TokenTag::CLOSE_PARENTHESIS,
+                            Some(DiagnosticToken::from_static_tag(TokenTag::EOF)),
+                            None,
+                        ),
+                    );
+                }
+                diagnostic
             })
-            .map_err(TemplateError::from)?
-            .unwrap_or_else(|| DiagnosticToken::from_static_tag(TokenTag::COMMA));
-        let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(found, None);
-        return Err(with_current_token_span(token_stream, diagnostic).into());
+        } else {
+            error
+        }
+    })?;
+
+    // The shared parser has consumed `)`. Keep the old directive-helper
+    // postcondition so the head parser advances it exactly once.
+    let close_position = token_stream.position().saturating_sub(1);
+    token_stream
+        .set_position(close_position)
+        .map_err(TemplateError::from)?;
+
+    let Some(argument) = arguments.first() else {
+        return Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_directive(
+                Some(directive_name),
+                InvalidTemplateDirectiveReason::EmptyArguments,
+                None,
+            ),
+        )
+        .into());
+    };
+
+    // Positional-only is a directive contract, not a reason to discard a
+    // parsed label. The shared owner retains the label and this adapter emits
+    // the supported-call diagnostic lane instead of silently accepting it.
+    if argument.target_param.is_some() {
+        return Err(CompilerDiagnostic::invalid_call_shape(
+            InvalidCallShapeReason::NamedArgumentsNotSupported,
+            Some(directive_name),
+            argument.target_span.or(argument.span),
+        )
+        .into());
     }
 
-    expect_directive_close_paren(token_stream, string_table)?;
+    if argument.access_mode != CallAccessMode::Shared {
+        return Err(CompilerDiagnostic::invalid_template_directive(
+            Some(directive_name),
+            InvalidTemplateDirectiveReason::invalid_argument(),
+            argument.marker_span.or(argument.span),
+        )
+        .into());
+    }
 
-    Ok(expression)
+    if arguments.len() > 1 {
+        let diagnostic = CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(TokenTag::COMMA),
+            argument.following_separator_span.or(argument.span),
+        );
+        return Err(diagnostic.into());
+    }
+
+    Ok(arguments
+        .into_iter()
+        .next()
+        .expect("validated directive argument list is non-empty")
+        .value)
 }
 
 /// Parses an optional parenthesized compile-time expression after a directive.
@@ -226,16 +296,15 @@ pub(crate) fn parse_optional_parenthesized_expression(
         return Ok(None);
     }
 
-    advance_into_directive_arguments(token_stream);
-    let expression = parse_single_expression_in_directive_parens(
+    parse_single_directive_argument(
         directive_name,
         token_stream,
         context,
         type_interner,
         string_table,
         path_fork,
-    )?;
-    Ok(Some(expression))
+    )
+    .map(Some)
 }
 
 /// Parses a required parenthesized compile-time expression after a directive.
@@ -266,8 +335,8 @@ pub(crate) fn parse_required_parenthesized_expression(
         )
         .into());
     }
-    advance_into_directive_arguments(token_stream);
-    parse_single_expression_in_directive_parens(
+
+    parse_single_directive_argument(
         directive_name,
         token_stream,
         context,

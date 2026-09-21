@@ -275,7 +275,7 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
     let registry = StyleDirectiveRegistry::merged(&directives)
         .expect("provided directive should merge with core directives");
     let file_tokens = template_tokens_from_source_with_directives(
-        "[$brand(\"theme\"): body]",
+        "[$brand(\"theme\",): body]",
         &directives,
         &mut string_table,
         &mut span_builder,

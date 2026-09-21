@@ -2,11 +2,12 @@
 
 ## Status
 
-- Status: Phase 0 refresh and inventory accepted; implementation active.
-- Current slice: Phase 1 - consolidate argument parsing.
+- Status: Phase 1 argument parsing consolidation accepted; implementation active.
+- Current slice: Phase 2A - cut over syntax and nested const values.
 - Blockers: none. The source/token-layout Phase 3 closeout and maintainer-managed post-Phase-3
   cleanup are accepted on main.
-- Next action: extend the shared argument owner and route existing consumers through its one list loop.
+- Next action: integrate parenthesized grouping and recursive const-record construction through the
+  shared argument owner.
 
 ## Purpose and authority
 
@@ -164,9 +165,9 @@ Exit: a current owner map and complete cutover checklist, not another design int
 
 ### Phase 1: Consolidate argument parsing
 
-- [ ] Extend the shared argument owner with named-only and const-required policies and diagnostic receiving context.
-- [ ] Route implemented consumers through one list loop, preserving specialised template payload handling and all signature/access/default semantics.
-- [ ] Consolidate grammar coverage under existing owners. Add context-specific coverage only for distinct contracts.
+- [x] Extend the shared argument owner with named-only and const-required policies and diagnostic receiving context.
+- [x] Route implemented consumers through one list loop, preserving specialised template payload handling and all signature/access/default semantics.
+- [x] Consolidate grammar coverage under existing owners. Add context-specific coverage only for distinct contracts.
 
 Exit: existing supported consumers validate on one path. Published syntax contracts remain unchanged. Record construction is not reported as implemented yet.
 

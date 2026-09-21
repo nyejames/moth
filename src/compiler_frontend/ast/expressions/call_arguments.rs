@@ -2,7 +2,8 @@
 //!
 //! WHAT: owns parentheses, separators, named targets, mutable markers, expression boundaries,
 //!       cast-target threading and the one parser-time named/positional slot router used by every
-//!       call-shaped AST surface.
+//!       call-shaped AST surface. Typed receiving policies select naming and value requirements
+//!       without changing that list ownership.
 //! WHY: each call consumer must parse the same syntax once and carry the selected parameter slot
 //!      into final validation instead of rebuilding call meaning after expression parsing.
 //!
@@ -12,6 +13,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
@@ -20,14 +22,15 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidBuiltinCallReason, InvalidCallShapeReason,
-    InvalidGenericInstantiationReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
@@ -40,12 +43,36 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
-/// Syntax policy for one call-shaped surface.
+/// Naming policy selected by a receiving call-shaped surface.
 ///
-/// WHAT: carries the surface-specific diagnostic lane for named targets and no-argument builtin
-///       members while the shared parser owns all syntax and slot-selection policy.
-/// WHY: every call-shaped consumer must share one retained-slot parser even when its named or
-///      argument-count policy differs.
+/// WHAT: keeps declaration-order signature routing distinct from named-only field routing.
+/// WHY: named-only values have no declaration slots to fabricate, while ordinary calls retain
+/// their existing positional-then-named semantics.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallArgumentNamingPolicy {
+    PositionalThenNamed,
+    PositionalOnly,
+    NamedOnly,
+}
+
+/// Value-evaluation policy selected by a receiving call-shaped surface.
+///
+/// WHAT: records whether the receiving surface accepts ordinary expressions or requires a
+/// compile-time value.
+/// WHY: the shared owner must carry this distinction without adding a second expression parser.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallArgumentValuePolicy {
+    Ordinary,
+    ConstRequired,
+}
+
+/// Surface diagnostic descriptor for one call-shaped owner.
+///
+/// WHAT: carries the existing call/builtin diagnostic lane and no-argument builtin policy.
+/// WHY: naming and value evaluation are typed receiving policies, while this descriptor preserves
+/// current diagnostics and call-site compatibility.
 #[derive(Clone, Copy)]
 pub(crate) enum CallArgumentSyntax {
     Supported {
@@ -58,6 +85,125 @@ pub(crate) enum CallArgumentSyntax {
         member_name: Option<StringId>,
         takes_no_arguments: bool,
     },
+}
+
+/// Diagnostic identity carried by the shared argument owner.
+///
+/// WHAT: keeps the existing call/builtin diagnostic lane together with the optional operation
+/// name used by a const-required receiving context.
+/// WHY: naming and value policies must not manufacture a second parser or lose the receiving
+/// surface that owns source diagnostics.
+#[derive(Clone, Copy)]
+pub(crate) struct CallArgumentDiagnosticContext {
+    pub(crate) syntax: CallArgumentSyntax,
+    pub(crate) const_operation: Option<StringId>,
+    /// Opening-delimiter span retained for receiving-boundary diagnostics.
+    ///
+    /// WHAT: preserves the authored `(` span independently from each entry span.
+    /// WHY: empty, nested and const-required boundary diagnostics may need the receiving
+    /// delimiter even when no value expression exists.
+    pub(crate) opening_span: Option<SourceSpan>,
+}
+
+impl CallArgumentDiagnosticContext {
+    pub(crate) fn from_syntax(syntax: CallArgumentSyntax) -> Self {
+        let const_operation = match syntax {
+            CallArgumentSyntax::Supported { callee_name }
+            | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
+            CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => member_name,
+        };
+
+        Self {
+            syntax,
+            const_operation,
+            opening_span: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_const_operation(mut self, const_operation: Option<StringId>) -> Self {
+        self.const_operation = const_operation;
+        self
+    }
+
+    pub(crate) fn with_opening_span(mut self, opening_span: Option<SourceSpan>) -> Self {
+        self.opening_span = opening_span;
+        self
+    }
+}
+
+/// Typed receiving context for one shared call-argument list.
+///
+/// WHAT: carries naming, value-evaluation and diagnostic policy through the one parenthesised
+/// list loop.
+/// WHY: future named-only/const-required surfaces can select their policy without fabricating
+/// declaration slots or introducing a second delimiter parser.
+#[derive(Clone, Copy)]
+pub(crate) struct CallArgumentReceivingContext {
+    pub(crate) naming_policy: CallArgumentNamingPolicy,
+    pub(crate) value_policy: CallArgumentValuePolicy,
+    pub(crate) diagnostics: CallArgumentDiagnosticContext,
+}
+
+impl CallArgumentReceivingContext {
+    pub(crate) fn existing_call(syntax: CallArgumentSyntax) -> Self {
+        let naming_policy = match syntax {
+            CallArgumentSyntax::Supported { .. } => CallArgumentNamingPolicy::PositionalThenNamed,
+            CallArgumentSyntax::UnsupportedCall { .. }
+            | CallArgumentSyntax::UnsupportedBuiltinMember { .. } => {
+                CallArgumentNamingPolicy::PositionalOnly
+            }
+        };
+
+        Self {
+            naming_policy,
+            value_policy: CallArgumentValuePolicy::Ordinary,
+            diagnostics: CallArgumentDiagnosticContext::from_syntax(syntax),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_policies(
+        diagnostics: CallArgumentDiagnosticContext,
+        naming_policy: CallArgumentNamingPolicy,
+        value_policy: CallArgumentValuePolicy,
+    ) -> Self {
+        Self {
+            naming_policy,
+            value_policy,
+            diagnostics,
+        }
+    }
+}
+
+/// Parses one call-shaped list through the shared receiving-context policy.
+///
+/// The `expectations` slice is only a declaration-order signature. Named-only receivers pass
+/// `None` (or have it ignored by this owner), so no synthetic parameter slots are created.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "argument parsing keeps the token stream, scope, mutable interner/string/path state, syntax contexts, and optional expectations as separate borrows"
+)]
+pub(crate) fn parse_call_arguments_with_receiving_context(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    receiving_context: CallArgumentReceivingContext,
+    expectations: Option<&[ParameterExpectation]>,
+    syntax_context: CallArgumentSyntaxContext,
+    path_fork: &mut PathInternerFork,
+) -> Result<Vec<CallArgument>, ExpressionParseError> {
+    parse_call_arguments_inner(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        syntax_context,
+        receiving_context,
+        expectations,
+        path_fork,
+    )
 }
 
 /// Parses a call argument list with explicit parameter expectations threaded into each argument.
@@ -76,14 +222,14 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
     argument_syntax: CallArgumentSyntax,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    parse_call_arguments_inner(
+    parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
         string_table,
-        CallArgumentSyntaxContext::Ordinary,
-        argument_syntax,
+        CallArgumentReceivingContext::existing_call(argument_syntax),
         Some(expectations),
+        CallArgumentSyntaxContext::Ordinary,
         path_fork,
     )
 }
@@ -97,24 +243,24 @@ pub(crate) fn parse_generic_call_arguments_typed(
     expectations: &[ParameterExpectation],
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    parse_call_arguments_inner(
+    parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
         string_table,
+        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Supported {
+            callee_name: generic_function_name,
+        }),
+        Some(expectations),
         CallArgumentSyntaxContext::GenericFunction {
             function_name: generic_function_name,
         },
-        CallArgumentSyntax::Supported {
-            callee_name: generic_function_name,
-        },
-        Some(expectations),
         path_fork,
     )
 }
 
 #[derive(Clone, Copy)]
-enum CallArgumentSyntaxContext {
+pub(crate) enum CallArgumentSyntaxContext {
     Ordinary,
     GenericFunction { function_name: Option<StringId> },
 }
@@ -171,11 +317,27 @@ fn parse_call_arguments_inner(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     syntax_context: CallArgumentSyntaxContext,
-    argument_syntax: CallArgumentSyntax,
+    receiving_context: CallArgumentReceivingContext,
     expectations: Option<&[ParameterExpectation]>,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     ast_log!("Creating function call arguments");
+    let mut receiving_context = receiving_context;
+    let opening_span = current_span(token_stream);
+    if receiving_context.diagnostics.opening_span.is_none() {
+        receiving_context.diagnostics = receiving_context
+            .diagnostics
+            .with_opening_span(opening_span);
+    }
+
+    let argument_syntax = receiving_context.diagnostics.syntax;
+    // Named-only receivers own fields by label, not by declaration-order signature slots.
+    // Keeping this as `None` is the invariant that prevents fabricated `ParameterSlot`s.
+    let routed_expectations = match receiving_context.naming_policy {
+        CallArgumentNamingPolicy::NamedOnly => None,
+        CallArgumentNamingPolicy::PositionalThenNamed
+        | CallArgumentNamingPolicy::PositionalOnly => expectations,
+    };
 
     if let CallArgumentSyntax::UnsupportedBuiltinMember {
         member_name: Some(member_name),
@@ -236,8 +398,7 @@ fn parse_call_arguments_inner(
     }
 
     let mut arguments = Vec::new();
-    let mut slot_router = ParameterSlotRouter::new(expectations, argument_syntax);
-
+    let mut slot_router = ParameterSlotRouter::new(routed_expectations, receiving_context);
     // ------------------------
     //  Parse each argument
     // ------------------------
@@ -309,6 +470,26 @@ fn parse_call_arguments_inner(
             _ => None,
         };
 
+        if matches!(
+            receiving_context.naming_policy,
+            CallArgumentNamingPolicy::NamedOnly
+        ) && named_target.is_none()
+        {
+            // A named-only receiver has no signature-slot diagnostic to report here. Keep the
+            // parser-level ownership truthful by rejecting the positional token directly; Phase
+            // 2 field validation owns duplicate/unknown-label diagnostics.
+            let found = token_stream
+                .current_diagnostic_token(string_table)
+                .map_err(|error| {
+                    CompilerDiagnostic::token_view_invariant_error(
+                        error,
+                        "named-only argument diagnostic",
+                    )
+                })?
+                .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
+            return Err(CompilerDiagnostic::unexpected_token_from_tag(found, argument_span).into());
+        }
+
         let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
@@ -339,8 +520,8 @@ fn parse_call_arguments_inner(
             .into());
         }
 
-        let parameter_expectation =
-            parameter_slot.and_then(|slot| expectations.and_then(|items| items.get(slot.index())));
+        let parameter_expectation = parameter_slot
+            .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
         // Only a bare `none` needs the receiving option slot during parsing. Ordinary values
         // retain natural inference so call validation owns their type diagnostics.
         let mut inferred = if argument_is_bare_none(token_stream) {
@@ -380,6 +561,7 @@ fn parse_call_arguments_inner(
             false,
         );
         let value = create_expression_with_trailing_newline_policy(input)?;
+        validate_argument_value_policy(&value, context, path_fork, receiving_context)?;
 
         // Preserve the value-expression span, named-parameter span, and authored `~` marker span
         // independently so diagnostics can point at whichever source the author must change.
@@ -395,16 +577,20 @@ fn parse_call_arguments_inner(
         } else {
             argument
         };
-        arguments.push(argument);
 
-        match token_stream.current_tag() {
+        let (argument, list_ended) = match token_stream.current_tag() {
             TokenTag::COMMA => {
+                let separator_span = current_span(token_stream);
                 token_stream.advance();
                 token_stream.skip_newlines();
+                (
+                    argument.with_following_separator_span(separator_span),
+                    false,
+                )
             }
             TokenTag::CLOSE_PARENTHESIS => {
                 token_stream.advance();
-                break;
+                (argument, true)
             }
             _ => {
                 let found = token_stream
@@ -424,6 +610,11 @@ fn parse_call_arguments_inner(
                 )
                 .into());
             }
+        };
+
+        arguments.push(argument);
+        if list_ended {
+            break;
         }
     }
 
@@ -445,16 +636,59 @@ fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
     lookahead_tag_at(token_stream, next_index)
         .is_some_and(|tag| matches!(tag, TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS))
 }
-
-/// Maintains one parser-time declaration-order routing state for a call argument list.
+/// Apply a receiving value policy after ordinary expression parsing has established the value.
 ///
-/// WHAT: selects a `ParameterSlot` before the corresponding value expression is parsed and
-///       applies named-argument, duplicate and positional-order diagnostics.
-/// WHY: cast targets and final validation must consume the same decision without reconstructing
-///      the authored call shape later.
+/// WHAT: const-required receivers reuse the canonical expression const classifier and module-local
+/// template store instead of token filtering or a second evaluator.
+/// WHY: expression parsing still owns grouping, casts, generic inference and contextual `none`;
+/// this check only decides whether the completed value satisfies the receiving boundary.
+fn validate_argument_value_policy(
+    value: &Expression,
+    context: &ScopeContext,
+    path_fork: &PathInternerFork,
+    receiving_context: CallArgumentReceivingContext,
+) -> Result<(), ExpressionParseError> {
+    if !matches!(
+        receiving_context.value_policy,
+        CallArgumentValuePolicy::ConstRequired
+    ) {
+        return Ok(());
+    }
+
+    let is_placeholder_reference = if let ExpressionKind::Reference(path) = &value.kind {
+        path_fork.component(*path).is_some_and(|name| {
+            context.get_reference(&name).is_some_and(|reference| {
+                reference
+                    .as_declaration()
+                    .is_unresolved_constant_placeholder()
+            })
+        })
+    } else {
+        false
+    };
+
+    let is_compile_time_value = is_placeholder_reference
+        || value
+            .const_value_kind_with_template_classifier(&mut |template| {
+                classify_template_from_effective_tir(template, &context.template_ir_store)
+            })?
+            .is_compile_time_value();
+
+    if is_compile_time_value {
+        return Ok(());
+    }
+
+    Err(CompilerDiagnostic::compile_time_evaluation_error(
+        CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+        receiving_context.diagnostics.const_operation,
+        value.span,
+    )
+    .into())
+}
+
 struct ParameterSlotRouter<'a> {
     expectations: Option<&'a [ParameterExpectation]>,
-    argument_syntax: CallArgumentSyntax,
+    receiving_context: CallArgumentReceivingContext,
     parameter_name_to_slot: FxHashMap<StringId, usize>,
     positional_cursor: usize,
     saw_named_argument: bool,
@@ -464,7 +698,7 @@ struct ParameterSlotRouter<'a> {
 impl<'a> ParameterSlotRouter<'a> {
     fn new(
         expectations: Option<&'a [ParameterExpectation]>,
-        argument_syntax: CallArgumentSyntax,
+        receiving_context: CallArgumentReceivingContext,
     ) -> Self {
         let parameter_name_to_slot = expectations
             .map(|items| {
@@ -478,7 +712,7 @@ impl<'a> ParameterSlotRouter<'a> {
 
         Self {
             expectations,
-            argument_syntax,
+            receiving_context,
             parameter_name_to_slot,
             positional_cursor: 0,
             saw_named_argument: false,
@@ -504,7 +738,22 @@ impl<'a> ParameterSlotRouter<'a> {
         if let Some((target_name, target_span)) = named_target {
             self.saw_named_argument = true;
 
-            match self.argument_syntax {
+            if matches!(
+                self.receiving_context.naming_policy,
+                CallArgumentNamingPolicy::PositionalOnly
+            ) && matches!(
+                self.receiving_context.diagnostics.syntax,
+                CallArgumentSyntax::Supported { .. }
+            ) {
+                return Err(CompilerDiagnostic::invalid_call_shape(
+                    InvalidCallShapeReason::NamedArgumentsNotSupported,
+                    self.callee_name(),
+                    *target_span,
+                )
+                .into());
+            }
+
+            match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
@@ -612,7 +861,7 @@ impl<'a> ParameterSlotRouter<'a> {
     }
 
     fn callee_name(&self) -> Option<StringId> {
-        match self.argument_syntax {
+        match self.receiving_context.diagnostics.syntax {
             CallArgumentSyntax::Supported { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
             CallArgumentSyntax::UnsupportedBuiltinMember { .. } => None,

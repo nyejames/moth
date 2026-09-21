@@ -20,8 +20,9 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
-    SyntaxDiagnosticKind, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload,
+    DiagnosticToken, InvalidCallShapeReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -38,9 +39,22 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn parse_args(
+fn parse_args(source: &str) -> Vec<CallArgument> {
+    parse_args_with_receiving_context(
+        source,
+        super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        }),
+        None,
+    )
+    .expect("call arguments should parse")
+}
+
+fn parse_args_with_receiving_context(
     source: &str,
-) -> Vec<crate::compiler_frontend::ast::expressions::call_argument::CallArgument> {
+    receiving_context: super::CallArgumentReceivingContext,
+    expectations: Option<&[ParameterExpectation]>,
+) -> Result<Vec<CallArgument>, ExpressionParseError> {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -84,14 +98,16 @@ fn parse_args(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    parse_raw_call_args_for_test(
+    super::parse_call_arguments_with_receiving_context(
         &mut token_stream,
         &context,
         &mut type_interner,
         &mut string_table,
+        receiving_context,
+        expectations,
+        super::CallArgumentSyntaxContext::Ordinary,
         &mut path_fork,
     )
-    .expect("call arguments should parse")
 }
 
 fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
@@ -174,14 +190,16 @@ fn parse_raw_call_args_for_test(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    super::parse_call_arguments_inner(
+    super::parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
         string_table,
-        super::CallArgumentSyntaxContext::Ordinary,
-        super::CallArgumentSyntax::Supported { callee_name: None },
+        super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        }),
         None,
+        super::CallArgumentSyntaxContext::Ordinary,
         path_fork,
     )
 }
@@ -319,6 +337,107 @@ fn parses_mixed_positional_then_named() {
     assert!(args[0].target_param.is_none());
     assert!(args[1].target_param.is_some());
     assert!(args[2].target_param.is_some());
+}
+
+#[test]
+fn named_only_receiving_context_keeps_labels_without_signature_slots() {
+    let diagnostics =
+        super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        });
+    let receiving_context = super::CallArgumentReceivingContext::with_policies(
+        diagnostics,
+        super::CallArgumentNamingPolicy::NamedOnly,
+        super::CallArgumentValuePolicy::Ordinary,
+    );
+    let args =
+        parse_args_with_receiving_context("record(first = 1, second = 2)", receiving_context, None)
+            .expect("named-only arguments should parse");
+
+    assert_eq!(args.len(), 2);
+    assert!(args.iter().all(|argument| argument.target_param.is_some()));
+    assert!(
+        args.iter()
+            .all(|argument| argument.parameter_slot.is_none()),
+        "named-only values must not fabricate declaration-order slots",
+    );
+}
+
+#[test]
+fn named_only_receiving_context_rejects_positional_arguments() {
+    let diagnostics =
+        super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        });
+    let receiving_context = super::CallArgumentReceivingContext::with_policies(
+        diagnostics,
+        super::CallArgumentNamingPolicy::NamedOnly,
+        super::CallArgumentValuePolicy::Ordinary,
+    );
+    let error = parse_args_with_receiving_context("record(1)", receiving_context, None)
+        .expect_err("named-only arguments must reject positional values");
+
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected a user diagnostic for positional named-only input");
+    };
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnexpectedToken { .. }
+    ));
+}
+
+#[test]
+fn const_required_receiving_context_reuses_expression_const_classification() {
+    let diagnostics =
+        super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        });
+    let receiving_context = super::CallArgumentReceivingContext::with_policies(
+        diagnostics,
+        super::CallArgumentNamingPolicy::NamedOnly,
+        super::CallArgumentValuePolicy::ConstRequired,
+    );
+    let args = parse_args_with_receiving_context("record(value = 1 + 2)", receiving_context, None)
+        .expect("constant arguments should parse");
+
+    assert_eq!(args.len(), 1);
+    assert!(args[0].target_param.is_some());
+    assert!(args[0].parameter_slot.is_none());
+}
+
+#[test]
+fn const_required_receiving_context_rejects_non_constant_values() {
+    let diagnostics =
+        super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        });
+    let receiving_context = super::CallArgumentReceivingContext::with_policies(
+        diagnostics,
+        super::CallArgumentNamingPolicy::NamedOnly,
+        super::CallArgumentValuePolicy::ConstRequired,
+    );
+    let error =
+        parse_args_with_receiving_context("record(value = {1 = 2})", receiving_context, None)
+            .expect_err("const-required arguments must reject map literals");
+
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected a user diagnostic for a non-constant argument");
+    };
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError)
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::CompileTimeEvaluationError {
+            reason: CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+            ..
+        }
+    ));
 }
 
 #[test]
