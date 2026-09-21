@@ -365,11 +365,10 @@ fn validate_declaration_statement(
     string_table: &mut StringTable,
 ) {
     // Declaration check intentionally stays simple:
-    // - must contain one `:` split point
+    // - must contain one `:` split point (first colon wins)
     // - property must look identifier-like
     // - value side cannot be empty
-    let statement_chars: Vec<char> = statement.chars().collect();
-    let Some(colon_index) = statement_chars.iter().position(|ch| *ch == ':') else {
+    let Some((property_source, value_source)) = statement.split_once(':') else {
         push_warning(
             warnings,
             CssTemplateWarning::MalformedDeclaration,
@@ -379,29 +378,21 @@ fn validate_declaration_statement(
         return;
     };
 
-    let property = statement_chars[..colon_index]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_owned();
-    if !is_valid_property_name(&property) {
+    let property = property_source.trim();
+    if !is_valid_property_name(property) {
         push_warning(
             warnings,
             CssTemplateWarning::InvalidPropertyName {
-                name: string_table.intern(&property),
+                name: string_table.intern(property),
             },
             start_offset,
-            start_offset.saturating_add(colon_index.max(1)),
+            start_offset.saturating_add(property_source.chars().count().max(1)),
         );
     }
 
-    let value = statement_chars[colon_index + 1..]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_owned();
+    let value = value_source.trim();
     if value.is_empty() {
-        let value_offset = start_offset.saturating_add(colon_index);
+        let value_offset = start_offset.saturating_add(property_source.chars().count());
         push_warning(
             warnings,
             CssTemplateWarning::MissingDeclarationValue,
@@ -486,68 +477,26 @@ fn strip_css_comments(text: &str) -> String {
     let mut index = 0usize;
     let mut state = ScanState::default();
 
+    // Local driver over the shared scanner:
+    // - `advance_scan_state` consumes quote/comment/escape transitions.
+    // - ordinary characters fall through and advance here.
+    // - only non-comment scanner steps are copied, so comments vanish
+    //   while quoted markers and escapes survive exactly as authored.
     while index < chars.len() {
-        let ch = chars[index];
-        let next = chars.get(index + 1).copied();
+        let old_index = index;
+        let was_in_comment = state.in_comment;
+        if !advance_scan_state(&mut state, &chars, &mut index) {
+            output.push(chars[old_index]);
+            index += 1;
+            continue;
+        }
 
-        if state.in_comment {
-            if ch == '*' && next == Some('/') {
-                state.in_comment = false;
-                index += 2;
-            } else {
-                index += 1;
+        let is_now_in_comment = state.in_comment;
+        if !was_in_comment && !is_now_in_comment {
+            for ch in &chars[old_index..index] {
+                output.push(*ch);
             }
-            continue;
         }
-
-        if state.in_single_quote {
-            if state.escaped {
-                state.escaped = false;
-            } else if ch == '\\' {
-                state.escaped = true;
-            } else if ch == '\'' {
-                state.in_single_quote = false;
-            }
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-
-        if state.in_double_quote {
-            if state.escaped {
-                state.escaped = false;
-            } else if ch == '\\' {
-                state.escaped = true;
-            } else if ch == '"' {
-                state.in_double_quote = false;
-            }
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-
-        if ch == '/' && next == Some('*') {
-            state.in_comment = true;
-            index += 2;
-            continue;
-        }
-
-        if ch == '\'' {
-            state.in_single_quote = true;
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-
-        if ch == '"' {
-            state.in_double_quote = true;
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-
-        output.push(ch);
-        index += 1;
     }
 
     output
