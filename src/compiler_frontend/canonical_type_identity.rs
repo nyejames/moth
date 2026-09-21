@@ -63,16 +63,20 @@ pub(crate) enum CanonicalTypeIdentity {
     /// Public-interface projection never constructs this variant.
     ModulePrivateNominal(ModulePrivateNominalIdentity),
     ExternalOpaque(ExternalOpaqueTypeIdentity),
+    /// Collection identity includes fixed capacity: `None` is growable `{T}`, while `Some(cap)`
+    /// is fixed `{N T}`. Capacity is semantic identity, not an allocation hint.
     Collection {
         element: Box<CanonicalTypeIdentity>,
         fixed_capacity: Option<usize>,
     },
+    /// Ordered-map identity stores key and value in their declared order.
     OrderedMap {
         key: Box<CanonicalTypeIdentity>,
         value: Box<CanonicalTypeIdentity>,
     },
     Option(Box<CanonicalTypeIdentity>),
     FallibleCarrier(FallibleCarrierTypeIdentity),
+    /// Generic identity is keyed by stable base origin plus recursively canonical arguments.
     GenericInstance {
         base: OriginTypeId,
         arguments: Box<[CanonicalTypeIdentity]>,
@@ -861,6 +865,7 @@ fn project_generic_instance(
         arguments,
     })
 }
+
 /// Validates the generic-instance base and returns its declared generic parameter count.
 ///
 /// WHAT: rejects an unknown/missing nominal base, a struct or choice base whose

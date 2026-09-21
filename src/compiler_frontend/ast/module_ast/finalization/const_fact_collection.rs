@@ -484,6 +484,8 @@ impl<'a> ConstFactCollector<'a> {
                 }
             }
 
+            // AST places currently contain only Local/Field structure; revisit this leaf if an
+            // expression-bearing place form is added.
             ExpressionKind::Copy(_) => {}
 
             ExpressionKind::FieldAccess { base, .. } => {
