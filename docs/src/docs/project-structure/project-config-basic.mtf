@@ -1,4 +1,4 @@
-**Current support versus accepted design.** Today `config.moth` still uses grouped `project` and `html` records. `$project`, `$html_builder` and a required `version` argument are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
+**Current support versus accepted design.** Today `config.moth` uses declaration-owned `#Config of T` inputs with parenthesised grouped `project` and `html` records. `$project`, `$html_builder` and a required `version` argument are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
 
 `config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source dependencies.
 
@@ -24,15 +24,16 @@
 ### Current grouped config
 
 [codeblock, $code("moth"):
-    project #= |
-        name = "my_project",
-        entry_root = "src",
-    |
+    version #Config of String = "0.1.0"
 
-    html #= |
+    project #= (
+        name = "my_project",
+        version = version,
+        entry_root = "src",
+    )
+
+    html #= (
         dev_output = "dev",
         release_output = "release",
-    |
+    )
 ]
-
-The command selects the builder before config validation.

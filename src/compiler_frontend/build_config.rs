@@ -652,7 +652,7 @@ impl BuildInputName {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BuildConfigValueLocation {
     /// A retained compiler source span: a contract declaration, its default literal or a
-    /// direct project field initializer.
+    /// grouped-project field initializer.
     Source(SourceSpan),
 
     /// An explicit command or programmatic input at one argument position.
@@ -683,7 +683,7 @@ impl BuildCommandLocation {
 /// How a resolved build-config value was produced.
 ///
 /// WHAT: the resolution-origin provenance later `#Config` resolution records next to a typed
-///       value and its location, covering both accepted resolution orders: direct project
+///       value and its location, covering both accepted resolution orders: fixed grouped-project
 ///       fields and project-wide source contracts.
 /// WHY: resolved values retain their origin so diagnostics can explain explicit inputs, builder
 ///       globals, authoritative fixed fields and folded defaults. Origin is provenance only;
@@ -696,7 +696,7 @@ pub(crate) enum BuildConfigValueOrigin {
     /// A compatible builder-provided primitive global.
     BuilderGlobal,
 
-    /// A fixed direct project field, which is authoritative for its name and blocks overrides.
+    /// A fixed grouped-project field, which is authoritative for its name and blocks overrides.
     FixedProjectField,
     /// The folded default of the declaration itself.
     DeclarationDefault,
@@ -957,10 +957,10 @@ impl ConfigResolutionServices {
 
 /// One normalized contract fact supplied to the project-wide build-config barrier.
 ///
-/// Source shells and project fields enter the barrier through this one shape. The caller chooses
-/// whether a fact is a source contract, a fixed project field or a direct project `#Config` field
-/// by placing it in the corresponding resolver input slice; the fact itself never carries
-/// build-system or source-graph identity.
+/// Source shells, grouped-project fields and declaration-owned input contracts enter the barrier
+/// through this one shape. The caller chooses whether a fact is a source contract, a fixed
+/// project field or a declaration-owned input contract by placing it in the corresponding
+/// resolver input slice; the fact itself never carries build-system or source-graph identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BuildConfigContractFact {
     name: BuildInputName,
@@ -990,7 +990,7 @@ impl BuildConfigContractFact {
         }
     }
 
-    /// Attach the value already selected while a direct project contract folded.
+    /// Attach the value already selected while a declaration-owned config contract folded.
     ///
     /// The barrier still validates this fact against source contracts, but must not select a
     /// second value or reconstruct its provenance from the authored contract alone.
@@ -1035,7 +1035,7 @@ impl BuildConfigContractFact {
     }
 }
 
-/// Value/provenance already selected by the direct-project config folding owner.
+/// Value/provenance already selected by the config-folding owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ResolvedBuildConfigProvider {
     value: Option<PrimitiveBuildValue>,
@@ -1108,10 +1108,10 @@ pub(crate) enum BuildConfigResolutionError {
     MissingRequiredValue {
         contract: Box<BuildConfigContractFact>,
     },
-    /// A direct project contract reached the barrier without its folded provider payload.
+    /// A declaration-owned config contract reached the barrier without its folded provider payload.
     ///
-    /// This is an internal handoff invariant: direct project config selection belongs exclusively
-    /// to the config-folding service and must never fall back to boundary resolution.
+    /// This is an internal handoff invariant: config selection belongs exclusively to the
+    /// config-folding service and must never fall back to boundary resolution.
     DirectProjectProviderMissing {
         contract: Box<BuildConfigContractFact>,
     },
@@ -1279,9 +1279,9 @@ impl ResolvedBuildConfigValue {
 
 /// The deterministic resolved values for one project or package configuration boundary.
 ///
-/// The map contains every known source, fixed-project and direct-project contract name exactly
-/// once. Its key order is lower_snake_case lexical order, independent of the order in which the
-/// three fact slices were supplied.
+/// The map contains every known source, fixed-project and declaration-owned config contract name
+/// exactly once. Its key order is lower_snake_case lexical order, independent of the order in
+/// which the three fact slices were supplied.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedBuildConfigMap {
     entries: BTreeMap<BuildInputName, ResolvedBuildConfigValue>,
@@ -1308,8 +1308,9 @@ impl ResolvedBuildConfigMap {
 /// Borrowed indexes for one already-validated canonical configuration boundary.
 ///
 /// WHAT: retains the validated canonical value map and references to canonical source,
-///       fixed-project and direct-project facts without copying any fact payload. A transient
-///       check-only unit can then validate and resolve only its own source facts against this index.
+///       fixed-project and declaration-owned config facts without copying any fact payload. A
+///       transient check-only unit then validates and resolves only its own source facts against
+///       this index.
 /// WHY: check-only compilation must not clone the canonical contract vector or reselect its
 ///       providers and defaults for every transient unit. The canonical resolver already validated
 ///       these facts and values before the index is built; only transient facts and any resolution
@@ -1424,7 +1425,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
         let mut resolved = self.canonical_values.clone();
 
         // Finally resolve names introduced only by this transient source unit. Canonical names
-        // and direct-project names already retain their canonical result above.
+        // and declaration-owned config names already retain their canonical result above.
         for (name, source) in &transient_by_name {
             if self.source_by_name.contains_key(name)
                 || self.direct_project_by_name.contains_key(name)
@@ -1489,9 +1490,9 @@ fn collect_transient_source_facts<'a>(
 ///
 /// Fact slices are already selected by the build-system barrier. Source facts are checked in the
 /// supplied source order so the first conflicting declaration is stable; the resulting value map
-/// is always name ordered. Fixed project fields are authoritative, direct project contracts are
-/// resolved before source-only contracts, and unknown explicit inputs are checked only after all
-/// known facts have been validated and resolved.
+/// is always name ordered. Fixed project fields are authoritative, declaration-owned config
+/// contracts are resolved before source-only contracts, and unknown explicit inputs are checked
+/// only after all known facts have been validated and resolved.
 pub(crate) fn resolve_build_config_values(
     source_facts: &[BuildConfigContractFact],
     fixed_project_facts: &[BuildConfigContractFact],

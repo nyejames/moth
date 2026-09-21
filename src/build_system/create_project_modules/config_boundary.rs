@@ -125,7 +125,8 @@ pub(super) fn source_contract_facts_for_current_module(
         .collect()
 }
 
-/// Return the names that are known to one boundary's canonical or direct-project contracts.
+/// Return the names that are known to one boundary's canonical or declaration-owned input
+/// contracts.
 ///
 /// Fixed project fields are deliberately absent: they provide values only for a matching source
 /// contract and must not make an explicit input known on their own.
@@ -176,10 +177,10 @@ pub(super) fn first_unknown_build_config_input(
 
 /// One effective project field shared by fixed source providers and `@project`.
 ///
-/// The snapshot keeps the semantic folded value and canonical type together with the field's
-/// capability/provenance kind. Direct project `#Config` records retain their selected provider
-/// metadata; ordinary fixed fields retain fixed provenance; arbitrary metadata remains visible
-/// only through `@project`.
+/// The snapshot keeps the semantic folded value and canonical type together with the
+/// capability/provenance kind. Declaration-owned `#Config` contracts stay private provider facts;
+/// ordinary fixed fields retain fixed provenance; supported extra project metadata remains visible
+/// through `@project`; unregistered top-level names stay private helpers.
 pub(super) struct EffectiveProjectField {
     pub(super) name: String,
     pub(super) type_identity: CanonicalTypeIdentity,
@@ -766,8 +767,8 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 ///
 /// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
 ///       constructing the final `CompilerMessages` vessel. User-facing failures move the
-///       boundary string table into a [`PremergeDiagnosticBatch`]; the direct-project
-///       invariant violation stays a typed infrastructure error.
+///       boundary string table into a [`PremergeDiagnosticBatch`]; the declaration-owned config
+///       handoff invariant stays a typed infrastructure error.
 /// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
 ///      typed until the final merge boundary owns the single vessel conversion. Moving the
 ///      table keeps every interned diagnostic id valid without cloning.
@@ -781,7 +782,7 @@ pub(super) fn build_config_resolution_failure(
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
         return PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "direct project build-config value for '{}' was not retained by config folding",
+            "grouped-project build-config value for '{}' was not retained by config folding",
             error.name().as_str()
         )));
     }

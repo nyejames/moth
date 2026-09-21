@@ -79,7 +79,7 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub trait_environment: Rc<TraitEnvironment>,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
     pub style_directives: StyleDirectiveRegistry,
-    /// Compiler-owned config resolution services for direct project fields.
+    /// Compiler-owned config resolution services for grouped-project fields.
     pub config_resolution: Option<Rc<ConfigResolutionServices>>,
     /// Immutable project/package source `#Config` values for source-header materialization.
     pub build_config_values: Arc<ResolvedBuildConfigMap>,

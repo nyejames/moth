@@ -78,11 +78,11 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) binding_packages: &'a ExternalPackageRegistry,
-    /// Typed explicit command/programmatic inputs for direct project qualifiers.
+    /// Typed explicit command/programmatic inputs for declaration-owned config contracts.
     pub(crate) build_config_inputs: &'a BuildConfigInputSet,
     /// Typed platform-neutral primitive globals supplied by the selected builder.
     pub(crate) builder_config_globals: &'a BuilderConfigGlobalSet,
-    /// Builder-schema policy for direct grouped-project fields.
+    /// Builder-schema policy for grouped-project fields.
     pub(crate) project_field_config_policies: ProjectFieldConfigPolicies,
 }
 
@@ -91,8 +91,8 @@ pub(crate) struct CompiledConfigSource {
     /// One owned folded declaration per authored top-level compile-time constant, in the
     /// declaration-table order the module store produces.
     pub(crate) declarations: Vec<FoldedConfigDeclaration>,
-    /// Direct-project qualifier and declaration-owned bootstrap resolution facts retained for
-    /// later compiler phases.
+    /// Grouped-project and declaration-owned bootstrap resolution facts retained for later
+    /// compiler phases.
     #[allow(dead_code)]
     pub(crate) resolution_records: Vec<ConfigResolutionRecord>,
     /// Receiving project fields whose folded values depend on declaration-owned inputs.

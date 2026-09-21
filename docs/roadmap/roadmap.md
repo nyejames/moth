@@ -11,7 +11,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Ready next. The final Phase 3 closeout and post-Phase-3 cleanup prerequisites are accepted on main. Deliver parenthesised value construction through the shared argument parser, inline nested const records and a complete source/documentation cutover before MON Rust tooling and later directive work. Runtime records and MON serialisation remain separate follow-ups.
+- [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Phase 1/2 syntax, nested-value and config cutover accepted; Phase 3 documentation and future-plan closeout active. Parenthesised value construction through the delivered shared argument owner, inline nested const records and declaration-owned `#Config` plus grouped `project #= (...)`/`html #= (...)` bootstrap are delivered; MON Rust tooling and later directive work remain queued. Runtime records and MON serialisation remain separate follow-ups.
 
 - [MON v1: Rust-facing compiler tooling](./plans/mon-rust-tooling-v1-plan.md) - Queued immediately after the MON syntax checkpoint. Deliver literal-data encoding, nested-value encoding, strict schema-checked decoding and bounded fail-fast errors through the Moth Rust library for engine save files and other native consumers. Moth directives, source operations, backend integration and the static MON project builder remain deferred to the final roadmap entry.
 

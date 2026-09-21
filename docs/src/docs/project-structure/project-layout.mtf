@@ -1,7 +1,8 @@
-**Current support versus accepted design.** The Alpha compiler still uses
-grouped `project` and `html` records, direct `#Config` fields and reserved
-`page_*` metadata. The accepted `$config`, `$project`, `$html_builder` and
-root-only `$page` forms are queued, and `moth new` does not emit them yet.
+**Current support versus accepted design.** The Alpha compiler uses
+declaration-owned `#Config of T` inputs, grouped parenthesised `project` and
+`html` records and reserved `page_*` metadata. The accepted `$config`,
+`$project`, `$html_builder` and root-only `$page` forms are queued, and `moth new`
+does not emit them yet.
 
 A Moth project is a directory tree with one strict config file, a source entry
 root and generated output folders.
@@ -25,8 +26,8 @@ passes it to the required project field:
 ]
 
 This is accepted queued design, not a claim about the current `moth new`
-scaffold. Keep operational projects on their current grouped config until the
-implementation cutover.
+scaffold. Keep operational projects on their current declaration-owned
+`#Config` and grouped parenthesised config until the general-directive cutover.
 
 ### Project root contents
 

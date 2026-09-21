@@ -45,8 +45,8 @@ Do not infer activation from the presence of this file.
 
 - canonical project/package graph and immutable artefact architecture
 - dependency-clause and path-syntax migration
-- grouped project config and recursive schema support
-- delivered typed build configuration values, immutable `@project` and project-boundary isolation
+- grouped project config, meaning the delivered parenthesised `project #= (...)`/`html #= (...)` bootstrap kept through the MON cutover, and recursive schema support
+- delivered typed build configuration values, meaning the declaration-owned `#Config` bootstrap rather than queued `$config` directives or field-embedded metadata, immutable `@project` and project-boundary isolation
 - stable package, module, public-interface and capability fingerprints
 - completed HTML mixed-target backend boundary where required by package compatibility policy
 

@@ -162,7 +162,7 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
 
-    /// Compiler-owned direct-project config resolution services, present only for config.moth.
+    /// Compiler-owned grouped-project config resolution services, present only for config.moth.
     pub config_resolution: Option<Rc<ConfigResolutionServices>>,
 
     /// Immutable project/package source `#Config` values resolved before AST construction.
@@ -199,7 +199,7 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
     >,
-    /// Compiler-owned direct-project config resolution services, present only for config.moth.
+    /// Compiler-owned grouped-project config resolution services, present only for config.moth.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
     /// Immutable project/package source `#Config` values resolved before AST construction.
     pub(crate) build_config_values: Arc<ResolvedBuildConfigMap>,

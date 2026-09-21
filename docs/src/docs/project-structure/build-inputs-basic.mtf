@@ -1,6 +1,6 @@
 Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-**Current support versus accepted design.** Direct and source `#Config` and typed `--input` values are supported. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
+**Current support versus accepted design.** Declaration-owned `#Config of T` inputs and typed `--input` values are supported. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
 
 ### Accepted `$config`
 
@@ -15,9 +15,11 @@ Build configuration values let a project or source module receive typed primitiv
 
 The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer. Ordinary constants still need one.
 
-Only `$config` declarations create contracts. A `$project` field named `version` does not supply a source input named `version`.
+Only `$config` declarations create explicit-only contracts. A `$project` field named `version` does not supply a source input named `version`.
 
 ### Current `#Config`
+
+Declaration-owned `#Config of T` is current; the `$config` prefix and explicit-only providers remain queued:
 
 [codeblock, $code("moth"):
     analytics #Config of Bool = false

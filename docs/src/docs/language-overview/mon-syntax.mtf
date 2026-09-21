@@ -1,7 +1,6 @@
-**Accepted queued design.** Parenthesised anonymous const records are queued for
-implementation. Runtime anonymous records are a separate later feature. Ordinary
-calls and named constructors already use parentheses. See @../progress (Progress)
-for implementation and target support.
+MON syntax is implemented for supplied arguments and compile-time anonymous
+const records, including inline nested values. Runtime anonymous records remain
+a separate deferred feature. See @../progress (Progress) for current support.
 
 MON means Moth Object Notation. **MON syntax** names Moth's shared parenthesised
 argument and value-construction notation. **The MON format** is a future data

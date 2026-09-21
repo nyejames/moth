@@ -4,7 +4,7 @@
 
 - Status: queued, with the design interview accepted.
 - Current slice: not started.
-- Blockers: shared directive recognition, retained syntax, compile-time call arguments and directive-based project configuration must be delivered.
+- Blockers: shared directive recognition, retained syntax and compile-time call arguments must be delivered; directive-based project configuration means the queued general-directives `$config`/`$project`/`$html_builder` cutover, not the delivered MON declaration-owned `#Config`/grouped bootstrap.
 - Next action: refresh the activation tree and start Phase 0.
 
 Intended location: `docs/roadmap/plans/html-page-directives-and-runtime-title-plan.md`.
@@ -66,7 +66,7 @@ A page directive never promotes a helper file, package source, support root or f
 
 `$page` describes the whole root regardless of source position. It does not enable a mode for subsequent statements or partition the file. Style places it early, after any earlier constants or dependencies needed by its arguments. Argument visibility remains ordinary file visibility. Same-file forward references are invalid even though the purpose applies to the whole root.
 
-Bare `$page` is the default invocation. `$page()` is invalid under the general no-empty-parentheses rule. Positional and named arguments use the shared call owner, without a page-specific list parser.
+Bare `$page` is the default invocation. `$page()` is invalid under the general no-empty-parentheses rule. Positional and named arguments use the delivered MON shared call owner, without a page-specific list parser.
 
 ### Signature
 
@@ -224,7 +224,7 @@ Delete reserved HIR-constant scanning, entry-scope prefix matching, key-name tab
 
 Delete the implicit rule that runtime work or fragments alone select a page. Delete homepage-at-entry-root enforcement, replacing it with command-specific no-page policy. Preserve directory routing, output conflicts, manifests and ownership.
 
-Update `page_template` so generated `src/@page.moth` contains `$page` and uses its metadata arguments. Retain the new config generator's `$config` version example and required `$project` version argument. Test the combined real scaffold after this cutover.
+Update `page_template` so generated `src/@page.moth` contains `$page` and uses its metadata arguments. Retain the live MON-bootstrap scaffold (declaration-owned `#Config` plus grouped `project #= (...)`/`html #= (...)`) until general directives lands; then carry the `$config`-version plus required `$project`-version example. Test the combined real scaffold after this cutover.
 
 Do not mass-insert `$page` into every test source. Frontend-only declaration cases and negative placement/purpose cases have different intents. Public HTML positive cases requiring an artefact should author the directive explicitly. Internal helpers must not bypass the public policy to make missing-purpose cases pass.
 
@@ -256,7 +256,7 @@ Later stages consume resolved purpose, metadata, start identity and resource fac
 
 ### Phase 1: `$page` syntax and metadata
 
-- [ ] Register the exact root-only singleton signature and consume the shared call path.
+- [ ] Register the exact root-only singleton signature and consume the delivered MON shared call path.
 - [ ] Retain source context and fold arguments with ordinary module visibility.
 - [ ] Publish owned non-HIR metadata and structural resource uses with remaps.
 - [ ] Cover wrong placement, cardinality, constant arguments and metadata-only roots.

@@ -390,8 +390,8 @@ pub(crate) fn find_config_qualifier_marker_in_cursor(
 
 /// Bounded invalid-spacing scan over one checked source-owned cursor.
 ///
-/// The direct project-config path uses this helper before header preparation. It observes exact
-/// canonical spans without materializing a token vector; the normal declaration-shell path
+/// The config.moth declaration-owned path uses this helper before header preparation. It observes
+/// exact canonical spans without materializing a token vector; the normal declaration-shell path
 /// validates adjacency at its parser cursor.
 pub(crate) fn find_invalid_config_qualifier_spacing_in_cursor(
     mut cursor: TokenCursor<'_>,

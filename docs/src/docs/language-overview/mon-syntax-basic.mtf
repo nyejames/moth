@@ -1,5 +1,5 @@
-**Accepted queued design.** Anonymous records using the notation below are not
-yet implemented. Calls and named constructors already use parentheses.
+MON syntax is implemented for supplied arguments and compile-time anonymous
+const records. Runtime anonymous records and the MON format remain deferred.
 
 MON means Moth Object Notation. MON syntax gives supplied arguments and record
 values a common notation. Pipes declare fields or parameters. Parentheses supply

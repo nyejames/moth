@@ -4,8 +4,8 @@ Moth is a high-level language with first-class string templates. Its compiler is
 
 This document is the single source of truth for accepted core compiler architecture, semantic ownership and cross-stage compiler contracts. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
-The compiler implements template directives, grouped `project`/`html` configuration records, direct
-and source `#Config` values as ordinary folded constants, and immutable project fields through
+The compiler implements template directives, declaration-owned `#Config of T` inputs plus grouped
+`project`/`html` (`#=`) records as ordinary folded constants, and immutable project fields through
 explicit `@project`. General non-template directives, `$config` prefixes, closed `$project` /
 `$html_builder` configuration, root-only `$page` and explicit root purposes are accepted queued
 design. Other accepted end-state contracts are labelled in their owning sections.
@@ -60,9 +60,12 @@ or thorough reviews.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
-- Call-shaped argument syntax has one parser and one parameter-slot routing owner. Functions,
+- Call-shaped argument syntax has one parser and one shared argument owner. Functions,
   constructors, receiver methods, builtin members, statement intrinsics and directive invocations
-  consume that shared syntax path rather than copying delimiter or named-argument handling.
+  route supplied values through signature parameter slots on that shared path rather than copying
+  delimiter or named-argument handling. Anonymous const-record entries and inline nested folded
+  values use the same shared owner with named-only field routing; signature parameter slots and
+  record fields remain distinct routings.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
@@ -74,7 +77,7 @@ or thorough reviews.
 - Stage 4 validates both branches of an ordinary `if` before static selection. A known compile-time Bool selects one branch before HIR, and the selected branch retains its lexical scope.
 - Terminality and durable generated requests are derived from the specialised active AST. An inactive static branch contributes no HIR or downstream executable facts.
 - HIR never receives an `if` whose condition is already a known compile-time Bool.
-- Ordinary `$config` values and static `if` specialise executable behaviour. They cannot change
+- Ordinary `#Config` values and static `if` specialise executable behaviour. They cannot change
   Stage 0 graphs or declaration structure. Future `$feature` is a separate compiler-owned
   structural-selection contract before graph and declaration publication.
 - Source does not select or inspect physical targets.
@@ -155,7 +158,7 @@ Source preparation and provider binding are deliberately separate.
 - structural file references
 - local declaration-ordering hints
 - root-activity and fragment-placement metadata
-- retained `$config` input-contract shells and other declaration-prefix directive metadata
+- retained `#Config` input-contract shells and other declaration-prefix directive metadata
 - source locations, diagnostics and remap information
 
 `BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained dependency clauses against immutable provider interfaces and produces:
@@ -524,7 +527,7 @@ A synthetic compile-time interface contains:
 - no HIR
 - no runtime body
 
-`@project` publishes only predefined project fields. Config helper constants and `$config` input
+`@project` publishes only predefined project fields. Config helper constants and `#Config` input
 declarations are not implicitly public project metadata.
 
 It enters visibility through the same dependency binding boundary as other interfaces. AST consumes
@@ -550,7 +553,7 @@ metadata, configuration dependence, public semantic facts and root metadata rema
 fingerprint inputs. Configuration dependencies use the existing fingerprint owners; they do not
 create a separate fingerprint family. Exported folded values or effect summaries may vary when they
 depend on configuration, with provenance retained, while structural public identity remains stable.
-Ordinary `$config` inputs cannot create or remove declarations or exports. They may change active
+Ordinary `#Config` inputs cannot create or remove declarations or exports. They may change active
 executable effects and derived link facts only. Future structural `$feature` selection needs
 distinct selection-compatibility facts before reuse; it is not ordinary configuration folding.
 
@@ -695,7 +698,7 @@ It owns:
 - root-role-aware `export:` parsing
 - dependency clause shells, flat direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
-- declaration-prefix metadata such as `$config` on the following eligible declaration
+- declaration-prefix metadata such as `#Config of T` on the following eligible declaration
 - retained config and root directive invocations, including their balanced argument token ranges
 - dormant normal-root start-body separation
 - compile-time fragment placement metadata
@@ -703,13 +706,13 @@ It owns:
 - structural provider references
 - structural file references, classified from the dense path rows tokenization already produced
 - conservative local declaration-ordering hints
-- retained `$config` input-contract shells
+- retained `#Config` input-contract shells
 
 Support roots and project package facades reject root runtime activity before executable HIR can be produced. Normal roots retain dormant start, fragment and root-directive metadata.
 
 Syntax preparation does not type-check executable bodies, fold expressions, parse a parallel argument language or open source provider interfaces. File-reference classification is shallow for the same reason: it reads path rows and their spelling, and never parses the surrounding expression. Directive arguments are semantically parsed once through the shared call owner when the receiving context is available.
 
-`$config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
+`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
 
 #### Interface binding
 
@@ -918,7 +921,9 @@ AST carries semantic `TypeId` values through fields, receiver lookup, calls, ope
 Call-shaped argument syntax has one focused AST owner. It consumes parentheses, commas, newline
 whitespace, positional and named targets, mutable-access markers, argument expression boundaries,
 expected-type and cast-target routing. Functions, constructors, receiver methods, builtin members,
-statement intrinsics and directive invocations consume that owner. The same owner retains each
+statement intrinsics and directive invocations route supplied values through signature parameter
+slots on that owner. Anonymous const-record entries and inline nested folded values use the same
+owner with named-only field routing and const-required values. The same owner retains each
 parsed argument's parameter slot for final validation, so call validation fills defaults and checks
 types and access without routing the source arguments a second time. Specialised template argument
 categories remain under their current template owners.
@@ -968,17 +973,19 @@ Constants are compile-time declarations and metadata rather than runtime top-lev
 
 Header preparation owns local dependency discovery. AST owns semantic checking and folding.
 
-`$config` is the accepted source spelling for an explicit input contract on one following typed
-compile-time `#` binding. Only those declarations create input contracts. Project fields and ordinary
-helper constants never implicitly supply or block same-named inputs.
+`#Config of T` is the implemented source spelling for an explicit input contract on one earlier
+explicitly typed top-level declaration. Only those declarations create input contracts. `$config`
+prefixes, closed `$project` / `$html_builder` configuration, root-only `$page` and explicit root
+purposes remain queued general directives. Fixed grouped-project fields retain their current
+authoritative provider and override-blocking policy; ordinary helper constants do not become input
+contracts.
 
-Bootstrap `$config` contracts resolve during the config compilation service. Source-module input
-defaults stay literal-only and resolve after graph discovery, before that module's AST semantics.
+Declaration-owned bootstrap `#Config` contracts resolve during the config compilation service. Source-module input defaults stay literal-only and resolve after graph discovery, before that module's AST semantics.
 Source defaults are deliberately restricted to self-contained primitive literals or `none`, as
 defined in `docs/build-system-design.md`. AST consumes the resolved primitive value and treats the
 declaration as an ordinary folded constant.
 
-A source `$config` declaration creates:
+A source `#Config` declaration creates:
 
 - no runtime wrapper type
 - no HIR node category
@@ -992,7 +999,7 @@ Private inferred const facts are advisory optimisation metadata. They do not aff
 #### Static Bool control-flow specialisation
 
 Static specialisation applies to ordinary statement and value-producing `if` forms and uses the normal
-folded Bool authority. It has no `$config` special case and no config-specific branch node.
+folded Bool authority. It has no `#Config` special case and no config-specific branch node.
 
 The current AST finalisation owner performs this selection after type and value-production
 validation and before terminality, durable generated requests and executable const facts.
@@ -1009,9 +1016,7 @@ validation and before terminality, durable generated requests and executable con
 Terminality and durable executable summaries observe the specialised active AST. HIR receives no
 statically decided ordinary `if`; every `if` remaining in HIR has a runtime condition.
 
-Fully folded struct and anonymous-record constants may become const records. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
-
-Compile-time and runtime semantics agree on checked numeric failures, cast range checks, non-finite Float rejection and value-to-string formatting.
+Fully folded struct and anonymous-record constants may become const records. Anonymous const records use parenthesized named-only `(name = value)` entries; the empty record is permitted and fields may fold inline nested anonymous, already bound, or explicitly constructed nominal values. Records declare no nested types, perform no conversion, and whole records remain runtime-ineligible. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
 
 #### Generics
 
@@ -1258,7 +1263,7 @@ HIR does not:
 - carry compile-time page fragments
 - carry absolute source paths, output paths, routes, URLs, content hashes or builder names
 - receive a statically decided ordinary `if`
-- evaluate `$config` or recover page metadata from constant names
+- evaluate `#Config` or recover page metadata from constant names
 - choose target- or platform-specific source branches
 - solve generic arguments
 - decide trait conformance
@@ -1585,7 +1590,7 @@ Backend lowerers do not:
 - rediscover project topology
 - choose command, entry or route policy
 - reconsider source legality, borrow facts or lifetime topology
-- reinterpret `$config`, `$feature` or static branch selection
+- reinterpret `#Config`, `$feature` or static branch selection
 - write final project outputs directly
 
 A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.

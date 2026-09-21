@@ -1,6 +1,7 @@
-**Current versus accepted.** Alpha scaffolds still use grouped config and
-reserved page metadata. The accepted `$config`/`$project`/`$html_builder` and
-root-only `$page` forms are queued. `moth new` doesn't emit them yet.
+**Current versus accepted.** Alpha scaffolds use declaration-owned `#Config of T`
+inputs with grouped parenthesised config and reserved page metadata. The accepted
+`$config`/`$project`/`$html_builder` and root-only `$page` forms are queued.
+`moth new` does not emit them yet.
 
 A Moth project has one config file, one source root and generated output
 folders.

@@ -4,8 +4,9 @@ Moth's build system selects a command and capability surface, bootstraps project
 
 This document is the single source of truth for accepted build-system, project graph, builder, tooling, link and output architecture. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
-The typed direct and source `#Config` contracts, shared primitive command inputs and immutable
-explicit `@project` interface are implemented. General non-template directives, `$config` prefixes,
+The declaration-owned typed `#Config of T` contracts, grouped `project`/`html` (`#=`) records,
+shared primitive command inputs and immutable explicit `@project` interface are implemented.
+General non-template directives, `$config` prefixes,
 closed `$project` / `$html_builder` configuration, root-only `$page` and explicit root purposes are
 accepted queued design. Other accepted end-state contracts are labelled in their owning sections.
 
@@ -35,7 +36,7 @@ refactors or thorough reviews.
 | Task | Read in this document | Also read when affected |
 |---|---|---|
 | Command selection, builder capabilities or tooling overlays | `Selected command and capability surface`; `Command and tooling policies` | The compiler sections for any new semantic capability or validation root |
-| `config.moth`, project fields, `$config`, `@project`, builder directives, root metadata or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records` when compiler folding or handoff changes |
+| `config.moth`, project fields, `#Config`, `@project`, builder directives, root metadata or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records` when compiler folding or handoff changes |
 | Source discovery, ownership, semantic source sets, check-only units or source preparation | `Source indexing and source sets`; `Prepared-source orchestration` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and the relevant Stage 1 to Stage 3 section |
 | Module roots, dependency topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
 | Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
@@ -66,10 +67,10 @@ refactors or thorough reviews.
 - Graph and input membership is conservative and comes from physical-target-bearing authored file references; output emission is exact and comes from entry or package reachability. Reachability never decides graph membership, and graph membership never forces emission. `SourceKindNoFileValue` and site-root `@/` have no physical target, source membership, input or watch record.
 - Resource origin, byte source, emitted output path and rendered URL are four separate facts owned by the build system after the compiler has published semantic resource facts.
 - Builders assign every reachable resource use one semantic URL context. No builder scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover resources.
-- Ordinary `$config` values and static `if` may specialise executable behaviour, but they cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology. Future `$feature` is a separate pre-graph structural-selection contract.
+- Ordinary `#Config` values and static `if` may specialise executable behaviour, but they cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology. Future `$feature` is a separate pre-graph structural-selection contract.
 - Source semantics remain target and platform agnostic.
 - Builders and backend capability metadata map stable source semantics to target-specific artefacts.
-- Builders must not expose target identity through `$config`.
+- Builders must not expose target identity through `#Config`.
 - A statically decided Bool `if` is specialised by Stage 4 before HIR and downstream executable analysis.
 - Parallel scheduling, reuse and caching preserve deterministic identities, diagnostics and output order.
 
@@ -90,7 +91,7 @@ The current CLI selects the HTML builder implicitly. Final builder-selection syn
 The selected builder exposes a bootstrap capability surface before config compilation:
 
 - owned compiler and builder directive signatures
-- config-only contexts for `$project` and `$html_builder`
+- config-only contexts for the grouped `project` and `html` records
 - source-backed Core and Builder packages
 - binding-backed packages
 - template directives
@@ -105,7 +106,7 @@ Frontend-owned directives and compiler-owned builtins are added to this surface.
 Explicit command inputs are parsed into typed primitive values before config or source contracts are
 matched. Programmatic command APIs construct the same typed carrier. Builder-provided primitive globals
 must express stable semantic configuration; target or platform identity is not a valid builder-provided
-`$config` global. Target intent remains build-system input and is not source-visible configuration.
+`#Config` global. Target intent remains build-system input and is not source-visible configuration.
 
 One artefact builder runs per `build` or `dev` invocation. Tooling overlays extend analysis and validation. They do not become competing artefact builders.
 
@@ -146,16 +147,19 @@ known-source inventory lane: its identity is registered upfront and final before
 tokenizes; only its table installation waits for the build-owned validation that can still
 produce spans.
 
-Allowed source includes:
+Allowed source includes the delivered MON bootstrap plus queued `$` directives:
 
+- earlier explicitly typed top-level `#Config of T` declarations before their uses
+- exactly one grouped `project #= (...)` record
+- exactly one grouped `html #= (...)` record for an authored HTML directory project
 - earlier private helper constants declared before their uses
-- standalone `$config` contracts
-- exactly one `$project` invocation
-- exactly one `$html_builder` invocation for an authored HTML directory project
 - scalar and optional constants
 - anonymous const records used as ordinary helpers
 - collections of supported folded values
 - foldable templates represented by their folded string result
+
+Standalone `$config` contracts, exactly one `$project` invocation and exactly one `$html_builder`
+invocation are queued `$` directive spellings, not current source.
 
 Rejected source includes:
 
@@ -175,47 +179,51 @@ Rejected source includes:
 
 Project config creates no source-visible declarations. Its folded outputs enter the project through specialised build-system interfaces only.
 
-Short accepted shape:
+Short accepted shape (delivered typed declarations plus grouped records):
 
 ```moth
-$config
-version #String = "0.1.0"
+version #Config of String = "0.1.0"
 
-$project(
+project #= (
     name = "my_site",
     version = version,
     entry_root = "src",
 )
 
-$html_builder
+html #= ()
 ```
 
-A fixed literal version also works. Having a contract named `version` does not satisfy an omitted `$project` argument. `config.moth` does not select the builder. The command has already done so. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic configuration path and do not invent `$project` / `$html_builder` source declarations.
+A fixed literal version also works. Having a contract named `version` does not satisfy an omitted `project` record entry. `config.moth` does not select the builder. The command has already done so. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic configuration path and do not invent `project` / `html` source declarations. The `$config` / `$project(...)` / `$html_builder` spellings above describe queued general directives; do not implement them early.
 
-### Project directive
+### Project record
 
-`config.moth` contains exactly one `$project` invocation. It publishes validated project identity and settings through the existing config result and predefined `@project` interface. It does not create a local source symbol named `project`.
+`config.moth` contains exactly one grouped `project #= (...)` record. It publishes validated project identity, settings and supported extra metadata through the existing config result and `@project` interface. It does not create a local source symbol named `project`. The closed `$project` invocation spelling is a queued general directive, not current source.
 
-The positional parameter order is:
+The record entry order is:
 
-| Parameter | Type | Default | Configurable value permitted |
+| Entry | Type | Default | Configurable value permitted |
 |---|---|---|---|
 | `name` | `String` | Required | No. |
-| `version` | `String` | Required | Yes. |
+| `version` | `String?` | `none` | Yes. |
 | `entry_root` | `String` | `"src"` | No. |
 | `author` | `String?` | `none` | Yes. |
 | `license` | `String?` | `none` | Yes. |
 | `template_const_loop_iteration_limit` | `Int` | The existing compiler-owned default limit | No. |
 
-`name` must be a valid Moth project identifier and is not inferred from the checkout directory. Directory-project `entry_root` remains a relative directory strictly beneath the project root. `version` has no declaration default; `"0.1.0"` belongs to the starter `$config` example, not to `$project`. Missing version is diagnosed even when an unused input contract named `version` exists.
+`name` must be a valid Moth project identifier and is not inferred from the checkout directory. Directory-project `entry_root` remains a relative directory strictly beneath the project root. `version` is optional in the delivered grouped record and remains absent when omitted; the future closed `$project` invocation requires its `version` argument. The starter `#Config` example supplies `"0.1.0"`.
 
-The signature is closed. Arbitrary metadata fields, misspelled standard fields and `metadata = ...` are rejected. Ordinary helper records in config remain ordinary private constants. Project-wide reusable constants belong in ordinary source or support packages.
+The grouped project record preserves supported extra metadata while its predefined fields retain the
+domains and defaults above. Unknown names with supported folded values remain extra project
+metadata; unsupported metadata shapes and invalid predefined values are rejected. The future closed
+`$project` signature rejects arbitrary fields and misspelled standard fields. Active builder sections
+remain closed. Ordinary helper records in config remain ordinary private constants. Project-wide
+reusable constants belong in ordinary source or support packages.
 
-Retain existing field-domain and output/source-path validation. Project identity, source-discovery and compiler-control settings remain fixed-only: reject `$config` dependence in `$project`'s `name`, `entry_root` and `template_const_loop_iteration_limit` arguments, including dependence through earlier helper constants. An ordinary compile-time value without input dependence remains valid. A folded value equal to a literal is not evidence that it was fixed.
+Retain existing field-domain and output/source-path validation. Project identity, source-discovery and compiler-control settings remain fixed-only: reject input-contract dependence in `project`'s `name`, `entry_root` and `template_const_loop_iteration_limit` entries, including dependence through earlier helper constants. An ordinary compile-time value without input dependence remains valid. A folded value equal to a literal is not evidence that it was fixed.
 
-### Bootstrap `$config` declarations
+### Bootstrap `#Config` declarations
 
-Only explicit `$config` declarations create input contracts. `$config` is a prefix on one following explicitly typed top-level `#` binding. The binding name is the input name, the type is the contract and `=` is the fallback. Required non-optional inputs may omit the initializer. There is no `$config(default)` form and no type-position or value-position directive.
+Only explicit `#Config of T` declarations create input contracts. `#Config of T` marks one earlier explicitly typed top-level declaration. The binding name is the input name, the type is the contract and `=` is the fallback. Required non-optional inputs may omit the initializer. `$config` prefixes are a queued general directive, not current source. There is no `$config(default)` form and no type-position or value-position directive.
 
 Accepted contract types are:
 
@@ -226,9 +234,9 @@ Accepted contract types are:
 - `Char`
 - optional forms of those types
 
-`$config` is compiler-owned declaration metadata. It is not a type constructor, source dependency clause or wrapper type. The semantic type of a marked binding remains the declared `T`.
+`#Config of T` is compiler-owned declaration metadata. It is not a type constructor, source dependency clause or wrapper type. The semantic type of a marked binding remains the declared `T`.
 
-Project fields and ordinary helper constants never implicitly supply or block same-named inputs. Remove the fixed-project-field provider tier and its override-blocking semantics.
+Delivered declaration-owned `#Config` contracts keep input names distinct from project metadata. Fixed grouped-project fields retain the current authoritative provider and override-blocking policy for same-named source contracts, while dependency-bearing configurable fields retain their input handoff. The future `$config` directive is the explicit-only provider model and removes that fixed-field tier.
 
 Bootstrap contracts resolve in this order:
 
@@ -279,12 +287,11 @@ Programmatic command APIs construct the same typed carrier and do not define ano
 policy.
 
 ### `ProjectGlobalsInterface` and `@project`
-
-The folded `$project` directive produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
+The folded grouped `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root. The closed `$project` invocation spelling is a queued general directive, not current source.
 
 The interface contains:
 
-- stable field identities for the predefined project fields only
+- stable field identities for predefined project fields and supported extra project metadata
 - folded backend-neutral values
 - source locations
 - field-level fingerprints
@@ -295,7 +302,7 @@ The interface contains:
 
 It is classified as project-local and Moth-source-backed for provenance and capability purposes, but it is not discovered as a normal source package.
 
-`@project` exposes those predefined fields as namespace members. It does not expose another value named `project`. Config helper constants and `$config` input declarations are not implicitly public project metadata.
+`@project` exposes predefined fields and supported extra project metadata as namespace members. It does not expose another value named `project`. Config helper constants and `#Config` input declarations are not implicitly public project metadata.
 
 Normal project modules and project-owned support packages may explicitly declare a dependency on `@project`. It is never implicitly injected.
 
@@ -318,7 +325,7 @@ resolution origins remain provenance, not semantic fingerprint inputs.
 
 ### Source contracts and static specialisation
 
-Source `$config` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
+Source `#Config` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
 
 A source declaration may use only the accepted primitive or optional types listed for bootstrap contracts. Only a single explicitly typed top-level compile-time binding is eligible.
 
@@ -366,31 +373,31 @@ Matching declarations within one compilation boundary agree on name, primitive t
 
 Selected-source contracts resolve in this order:
 
-1. the already-resolved matching bootstrap `$config` contract, after compatibility validation
+1. the already-resolved matching bootstrap `#Config` contract, after compatibility validation
 2. explicit input for a source-only contract
 3. a compatible builder-provided primitive global
 4. the common source fallback or optional absence
 5. a required-input diagnostic
 
-A project field named `version` does not satisfy a source input contract. `$project(version = "1.0")` creates project metadata, not a `version` input provider. Unknown explicit inputs are diagnosed only after every selected source contract is known. Each project or package boundary owns its own namespace; consumer input does not satisfy dependency contracts implicitly.
+Future `$project(version = ...)` metadata does not create a source input. Under the delivered grouped bootstrap, fixed project fields retain provider precedence while configurable fields preserve their declaration-owned input dependence. Unknown explicit inputs are diagnosed only after every selected source contract is known. Each project or package boundary owns its own namespace; consumer input does not satisfy dependency contracts implicitly.
 
 The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper,
 dependency symbol category, HIR node or new visibility rule.
 
-`$config` of `Bool` uses ordinary `if`; no `$config if` syntax exists. Both branches complete Stage 4
+`#Config` of `Bool` uses ordinary `if`; no `$config if` syntax exists. Both branches complete Stage 4
 frontend validation before a known Bool selects the executable branch. The selected branch keeps its
 lexical scope. Only active executable work reaches HIR and downstream generated-function, borrow,
 lifetime, link, target and backend systems. Static selection changes executable facts, not source
 structure or graph topology. Ordinary static `if false` does not suppress frontend directive errors.
 See the compiler authority for the exact Stage 4 ownership contract.
 
-### `$html_builder` and builder settings
+### `html` record and builder settings
 
-For an authored HTML directory project, `config.moth` contains exactly one `$html_builder` invocation. Bare `$html_builder` supplies all defaults. The command selects the builder first. This invocation never selects a backend, builder or runtime platform.
+For an authored HTML directory project, `config.moth` contains exactly one grouped `html #= (...)` record. An empty `html #= ()` record supplies all defaults. The command selects the builder first. This record never selects a backend, builder or runtime platform. The bare `$html_builder` spelling is a queued general directive, not current source.
 
-HTML settings remain a closed directive signature consumed by the existing typed HTML config owner. They use backend-neutral folded values rather than builder-specific nominal types. Unknown parameters are errors. Known unavailable directives error. Unknown directives error. Inactive-builder sections are not folded or ignored as a holding area. Multi-builder source and configuration await structural `$feature` selection.
+HTML settings remain a closed record consumed by the existing typed HTML config owner. They use backend-neutral folded values rather than builder-specific nominal types. Unknown parameters are errors. Known unavailable directives error. Unknown directives error. Inactive-builder sections are not folded or ignored as a holding area. Multi-builder source and configuration await structural `$feature` selection.
 
-These settings consume permitted folded input values and do not declare their own `$config` contracts. Config still rejects source dependencies and authored file-value paths. Tracked file resources belong in later root-local `$page` metadata.
+These settings consume permitted folded input values and do not declare their own `#Config` contracts. Config still rejects source dependencies and authored file-value paths. Tracked file resources belong in later root-local `$page` metadata.
 
 Project and page signatures stay distinct. There is no generic cross-scope field inheritance or merge system. Builder output-path settings and defaults remain builder-owned.
 
@@ -408,7 +415,7 @@ Root metadata and purpose directives are root-local builder facts. They are not 
 
 Header syntax retains the invocation and its ordinary dependency and reference facts. Module AST checks and folds it once through ordinary module visibility. Metadata is stored in that module's non-HIR lane. It creates no ordinary declaration, public export, runtime value or project global.
 
-Typed metadata arguments may use earlier same-file constants, dependency-bound constants, explicit `@project` members, resolved source `$config` values and the existing foldable expression and template surface. Resource-bearing strings stay structural. Consumers never inherit or apply provider page metadata.
+Typed metadata arguments may use earlier same-file constants, dependency-bound constants, explicit `@project` members, resolved source `#Config` values and the existing foldable expression and template surface. Resource-bearing strings stay structural. Consumers never inherit or apply provider page metadata.
 
 Authored root runtime or direct output requires an implemented purpose with a consumer. Only `$page` works initially. Comment and documentation semantics and API-only declarations are exempt. Future `$test` is documented but cannot satisfy validation until implemented. Unmarked executable candidates cannot silently vanish merely because entry filtering selects `$page`.
 
@@ -542,7 +549,7 @@ Prepared syntax may contain:
 - structural provider references
 - structural file references
 - local declaration-ordering hints
-- retained `$config` input-contract shells
+- retained `#Config` input-contract shells
 - retained root metadata and purpose directives
 - dormant root activity shells
 - compile-time fragment placement metadata
@@ -573,7 +580,7 @@ byte-source facts.
 Every authored physical-target-bearing file-value path is graph-active, independently of AST
 reachability, constant folding and static branch specialisation. `SourceKindNoFileValue` is
 retained only as a structural diagnostic fact with no physical target, semantic-source membership,
-physical-source or watch record. Graph membership is never decided by output reachability, and `$config`
+physical-source or watch record. Graph membership is never decided by output reachability, and `#Config`
 cannot alter file dependency topology.
 
 Because a newly discovered content source may itself contain file references, discovery is a
@@ -593,7 +600,7 @@ The loop's rules are what make it deterministic:
 - resource files found in newly added sources enter the same build-input registry as any other
 - ordering and diagnostics do not depend on the order in which the worklist happened to insert
 
-Retained source `$config` contract shells do not create structural provider edges, dependency symbol
+Retained source `#Config` contract shells do not create structural provider edges, dependency symbol
 bindings or topology changes. Their later resolved values are consumed only by ordinary module AST
 semantics. Root purpose selection also consumes retained facts rather than rediscovering source.
 
@@ -797,7 +804,7 @@ Assembly never recompiles or mutates the facade.
 
 A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.
 
-The facade package identity comes from the `$project` directive's `name` argument.
+The facade package identity comes from the grouped `project` record's `name` entry.
 
 ### Namespace and collision policy
 
@@ -905,7 +912,7 @@ Persistent or precompiled dependency artefacts may later replace source compilat
 
 Package declaration syntax, registries, remote fetching, version solving and lockfiles remain deferred.
 
-Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `$config` contracts.
+Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `#Config` contracts.
 
 A dependency resolves its contracts from its own config, defaults and compatible builder-provided globals. No implicit cross-boundary input lookup or same-name inheritance is allowed.
 
@@ -1171,7 +1178,7 @@ A module without `$page` produces no independent HTML entry. Its reachable decla
 ### Mixed-target planning and validation
 
 Source contains no target-selection annotations and cannot query whether a function will become
-JavaScript or Wasm. `$config` cannot carry target or backend identity. Automatic partitioning and
+JavaScript or Wasm. `#Config` cannot carry target or backend identity. Automatic partitioning and
 capability rejection are builder/compiler services over platform-agnostic source; builder capability
 surfaces expose stable semantics rather than physical target names.
 
@@ -1505,7 +1512,7 @@ HTML defaults remain:
 - development: `dev`
 - release: `release`
 
-The HTML builder accepts output-root overrides through `$html_builder`.
+The HTML builder accepts output-root overrides through the grouped `html` record.
 
 Every output root must be:
 

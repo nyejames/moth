@@ -2,11 +2,12 @@
 
 ## Status
 
-- Status: Phase 2B syntax, nested-value and config cutover accepted; implementation active.
-- Current slice: Phase 3 - complete documentation and future-plan cutover.
-- Blockers: none. The source/token-layout Phase 3 closeout and maintainer-managed post-Phase-3
-  cleanup are accepted on main.
-- Next action: apply the remaining language, architecture and queued-plan publication edits.
+- Status: Phase 3 documentation and future-plan cutover accepted; implementation active.
+- Current slice: Phase 4 - verify and retire.
+- Blockers: none. The Phase 3 release build, source-comment sweep and independent audits are
+  accepted; maintainer-managed post-Phase-3 cleanup remains on main.
+- Next action: repeat the tracked-file sweep, run final validation and bounded performance evidence,
+  then complete the Slice review and retire this plan.
 
 ## Purpose and authority
 
@@ -182,9 +183,9 @@ Exit: only final value syntax is accepted and all executable inputs use it. Name
 
 ### Phase 3: Complete documentation and future-plan cutover
 
-- [ ] Apply the concrete inventory below, including remaining cheatsheet, architecture, config, teaching and future-plan edits. Published references need a support-notice update, not another rewrite.
-- [ ] Remove stale code comments and all instructions that would restore displaced parsing or nesting bans. Preserve legitimate declaration examples.
-- [ ] Rebuild documentation and inspect the new MON and runtime-record sections and their links. Keep runtime/format status truthful.
+- [x] Apply the concrete inventory below, including remaining cheatsheet, architecture, config, teaching and future-plan edits. Published references need a support-notice update, not another rewrite.
+- [x] Remove stale code comments and all instructions that would restore displaced parsing or nesting bans. Preserve legitimate declaration examples.
+- [x] Rebuild documentation and inspect the new MON and runtime-record sections and their links. Keep runtime/format status truthful.
 
 Exit: the maintained tree and future instructions describe one value syntax. Historical evidence is not rewritten to claim a different program ran.
 

@@ -4,7 +4,7 @@
 
 - Status: queued. The canonical and Basic runtime references are published.
 - Current slice: implementation not started.
-- Blockers: shared MON syntax with nested const records, accepted numeric semantics and the required ordinary-struct validation paths must be delivered.
+- Blockers: shared MON syntax with nested const records is delivered (consume it; do not reconstruct a predecessor record parser); accepted numeric semantics and the required ordinary-struct validation paths must be delivered.
 - Next action: establish the activation tree and complete Phase 0.
 
 ## Purpose and prerequisites
@@ -17,8 +17,8 @@ Run after shared MON syntax and number/numeric semantics, before the HTML mixed 
 
 Required capabilities:
 
-- one shared argument-list owner with named-only and compile-time policies, receiving-context diagnostics and recursive value parsing
-- parenthesised anonymous const records with folded field projection and public-value handling
+- one shared argument-list owner, delivered by MON syntax, with named-only and compile-time policies, receiving-context diagnostics and recursive value parsing
+- parenthesised anonymous const records, delivered by MON syntax, with folded field projection and public-value handling
 - ordinary nominal identity, resolved field types and field lookup in `TypeEnvironment`
 - ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
 - public-surface rejection of hidden runtime identities

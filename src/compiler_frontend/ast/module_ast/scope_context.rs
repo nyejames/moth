@@ -416,7 +416,7 @@ pub struct ScopeShared {
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
     /// Names of source `#Config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
-    /// Optional compiler-owned direct-project config resolver for constant-header folding.
+    /// Optional compiler-owned grouped-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
     /// Owning source identity for `Stage0` joins and span construction.
     ///

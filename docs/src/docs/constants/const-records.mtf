@@ -36,9 +36,6 @@ folded export and provenance rules remain in force.
 
 ### Anonymous const records
 
-**Accepted queued design.** Parenthesised anonymous const records and inline
-nesting are queued for implementation. See @../progress (Progress) for support.
-
 Anonymous construction uses the named-only form of
 @../language-overview/#mon-syntax (MON syntax):
 

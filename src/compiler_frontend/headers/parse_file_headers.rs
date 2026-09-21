@@ -567,7 +567,7 @@ fn collect_source_build_config_contracts(
     let mut diagnostics = DiagnosticBag::new();
 
     for output in prepared_files {
-        // The project config source has its own direct-project qualifier consumer. Leaving its
+        // The config.moth source has its own declaration-owned qualifier consumer. Leaving its
         // top-level qualifier diagnostics on that path keeps config.moth semantics unchanged.
         let is_config_file = path_fork
             .component(output.source_file)

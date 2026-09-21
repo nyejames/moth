@@ -295,7 +295,7 @@ fn loads_canonical_config_file_from_project_root() {
 #[test]
 fn applies_grouped_project_record_to_config_fields() {
     // The grouped `project #= (...)` record validates against the project schema root and
-    // applies its compiler-owned fields; open metadata is accepted and dropped.
+    // applies its compiler-owned fields; supported extra metadata remains available to `@project`.
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 

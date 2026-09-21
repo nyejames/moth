@@ -1,7 +1,9 @@
+version #Config of String = "0.1.0"
+
 project #= (
     name = "html_project",
     entry_root = "src",
-    version = "0.1.0",
+    version = version,
     author = "",
     license = "MIT",
 )

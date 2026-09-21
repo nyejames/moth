@@ -4,7 +4,9 @@
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
-The Alpha compiler currently uses grouped `project`/`html` records, direct and source `#Config of T` contracts and reserved `page_*` metadata. The `$config`, `$project` and `$html_builder` forms in this article are accepted queued design, not current syntax.
+The Alpha compiler currently uses grouped `project`/`html` records, declaration-owned
+`#Config of T` contracts and reserved `page_*` metadata. The `$config`, `$project` and
+`$html_builder` forms in this article are accepted queued design, not current syntax.
 
 ## Command and capability surface
 
@@ -147,9 +149,18 @@ Config runs through one named **compiler service**, not a build-owned copy of th
 
 ## Build configuration values and `@project`
 
-Today’s Alpha implementation still accepts direct project fields and source declarations using `#Config of T`; that is current syntax, not the accepted provider model. The accepted replacement uses `$config` as a prefix on exactly one explicitly typed top-level `#` binding. Its name is the input name, its type is the contract and its initializer is the fallback value. `$config` is valid in `config.moth` and in specified selected-source declarations wherever an ordinary compile-time constant is legal.
+Today’s Alpha implementation accepts declaration-owned `#Config of T` contracts in a grouped
+parenthesised `project`/`html` bootstrap. The future replacement uses `$config` as a prefix on
+exactly one explicitly typed top-level `#` binding. Its name is the input name, its type is the
+contract and its initializer is the fallback value. `$config` is valid in `config.moth` and in
+specified selected-source declarations wherever an ordinary compile-time constant is legal.
 
-Only explicit `$config` declarations create input contracts. A `$project` field named `version` is project metadata, not a `version` input provider. An ordinary `version #String = "1.0"` helper is not an input provider. `@project` publishes only the predefined project fields. A contract named `version` does not satisfy an omitted required `$project` version, and a project field named `version` does not satisfy a source input contract.
+Only explicit `$config` declarations create input contracts in the queued provider model. Under
+the current bootstrap, fixed grouped-project fields retain authoritative provider precedence and
+override blocking for same-named source contracts; supported extra project metadata is visible
+through `@project`, while ordinary helpers and declaration-owned input contracts remain distinct.
+`@project` does not publish private helpers or input declarations. A contract named `version` does
+not replace the separate grouped project field identity.
 
 Ordinary constants still require initializers. A marked `$config` declaration may omit an initializer only for a required input; optional declarations resolve to `none` when no present fallback or external value exists. The accepted input types remain `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives.
 
@@ -233,7 +244,7 @@ The command and config service report these as structured diagnostics. Entry pur
 ## Roadmap and current status
 
 - **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `$project` and `$html_builder` invocations, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
-- **Current implementation:** grouped `config.moth`, direct and source `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
+- **Current implementation:** grouped parenthesised `config.moth`, declaration-owned `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
 - **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for root-only `$page`, page metadata and runtime title.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 

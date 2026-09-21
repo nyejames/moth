@@ -188,7 +188,8 @@ pub enum InvalidConfigReason {
     NotCompileTimeConstant,
     ValueCouldNotFold,
     EmptyProjectSetting,
-    /// A direct-project field was qualified but its schema policy is fixed-only.
+    /// A declaration-owned `#Config` dependency targeted a grouped-project field whose schema
+    /// policy is fixed-only.
     ConfigQualifierFixedField,
     /// A source or project field's name cannot become a build-config contract.
     ConfigContractNameInvalid,
@@ -223,7 +224,7 @@ pub enum InvalidConfigReason {
         expected: StringId,
         provided_argument_index: Option<usize>,
     },
-    /// A required direct-project config contract had no input, global or default.
+    /// A required declaration-owned config contract had no input, global or default.
     MissingConfigInput,
     UnknownKey {
         key: StringId,

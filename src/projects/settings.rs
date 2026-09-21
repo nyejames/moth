@@ -135,10 +135,10 @@ pub struct Config {
     /// Whether this config was loaded from an actual `config.moth` file. Synthetic single-file
     /// defaults must not become fixed project providers for source build-config contracts.
     pub(crate) project_config_loaded: bool,
-    /// Direct project `#Config` resolution records retained only until build-boundary projection.
-    /// Declaration-owned config dependencies projected onto receiving project fields.
+    /// Declaration-owned and grouped-project input-resolution dependencies retained only until
+    /// build-boundary provider projection.
     pub(crate) project_field_config_dependencies: Vec<FoldedConfigProjectFieldDependency>,
-    /// Direct project and declaration-owned input resolution records retained until build-boundary
+    /// Declaration-owned and grouped-project input-resolution records retained until build-boundary
     /// provider projection.
     pub(crate) config_resolution_records: Vec<ConfigResolutionRecord>,
 }
