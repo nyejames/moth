@@ -229,15 +229,11 @@ fn collect_reachable_nominal_identities(
         identities.insert(nested.clone());
 
         match nested {
-            CanonicalTypeIdentity::GenericInstance(instance) => {
-                identities.insert(CanonicalTypeIdentity::SourceNominal(
-                    instance.base().clone(),
-                ));
+            CanonicalTypeIdentity::GenericInstance { base, .. } => {
+                identities.insert(CanonicalTypeIdentity::SourceNominal(base.clone()));
             }
-            CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
-                identities.insert(CanonicalTypeIdentity::ModulePrivateNominal(
-                    instance.base().clone(),
-                ));
+            CanonicalTypeIdentity::ModulePrivateGenericInstance { base, .. } => {
+                identities.insert(CanonicalTypeIdentity::ModulePrivateNominal(base.clone()));
             }
             _ => {}
         }
@@ -599,7 +595,7 @@ impl ModuleMaterialisationPreparation {
                     private |= matches!(
                         identity,
                         CanonicalTypeIdentity::ModulePrivateNominal(_)
-                            | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+                            | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
                     );
                 });
                 private

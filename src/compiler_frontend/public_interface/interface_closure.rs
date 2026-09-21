@@ -531,15 +531,15 @@ impl ClosureWork {
             CanonicalTypeIdentity::SourceNominal(origin) => {
                 self.enqueue_declaration(OriginDeclarationId::Type(origin.clone()));
             }
-            CanonicalTypeIdentity::GenericInstance(instance) => {
-                self.enqueue_declaration(OriginDeclarationId::Type(instance.base().clone()));
+            CanonicalTypeIdentity::GenericInstance { base, .. } => {
+                self.enqueue_declaration(OriginDeclarationId::Type(base.clone()));
             }
             CanonicalTypeIdentity::Builtin(_)
             | CanonicalTypeIdentity::ModulePrivateNominal(_)
-            | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+            | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
             | CanonicalTypeIdentity::ExternalOpaque(_)
-            | CanonicalTypeIdentity::Collection(_)
-            | CanonicalTypeIdentity::OrderedMap(_)
+            | CanonicalTypeIdentity::Collection { .. }
+            | CanonicalTypeIdentity::OrderedMap { .. }
             | CanonicalTypeIdentity::Option(_)
             | CanonicalTypeIdentity::FallibleCarrier(_)
             | CanonicalTypeIdentity::GenericParameter(_)
@@ -907,15 +907,15 @@ fn collect_type_origins(identity: &CanonicalTypeIdentity, origins: &mut Vec<Orig
         CanonicalTypeIdentity::SourceNominal(origin) => {
             origins.push(OriginDeclarationId::Type(origin.clone()));
         }
-        CanonicalTypeIdentity::GenericInstance(instance) => {
-            origins.push(OriginDeclarationId::Type(instance.base().clone()));
+        CanonicalTypeIdentity::GenericInstance { base, .. } => {
+            origins.push(OriginDeclarationId::Type(base.clone()));
         }
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
-        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
         | CanonicalTypeIdentity::ExternalOpaque(_)
-        | CanonicalTypeIdentity::Collection(_)
-        | CanonicalTypeIdentity::OrderedMap(_)
+        | CanonicalTypeIdentity::Collection { .. }
+        | CanonicalTypeIdentity::OrderedMap { .. }
         | CanonicalTypeIdentity::Option(_)
         | CanonicalTypeIdentity::FallibleCarrier(_)
         | CanonicalTypeIdentity::GenericParameter(_)
@@ -933,9 +933,7 @@ fn closure_error(detail: impl Into<String>) -> CompilerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler_frontend::canonical_type_identity::{
-        ModulePrivateGenericInstanceTypeIdentity, ModulePrivateNominalIdentity,
-    };
+    use crate::compiler_frontend::canonical_type_identity::ModulePrivateNominalIdentity;
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
         StablePackageIdentity,
@@ -953,16 +951,15 @@ mod tests {
             "Argument".to_owned(),
             OriginTypeCategory::Struct,
         );
-        let identity = CanonicalTypeIdentity::ModulePrivateGenericInstance(
-            ModulePrivateGenericInstanceTypeIdentity::new(
-                ModulePrivateNominalIdentity::new(
-                    module,
-                    "HiddenBox".to_owned(),
-                    OriginTypeCategory::Struct,
-                ),
-                vec![CanonicalTypeIdentity::SourceNominal(argument.clone())].into_boxed_slice(),
+        let identity = CanonicalTypeIdentity::ModulePrivateGenericInstance {
+            base: ModulePrivateNominalIdentity::new(
+                module,
+                "HiddenBox".to_owned(),
+                OriginTypeCategory::Struct,
             ),
-        );
+            arguments: vec![CanonicalTypeIdentity::SourceNominal(argument.clone())]
+                .into_boxed_slice(),
+        };
 
         let mut work = ClosureWork::new();
         work.enqueue_type(&identity);

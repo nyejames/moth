@@ -63,14 +63,26 @@ pub(crate) enum CanonicalTypeIdentity {
     /// Public-interface projection never constructs this variant.
     ModulePrivateNominal(ModulePrivateNominalIdentity),
     ExternalOpaque(ExternalOpaqueTypeIdentity),
-    Collection(CollectionTypeIdentity),
-    OrderedMap(OrderedMapTypeIdentity),
+    Collection {
+        element: Box<CanonicalTypeIdentity>,
+        fixed_capacity: Option<usize>,
+    },
+    OrderedMap {
+        key: Box<CanonicalTypeIdentity>,
+        value: Box<CanonicalTypeIdentity>,
+    },
     Option(Box<CanonicalTypeIdentity>),
     FallibleCarrier(FallibleCarrierTypeIdentity),
-    GenericInstance(GenericInstanceTypeIdentity),
+    GenericInstance {
+        base: OriginTypeId,
+        arguments: Box<[CanonicalTypeIdentity]>,
+    },
     /// Artefact-scoped concrete instance of a private nominal, used only by generated requests
     /// and sidecars. Public-interface validation rejects this variant.
-    ModulePrivateGenericInstance(ModulePrivateGenericInstanceTypeIdentity),
+    ModulePrivateGenericInstance {
+        base: ModulePrivateNominalIdentity,
+        arguments: Box<[CanonicalTypeIdentity]>,
+    },
     GenericParameter(ExportedGenericParameterIdentity),
     /// Compile-time identity of one complete anonymous const record. Carries no payload:
     /// every anonymous const record shares the compile-time-only marker type interned once
@@ -88,23 +100,23 @@ impl CanonicalTypeIdentity {
         visitor(self);
 
         match self {
-            Self::Collection(collection) => collection.element().visit(visitor),
-            Self::OrderedMap(map) => {
-                map.key().visit(visitor);
-                map.value().visit(visitor);
+            Self::Collection { element, .. } => element.visit(visitor),
+            Self::OrderedMap { key, value } => {
+                key.visit(visitor);
+                value.visit(visitor);
             }
             Self::Option(inner) => inner.visit(visitor),
             Self::FallibleCarrier(carrier) => {
                 carrier.success().visit(visitor);
                 carrier.error().visit(visitor);
             }
-            Self::GenericInstance(instance) => {
-                for argument in instance.arguments() {
+            Self::GenericInstance { arguments, .. } => {
+                for argument in arguments.iter() {
                     argument.visit(visitor);
                 }
             }
-            Self::ModulePrivateGenericInstance(instance) => {
-                for argument in instance.arguments() {
+            Self::ModulePrivateGenericInstance { arguments, .. } => {
+                for argument in arguments.iter() {
                     argument.visit(visitor);
                 }
             }
@@ -201,64 +213,6 @@ impl ExternalOpaqueTypeIdentity {
     }
 }
 
-/// Growable or fixed collection canonical identity.
-///
-/// `fixed_capacity` is `None` for growable `{T}` and `Some(cap)` for fixed `{N T}`. Fixed
-/// capacity is semantic identity, not an allocation hint, so the two shapes are distinct.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct CollectionTypeIdentity {
-    element: Box<CanonicalTypeIdentity>,
-    fixed_capacity: Option<usize>,
-}
-
-impl CollectionTypeIdentity {
-    /// Construct a growable or fixed collection identity.
-    ///
-    /// Compiler-internal: only the projection owner builds these.
-    pub(crate) fn new(element: CanonicalTypeIdentity, fixed_capacity: Option<usize>) -> Self {
-        Self {
-            element: Box::new(element),
-            fixed_capacity,
-        }
-    }
-
-    pub(crate) fn element(&self) -> &CanonicalTypeIdentity {
-        &self.element
-    }
-
-    pub(crate) fn fixed_capacity(&self) -> Option<usize> {
-        self.fixed_capacity
-    }
-}
-
-/// Ordered map canonical identity. Key and value are stored directly so `{K = V}` order is
-/// preserved.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct OrderedMapTypeIdentity {
-    key: Box<CanonicalTypeIdentity>,
-    value: Box<CanonicalTypeIdentity>,
-}
-
-impl OrderedMapTypeIdentity {
-    /// Construct an ordered map identity from canonical key and value identities.
-    ///
-    /// Compiler-internal: only the projection owner builds these.
-    pub(crate) fn new(key: CanonicalTypeIdentity, value: CanonicalTypeIdentity) -> Self {
-        Self {
-            key: Box::new(key),
-            value: Box::new(value),
-        }
-    }
-
-    pub(crate) fn key(&self) -> &CanonicalTypeIdentity {
-        &self.key
-    }
-
-    pub(crate) fn value(&self) -> &CanonicalTypeIdentity {
-        &self.value
-    }
-}
-
 /// Fallible carrier canonical identity. Success and error are stored in order.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct FallibleCarrierTypeIdentity {
@@ -283,59 +237,6 @@ impl FallibleCarrierTypeIdentity {
 
     pub(crate) fn error(&self) -> &CanonicalTypeIdentity {
         &self.error
-    }
-}
-
-/// Concrete source nominal generic instance canonical identity.
-///
-/// WHAT: keyed by the stable base `OriginTypeId` plus recursively canonical concrete arguments.
-/// WHY: two instances of the same generic nominal with the same canonical arguments share one
-/// canonical identity across module boundaries.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct GenericInstanceTypeIdentity {
-    base: OriginTypeId,
-    arguments: Box<[CanonicalTypeIdentity]>,
-}
-
-/// Stable artefact-scoped identity for a concrete instance of one private nominal.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct ModulePrivateGenericInstanceTypeIdentity {
-    base: ModulePrivateNominalIdentity,
-    arguments: Box<[CanonicalTypeIdentity]>,
-}
-
-impl ModulePrivateGenericInstanceTypeIdentity {
-    pub(crate) fn new(
-        base: ModulePrivateNominalIdentity,
-        arguments: Box<[CanonicalTypeIdentity]>,
-    ) -> Self {
-        Self { base, arguments }
-    }
-
-    pub(crate) fn base(&self) -> &ModulePrivateNominalIdentity {
-        &self.base
-    }
-
-    pub(crate) fn arguments(&self) -> &[CanonicalTypeIdentity] {
-        &self.arguments
-    }
-}
-
-impl GenericInstanceTypeIdentity {
-    /// Construct a concrete generic instance identity from a stable base origin and canonical
-    /// concrete arguments.
-    ///
-    /// Compiler-internal: only the projection owner builds these after validating exact arity.
-    pub(crate) fn new(base: OriginTypeId, arguments: Box<[CanonicalTypeIdentity]>) -> Self {
-        Self { base, arguments }
-    }
-
-    pub(crate) fn base(&self) -> &OriginTypeId {
-        &self.base
-    }
-
-    pub(crate) fn arguments(&self) -> &[CanonicalTypeIdentity] {
-        &self.arguments
     }
 }
 
@@ -837,9 +738,10 @@ fn project_constructed(
             };
             let element =
                 project_type_id_to_canonical_identity(*element_id, type_environment, context)?;
-            Ok(CanonicalTypeIdentity::Collection(
-                CollectionTypeIdentity::new(element, *fixed_capacity),
-            ))
+            Ok(CanonicalTypeIdentity::Collection {
+                element: Box::new(element),
+                fixed_capacity: *fixed_capacity,
+            })
         }
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => {
             let [inner_id] = arguments else {
@@ -872,9 +774,10 @@ fn project_constructed(
             let key = project_type_id_to_canonical_identity(*key_id, type_environment, context)?;
             let value =
                 project_type_id_to_canonical_identity(*value_id, type_environment, context)?;
-            Ok(CanonicalTypeIdentity::OrderedMap(
-                OrderedMapTypeIdentity::new(key, value),
-            ))
+            Ok(CanonicalTypeIdentity::OrderedMap {
+                key: Box::new(key),
+                value: Box::new(value),
+            })
         }
         TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
             Err(CompilerError::compiler_error(
@@ -935,18 +838,16 @@ fn project_generic_instance(
 
     let arguments = projected_arguments.into_boxed_slice();
     if let Some(base_origin) = private_base {
-        return Ok(CanonicalTypeIdentity::GenericInstance(
-            GenericInstanceTypeIdentity::new(
-                base_origin.map_err(|error| {
-                    CompilerError::compiler_error(format!(
-                        "canonical type projection could not resolve a source-nominal origin for generic-instance base NominalTypeId({}): {error_msg}",
-                        instance.base.0,
-                        error_msg = error.msg,
-                    ))
-                })?,
-                arguments,
-            ),
-        ));
+        return Ok(CanonicalTypeIdentity::GenericInstance {
+            base: base_origin.map_err(|error| {
+                CompilerError::compiler_error(format!(
+                    "canonical type projection could not resolve a source-nominal origin for generic-instance base NominalTypeId({}): {error_msg}",
+                    instance.base.0,
+                    error_msg = error.msg,
+                ))
+            })?,
+            arguments,
+        });
     }
     let Some(CanonicalTypeIdentity::ModulePrivateNominal(base)) =
         type_environment.canonical_identity_for_type_id(base_type_id)
@@ -955,11 +856,11 @@ fn project_generic_instance(
             "canonical private generic-instance base lost its private nominal identity",
         ));
     };
-    Ok(CanonicalTypeIdentity::ModulePrivateGenericInstance(
-        ModulePrivateGenericInstanceTypeIdentity::new(base.clone(), arguments),
-    ))
+    Ok(CanonicalTypeIdentity::ModulePrivateGenericInstance {
+        base: base.clone(),
+        arguments,
+    })
 }
-
 /// Validates the generic-instance base and returns its declared generic parameter count.
 ///
 /// WHAT: rejects an unknown/missing nominal base, a struct or choice base whose

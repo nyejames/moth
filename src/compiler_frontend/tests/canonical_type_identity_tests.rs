@@ -14,10 +14,9 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
-    CanonicalTypeIdentity, CanonicalTypeProjectionContext, CollectionTypeIdentity,
-    ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, FallibleCarrierTypeIdentity,
-    GenericDeclarationOrigin, GenericInstanceTypeIdentity, GenericParameterOriginResolver,
-    NominalOriginResolver, OrderedMapTypeIdentity, project_type_id_to_canonical_identity,
+    CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
+    ExternalOpaqueTypeIdentity, FallibleCarrierTypeIdentity, GenericDeclarationOrigin,
+    GenericParameterOriginResolver, NominalOriginResolver, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::{
@@ -615,10 +614,10 @@ fn projects_growable_collection() {
 
     assert_eq!(
         identity,
-        CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-            None
-        )),
+        CanonicalTypeIdentity::Collection {
+            element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
+            fixed_capacity: None,
+        },
         "growable {{String}} must project with fixed_capacity = None"
     );
 }
@@ -645,10 +644,10 @@ fn projects_fixed_collection_distinct_from_growable() {
         "fixed and growable collections of the same element must be distinct"
     );
 
-    let expected_fixed = CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-        Some(4),
-    ));
+    let expected_fixed = CanonicalTypeIdentity::Collection {
+        element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+        fixed_capacity: Some(4),
+    };
     assert_eq!(fixed_identity, expected_fixed);
 }
 
@@ -667,10 +666,10 @@ fn projects_ordered_map_preserving_key_value_order() {
     let identity = project_type_id_to_canonical_identity(map_id, &env, &context)
         .expect("map projection should succeed");
 
-    let expected = CanonicalTypeIdentity::OrderedMap(OrderedMapTypeIdentity::new(
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-    ));
+    let expected = CanonicalTypeIdentity::OrderedMap {
+        key: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
+        value: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+    };
     assert_eq!(
         identity, expected,
         "{{String = Int}} must preserve key/value order"
@@ -746,10 +745,10 @@ fn projects_concrete_generic_nominal_instance() {
     let identity = project_type_id_to_canonical_identity(instance_id, &env, &context)
         .expect("generic instance projection should succeed");
 
-    let expected = CanonicalTypeIdentity::GenericInstance(GenericInstanceTypeIdentity::new(
-        struct_origin("Box"),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
-    ));
+    let expected = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments: Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+    };
     assert_eq!(
         identity, expected,
         "Box<Int> must project to base origin plus canonical concrete arguments"
@@ -758,10 +757,15 @@ fn projects_concrete_generic_nominal_instance() {
 
 #[test]
 fn generic_instance_identity_is_equal_for_equal_base_and_arguments() {
-    let base = struct_origin("Box");
-    let args = Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]);
-    let a = GenericInstanceTypeIdentity::new(base.clone(), args.clone());
-    let b = GenericInstanceTypeIdentity::new(base, args);
+    let arguments = Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]);
+    let a = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments: arguments.clone(),
+    };
+    let b = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments,
+    };
     assert_eq!(a, b, "equal base and arguments must yield equal identity");
 
     let mut set = HashSet::new();
@@ -774,11 +778,14 @@ fn generic_instance_identity_is_equal_for_equal_base_and_arguments() {
 
 #[test]
 fn generic_instance_distinguishes_different_concrete_arguments() {
-    let base = struct_origin("Box");
-    let int_args = Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]);
-    let string_args = Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)]);
-    let int_instance = GenericInstanceTypeIdentity::new(base.clone(), int_args);
-    let string_instance = GenericInstanceTypeIdentity::new(base, string_args);
+    let int_instance = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments: Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+    };
+    let string_instance = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments: Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)]),
+    };
     assert_ne!(
         int_instance, string_instance,
         "different concrete arguments must yield distinct identities"
@@ -1171,12 +1178,12 @@ fn recursive_generic_instance_arguments_are_canonical() {
     let identity = project_type_id_to_canonical_identity(nested_instance_id, &env, &context)
         .expect("nested generic instance projection should succeed");
 
-    let expected = CanonicalTypeIdentity::GenericInstance(GenericInstanceTypeIdentity::new(
-        struct_origin("Box"),
-        Box::new([CanonicalTypeIdentity::Option(Box::new(
+    let expected = CanonicalTypeIdentity::GenericInstance {
+        base: struct_origin("Box"),
+        arguments: Box::new([CanonicalTypeIdentity::Option(Box::new(
             CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
         ))]),
-    ));
+    };
     assert_eq!(
         identity, expected,
         "Box<Option<Int>> must recursively project inner option to canonical identity"
@@ -1418,10 +1425,10 @@ fn projects_collection_of_exported_generic_parameter() {
     let projected = project_type_id_to_canonical_identity(collection_id, &env, &context)
         .expect("collection of generic parameter projection should succeed");
 
-    let expected = CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
-        CanonicalTypeIdentity::GenericParameter(identity),
-        None,
-    ));
+    let expected = CanonicalTypeIdentity::Collection {
+        element: Box::new(CanonicalTypeIdentity::GenericParameter(identity)),
+        fixed_capacity: None,
+    };
     assert_eq!(
         projected, expected,
         "{{T}} must recursively project the inner exported generic parameter"

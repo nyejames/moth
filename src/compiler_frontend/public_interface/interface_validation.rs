@@ -141,7 +141,7 @@ impl PublicSemanticInterface {
                 && matches!(
                     identity,
                     CanonicalTypeIdentity::ModulePrivateNominal(_)
-                        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+                        | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
                 )
             {
                 invalid_identity = Some(identity.clone());
@@ -596,9 +596,9 @@ fn receiver_type_matches_evidence_target(
     matches!(
         (receiver, target),
         (
-            CanonicalTypeIdentity::GenericInstance(instance),
+            CanonicalTypeIdentity::GenericInstance { base, .. },
             CanonicalTypeIdentity::SourceNominal(target_origin),
-        ) if instance.base() == target_origin
+        ) if base == target_origin
     )
 }
 

@@ -23,8 +23,7 @@ use super::test_support::{module_origin, struct_origin};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
     CanonicalTraitIdentity, CanonicalTypeIdentity, ExternalOpaqueTypeIdentity,
-    ModulePrivateGenericInstanceTypeIdentity, ModulePrivateNominalIdentity,
-    StableTraitRequirementIdentity,
+    ModulePrivateNominalIdentity, StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalPackageRegistry,
@@ -490,16 +489,15 @@ fn rejects_direct_private_nominal_before_interface_closure() {
 
 #[test]
 fn rejects_nested_private_generic_instance_before_publication() {
-    let private_instance = CanonicalTypeIdentity::ModulePrivateGenericInstance(
-        ModulePrivateGenericInstanceTypeIdentity::new(
-            ModulePrivateNominalIdentity::new(
-                module_origin(),
-                "HiddenBox".to_owned(),
-                OriginTypeCategory::Struct,
-            ),
-            vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)].into_boxed_slice(),
+    let private_instance = CanonicalTypeIdentity::ModulePrivateGenericInstance {
+        base: ModulePrivateNominalIdentity::new(
+            module_origin(),
+            "HiddenBox".to_owned(),
+            OriginTypeCategory::Struct,
         ),
-    );
+        arguments: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]
+            .into_boxed_slice(),
+    };
     let origin = OriginFunctionId::new_free(module_origin(), "expose_nested_private".to_owned());
     let interface = PublicSemanticInterface {
         module_origin: module_origin(),

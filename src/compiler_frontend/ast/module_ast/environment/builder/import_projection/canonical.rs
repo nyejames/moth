@@ -37,14 +37,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let inner_id = self.intern_imported_canonical_type(inner)?;
                 self.type_environment.intern_option(inner_id)
             }
-            CanonicalTypeIdentity::Collection(collection) => {
-                let element_id = self.intern_imported_canonical_type(collection.element())?;
+            CanonicalTypeIdentity::Collection {
+                element,
+                fixed_capacity,
+            } => {
+                let element_id = self.intern_imported_canonical_type(element)?;
                 self.type_environment
-                    .intern_collection(element_id, collection.fixed_capacity())
+                    .intern_collection(element_id, *fixed_capacity)
             }
-            CanonicalTypeIdentity::OrderedMap(map) => {
-                let key_id = self.intern_imported_canonical_type(map.key())?;
-                let value_id = self.intern_imported_canonical_type(map.value())?;
+            CanonicalTypeIdentity::OrderedMap { key, value } => {
+                let key_id = self.intern_imported_canonical_type(key)?;
+                let value_id = self.intern_imported_canonical_type(value)?;
                 self.type_environment.intern_map(key_id, value_id)
             }
             CanonicalTypeIdentity::FallibleCarrier(carrier) => {
@@ -67,7 +70,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "Public interface exposed module-private nominal identity {identity:?}"
                 )));
             }
-            CanonicalTypeIdentity::ModulePrivateGenericInstance(identity) => {
+            CanonicalTypeIdentity::ModulePrivateGenericInstance { .. } => {
                 return Err(CompilerError::compiler_error(format!(
                     "Public interface exposed module-private generic instance {identity:?}"
                 )));
@@ -87,15 +90,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     })?;
                 self.type_environment.intern_external(external_type_id)
             }
-            CanonicalTypeIdentity::GenericInstance(instance) => {
+            CanonicalTypeIdentity::GenericInstance { base, arguments } => {
                 let base_type_id = self
                     .imported_type_ids_by_origin
-                    .get(instance.base())
+                    .get(base)
                     .copied()
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "Imported canonical generic instance base {:?} has no projected consumer-local nominal declaration",
-                            instance.base()
+                            base
                         ))
                     })?;
                 let nominal_id = match self.type_environment.get(base_type_id) {
@@ -107,12 +110,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         ));
                     }
                 };
-                let mut arguments = Vec::with_capacity(instance.arguments().len());
-                for argument in instance.arguments() {
-                    arguments.push(self.intern_imported_canonical_type(argument)?);
+                let mut interned_arguments = Vec::with_capacity(arguments.len());
+                for argument in arguments.iter() {
+                    interned_arguments.push(self.intern_imported_canonical_type(argument)?);
                 }
                 self.type_environment
-                    .intern_generic_instance(nominal_id, arguments.into_boxed_slice())
+                    .intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
             }
             CanonicalTypeIdentity::GenericParameter(parameter) => self
                 .imported_generic_parameter_type_ids

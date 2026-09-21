@@ -811,12 +811,12 @@ fn requester_type_id_for_canonical_identity(
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
-        | CanonicalTypeIdentity::Collection(_)
-        | CanonicalTypeIdentity::OrderedMap(_)
+        | CanonicalTypeIdentity::Collection { .. }
+        | CanonicalTypeIdentity::OrderedMap { .. }
         | CanonicalTypeIdentity::Option(_)
         | CanonicalTypeIdentity::FallibleCarrier(_)
-        | CanonicalTypeIdentity::GenericInstance(_)
-        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+        | CanonicalTypeIdentity::GenericInstance { .. }
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
         | CanonicalTypeIdentity::GenericParameter(_)
         | CanonicalTypeIdentity::AnonymousConstRecord => Err(CompilerError::compiler_error(
             "Generated evidence target has no requester-local canonical type handle",

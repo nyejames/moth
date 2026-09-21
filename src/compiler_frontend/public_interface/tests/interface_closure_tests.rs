@@ -20,8 +20,7 @@ use super::super::{
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
-    CollectionTypeIdentity, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
-    GenericInstanceTypeIdentity, OrderedMapTypeIdentity, StableTraitRequirementIdentity,
+    ExportedGenericParameterIdentity, GenericDeclarationOrigin, StableTraitRequirementIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -383,23 +382,25 @@ fn nested_canonical_and_folded_identities_select_origins() {
     let constant_origin = OriginConstantId::new(module.clone(), "NESTED".to_owned());
     let display_text = trait_origin(&module, "DISPLAY_TEXT");
 
-    let nested_field_identity = CanonicalTypeIdentity::Collection(CollectionTypeIdentity::new(
-        CanonicalTypeIdentity::GenericInstance(GenericInstanceTypeIdentity::new(
-            box_origin.clone(),
-            vec![CanonicalTypeIdentity::Option(Box::new(
+    let nested_field_identity = CanonicalTypeIdentity::Collection {
+        element: Box::new(CanonicalTypeIdentity::GenericInstance {
+            base: box_origin.clone(),
+            arguments: vec![CanonicalTypeIdentity::Option(Box::new(
                 CanonicalTypeIdentity::SourceNominal(argument_origin.clone()),
             ))]
             .into_boxed_slice(),
-        )),
-        None,
-    ));
+        }),
+        fixed_capacity: None,
+    };
     let folded_only_identity = CanonicalTypeIdentity::Option(Box::new(
         CanonicalTypeIdentity::SourceNominal(folded_only_origin.clone()),
     ));
-    let nested_map_identity = CanonicalTypeIdentity::OrderedMap(OrderedMapTypeIdentity::new(
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-        CanonicalTypeIdentity::SourceNominal(map_value_origin.clone()),
-    ));
+    let nested_map_identity = CanonicalTypeIdentity::OrderedMap {
+        key: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
+        value: Box::new(CanonicalTypeIdentity::SourceNominal(
+            map_value_origin.clone(),
+        )),
+    };
     let optional_map_identity =
         CanonicalTypeIdentity::Option(Box::new(nested_map_identity.clone()));
     let folded_choice_identity = CanonicalTypeIdentity::SourceNominal(choice_origin.clone());

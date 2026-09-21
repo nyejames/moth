@@ -78,19 +78,19 @@ fn collect_canonical_type_origins(
     match identity {
         CanonicalTypeIdentity::Builtin(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_)
-        | CanonicalTypeIdentity::ModulePrivateGenericInstance(_)
+        | CanonicalTypeIdentity::ModulePrivateGenericInstance { .. }
         | CanonicalTypeIdentity::ExternalOpaque(_)
         | CanonicalTypeIdentity::GenericParameter(_)
         | CanonicalTypeIdentity::AnonymousConstRecord => {}
         CanonicalTypeIdentity::SourceNominal(origin) => {
             origins.insert(origin.clone());
         }
-        CanonicalTypeIdentity::Collection(collection) => {
-            collect_canonical_type_origins(collection.element(), origins);
+        CanonicalTypeIdentity::Collection { element, .. } => {
+            collect_canonical_type_origins(element, origins);
         }
-        CanonicalTypeIdentity::OrderedMap(map) => {
-            collect_canonical_type_origins(map.key(), origins);
-            collect_canonical_type_origins(map.value(), origins);
+        CanonicalTypeIdentity::OrderedMap { key, value } => {
+            collect_canonical_type_origins(key, origins);
+            collect_canonical_type_origins(value, origins);
         }
         CanonicalTypeIdentity::Option(inner) => {
             collect_canonical_type_origins(inner, origins);
@@ -99,9 +99,9 @@ fn collect_canonical_type_origins(
             collect_canonical_type_origins(carrier.success(), origins);
             collect_canonical_type_origins(carrier.error(), origins);
         }
-        CanonicalTypeIdentity::GenericInstance(instance) => {
-            origins.insert(instance.base().clone());
-            for argument in instance.arguments() {
+        CanonicalTypeIdentity::GenericInstance { base, arguments } => {
+            origins.insert(base.clone());
+            for argument in arguments.iter() {
                 collect_canonical_type_origins(argument, origins);
             }
         }

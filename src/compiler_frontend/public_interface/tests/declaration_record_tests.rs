@@ -1448,22 +1448,18 @@ fn projects_nested_collection_and_option_types() {
     let function = declaration_function(&declarations, "collect");
     assert_eq!(
         &function.parameters[0].type_identity,
-        &CanonicalTypeIdentity::Option(Box::new(CanonicalTypeIdentity::Collection(
-            crate::compiler_frontend::canonical_type_identity::CollectionTypeIdentity::new(
-                CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-                None,
-            )
-        ))),
+        &CanonicalTypeIdentity::Option(Box::new(CanonicalTypeIdentity::Collection {
+            element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+            fixed_capacity: None,
+        })),
         "nested option(collection(int)) must project recursively"
     );
     assert_eq!(
         &function.returns[0].type_identity,
-        &CanonicalTypeIdentity::Collection(
-            crate::compiler_frontend::canonical_type_identity::CollectionTypeIdentity::new(
-                CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-                None,
-            )
-        )
+        &CanonicalTypeIdentity::Collection {
+            element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+            fixed_capacity: None,
+        }
     );
 }
 

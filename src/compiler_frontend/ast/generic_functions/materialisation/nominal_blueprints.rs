@@ -852,20 +852,23 @@ pub(super) fn intern_generated_canonical_type(
             )?;
             type_environment.intern_option(inner)
         }
-        CanonicalTypeIdentity::Collection(collection) => {
+        CanonicalTypeIdentity::Collection {
+            element,
+            fixed_capacity,
+        } => {
             let element = intern_generated_canonical_type(
-                collection.element(),
+                element,
                 type_environment,
                 external_registry,
                 nominal_source,
                 string_table,
                 path_fork,
             )?;
-            type_environment.intern_collection(element, collection.fixed_capacity())
+            type_environment.intern_collection(element, *fixed_capacity)
         }
-        CanonicalTypeIdentity::OrderedMap(map) => {
+        CanonicalTypeIdentity::OrderedMap { key, value } => {
             let key = intern_generated_canonical_type(
-                map.key(),
+                key,
                 type_environment,
                 external_registry,
                 nominal_source,
@@ -873,7 +876,7 @@ pub(super) fn intern_generated_canonical_type(
                 path_fork,
             )?;
             let value = intern_generated_canonical_type(
-                map.value(),
+                value,
                 type_environment,
                 external_registry,
                 nominal_source,
@@ -918,8 +921,8 @@ pub(super) fn intern_generated_canonical_type(
                 ))?;
             type_environment.intern_external(external_type_id)
         }
-        CanonicalTypeIdentity::GenericInstance(instance) => {
-            let base_identity = CanonicalTypeIdentity::SourceNominal(instance.base().clone());
+        CanonicalTypeIdentity::GenericInstance { base, arguments } => {
+            let base_identity = CanonicalTypeIdentity::SourceNominal(base.clone());
             let base_type_id = intern_generated_canonical_type(
                 &base_identity,
                 type_environment,
@@ -937,9 +940,9 @@ pub(super) fn intern_generated_canonical_type(
                     ));
                 }
             };
-            let mut arguments = Vec::with_capacity(instance.arguments().len());
-            for argument in instance.arguments() {
-                arguments.push(intern_generated_canonical_type(
+            let mut interned_arguments = Vec::with_capacity(arguments.len());
+            for argument in arguments.iter() {
+                interned_arguments.push(intern_generated_canonical_type(
                     argument,
                     type_environment,
                     external_registry,
@@ -948,11 +951,11 @@ pub(super) fn intern_generated_canonical_type(
                     path_fork,
                 )?);
             }
-            type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
+            type_environment.intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
         }
-        CanonicalTypeIdentity::ModulePrivateGenericInstance(instance) => {
+        CanonicalTypeIdentity::ModulePrivateGenericInstance { base, arguments } => {
             let base_identity =
-                CanonicalTypeIdentity::ModulePrivateNominal(instance.base().clone());
+                CanonicalTypeIdentity::ModulePrivateNominal(base.clone());
             let base_type_id = intern_generated_canonical_type(
                 &base_identity,
                 type_environment,
@@ -970,9 +973,9 @@ pub(super) fn intern_generated_canonical_type(
                     ));
                 }
             };
-            let mut arguments = Vec::with_capacity(instance.arguments().len());
-            for argument in instance.arguments() {
-                arguments.push(intern_generated_canonical_type(
+            let mut interned_arguments = Vec::with_capacity(arguments.len());
+            for argument in arguments.iter() {
+                interned_arguments.push(intern_generated_canonical_type(
                     argument,
                     type_environment,
                     external_registry,
@@ -981,7 +984,7 @@ pub(super) fn intern_generated_canonical_type(
                     path_fork,
                 )?);
             }
-            type_environment.intern_generic_instance(nominal_id, arguments.into_boxed_slice())
+            type_environment.intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
         }
         CanonicalTypeIdentity::GenericParameter(_) => {
             return Err(CompilerError::compiler_error(

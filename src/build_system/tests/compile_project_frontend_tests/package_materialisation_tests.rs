@@ -1023,12 +1023,14 @@ same_private_box PrivateBox of Bool = forward(private_box)
             .first()
             .expect("generated request should have one type argument");
         let base_name = match argument {
-            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::GenericInstance(
-                instance,
-            ) => instance.base().defining_name(),
-            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::ModulePrivateGenericInstance(
-                instance,
-            ) => instance.base().defining_path(),
+            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::GenericInstance {
+                base,
+                ..
+            } => base.defining_name(),
+            crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity::ModulePrivateGenericInstance {
+                base,
+                ..
+            } => base.defining_path(),
             _ => panic!("request argument should retain generic-instance identity"),
         };
         let environment = &sidecar.module.executable.type_environment;
