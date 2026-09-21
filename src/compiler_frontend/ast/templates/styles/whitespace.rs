@@ -12,8 +12,7 @@
 //!   opaque child-template anchors into a temporary string buffer.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
-    FormatterInput, FormatterInputPiece, FormatterOpaquePiece, FormatterOutput,
-    FormatterOutputPiece,
+    FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::CharacterParsing;
@@ -240,56 +239,24 @@ pub(crate) fn apply_whitespace_passes_to_input(
     run_position: TemplateBodyRunPosition,
     string_table: &mut StringTable,
 ) -> FormatterOutput {
-    if passes.is_empty() {
-        // No passes to run — convert input directly to output.
-        let pieces = input
-            .pieces
-            .into_iter()
-            .map(|piece| match piece {
-                FormatterInputPiece::Text(t) => {
-                    FormatterOutputPiece::Text(string_table.resolve(t.text).to_owned())
-                }
-                FormatterInputPiece::Opaque(id) => FormatterOutputPiece::Opaque(id),
-            })
-            .collect();
-        return FormatterOutput { pieces };
-    }
-
-    // Resolve all text pieces up-front so we can compute shared whitespace context.
-    let resolved_pieces: Vec<ResolvedInputPiece> = input
+    // Resolve interned text once; opaque anchors pass through unchanged.
+    let mut pieces: Vec<FormatterOutputPiece> = input
         .pieces
         .into_iter()
         .map(|piece| match piece {
             FormatterInputPiece::Text(t) => {
-                ResolvedInputPiece::Text(string_table.resolve(t.text).to_owned())
+                FormatterOutputPiece::Text(string_table.resolve(t.text).to_owned())
             }
-            FormatterInputPiece::Opaque(id) => ResolvedInputPiece::Opaque(id),
+            FormatterInputPiece::Opaque(id) => FormatterOutputPiece::Opaque(id),
         })
         .collect();
 
     // Run each pass sequentially over the resolved piece list.
-    let mut text_pieces = resolved_pieces;
     for pass in passes {
-        text_pieces = apply_structured_whitespace_pass(text_pieces, *pass, run_position);
+        pieces = apply_structured_whitespace_pass(pieces, *pass, run_position);
     }
 
-    // Convert resolved pieces back to formatter output.
-    let pieces = text_pieces
-        .into_iter()
-        .map(|piece| match piece {
-            ResolvedInputPiece::Text(t) => FormatterOutputPiece::Text(t),
-            ResolvedInputPiece::Opaque(id) => FormatterOutputPiece::Opaque(id),
-        })
-        .collect();
-
     FormatterOutput { pieces }
-}
-
-/// Intermediate piece type used during structured whitespace processing.
-/// Text pieces hold owned strings so they can be modified in-place across passes.
-enum ResolvedInputPiece {
-    Text(String),
-    Opaque(FormatterOpaquePiece),
 }
 
 /// Applies a single whitespace pass across a list of resolved pieces.
@@ -297,10 +264,10 @@ enum ResolvedInputPiece {
 /// Computes dedent width from the first text piece, then normalizes each text piece
 /// while keeping opaque anchors untouched.
 fn apply_structured_whitespace_pass(
-    pieces: Vec<ResolvedInputPiece>,
+    pieces: Vec<FormatterOutputPiece>,
     pass: TemplateWhitespacePassProfile,
     run_position: TemplateBodyRunPosition,
-) -> Vec<ResolvedInputPiece> {
+) -> Vec<FormatterOutputPiece> {
     let trim_leading = pass.trim_leading_boundary && run_position.is_first();
     let trim_trailing = pass.trim_trailing_boundary && run_position.is_last();
 
@@ -322,13 +289,13 @@ fn apply_structured_whitespace_pass(
 /// - Opaque anchors represent child templates whose content is sealed. They do not
 ///   contribute whitespace and must not be flattened into a text buffer.
 fn normalize_structured_default_whitespace(
-    pieces: Vec<ResolvedInputPiece>,
+    pieces: Vec<FormatterOutputPiece>,
     trim_leading: bool,
     trim_trailing: bool,
-) -> Vec<ResolvedInputPiece> {
+) -> Vec<FormatterOutputPiece> {
     // Find the first text piece to compute dedent width.
     let first_text = pieces.iter().find_map(|p| match p {
-        ResolvedInputPiece::Text(t) if !t.is_empty() => Some(t.as_str()),
+        FormatterOutputPiece::Text(t) if !t.is_empty() => Some(t.as_str()),
         _ => None,
     });
 
@@ -340,12 +307,12 @@ fn normalize_structured_default_whitespace(
     // Find the index of the last non-empty text piece for trailing trim.
     let last_text_index = pieces
         .iter()
-        .rposition(|p| matches!(p, ResolvedInputPiece::Text(t) if !t.is_empty()));
+        .rposition(|p| matches!(p, FormatterOutputPiece::Text(t) if !t.is_empty()));
 
     // Find the index of the first non-empty text piece for leading trim.
     let first_text_index = pieces
         .iter()
-        .position(|p| matches!(p, ResolvedInputPiece::Text(t) if !t.is_empty()));
+        .position(|p| matches!(p, FormatterOutputPiece::Text(t) if !t.is_empty()));
 
     // Boundary trimming only applies to actual run boundaries. Opaque anchors
     // before the first text or after the last text represent already-emitted
@@ -354,24 +321,24 @@ fn normalize_structured_default_whitespace(
     let leading_text_is_run_boundary = first_text_index.is_some_and(|first_index| {
         pieces[..first_index]
             .iter()
-            .all(|piece| matches!(piece, ResolvedInputPiece::Text(text) if text.is_empty()))
+            .all(|piece| matches!(piece, FormatterOutputPiece::Text(text) if text.is_empty()))
     });
     let trailing_text_is_run_boundary = last_text_index.is_some_and(|last_index| {
         pieces[last_index + 1..]
             .iter()
-            .all(|piece| matches!(piece, ResolvedInputPiece::Text(text) if text.is_empty()))
+            .all(|piece| matches!(piece, FormatterOutputPiece::Text(text) if text.is_empty()))
     });
 
     let mut result = Vec::with_capacity(pieces.len());
 
     for (index, piece) in pieces.into_iter().enumerate() {
         match piece {
-            ResolvedInputPiece::Opaque(id) => {
-                result.push(ResolvedInputPiece::Opaque(id));
+            FormatterOutputPiece::Opaque(id) => {
+                result.push(FormatterOutputPiece::Opaque(id));
             }
-            ResolvedInputPiece::Text(mut text) => {
+            FormatterOutputPiece::Text(mut text) => {
                 if text.is_empty() {
-                    result.push(ResolvedInputPiece::Text(text));
+                    result.push(FormatterOutputPiece::Text(text));
                     continue;
                 }
 
@@ -400,7 +367,7 @@ fn normalize_structured_default_whitespace(
                     trim_trailing_whitespace_from_final_newline(&mut text);
                 }
 
-                result.push(ResolvedInputPiece::Text(text));
+                result.push(FormatterOutputPiece::Text(text));
             }
         }
     }
