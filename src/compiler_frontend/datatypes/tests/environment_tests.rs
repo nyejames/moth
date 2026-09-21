@@ -1043,6 +1043,164 @@ fn struct_and_choice_share_nominal_id_space() {
 }
 
 #[test]
+fn by_nominal_queries_reject_wrong_kind_and_missing_ids() {
+    let mut env = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+    let struct_path = test_path(&mut path_builder, &mut table, "Point");
+    let choice_path = test_path(&mut path_builder, &mut table, "Status");
+
+    let (struct_nominal, struct_type_id) = env.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let interleaved_collection = env.intern_collection(env.builtins().int, None);
+
+    let (choice_nominal, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
+        id: NominalTypeId(0),
+        path: choice_path,
+        variants: Box::new([]),
+        generic_parameters: None,
+    });
+
+    assert_eq!(
+        env.type_id_for_nominal_id(struct_nominal),
+        Some(struct_type_id)
+    );
+    assert_eq!(
+        env.type_id_for_nominal_id(choice_nominal),
+        Some(choice_type_id)
+    );
+    assert!(matches!(
+        env.get(interleaved_collection),
+        Some(TypeDefinition::Constructed(_))
+    ));
+    let generated = env.fork_for_generated();
+    assert_eq!(
+        generated
+            .struct_definition(struct_nominal)
+            .map(|definition| definition.path),
+        Some(struct_path)
+    );
+    assert_eq!(
+        generated
+            .choice_definition(choice_nominal)
+            .map(|definition| definition.path),
+        Some(choice_path)
+    );
+    assert!(env.choice_definition(struct_nominal).is_none());
+    assert!(env.struct_definition(choice_nominal).is_none());
+    assert!(env.struct_definition(NominalTypeId(u32::MAX)).is_none());
+    assert!(env.choice_definition(NominalTypeId(u32::MAX)).is_none());
+    assert_eq!(env.type_id_for_nominal_id(NominalTypeId(u32::MAX)), None);
+}
+
+#[test]
+fn generated_fork_appends_local_nominals_after_inherited_prefix() {
+    let mut requester = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+    let inherited_path = test_path(&mut path_builder, &mut table, "Inherited");
+    let (inherited_nominal, inherited_type_id) =
+        requester.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path: inherited_path,
+            fields: Box::new([]),
+            generic_parameters: None,
+            const_record: false,
+        });
+
+    let mut generated = requester.fork_for_generated();
+    let interleaved_type_id = generated.intern_collection(generated.builtins().int, None);
+    let local_path = test_path(&mut path_builder, &mut table, "Local");
+    let (local_nominal, local_type_id) = generated.register_nominal_choice(ChoiceTypeDefinition {
+        id: NominalTypeId(0),
+        path: local_path,
+        variants: Box::new([]),
+        generic_parameters: None,
+    });
+
+    assert_eq!(
+        local_nominal,
+        NominalTypeId(inherited_nominal.0 + 1),
+        "local nominal IDs must continue after the inherited prefix"
+    );
+    assert_eq!(
+        generated.type_id_for_nominal_id(inherited_nominal),
+        Some(inherited_type_id)
+    );
+    assert_eq!(
+        generated.type_id_for_nominal_id(local_nominal),
+        Some(local_type_id)
+    );
+    assert!(matches!(
+        generated.get(interleaved_type_id),
+        Some(TypeDefinition::Constructed(_))
+    ));
+    assert_eq!(
+        generated.nominal_path_by_id(local_nominal),
+        Some(&local_path)
+    );
+}
+
+#[test]
+fn mutually_referring_nominal_shells_patch_the_canonical_payloads() {
+    let mut env = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+    let left_path = test_path(&mut path_builder, &mut table, "Left");
+    let right_path = test_path(&mut path_builder, &mut table, "Right");
+    let left_field_name = test_path(&mut path_builder, &mut table, "right");
+    let right_field_name = test_path(&mut path_builder, &mut table, "left");
+
+    let (_, left_type_id) = env.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: left_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let (_, right_type_id) = env.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: right_path,
+        fields: vec![FieldDefinition {
+            name: right_field_name,
+            type_id: left_type_id,
+            span: None,
+        }]
+        .into_boxed_slice(),
+        generic_parameters: None,
+        const_record: false,
+    });
+
+    env.update_struct_fields(
+        left_type_id,
+        vec![FieldDefinition {
+            name: left_field_name,
+            type_id: right_type_id,
+            span: None,
+        }]
+        .into_boxed_slice(),
+    );
+
+    assert_eq!(
+        env.fields_for(left_type_id)
+            .and_then(|fields| fields.first())
+            .map(|field| field.type_id),
+        Some(right_type_id)
+    );
+    assert_eq!(
+        env.fields_for(right_type_id)
+            .and_then(|fields| fields.first())
+            .map(|field| field.type_id),
+        Some(left_type_id)
+    );
+}
+
+#[test]
 fn collection_element_type_query_works() {
     let mut env = TypeEnvironment::new();
     let int = env.builtins().int;

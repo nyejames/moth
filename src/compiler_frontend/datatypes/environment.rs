@@ -102,10 +102,9 @@ pub struct TypeEnvironment {
     canonical_identities: FxHashMap<TypeId, CanonicalTypeIdentity>,
 
     // Nominal definition storage.
-    // `NominalTypeId.0` indexes into `nominal_registry`.
-    nominal_registry: Vec<NominalEntry>,
-    struct_definitions: Vec<StructTypeDefinition>,
-    choice_definitions: Vec<ChoiceTypeDefinition>,
+    // `NominalTypeId.0 - inherited_nominal_count()` indexes into `nominal_type_ids`.
+    // The pointed-to `TypeId` owns the single canonical struct/choice payload in `types`.
+    nominal_type_ids: Vec<TypeId>,
 
     // Generic parameter list storage (indexed by GenericParameterListId.0).
     generic_parameter_lists: Vec<GenericParameterList>,
@@ -124,9 +123,6 @@ pub struct TypeEnvironment {
 
     // Path -> NominalTypeId lookup.
     nominal_by_path: FxHashMap<PathId, NominalTypeId>,
-
-    // NominalTypeId -> TypeId lookup.
-    nominal_to_type_id: FxHashMap<NominalTypeId, TypeId>,
 
     // ID counters.
     next_generic_parameter_id: u32,
@@ -165,13 +161,6 @@ pub struct TypeEnvironment {
 #[derive(Default)]
 pub(crate) struct TypeEnvironmentRemapCache {
     inherited_snapshots: FxHashMap<*const TypeEnvironment, Arc<TypeEnvironment>>,
-}
-
-/// Internal enum mapping a `NominalTypeId` to its actual definition storage.
-#[derive(Debug, Clone)]
-enum NominalEntry {
-    Struct(usize), // index into struct_definitions
-    Choice(usize), // index into choice_definitions
 }
 
 /// A list of generic parameters for a nominal or function definition.
@@ -287,14 +276,11 @@ impl TypeEnvironment {
             generic_instance_ids: FxHashMap::default(),
             canonical_type_ids: FxHashMap::default(),
             canonical_identities: FxHashMap::default(),
-            nominal_registry: Vec::new(),
-            struct_definitions: Vec::new(),
-            choice_definitions: Vec::new(),
+            nominal_type_ids: Vec::new(),
             generic_parameter_lists: Vec::new(),
             generic_parameter_ids: FxHashMap::default(),
             trait_bounds_by_generic_parameter_id: FxHashMap::default(),
             nominal_by_path: FxHashMap::default(),
-            nominal_to_type_id: FxHashMap::default(),
             next_generic_parameter_id: 0,
             next_generic_parameter_list_id: 0,
             builtins: BuiltinTypes {
@@ -374,14 +360,11 @@ impl TypeEnvironment {
             generic_instance_ids: FxHashMap::default(),
             canonical_type_ids: FxHashMap::default(),
             canonical_identities: FxHashMap::default(),
-            nominal_registry: Vec::new(),
-            struct_definitions: Vec::new(),
-            choice_definitions: Vec::new(),
+            nominal_type_ids: Vec::new(),
             generic_parameter_lists: Vec::new(),
             generic_parameter_ids: FxHashMap::default(),
             trait_bounds_by_generic_parameter_id: FxHashMap::default(),
             nominal_by_path: FxHashMap::default(),
-            nominal_to_type_id: FxHashMap::default(),
             next_generic_parameter_id: self.next_generic_parameter_id,
             next_generic_parameter_list_id: self.next_generic_parameter_list_id,
             builtins: self.builtins,
@@ -405,7 +388,7 @@ impl TypeEnvironment {
     }
 
     fn nominal_count(&self) -> usize {
-        self.inherited_nominal_count() + self.nominal_registry.len()
+        self.inherited_nominal_count() + self.nominal_type_ids.len()
     }
 
     fn inherited_generic_parameter_list_count(&self) -> usize {
@@ -456,14 +439,6 @@ impl TypeEnvironment {
 
         for definition in &mut self.types {
             Self::remap_type_definition(definition, remap);
-        }
-
-        for definition in &mut self.struct_definitions {
-            Self::remap_struct_definition(definition, remap);
-        }
-
-        for definition in &mut self.choice_definitions {
-            Self::remap_choice_definition(definition, remap);
         }
 
         for list in &mut self.generic_parameter_lists {
@@ -1066,20 +1041,12 @@ impl TypeEnvironment {
         &mut self,
         mut definition: StructTypeDefinition,
     ) -> (NominalTypeId, TypeId) {
-        let struct_index = self.struct_definitions.len();
         let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
         let canonical_path = definition.path;
-
-        self.nominal_registry
-            .push(NominalEntry::Struct(struct_index));
-        self.struct_definitions.push(definition.clone());
-
         let type_id = self.insert_definition(TypeDefinition::Struct(definition));
-
+        self.nominal_type_ids.push(type_id);
         self.nominal_by_path.insert(canonical_path, nominal_id);
-        self.nominal_to_type_id.insert(nominal_id, type_id);
-
         (nominal_id, type_id)
     }
 
@@ -1091,35 +1058,28 @@ impl TypeEnvironment {
     /// before AST field shells are fully resolved; this method writes the final
     /// canonical member definitions in-place once semantic `TypeId`s are known.
     pub fn update_struct_fields(&mut self, type_id: TypeId, fields: Box<[FieldDefinition]>) {
-        let Some(TypeDefinition::Struct(def)) = self.get(type_id) else {
-            return;
+        let nominal_id = match self.get(type_id) {
+            Some(TypeDefinition::Struct(def)) => def.id,
+            _ => return,
         };
-        let nominal_id = def.id;
-        let inherited_count = self.inherited_nominal_count();
-        if (nominal_id.0 as usize) < inherited_count {
+        if (nominal_id.0 as usize) < self.inherited_nominal_count() {
             debug_assert!(
                 false,
                 "generated type-environment forks cannot patch inherited struct fields"
             );
             return;
         }
-        let struct_index = match self
-            .nominal_registry
-            .get(nominal_id.0 as usize - inherited_count)
-        {
-            Some(NominalEntry::Struct(index)) => *index,
+        let expected_type_id = match self.type_id_for_nominal_id(nominal_id) {
+            Some(expected_type_id) if expected_type_id == type_id => expected_type_id,
             _ => return,
         };
-        if let Some(def) = self.struct_definitions.get_mut(struct_index) {
-            def.fields = fields.clone();
+        let Some(TypeDefinition::Struct(cached)) = self.get_mut_local(expected_type_id) else {
+            return;
+        };
+        if cached.id != nominal_id {
+            return;
         }
-        // Also update the cached TypeDefinition so subsequent `get()` calls
-        // see the resolved fields.
-        let type_index = type_id.0 as usize - self.inherited_type_count();
-        if let Some(TypeDefinition::Struct(cached)) = self.types.get_mut(type_index) {
-            cached.fields = fields;
-        }
-
+        cached.fields = fields;
         self.refresh_generic_instance_substitutions_for_nominal(nominal_id);
     }
 
@@ -1129,20 +1089,12 @@ impl TypeEnvironment {
         &mut self,
         mut definition: ChoiceTypeDefinition,
     ) -> (NominalTypeId, TypeId) {
-        let choice_index = self.choice_definitions.len();
         let nominal_id = NominalTypeId(self.nominal_count() as u32);
         definition.id = nominal_id;
         let canonical_path = definition.path;
-
-        self.nominal_registry
-            .push(NominalEntry::Choice(choice_index));
-        self.choice_definitions.push(definition.clone());
-
         let type_id = self.insert_definition(TypeDefinition::Choice(definition));
-
+        self.nominal_type_ids.push(type_id);
         self.nominal_by_path.insert(canonical_path, nominal_id);
-        self.nominal_to_type_id.insert(nominal_id, type_id);
-
         (nominal_id, type_id)
     }
 
@@ -1157,35 +1109,28 @@ impl TypeEnvironment {
         type_id: TypeId,
         variants: Box<[ChoiceVariantDefinition]>,
     ) {
-        let Some(TypeDefinition::Choice(def)) = self.get(type_id) else {
-            return;
+        let nominal_id = match self.get(type_id) {
+            Some(TypeDefinition::Choice(def)) => def.id,
+            _ => return,
         };
-        let nominal_id = def.id;
-        let inherited_count = self.inherited_nominal_count();
-        if (nominal_id.0 as usize) < inherited_count {
+        if (nominal_id.0 as usize) < self.inherited_nominal_count() {
             debug_assert!(
                 false,
                 "generated type-environment forks cannot patch inherited choice variants"
             );
             return;
         }
-        let choice_index = match self
-            .nominal_registry
-            .get(nominal_id.0 as usize - inherited_count)
-        {
-            Some(NominalEntry::Choice(index)) => *index,
+        let expected_type_id = match self.type_id_for_nominal_id(nominal_id) {
+            Some(expected_type_id) if expected_type_id == type_id => expected_type_id,
             _ => return,
         };
-
-        if let Some(def) = self.choice_definitions.get_mut(choice_index) {
-            def.variants = variants.clone();
+        let Some(TypeDefinition::Choice(cached)) = self.get_mut_local(expected_type_id) else {
+            return;
+        };
+        if cached.id != nominal_id {
+            return;
         }
-
-        let type_index = type_id.0 as usize - self.inherited_type_count();
-        if let Some(TypeDefinition::Choice(cached)) = self.types.get_mut(type_index) {
-            cached.variants = variants;
-        }
-
+        cached.variants = variants;
         self.refresh_generic_instance_substitutions_for_nominal(nominal_id);
     }
 
@@ -1201,6 +1146,15 @@ impl TypeEnvironment {
             return self.base.as_ref()?.get(id);
         }
         self.types.get(index - inherited_count)
+    }
+
+    fn get_mut_local(&mut self, id: TypeId) -> Option<&mut TypeDefinition> {
+        let inherited_count = self.inherited_type_count();
+        let index = id.0 as usize;
+        if index < inherited_count {
+            return None;
+        }
+        self.types.get_mut(index - inherited_count)
     }
 
     /// Returns the high-level kind of the type.
@@ -1225,9 +1179,11 @@ impl TypeEnvironment {
         if index < inherited_count {
             return self.base.as_ref()?.nominal_path_by_id(id);
         }
-        match self.nominal_registry.get(index - inherited_count)? {
-            NominalEntry::Struct(index) => self.struct_definitions.get(*index).map(|s| &s.path),
-            NominalEntry::Choice(index) => self.choice_definitions.get(*index).map(|c| &c.path),
+        let type_id = self.nominal_type_ids.get(index - inherited_count)?;
+        match self.get(*type_id)? {
+            TypeDefinition::Struct(definition) => Some(&definition.path),
+            TypeDefinition::Choice(definition) => Some(&definition.path),
+            _ => None,
         }
     }
 
@@ -1274,11 +1230,12 @@ impl TypeEnvironment {
 
     /// Returns the `TypeId` for a nominal, if registered.
     pub fn type_id_for_nominal_id(&self, id: NominalTypeId) -> Option<TypeId> {
-        self.nominal_to_type_id.get(&id).copied().or_else(|| {
-            self.base
-                .as_ref()
-                .and_then(|base| base.type_id_for_nominal_id(id))
-        })
+        let index = id.0 as usize;
+        let inherited_count = self.inherited_nominal_count();
+        if index < inherited_count {
+            return self.base.as_ref()?.type_id_for_nominal_id(id);
+        }
+        self.nominal_type_ids.get(index - inherited_count).copied()
     }
 
     /// Registers one exact stable identity for a consumer-local type handle.
@@ -1359,9 +1316,10 @@ impl TypeEnvironment {
         if index < inherited_count {
             return self.base.as_ref()?.struct_definition(id);
         }
-        match self.nominal_registry.get(index - inherited_count)? {
-            NominalEntry::Struct(index) => self.struct_definitions.get(*index),
-            NominalEntry::Choice(..) => None,
+        let type_id = self.nominal_type_ids.get(index - inherited_count)?;
+        match self.get(*type_id)? {
+            TypeDefinition::Struct(definition) => Some(definition),
+            _ => None,
         }
     }
 
@@ -1372,9 +1330,10 @@ impl TypeEnvironment {
         if index < inherited_count {
             return self.base.as_ref()?.choice_definition(id);
         }
-        match self.nominal_registry.get(index - inherited_count)? {
-            NominalEntry::Struct(..) => None,
-            NominalEntry::Choice(index) => self.choice_definitions.get(*index),
+        let type_id = self.nominal_type_ids.get(index - inherited_count)?;
+        match self.get(*type_id)? {
+            TypeDefinition::Choice(definition) => Some(definition),
+            _ => None,
         }
     }
 
@@ -2140,14 +2099,6 @@ impl TypeEnvironment {
                 }
                 _ => {}
             }
-        }
-        for definition in &mut self.struct_definitions {
-            definition.path = remap.get(definition.path);
-            Self::remap_path_fields(definition.fields.as_mut(), remap);
-        }
-        for definition in &mut self.choice_definitions {
-            definition.path = remap.get(definition.path);
-            Self::remap_variant_path_fields(definition.variants.as_mut(), remap);
         }
         for fields in self.generic_instance_fields.values_mut() {
             Self::remap_path_fields(fields.as_mut_slice(), remap);
