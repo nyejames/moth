@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: queued, with the format interview accepted and the first delivery narrowed to Rust tooling.
-- Current slice: not started.
-- Blockers: the shared parenthesised MON syntax and nested const-record checkpoint must be accepted.
-- Next action: establish the activation baseline and start Phase 0.
+- Status: active, Phase 0 accepted; the first delivery remains Rust tooling only.
+- Current slice: Phase 1, permanent MON format and Rust API/ownership authorities.
+- Blockers: none for this Rust-only checkpoint. Moth-native operations, source-parity changes and the static builder remain deferred.
+- Next action: publish the format/API contract and truthful status before executable codec support.
 
 ## Purpose and delivery boundary
 
