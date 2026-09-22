@@ -304,7 +304,10 @@ fn normalize_config_default(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "resolution record keeps field identity and text, input name and contract, required/default/value state, origin, and qualifier/value spans as separate inputs"
+)]
 fn config_resolution_record(
     field_name: StringId,
     field_text: &str,

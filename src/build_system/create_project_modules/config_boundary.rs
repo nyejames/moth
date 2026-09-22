@@ -871,7 +871,10 @@ pub(super) fn build_config_resolution_failure(
         std::mem::take(string_table),
     ))
 }
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "boundary resolution keeps source, fixed-project and direct-project facts, explicit inputs, builder globals, and fallback-span/mutable string-table state as separate inputs"
+)]
 pub(super) fn resolve_boundary_build_config(
     source_facts: &[BuildConfigContractFact],
     fixed_project_facts: &[BuildConfigContractFact],

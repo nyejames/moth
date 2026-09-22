@@ -175,7 +175,7 @@ impl CallArgument {
 /// Arrange parsed arguments by their retained declaration-order slots.
 ///
 /// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
-/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after
+/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after the shared router has assigned every slot, so ordering must fail loudly instead of silently misrouting arguments.
 pub(crate) fn order_call_arguments_by_retained_slot(
     arguments: &[CallArgument],
     expected_slot_count: usize,

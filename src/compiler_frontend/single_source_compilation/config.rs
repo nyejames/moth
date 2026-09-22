@@ -91,9 +91,12 @@ pub(crate) struct CompiledConfigSource {
     /// One owned folded declaration per authored top-level compile-time constant, in the
     /// declaration-table order the module store produces.
     pub(crate) declarations: Vec<FoldedConfigDeclaration>,
-    /// Grouped-project and declaration-owned bootstrap resolution facts retained for later
-    /// compiler phases.
-    #[allow(dead_code)]
+    /// Declaration-owned bootstrap resolution facts for the build config handoff.
+    ///
+    /// WHY: `build_system::project_config::compile_project_config_file` moves these records into
+    ///      `Config::config_resolution_records`, whose sole consumer is
+    ///      `create_project_modules::config_boundary::effective_project_fields` projecting private
+    ///      input-contract fields.
     pub(crate) resolution_records: Vec<ConfigResolutionRecord>,
     /// Receiving project fields whose folded values depend on declaration-owned inputs.
     pub(crate) project_field_dependencies: Vec<FoldedConfigProjectFieldDependency>,

@@ -49,7 +49,6 @@ use rustc_hash::FxHashMap;
 /// WHAT: keeps declaration-order signature routing distinct from named-only field routing.
 /// WHY: named-only values have no declaration slots to fabricate, while ordinary calls retain
 /// their existing positional-then-named semantics.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CallArgumentNamingPolicy {
     PositionalThenNamed,
@@ -62,7 +61,6 @@ pub(crate) enum CallArgumentNamingPolicy {
 /// WHAT: records whether the receiving surface accepts ordinary expressions or requires a
 /// compile-time value.
 /// WHY: the shared owner must carry this distinction without adding a second expression parser.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CallArgumentValuePolicy {
     Ordinary,
@@ -164,12 +162,6 @@ impl CallArgumentDiagnosticContext {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn with_const_operation(mut self, const_operation: Option<StringId>) -> Self {
-        self.const_operation = const_operation;
-        self
-    }
-
     pub(crate) fn with_opening_span(mut self, opening_span: Option<SourceSpan>) -> Self {
         self.opening_span = opening_span;
         self
@@ -207,7 +199,6 @@ impl CallArgumentReceivingContext {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn with_policies(
         diagnostics: CallArgumentDiagnosticContext,
         naming_policy: CallArgumentNamingPolicy,
