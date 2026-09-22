@@ -16,6 +16,8 @@ Backing describes implementation:
 - **MothSource**: one or more Moth modules resolved through the source package registry.
 - **ExternalBinding**: typed functions, constants and opaque types implemented outside Moth.
 
+Backing is semantic, not a file-format choice. Precompiling or emitting a `MothSource` package as Wasm keeps it `MothSource`. Imported WIT components are `ExternalBinding` packages.
+
 [table:
     [th:
         [: **Package**]
