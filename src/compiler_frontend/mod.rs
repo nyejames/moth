@@ -39,8 +39,6 @@ pub(crate) mod ast;
 pub(crate) mod declaration_syntax;
 pub(crate) mod headers;
 pub(crate) mod module_dependencies;
-// The decoder remains crate-private until the later public/export integration phase.
-#[allow(dead_code)]
 pub(crate) mod mon;
 pub(crate) mod numeric_text;
 pub(crate) mod plain_markdown;

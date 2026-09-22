@@ -8,15 +8,12 @@ mod reader;
 mod schema;
 mod writer;
 
-#[allow(unused_imports)]
-pub(crate) use reader::decode_document;
+pub use reader::{decode_document, decode_document_bytes};
 #[allow(unused_imports)]
 pub(crate) use schema::prepare_schema;
 #[allow(unused_imports)]
-pub(crate) use writer::{
-    WriteOptions, encode_document, encode_document_with_options, encode_value,
-    encode_value_with_options,
-};
+pub(crate) use writer::{WriteOptions, encode_document_with_options, encode_value_with_options};
+pub use writer::{encode_document, encode_value};
 /// A half-open byte range in the caller-provided UTF-8 input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -111,15 +108,6 @@ impl MonError {
 
     pub(super) fn at(code: MonErrorCode, span: Span, detail: impl Into<String>) -> Self {
         Self::new(code, Some(span), &[], detail)
-    }
-
-    pub(super) fn with_path(
-        code: MonErrorCode,
-        span: Option<Span>,
-        path: &[PathSegment],
-        detail: impl Into<String>,
-    ) -> Self {
-        Self::new(code, span, path, detail)
     }
 }
 

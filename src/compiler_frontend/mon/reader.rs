@@ -18,7 +18,7 @@ use super::{BudgetState, MonError, MonErrorCode, PathSegment, PreparedSchema, Sp
 /// The input is already valid UTF-8 by virtue of this API's `&str` boundary.  No intermediate
 /// value is returned on failure: the parser's temporary literal tree and the validator's partially
 /// built owned tree are both local to this call and are dropped by normal error propagation.
-pub(crate) fn decode_document(input: &str, schema: &PreparedSchema) -> Result<Value, MonError> {
+pub fn decode_document(input: &str, schema: &PreparedSchema) -> Result<Value, MonError> {
     let input_end = span_end(input.len());
     if input.len() > schema.limits.max_input_bytes || input.len() > u32::MAX as usize {
         return Err(MonError::new(
@@ -53,6 +53,40 @@ pub(crate) fn decode_document(input: &str, schema: &PreparedSchema) -> Result<Va
     let mut budget = parser.budget;
     let mut path = Vec::new();
     validate_root(raw_root, &schema.root, &mut budget, &mut path)
+}
+
+/// Decode one complete MON document from raw bytes against a prepared root record schema.
+///
+/// The byte budget is enforced before UTF-8 conversion and parsing. Invalid UTF-8
+/// fails with [`MonErrorCode::InvalidUtf8`] and a byte span covering the first
+/// invalid sequence; no intermediate value is returned on failure.
+pub fn decode_document_bytes(input: &[u8], schema: &PreparedSchema) -> Result<Value, MonError> {
+    let input_end = span_end(input.len());
+    if input.len() > schema.limits.max_input_bytes || input.len() > u32::MAX as usize {
+        return Err(MonError::new(
+            MonErrorCode::InputBudget,
+            Some(Span::new(0, input_end)),
+            &[],
+            format!(
+                "MON input exceeds byte budget (limit {})",
+                schema.limits.max_input_bytes
+            ),
+        ));
+    }
+    let text = std::str::from_utf8(input).map_err(|error| {
+        let start = error.valid_up_to();
+        let end = match error.error_len() {
+            Some(len) => start.saturating_add(len),
+            None => input.len(),
+        };
+        MonError::new(
+            MonErrorCode::InvalidUtf8,
+            Some(Span::new(start, span_end(end))),
+            &[],
+            "MON input is not valid UTF-8",
+        )
+    })?;
+    decode_document(text, schema)
 }
 
 fn span_end(end: usize) -> usize {
@@ -975,7 +1009,6 @@ impl<'a> Parser<'a> {
                 normalized: parsed.normalized_text,
                 kind: parsed.kind,
                 digit_count,
-                fractional_digit_count: parsed.fractional_digit_count as usize,
             }),
         })
     }
@@ -1032,7 +1065,6 @@ struct NumericRaw<'a> {
     normalized: String,
     kind: NumericLiteralKind,
     digit_count: usize,
-    fractional_digit_count: usize,
 }
 
 #[derive(Debug)]

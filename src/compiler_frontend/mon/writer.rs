@@ -17,16 +17,17 @@ pub(crate) struct WriteOptions {
 
 impl WriteOptions {
     pub(crate) const COMPACT: Self = Self { pretty: false };
+    #[cfg(test)]
     pub(crate) const PRETTY: Self = Self { pretty: true };
 }
 
 /// Encode a complete root-record document in compact form.
-pub(crate) fn encode_document(value: &Value, schema: &PreparedSchema) -> Result<String, MonError> {
+pub fn encode_document(value: &Value, schema: &PreparedSchema) -> Result<String, MonError> {
     encode_document_with_options(value, schema, WriteOptions::COMPACT)
 }
 
 /// Encode a nested value in compact form.
-pub(crate) fn encode_value(value: &Value, schema: &PreparedSchema) -> Result<String, MonError> {
+pub fn encode_value(value: &Value, schema: &PreparedSchema) -> Result<String, MonError> {
     encode_value_with_options(value, schema, WriteOptions::COMPACT)
 }
 
