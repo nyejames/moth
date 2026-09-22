@@ -692,9 +692,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: MON Rust codec]
-            [: Deferred]
-            [: None]
-            [: Accepted Rust-facing compiler-library tooling. The literal-data format and Rust-only API/ownership contract (future [$html:<code>moth::mon</code>], owned Value/Schema/PreparedSchema, private compiler frontend owner) is documented in the MON format authority. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation or coverage is claimed. This surface does not expose MON operations to compiled Moth programs.]
+            [: Partial]
+            [: Focused decoder unit coverage]
+            [: Phase 2 is implemented behind the private compiler frontend owner: literal-only complete-document reading, owned values, immutable prepared schemas/defaults, strict field/choice/map routing and bounded first-error diagnostics. Phase 3 writers, the public Rust export/consumer gate and the native Moth integration remain later slices.]
         ]
 
         [data:

@@ -1100,9 +1100,9 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> MON Rust codec</td>
- <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> None</td>
- <td style="padding: 0.1em 0.5em; "> Accepted Rust-facing compiler-library tooling. The literal-data format and Rust-only API/ownership contract (future <code>moth::mon</code>, owned Value/Schema/PreparedSchema, private compiler frontend owner) is documented in the MON format authority. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation or coverage is claimed. This surface does not expose MON operations to compiled Moth programs.</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Focused decoder unit coverage</td>
+ <td style="padding: 0.1em 0.5em; "> Phase 2 is implemented behind the private compiler frontend owner: literal-only complete-document reading, owned values, immutable prepared schemas/defaults, strict field/choice/map routing and bounded first-error diagnostics. Phase 3 writers, the public Rust export/consumer gate and the native Moth integration remain later slices.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

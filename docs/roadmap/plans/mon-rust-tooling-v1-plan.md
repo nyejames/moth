@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active, Phase 1 accepted; the first delivery remains Rust tooling only.
-- Current slice: Phase 2, shared literal reader and static schema validation.
+- Status: active, Phase 2 accepted; the first delivery remains Rust tooling only.
+- Current slice: Phase 3, document and nested-value writers.
 - Blockers: none for this Rust-only checkpoint. Moth-native operations, source-parity changes and the static builder remain deferred.
-- Next action: implement the bounded literal reader and immutable schema preparation behind the documented public boundary.
+- Next action: implement bounded document and nested-value writers over the shared literal-data owner.
 
 ## Purpose and delivery boundary
 

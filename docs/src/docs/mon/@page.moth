@@ -25,8 +25,9 @@ page_head #= language_theme_head
 
     Serialised MON is literal data only. A MON reader never evaluates Moth
     expressions, including foldable ones. Availability is Rust-only: the
-    Rust-facing codec contract is accepted and queued, and Moth-native
-    operations remain deferred separately.
+    bounded decoder and static-schema slice is implemented behind the private
+    compiler frontend owner; writers, public export and Moth-native operations
+    remain deferred separately.
 ]
 
 #[section:
