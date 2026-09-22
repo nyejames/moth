@@ -93,3 +93,7 @@ A compile-time `true` condition and a runtime or unknown condition are rejected
 because the compiler does not prove loop termination.
 
 Runtime template control flow remains owned by @../templates/#template-control-flow (Template control flow).
+
+### MON data boundary
+
+A folded const template is an ordinary `String` that an encoder can quote. An unevaluated template is not a serialisable value. Compile time versus runtime concerns the producer and never changes document validity. The Rust codec delivers no Moth-side producer inside compiled Moth. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).

@@ -48,6 +48,8 @@ static project builder remain deferred separately. That direction does not make
 the format implemented or give every MON-syntax value a serialisation guarantee.
 Engine and application schemas remain separate from the format contract.
 
+Accepted late Moth integration covers compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and the static `.mon` asset builder, reusing the codec and shared syntax owners. Dynamic schema construction and loading, public borrowed views, streaming, binary formats, graph identity preservation, automatic migrations, custom serialisation traits, field-transformation frameworks and byte-canonical output remain outside v1 and are added only for a concrete accepted use case.
+
 ### Open design question
 
 An open design question has no final accepted contract. It may or may not enter

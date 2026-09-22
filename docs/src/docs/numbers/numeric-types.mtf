@@ -32,3 +32,7 @@ There is no implicit `Float -> Int` conversion. Use a fallible explicit cast at
 an `Int` target.
 
 `Bool` and `Char` are not numeric types.
+
+### MON data boundary
+
+Source promotion and cast rules above are unchanged. MON numeric text keeps whole-number versus decimal/exponent categories lossless until conversion, then converts strictly per the receiving schema: `Int` requires whole-number spelling, finite `Float` materialisation rejects non-finite values, and exact decimal targets accept only exactly representable values at their declared scale without rounding. Large integer and exact decimal data are retained before the later Moth numeric runtime exists; unsupported concrete-type adapters fail explicitly rather than narrowing through `Float`. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).

@@ -1102,7 +1102,7 @@ td {
              <td style="padding: 0.1em 0.5em; "> MON Rust codec</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
- <td style="padding: 0.1em 0.5em; "> Accepted Rust-facing compiler-library tooling. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation is claimed. This surface does not expose MON operations to compiled Moth programs.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted Rust-facing compiler-library tooling. The literal-data format and Rust-only API/ownership contract (future <code>moth::mon</code>, owned Value/Schema/PreparedSchema, private compiler frontend owner) is documented in the MON format authority. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation or coverage is claimed. This surface does not expose MON operations to compiled Moth programs.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

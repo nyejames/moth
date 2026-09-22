@@ -33,6 +33,9 @@ Moth MON source syntax allows ordinary expressions according to the receiving
 Moth context. MON serialised data is self-contained literal data only, and a MON
 reader never evaluates Moth expressions, including foldable ones.
 
+@../mon/#mon-format (MON format) owns the serialised literal-data contract.
+This page owns the shared notation only.
+
 The Rust-facing codec contract is accepted and queued. Moth-native `$mon`,
 automatic schema extraction and the static project builder remain deferred
 separately. This syntax alone does not turn a record into text or make every

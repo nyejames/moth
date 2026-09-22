@@ -82,4 +82,4 @@ compile-time execution nor implicit construction of a named type.
 Input contracts belong to declarations rather than record entries. Exact
 configuration placement and processing rules are owned by
 @../project-structure/#build-inputs (Build configuration values).
-The MON format's serialisation domain is a separate future contract.
+The MON format's serialisation domain is an accepted Rust-only contract owned by @../mon/#mon-format (MON format); its codec is queued, and it does not change const-record evaluation or source syntax.

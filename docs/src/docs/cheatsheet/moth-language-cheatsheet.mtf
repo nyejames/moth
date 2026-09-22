@@ -12,6 +12,9 @@
     **Deferred.** `$feature`, `$layout`, `$export` migration, `$async:`, `$checked:`,
     `$test` and custom metadata remain future work. For more detailed breakdowns, see
     the @../ (Moth documentation).
+    The literal MON data format contract is documented separately at @../mon/#mon-format (MON format).
+    That contract is not implemented source behaviour and not an executable codec: source `{=}` enforcement,
+    source Unicode escapes beyond the five below, contextual `::Variant` construction and `$mon` remain deferred.
 
 ## Rules to internalise first
 
@@ -211,11 +214,8 @@ Symbolic binary operators and assignment require spaces on both sides:
     message = [: Hello, [text].]
 ]
 
-Quoted text creates a read-only string slice. A template creates an owned string.
-Both use the semantic `String` type at typed boundaries. `Char` stores one Unicode scalar value.
-
 Quoted strings support only `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings.
-In `$md` content, backticks are for inline code snippets.
+In `$md` content, backticks are for inline code snippets. The MON literal-data contract documents a separate `\u{H...}` escape for data text only; that spelling is not implemented source behaviour.
 
 `String + String` is invalid. Concatenate and interpolate through templates:
 
@@ -768,7 +768,7 @@ Pattern matching is the supported payload-access form:
     ;
 ]
 
-Direct payload field access with narrowing, nested payload patterns and recursive choices are design pending. Do not infer unrestricted `status.message` access or nested pattern syntax.
+Direct payload field access with narrowing, nested payload patterns and recursive choices are design pending. Do not infer unrestricted `status.message` access or nested pattern syntax. Contextual `::Variant` construction without an explicit nominal qualifier is not implemented source behaviour; the MON literal-data contract documents that spelling for data text only.
 
 Choice equality is available only when every possible payload type supports equality.
 
@@ -819,7 +819,7 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
 ]
 
 - `{Key = Value}` is a map type. `{key = value}` is a map literal.
-- Empty maps need an explicit map type.
+- Empty maps need an explicit map type. Source `{=}` empty-map enforcement is not implemented; the `{=}` spelling belongs to the documented MON literal-data contract only.
 - Maps preserve insertion order. Replacing a value does not move its entry.
 - Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
 - `get`, `set` and `remove` are fallible.
@@ -865,6 +865,8 @@ uses its explicit constructor. Every field value must fold.
 The complete record is not a runtime value: it cannot be passed, returned,
 stored in runtime data or used through receiver methods.
 A fully folded named struct constant may also act as a data-only const record.
+Const records are source values, not serialised MON documents: field values may be ordinary
+foldable expressions, while MON literal data accepts literals only and is owned by @../mon/#mon-format (MON format).
 
 ### Const templates
 
@@ -1538,6 +1540,4 @@ Do not invent shadowing, macros, general closures/function values, exceptions, c
 Outside scope also includes target/platform conditional compilation, conditionally present imports,
 declarations or exports, builder-provided target identity flags and backend-specific source legality.
 
-Use choices for runtime heterogeneity, trait bounds for static reuse, `copy` for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.
-
-Further detail: @../language-overview (language), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).
+Further detail: @../language-overview (language), @../mon/#mon-format (MON format, documented contract; not implemented source behaviour and no executable codec), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).

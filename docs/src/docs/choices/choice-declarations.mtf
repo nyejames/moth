@@ -41,6 +41,10 @@ A payload variant uses a record body:
 - Recursive choice declarations are deferred.
 - A choice has nominal identity. Matching variants and payload shapes do not make two choices interchangeable.
 
+### MON data boundary
+
+Nominal identity above is unchanged: matching variants and payload shapes never make two choices interchangeable. MON literal choice data follows the same declaration shapes by reference, with contextual `::Variant` or one exact `Choice::Variant` qualifier checked against the receiving schema. Contextual `::Variant` source construction is deferred, and choice payload defaults remain excluded. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+
 ### Generic choices
 
 Choices may introduce declaration-site generic parameters.

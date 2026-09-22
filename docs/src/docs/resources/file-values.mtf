@@ -169,6 +169,10 @@ It returns structural folded content with its resource facts. Extracting plain t
 
 Both branches of an ordinary `if` complete normal validation, and a physical-target-bearing path in a branch removed by known-`Bool` specialisation is still resolved and validated. A `SourceKindNoFileValue` occurrence still reaches AST for its unconditional diagnostic but is never resolved as a physical target. That inactive branch contributes no output. A runtime branch retains ordinary reachability, so any reachable physical-target-bearing path contributes its uses. See @#file-paths (File paths) for why being a build input is separate from reaching an output.
 
+### MON data boundary
+
+MON carries resource identifiers as ordinary strings. Resolve any compiler structural resource pieces to their final characters before encoding; an unresolved value fails conversion to concrete MON data. There is no public Resource value at the Rust boundary, and the codec performs no path discovery, URL generation, filesystem checks or resource loading. No string scan reconstructs dependencies. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+
 ### Related concepts
 
 - For file path syntax and resolution see @#file-paths (File paths).

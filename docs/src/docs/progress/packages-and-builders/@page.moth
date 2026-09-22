@@ -353,6 +353,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: None]
             [: Queued Core IO call: one String-content input, no value result, HTML-JS host capability, pre-lowering rejection on unsupported reachable targets. Not a silent no-op. Current IO helpers are unchanged.]
         ]
+
+        [data:
+            [: MON static project builder]
+            [: Deferred]
+            [: None]
+            [: Accepted late follow-up for compile-time-known [$html:<code>.mon</code>] assets through normal build output ownership. No command, source kind, builder registration, package surface or output writes are implemented. The documented Rust-only codec contract implies none of these.]
+        ]
     ]
 ]
 

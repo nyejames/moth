@@ -16,6 +16,10 @@ Hash maps form insertion-ordered key/value groups.
 - A bare identifier in key position is a variable reference, not string shorthand.
 - Map values follow the same runtime-storable rules as collection elements.
 
+### MON data boundary
+
+Source maps keep their implemented behaviour: `{}` with an explicit or immediate contextual map type is the empty map, and a bare identifier in key position is a variable reference. MON data uses a distinct explicit form: `{=}` is always an empty map and `{}` is always an empty collection, and schema context never changes a container's kind. MON map keys use the same `String`, `Int`, `Bool` and `Char` families with insertion order preserved; bare names are invalid keys and duplicate keys fail. That contract is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format).
+
 ### Key contract
 
 Builtin map keys are permanently limited to:

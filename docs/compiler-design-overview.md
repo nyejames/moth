@@ -17,6 +17,7 @@ design. Other accepted end-state contracts are labelled in their owning sections
 Companion authorities:
 
 - `docs/build-system-design.md` for project and build orchestration
+- `docs/src/docs/mon/mon-format.mtf` for MON literal-data format semantics; this document owns only the compiler and Rust API boundary for that format
 - `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/directives/directives.mtf` for general directive syntax, ownership and argument rules
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
@@ -53,6 +54,7 @@ or thorough reviews.
 | Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/developer-docs/memory-management/retained-edge-counting/` and the backend memory route |
 | Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
 | Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
+| Rust-only MON data service, literal reader, schema boundary or MON errors | `Rust-only MON service` | `docs/compiler-data-layout-design.md` > `MON data handoff` when input lifetime, spans or owned results are affected |
 
 ## Architectural invariants
 
@@ -91,7 +93,9 @@ or thorough reviews.
 - Lifetime-region and escape validation is mandatory and backend-independent. GC cannot bypass topology legality.
 - Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
 - Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
-- Parallelism, reuse and caching preserve deterministic identities, diagnostics and output order.
+- MON decoding never enters the canonical module compilation service and never constructs AST, HIR, TIR, borrow facts or module artefacts.
+- The Rust-only MON service owns exactly one public root: `moth::mon` after implementation. `compiler_frontend` internals stay crate-private; no MON path exposes them.
+- MON decoded values are owned trees a caller can keep after releasing the input text. The public boundary has no borrowed document view and publishes no partial result on failure.
 
 ## Compiler input and result boundary
 
@@ -1604,6 +1608,230 @@ Numeric checks, cast failure, finite-Float validation, map behaviour, error prop
 
 Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, resource output placement, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
 
+## Rust-only MON service
+
+The Rust-only MON service is a narrow public library service beside the canonical
+module compilation service. It accepts caller-owned UTF-8 MON text and returns
+owned data values; it never compiles a module, evaluates a Moth program, reads a
+file, discovers a project or writes a build output. Its accepted public root is
+`moth::mon` after implementation. `compiler_frontend` internals stay crate-private
+and no MON path exposes them. The MON literal-data format itself is owned by
+`docs/src/docs/mon/mon-format.mtf`; this section owns only the compiler and Rust
+API boundary for that format.
+
+The three accepted operations share one prepared schema and one writer:
+
+- `encode_document` receives a record value and its prepared static schema and
+  returns one complete ordinary UTF-8 MON `String` or a structured failure.
+- `encode_value` receives any eligible value and its schema and returns its
+  complete literal text, including string quotes or container delimiters, through
+  the same writer.
+- `decode_document` receives one complete document and its prepared record schema,
+  validates, applies defaults and returns an owned schema-checked record or the
+  first structured failure.
+
+Encoding a `String` always encodes string data. It never guesses that the text
+resembles MON and should be inserted raw or decoded. Nested encoded fragments are
+ordinary strings with no trusted marker, hidden schema or deferred computation;
+composition requires final document validation.
+
+### Public root and crate boundary
+
+The future public surface is exactly the accepted Phase 0 names re-exported
+through `moth::mon`: `decode_document`, `decode_document_bytes`,
+`encode_document`, `encode_value`, `Field`, `PreparedSchema`, `Schema`,
+`SchemaType`, `Variant`, `Value`, `Limits`, `MonError`, `MonErrorCode`,
+`PathSegment` and `Span`. The companion file `tmp/mon-rust-tooling-v1-consumer.rs`
+is the accepted external-style consumer shape: it builds a static schema once,
+encodes a record, decodes it, drops the source `String` and converts the owned
+result into native Rust data. After implementation, the service stays usable from
+another crate with only a Moth dependency and ordinary data conversion code; it
+needs no compiler command, source project, backend, JSON adapter or Bevy
+dependency.
+Availability of that surface is not an assertion that compiled Moth programs can
+call MON services.
+
+`mon` owns an input cursor over the caller-provided text, `Span` byte ranges and
+owned `Value` results. It never constructs `SourceId`, `PathId`, `StringId`,
+`SourceDatabase`, AST, HIR or compiler cursors, and it performs no module
+compilation or evaluation. The AST call-argument owner remains unchanged because
+its `Expression` and scope contract cannot cross this boundary; MON reproduces
+only the accepted delimiter and slot policy in its data cursor.
+
+### Literal-only reader
+
+The reader consumes exactly one implicit or explicitly parenthesised root record.
+Empty and comments-only input denotes an empty root record; validation still
+checks every required field. Commas separate entries at every level with one
+optional trailing comma, and newlines are whitespace rather than a second
+separator. After an explicit root only whitespace and comments may remain.
+Multiple roots and concatenated documents are invalid. A lone scalar, collection
+or choice is not a document; the caller places it in a named root field.
+
+Every value in a completed document must be a supported literal form. The reader
+rejects names, arithmetic, calls, casts, field projections, variables, constant
+references and unevaluated templates before expression evaluation, even when the
+compiler could fold them. Constructor-shaped record and choice literals are data
+forms whose arguments recursively obey the literal restriction; they invoke no
+user code and create no structural-conversion rule. A folded const template is an
+ordinary `String` that an encoder can quote. An unevaluated template is not a
+serialisable value.
+
+Records are closed: every unknown field fails, including a misspelling of a field
+whose correct name has a default. Maps provide the explicit dynamic-key surface.
+`{}` always parses as a collection and `{=}` always parses as a map; schema
+context never changes a container's kind, and map entries and collection items
+cannot mix. Maps preserve insertion order, reject duplicate keys under the
+receiving key contract and carry only `String`, `Int`, `Bool` or `Char` keys.
+Bare names are references and are invalid as MON map keys. String and Char remain
+distinct keys and Bool is not a numeric key. A string-keyed map does not become a
+record.
+
+Qualifiers are one case-sensitive identifier with no dotted path, alias, registry
+lookup or whitespace-separated `::`. Anonymous records are named-only. A nominal
+`Struct(name)` record accepts anonymous `(...)` or one exact `name(...)`; an
+explicit mismatch fails. Choices accept contextual `::Variant` or one exact
+`Choice::Variant`. A unit variant has no parentheses and a payload variant
+requires them. Positional arguments precede named arguments, each schema slot is
+supplied exactly once, unknown or duplicate slots fail, and choice payloads have
+no defaults. A qualifier is a checked assertion against the expected schema and
+never selects another schema; writers omit the checked qualifier. Contextual
+source `::Variant` construction outside literal data remains a later Moth feature.
+
+Options permit `none` but never permit omission by themselves. Only an explicit
+field default permits omission, and a missing optional field without a default is
+an error. Defaults are prevalidated data applied at the exact missing field: a
+supplied `none` is validated as `none` and never replaced, a supplied nested
+record is validated as that record with no deep merge into a parent default, and
+`()` becomes a completed default-valued record only when its receiving schema
+permits every omission. Typed encoding emits all completed fields in schema
+declaration order, including explicit `none` and values equal to defaults.
+Eligibility is transitive over the complete concrete schema: an unsupported
+member makes the enclosing shape ineligible even when the current instance does
+not use it. `SchemaType::Unsupported` exists only so `prepare()` can reject such
+a schema before any document is processed; there is no public unsupported value.
+
+Resource identifiers cross this boundary as ordinary strings. Compiler structural
+Resource and SiteRoot pieces are materialised to their final characters before
+encoding, and an unresolved anchor fails conversion to MON data rather than
+entering the API. There is no public `Resource` value. Decoding performs no path
+discovery, URL generation, filesystem check or resource loading.
+
+There is no mandatory schema header, reserved universal version field or
+automatic schema discovery. Applications may declare an ordinary
+`format_version` field and explicit migrations. A successful producer-side check
+never removes validation at a receiving boundary, and the receiver publishes
+live state only after its own checks succeed.
+
+### Static schema boundary
+
+The Rust caller defines its save-data contract once as an immutable `Schema` and
+shares the validated `PreparedSchema` across calls. Preparation validates the
+static schema and its defaults before any document is processed; reuse of the
+prepared value across calls is the ordinary pattern. Schema misuse is a
+structured failure, never a panic. The schema language defines ordinary data
+shapes, field types, nominal identities, choice variants and explicit default
+values; it defines no second expression language and adds no rename, skip,
+flatten, custom codec hook or user predicate. A schema-checked owned MON value is
+the initial codec result. The engine maps that value to its native struct with
+ordinary Rust functions, as the accepted consumer sketch demonstrates. Automatic
+derives, procedural macros, Serde traits, broad reflection and automatic
+extraction from Moth types are not part of this boundary.
+
+Public values are owned trees: `None`, `Bool`, `Char`, `String`, `Int(i32)`,
+`Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
+`Record(fields)`, `Collection(items)`, `Map(entries)` and
+`Choice { qualifier, variant, fields }`. Decoded values outlive and release the
+input text without a caller-retained backing buffer; internal borrowing during
+parsing is allowed. The default public API has no borrowed document view and
+exposes no partially built result. Repeated shared source values encode at each
+occurrence and decode with no preserved alias relationship or allocation
+identity. Cyclic host data fails encoding; finite values of recursive schemas
+are distinct from cyclic values but add no recursive Moth type feature.
+
+Writing is deterministic without canonical-byte semantics: given the same ordered
+value, schema, options and encoder version the output is deterministic, but
+semantically equivalent documents need not share bytes. Pretty and compact modes
+differ only in whitespace over the same writer. A comment-preserving formatter
+and canonical hashing or signing facility are not part of this service.
+
+### Shared lexical owners without source widening
+
+MON reuses the compiler's lexical owners and reproduces only the accepted
+delimiter and slot policy in its own data cursor. It does not clone the source
+grammar, rescan repeatedly or route through `f64`, an `Int` token payload or
+display formatting. Whole-number and decimal or exponent spellings stay
+distinguishable through a lossless numeric literal representation until the
+destination is known. Signed numeric literals are allowed without allowing
+general unary expressions.
+Strict conversion keeps its accepted policy: `Int` and exact `Integer` require
+whole-number spelling, so `3.0` and `1e3` reject an `Int` target even when
+mathematically integral; lowercase `e` is the only accepted exponent marker and
+range checks are strict; finite `Float` materialisation follows the numeric
+authority and rejects non-finite source values and conversion results, emitting
+`-0.0` for negative zero and `0` for positive zero while decoding preserves the
+sign bit; exact `Number` and `NumberN` mapping uses the destination's declared
+scale of 0 to 18 and rejects inexactly representable input such as `1.239`
+against a scale-two target without rounding. Unsupported concrete compiler-type
+adapters fail explicitly rather than narrowing or converting through `Float`.
+MON performs only the bounded literal normalisation, range and scale checks the
+codec needs; it adds no second arithmetic runtime.
+
+Unicode sharing is exactly the Phase 0 contract: MON quoted `String` escapes are
+`\\`, `\"`, `\n`, `\r`, `\t` and `\u{H...}`, and `Char` escapes are `\\`,
+`\'`, `\n`, `\r`, `\t` and `\u{H...}`. Unicode braces contain one to six ASCII
+hex digits, accept either case on input, reject empty, too-long, non-hex,
+surrogate and out-of-range scalars, and writer output uses uppercase hex. `\0`,
+`\xNN`, fixed-width `\uXXXX`, escaped physical newlines and unknown escapes
+fail. Unescaped string newlines and CRLF remain byte-for-byte content because
+MON is data, not Moth source. Moth source remains limited to its existing five
+escapes: sharing the decoding primitive does not widen the source language, and
+source `{=}`, Unicode-escape and contextual `::Variant` parity stay deferred. A
+schema-free internal parse may preserve qualifiers without claiming they have
+been validated.
+
+### Errors, budgets and first-error rollback
+
+MON failures are structured public values, not compiler diagnostics. The public
+error is `MonError { code: MonErrorCode, span: Option<Span>, path:
+Vec<PathSegment>, detail: String }` with no compiler identity table. Codes keep
+input, schema, resource, budget and internal lanes distinct: UTF-8, literal and
+syntax, schema and type, duplicate and qualifier and arity, numeric and Unicode,
+resource, each budget kind and internal invariant failures each have their own
+codes. A missing field points at its containing record rather than fabricated
+source text; duplicate map-key errors point at the duplicate key. Messages render
+only at the caller's diagnostic boundary. The service does not start the later
+compact-diagnostics migration and adds no competing global error taxonomy.
+
+Each public decode/encode operation returns the first structured failure with its stable reason, original input byte range and field or element path where available, and discards partial values. Encoding builds a private `String` and discards it on error; where an internal writer supports caller-owned buffers, its public contract either rolls back to the original length or keeps that facility private. Incremental input, streams and multiple-document framing remain deferred; complete documents fail fast.
+
+Limits are receiver resource policy, not grammar dialects: a valid document may
+exceed a receiver's budget and is reported distinctly from syntax and schema
+errors. Every counter uses checked arithmetic and is charged before the affected
+allocation or expansion, including default expansion and repeated shared-value
+expansion. The accepted defaults are 1 MiB input bytes, depth 64, 100,000 nodes,
+4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
+default expansions. Accepted recursion stays bounded so the parser and owned-tree
+destruction remain within the documented depth, and there is no unsafe unlimited
+switch.
+
+### Deferred source, backend and builder surface
+
+The following are explicitly not part of this service: compiler-owned `$mon`
+convenience with its undecided invocation syntax, Moth-side encode and decode
+operations, checked anonymous-record receiving contexts, automatic schema
+extraction from ordinary Moth types and generic instances, source-level `{=}`
+cutover, Unicode-escape widening, contextual `::Variant` construction where not
+already delivered, the static `.mon` project builder with its CLI, scaffolding,
+source-file integration and output ownership, Wasm and JS bindings, runtime code
+generation and engine UI lifecycle integration. MON text has no file IO, module
+import, schema discovery, command, builder registration, output write or runtime
+opcode. Dynamic schema construction and loading, public borrowed views,
+streaming, binary formats, graph identity preservation, automatic migrations,
+custom serialisation traits, field-transformation frameworks and byte-canonical
+output remain outside this boundary and are added only for a concrete accepted
+use case.
+
 ## Compiler implementation map
 
 Current locations are navigation aids rather than permanent architecture.
@@ -1615,6 +1843,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Generated request canonicalisation, materialisation, convergence and delta: `src/compiler_frontend/module_compilation/generated/`
 - Project config compilation and direct Moth-template compilation: `src/compiler_frontend/single_source_compilation/`
 - The stage facade those services drive, which is not an entry point of its own: `src/compiler_frontend/pipeline.rs`
+- Rust-only MON service (accepted, not yet implemented): future `moth::mon` re-exported from `src/lib.rs` over a crate-private `src/compiler_frontend/mon/` owner
 
 ### Stage owners
 
@@ -1645,6 +1874,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
 - Target-contract validation: backend feature and external package validation owners under
   `src/backends/`
+- Rust-only MON literal reader, static schema preparation, deterministic writer, bounded budgets and structured `MonError` reporting: the crate-private MON owner above; shares `numeric_text` grammar and the accepted escape owner without widening source syntax
 - Phase 3 probe-only ownership accounting:
   `src/compiler_frontend/instrumentation/memory_ledger.rs`,
   `src/benchmarking/frontend.rs`, `src/bin/data_layout_memory_probe.rs`

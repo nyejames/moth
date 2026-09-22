@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active, Phase 0 accepted; the first delivery remains Rust tooling only.
-- Current slice: Phase 1, permanent MON format and Rust API/ownership authorities.
+- Status: active, Phase 1 accepted; the first delivery remains Rust tooling only.
+- Current slice: Phase 2, shared literal reader and static schema validation.
 - Blockers: none for this Rust-only checkpoint. Moth-native operations, source-parity changes and the static builder remain deferred.
-- Next action: publish the format/API contract and truthful status before executable codec support.
+- Next action: implement the bounded literal reader and immutable schema preparation behind the documented public boundary.
 
 ## Purpose and delivery boundary
 

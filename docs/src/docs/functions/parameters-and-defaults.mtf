@@ -78,3 +78,7 @@ are values, not parameters or defaults. See @../constants/#const-records (Const 
 Declaration lists remain flat. Nesting a legal value expression in a default does
 not introduce a nested type declaration or make an anonymous record compatible
 with a named parameter type.
+
+### MON data boundary
+
+Source parameter defaults above are unchanged. MON schema defaults are a separate serialised-data contract documented by reference: defaults are prevalidated data applied only at the exact missing field, a supplied `none` is validated as `none` and never replaced, and a supplied nested record is never deep-merged with a default. Only an explicit field default permits omission, and choice payload fields still have no defaults. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format) and @../errors/#options (Options).

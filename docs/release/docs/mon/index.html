@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Numbers | Moth</title>
-    <meta name="description" content="Numeric types, literals, operators and checked arithmetic in Moth.">
+    <title>MON format | Moth</title>
+    <meta name="description" content="The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -699,17 +699,17 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Numbers</p><h1>Numbers</h1><p>Moth uses <code>Int</code> for signed whole numbers and <code>Float</code> for finite real-number values. It avoids the large family of integer widths and implicit numeric conversions found in many systems languages.</p><p>Arithmetic checks overflow, division errors and non-finite results. Literal spelling and operator spacing also follow one exact grammar on every backend.</p></section>
+<section class="container"><p><a href="../">Documentation</a> / MON format</p><h1>MON format</h1><p>MON means Moth Object Notation. <strong>MON syntax</strong> names Moth&#39;s shared parenthesised argument and value-construction notation. <strong>The MON format</strong> is the separate serialised-data profile with its own supported values and serialisation rules.</p><p>Serialised MON is literal data only. A MON reader never evaluates Moth expressions, including foldable ones. Availability is Rust-only: the Rust-facing codec contract is accepted and queued, and Moth-native operations remain deferred separately.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
-        Choose the explanation level: Numeric types
+        Choose the explanation level: MON format
 </legend>
 
 <input
     class="doc-level__input doc-level__input--basic"
     type="radio"
-    name="numeric-types-level"
-                id="numeric-types-basic"
+    name="mon-format-level"
+                id="mon-format-basic"
                 value="basic"
                 checked
             >
@@ -717,27 +717,27 @@ td {
             <input
                 class="doc-level__input doc-level__input--advanced"
                 type="radio"
-                name="numeric-types-level"
-                id="numeric-types-advanced"
+                name="mon-format-level"
+                id="mon-format-advanced"
                 value="advanced"
             >
 
             <header class="doc-level__header">
-                <h2 class="doc-level__title" id="numeric-types">
-                    Numeric types
+                <h2 class="doc-level__title" id="mon-format">
+                    MON format
 </h2>
 
 <div class="doc-level__switch">
     <label
         class="doc-level__option doc-level__option--basic"
-        for="numeric-types-basic"
+        for="mon-format-basic"
                     >
                         Basic
                     </label>
 
                     <label
                         class="doc-level__option doc-level__option--advanced"
-                        for="numeric-types-advanced"
+                        for="mon-format-advanced"
                     >
                         Advanced
                     </label>
@@ -749,241 +749,49 @@ td {
 
 
 
-        <p>Moth uses <code>Int</code> for whole numbers and <code>Float</code> for decimal numbers.</p><pre style=""><code class='codeblock'>lives <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
-progress <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.75</span></code></pre><p>An <code>Int</code> can be used where a <code>Float</code> is expected:</p><pre style=""><code class='codeblock'>lives <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
-display_value <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> lives</code></pre><p>A <code>Float</code> never silently becomes an <code>Int</code>. That conversion can lose information, so it needs an explicit cast.</p>
+        <p>A small MON document is one root record of literal values. This save record shows the accepted shape: named fields, a nested record, a map, an explicit <code>none</code> and ordinary string data.</p><pre style=""><code class='codeblock'>format_version = 1,
+title = &quot;Strategy&quot;,
+window = (width = 1280, height = 720),
+scores = {&quot;Priya&quot; = 10, &quot;Rob&quot; = 12},
+note = none,</code></pre><p>The same record may carry explicit outer parentheses. A lone scalar, collection or choice is not a document: put it in a named root field. Encoding fills only exact missing field defaults and emits the completed record in schema order, including explicit <code>none</code> and values equal to defaults. See <a href="#mon-format">MON format</a> for the complete literal-data reference.</p><p>Strictness is the point. These inputs fail:</p><pre style=""><code class='codeblock'>-- INVALID: MON never evaluates expressions, including foldable ones
+width = 1280 + 0,
+
+-- INVALID: a template is producer syntax, not a MON string literal
+title = [: Strategy],
+
+-- INVALID: missing comma between entries
+title = &quot;Strategy&quot;
+width = 1280,
+
+-- INVALID: `{}` is a collection, never an empty map; use `{=}`
+scores = {},
+
+-- INVALID: duplicate keys are rejected, not merged
+scores = {&quot;Priya&quot; = 10, &quot;Priya&quot; = 12},
+
+-- INVALID: decimal spelling never converts to an Int target
+width = 1280.0,
+
+-- INVALID: unknown record fields fail, even with defaults nearby
+titl = &quot;Strategy&quot;,</code></pre><p>Availability is Rust-only. The accepted Rust caller is the future <code>moth::mon</code> library surface, and Moth-native operations remain deferred separately.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p>Moth has two core numeric types.</p><h3><code>Int</code></h3><p><code>Int</code> is a signed 32-bit integer.</p><p>Its range is:</p><pre style=""><code class='codeblock'>-2147483648 through 2147483647</code></pre><h3><code>Float</code></h3><p><code>Float</code> is a finite <code>f64</code>.</p><p><code>NaN</code>, positive infinity and negative infinity are not valid Moth <code>Float</code> values. Boundaries that can introduce a non-finite result must reject it.</p><h3>Promotion</h3><p><code>Int</code> may promote to <code>Float</code> at a contextual numeric boundary.</p><pre style=""><code class='codeblock'>count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>3</span>
-ratio <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> count</code></pre><p>Mixed <code>Int</code> and <code>Float</code> arithmetic produces <code>Float</code>.</p><p>There is no implicit <code>Float -&gt; Int</code> conversion. Use a fallible explicit cast at an <code>Int</code> target.</p><p><code>Bool</code> and <code>Char</code> are not numeric types.</p><h3>MON data boundary</h3><p>Source promotion and cast rules above are unchanged. MON numeric text keeps whole-number versus decimal/exponent categories lossless until conversion, then converts strictly per the receiving schema: <code>Int</code> requires whole-number spelling, finite <code>Float</code> materialisation rejects non-finite values, and exact decimal targets accept only exactly representable values at their declared scale without rounding. Large integer and exact decimal data are retained before the later Moth numeric runtime exists; unsupported concrete-type adapters fail explicitly rather than narrowing through <code>Float</code>. That contract is Rust-only serialised-data documentation. See <a href="../mon/#mon-format">MON format</a>.</p>
+    <p>The MON format is Moth Object Notation as serialised literal data: one root record written in the shared MON notation and restricted to literal values. Every value in a completed document must be a supported literal form.</p><p>A MON reader never evaluates Moth expressions. Arithmetic, templates, calls, casts, field projections, variables and constant references are rejected even when the compiler could fold them. Rejection happens before expression evaluation, not after evaluating and inspecting a result.</p><p>Availability is Rust-only. The accepted Rust caller is the future <code>moth::mon</code> library surface. Moth-native operations, automatic schema extraction and the static project builder remain deferred separately. See <a href="../progress">Progress</a> for current support.</p><h3>One root record</h3><p>A complete document contains exactly one record. Its outer parentheses may be omitted. These forms have the same record meaning:</p><pre style=""><code class='codeblock'>title = &quot;Strategy&quot;,
+window = (width = 1280, height = 720),</code></pre><pre style=""><code class='codeblock'>(
+    title = &quot;Strategy&quot;,
+    window = (width = 1280, height = 720),
+)</code></pre><p>A lone scalar, collection or choice is not a document. Put it in a named root field. The explicit empty root is <code>()</code>. Empty and comments-only input denotes an empty root record. Validation still checks every required field.</p><p>Use commas between entries at every level, with one optional trailing comma. Newlines are whitespace, not a separator. Root fields create no bindings, scope or references to earlier fields. After an explicit root, only whitespace and comments may remain. Multiple roots and concatenated documents are invalid. The file and in-memory document grammars are identical.</p><h3>Records, collections and maps</h3><p>Values nest recursively subject to resource limits and the receiving schema. Supported values are records, ordered collections, maps, quoted strings, characters, booleans, numeric literal data, <code>none</code>, literal choices and qualified nominal record data.</p><p>Record fields have unique identifier labels and explicit <code>= value</code> entries. They are named-only and carry no annotations, declaration qualifiers, mutable markers or shorthand initialisers. <code>()</code> is an empty record, never a tuple or unit value.</p><p>MON collections may contain different literal kinds and different record shapes. The receiving schema enforces its element type. Heterogeneous text changes no Moth collection typing rule and adds no <code>Any</code> type to Moth.</p><p>Maps preserve insertion order. Keys use the supported Moth map-key families: String, Int, Bool and Char. Bare names are references, not key shorthand, and are invalid as MON map keys. The schema checks the declared key and value types. Map entries and collection items cannot be mixed.</p><p>Duplicate keys are rejected rather than keeping the first or last value. Keys compare as decoded values under the receiving key contract, so different escape or numeric spellings cannot evade uniqueness. String and Char remain distinct, and Bool is not a numeric key. Record labels remain identifiers, while map keys are data: a string-keyed map does not become a record.</p><p>The empty forms never change kind:</p><ul><li><code>{=}</code> is always an empty map and <code>{}</code> is always an empty collection.</li><li>A map schema rejects <code>{}</code> and a collection schema rejects <code>{=}</code>. Schema context never changes a container&#39;s kind.</li></ul><pre style=""><code class='codeblock'>scores = {&quot;Priya&quot; = 10, &quot;Rob&quot; = 12},
+empty_scores = {=},
+empty_items = {},
+empty_record = (),</code></pre><h3>Strings and characters</h3><p>Strings use double quotes and Char uses single quotes. A Char decodes as exactly one Unicode scalar value. String contents are preserved without Unicode normalisation or implicit line-ending conversion. An unescaped newline or CRLF inside a string stays byte-for-byte content, because MON is data, not Moth source.</p><p>MON strings accept exactly <code>\\</code>, <code>\&quot;</code>, <code>\n</code>, <code>\r</code>, <code>\t</code> and <code>\u{H...}</code>. MON characters accept exactly <code>\\</code>, <code>\&#39;</code>, <code>\n</code>, <code>\r</code>, <code>\t</code> and <code>\u{H...}</code>. The Unicode braces hold 1 to 6 ASCII hex digits and accept either case on input; writer output uses uppercase hex. Empty braces, more than six digits, non-hex digits, surrogate values and out-of-range scalars fail. <code>\0</code>, <code>\xNN</code>, fixed-width <code>\uXXXX</code>, an escaped physical newline and every other unknown escape fail.</p><p>Templates are producer syntax only and are not accepted string literals in MON. A folded const template and an evaluated runtime template are each an ordinary String that a producer quotes; an unevaluated template is not a serialisable value. Compile time versus runtime concerns the producer and never changes document validity.</p><h3>Numeric data</h3><p>A numeric literal keeps its lossless spelling until the destination is known. Whole-number spelling and decimal/exponent spelling remain distinguishable, and numbers are never routed through <code>f64</code> or display formatting.</p><p>The lexical rules are strict. Exponents use lowercase <code>e</code>; uppercase <code>E</code> fails. Unary <code>+</code> fails, and <code>-</code> is accepted only when attached to the literal. <code>_</code> is allowed only between decimal digits inside the integer, fraction or exponent runs. Malformed, edge and double separators fail, and <code>NaN</code> and infinity have no MON spelling.</p><p>Conversion is strict about categories:</p><ul><li><code>Int</code> and exact <code>Integer</code> require whole-number spelling. Decimal data such as <code>3.0</code> fails an Int target even when mathematically integral, and <code>1e3</code> fails it too. Formatting cannot rewrite one category as the other.</li><li>Exact <code>Decimal</code> with a declared scale from 0 to 18 accepts whole, decimal and exponent forms only when the value is exact after removing trailing fractional zeroes and the effective scale is at most the declared scale. A scale-two target accepts <code>1.2</code> but rejects <code>1.239</code> without rounding.</li><li><code>Float</code> accepts all valid finite categories and rejects non-finite source values and conversion results. Encoding round-trips the supported Float value including signed zero: negative zero writes <code>-0.0</code> and positive zero writes <code>0</code>.</li></ul><p>Large integer and exact decimal data are retained and round-tripped without a second arithmetic runtime. Unsupported concrete adapters fail explicitly rather than narrowing or converting through Float.</p><h3>Structs and choices</h3><p>Both nested record forms are accepted:</p><pre style=""><code class='codeblock'>size = (width = 1280, height = 720),
+size = Size(width = 1280, height = 720),</code></pre><p>These are alternative examples, not duplicate fields in one document. Anonymous records use named entries. A qualified nominal record literal follows the shared constructor argument rules without invoking user code.</p><p>A qualifier is one identifier: Unicode alphabetic or underscore start, Unicode alphanumeric or underscore continuation, case-sensitive. Dotted paths, aliases, registry lookup and whitespace-separated <code>::</code> are invalid. The receiving schema determines the expected nominal type. An explicit qualifier is an additional checked assertion, never ignored and never used to select another schema. Matching payload shapes do not make unrelated nominal types interchangeable.</p><p>Choice data uses Moth-shaped variants rather than an invented tagged-record mapping:</p><pre style=""><code class='codeblock'>widgets = {
+    ::Text(&quot;Gold&quot;),
+    Widget::Progress(value = 0.4),
+    ::Ready,
+},</code></pre><p>A unit variant has no parentheses and a payload variant requires them. <code>::Text(...)</code> uses the expected choice from the receiving schema, while an explicit <code>Widget</code> qualifier must name that same expected choice. An unknown or mismatching explicit name fails.</p><p>Positional arguments precede named arguments. Target slots are routed once, every required slot is supplied exactly once, and unknown variants, duplicate payload fields, wrong arity and payload type mismatches fail. Choice payload fields have no defaults. Typed encoding checks any supplied qualifier before omitting it, and prefers unqualified named records with named choice payloads.</p><h3>Schemas, defaults and options</h3><p>Schemas define ordinary data shapes, field types, nominal identities, choice variants and explicit default values. They do not define a second expression language. Records are closed: every unknown field fails, including a misspelling of a field whose correct name has a default. Maps provide the explicit dynamic-key surface.</p><p>V1 supplies a small immutable Rust schema description for host callers. The engine defines its save-data contract once and supplies it explicitly. A prepared schema and its defaults are validated when prepared, before any document is processed, and the immutable prepared schema is reused across calls. Schema misuse is a structured failure, not a panic. There are no schema files, remote schema loading, runtime schema editing, registries or predicate DSLs.</p><p>Eligibility is derived transitively from the complete concrete schema. Every field, element, map entry and variant payload must have a supported mapping, and an unsupported member makes the enclosing shape ineligible even when the current instance does not use it. Functions, wires, routes, closures, live handles, unresolved resource pieces and deferred computations have no ordinary data encoding. A completed runtime-generated String is eligible. No mandatory serialisation trait, per-type marker, rename or skip attribute, custom codec hook or constructor execution participates in decoding.</p><p>Optionality permits <code>none</code>. Only an explicit field default permits omission. A missing optional field without a default is an error. Missing fields, explicit <code>none</code> and empty values remain distinct.</p><p>Defaults are prevalidated data, not runtime factories. A default applies only at the exact missing field. A supplied <code>none</code> is validated as <code>none</code> and never replaced by a default. A supplied nested record is validated as that record, not deep-merged with the parent&#39;s default record.</p><p>For a parent field <code>layout</code> with no default, omission fails even when every field inside the Layout schema has a default. Supplying <code>layout = ()</code> permits those inner defaults to apply. If <code>layout</code> itself has a default, omission uses that complete value. <code>()</code> remains an empty record at the format level; it becomes a completed default-valued record only when its receiving schema permits every omission.</p><p>Normal typed encoding emits all completed fields, including explicit <code>none</code> and values equal to defaults.</p><h3>Trees, not graphs</h3><p>The data format represents value trees. Repeated shared source values are encoded at each occurrence, and decoding establishes no preserved alias relationship or allocation identity. Cyclic values fail encoding. Finite values of recursive schemas are distinct from cyclic values. Applications encode graph links as ordinary identifiers and reconstruct them explicitly.</p><h3>Limits and first errors</h3><p>The codec consumes complete documents and fails fast. Incremental input, streams and multiple-document framing remain deferred. Finite configurable budgets bound input bytes, nesting, node and entry counts, numeric digits and materialisation, decoded data and encoded output. Each counter is checked before the affected allocation or expansion, including default expansion and repeated shared-value expansion. The default ceiling is 1 MiB of input, depth 64, 100,000 nodes, 4,096 numeric digits, 16 MiB of decoded bytes, 16 MiB of output bytes and 10,000 default expansions.</p><p>Limits are receiver resource policy, not grammar dialects. A valid document may exceed a receiver&#39;s budget, and that outcome is reported distinctly from syntax and schema errors.</p><p>Both operations publish only complete successful results. On failure, partial values and output buffers are discarded and no partial public result exists. Each failure is one structured first error with a stable reason, the original input byte range and the field or element path where available. A missing field points to its containing record, not fabricated source text. Messages are rendered only at the caller&#39;s diagnostic boundary.</p><h3>Deterministic writing</h3><p>Typed record fields write in schema declaration order. Collection and map order is preserved. Pretty and compact modes differ only in whitespace and share one writer. Given the same ordered value, schema, options and encoder version, output is deterministic, with no promise that all semantically equivalent documents share identical bytes.</p><p>Formatting authored text is distinct from typed encoding. It cannot silently fill omitted fields, reorder maps, remove unchecked qualifiers or erase numeric categories.</p><h3>Resources and versions</h3><p>MON carries resource identifiers as ordinary strings. Compiler structural resource pieces are resolved to their final characters before encoding, and an unresolved value fails conversion to concrete MON data. V1 performs no path discovery, URL generation, filesystem checks or resource loading, and no string scan reconstructs dependencies.</p><p>The receiver supplies the schema. There is no mandatory schema header, reserved universal version field or automatic schema discovery. Applications may declare an ordinary <code>format_version</code> field with explicit migrations. Closed schemas never silently fall back to another version or repair mismatches.</p><h3>Deferred source and builder surfaces</h3><p>MON text has no file IO, module imports, schema discovery, command, builder registration, output write or runtime opcode. Compiler <code>$mon</code> convenience, with its invocation syntax still undecided, belongs to later Moth-native integration, as do Moth-side encode and decode operations, automatic schema extraction from ordinary Moth types and the static <code>.mon</code> project builder.</p><p>Sharing a decoding primitive does not widen the source language. The <code>{=}</code> empty-map distinction, Unicode escapes and contextual <code>::Variant</code> construction remain deferred source parity unless another authorised syntax change has already delivered them.</p>
 </div>
 </fieldset></section>
-<section class="container"><fieldset class="doc-level">
-    <legend class="visually-hidden">
-        Choose the explanation level: Numeric literals
-</legend>
-
-<input
-    class="doc-level__input doc-level__input--basic"
-    type="radio"
-    name="numeric-literals-level"
-                id="numeric-literals-basic"
-                value="basic"
-                checked
-            >
-
-            <input
-                class="doc-level__input doc-level__input--advanced"
-                type="radio"
-                name="numeric-literals-level"
-                id="numeric-literals-advanced"
-                value="advanced"
-            >
-
-            <header class="doc-level__header">
-                <h2 class="doc-level__title" id="numeric-literals">
-                    Numeric literals
-</h2>
-
-<div class="doc-level__switch">
-    <label
-        class="doc-level__option doc-level__option--basic"
-        for="numeric-literals-basic"
-                    >
-                        Basic
-                    </label>
-
-                    <label
-                        class="doc-level__option doc-level__option--advanced"
-                        for="numeric-literals-advanced"
-                    >
-                        Advanced
-                    </label>
-                </div>
-            </header>
-
-            <div class="doc-level__panel doc-level__panel--basic">
-                
-
-
-
-        <p>Whole numbers are <code>Int</code> values:</p><pre style=""><code class='codeblock'>score <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span></code></pre><p>Numbers with a decimal point are <code>Float</code> values:</p><pre style=""><code class='codeblock'>progress <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span></code></pre><p>Large and tiny values can use lowercase <code>e</code> notation:</p><pre style=""><code class='codeblock'>population <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e6</span>
-tolerance <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e-6</span></code></pre><p>Keep a minus sign attached to the value:</p><pre style=""><code class='codeblock'>temperature <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>5</span>
-opposite <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count</code></pre><p><code>1E6</code>, <code>+1</code> and <code>- count</code> are not valid numeric forms.</p>
-</div>
-
-<div class="doc-level__panel doc-level__panel--advanced">
-    <p>The source spelling of a number determines its natural type.</p><pre style=""><code class='codeblock'>whole <span class='moth-code-operator'>=</span> <span class='moth-code-number'>42</span>
-decimal <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.5</span>
-large <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e6</span>
-small <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1e-6</span>
-precise <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1.0e+21</span></code></pre><h3>Contract</h3><ul><li>A whole-number literal is naturally <code>Int</code>.</li><li>A decimal-point literal is naturally <code>Float</code>.</li><li>Exponents use lowercase <code>e</code>.</li><li>Uppercase <code>E</code> is rejected.</li><li>Unary <code>+</code> is rejected.</li><li>A leading <code>-</code> must be attached to the literal or expression it negates.</li><li><code>-1</code>, <code>-1e6</code> and <code>-count</code> are valid prefix forms.</li><li><code>- count</code> is invalid.</li><li>Integer literals must fit the <code>Int</code> range.</li><li>Float literals must materialise to a finite <code>Float</code>.</li></ul><pre style=""><code class='codeblock'>valid_literal <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span><span class='moth-code-number'>42</span>
-valid_expression <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span>count
-
-invalid_exponent <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span><span class='moth-code-nominal'>E6</span>
-invalid_plus <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>+</span><span class='moth-code-number'>1</span>
-invalid_spacing <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>-</span> count</code></pre><p>The invalid lines above demonstrate rejected syntax. They are not valid program forms.</p><h3>MON data boundary</h3><p>Source literal rules above are unchanged. MON literal data reuses the same lexical spelling but retains lossless numeric text until the receiving schema is known: whole-number spelling and decimal/exponent spelling stay distinguishable, and <code>3.0</code> fails an <code>Int</code> target even when mathematically integral. That strict target conversion is Rust-only serialised-data documentation; source contextual typing is unchanged. Unavailable <code>Number</code>/<code>Byte</code> source and backend adapters remain deferred. See <a href="../mon/#mon-format">MON format</a>.</p>
-</div>
-</fieldset></section>
-<section class="container"><fieldset class="doc-level">
-    <legend class="visually-hidden">
-        Choose the explanation level: Operators
-</legend>
-
-<input
-    class="doc-level__input doc-level__input--basic"
-    type="radio"
-    name="operators-level"
-                id="operators-basic"
-                value="basic"
-                checked
-            >
-
-            <input
-                class="doc-level__input doc-level__input--advanced"
-                type="radio"
-                name="operators-level"
-                id="operators-advanced"
-                value="advanced"
-            >
-
-            <header class="doc-level__header">
-                <h2 class="doc-level__title" id="operators">
-                    Operators
-</h2>
-
-<div class="doc-level__switch">
-    <label
-        class="doc-level__option doc-level__option--basic"
-        for="operators-basic"
-                    >
-                        Basic
-                    </label>
-
-                    <label
-                        class="doc-level__option doc-level__option--advanced"
-                        for="operators-advanced"
-                    >
-                        Advanced
-                    </label>
-                </div>
-            </header>
-
-            <div class="doc-level__panel doc-level__panel--basic">
-                
-
-
-
-        <p>Put spaces around symbolic operators.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
-count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span></code></pre><p>Moth uses words for equality and logic:</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> right
-different <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> <span class='moth-code-operator'>not</span> right
-ready <span class='moth-code-operator'>=</span> loaded <span class='moth-code-operator'>and</span> valid
-retry <span class='moth-code-operator'>=</span> timed_out <span class='moth-code-operator'>or</span> disconnected
-blocked <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>not</span> ready</code></pre><p>Division has two forms:</p><pre style=""><code class='codeblock'>real_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2</span>
-whole_result <span class='moth-code-operator'>=</span> <span class='moth-code-number'>5</span> <span class='moth-code-operator'>//</span> <span class='moth-code-number'>2</span></code></pre><p><code>/</code> produces a real <code>Float</code> result. <code>//</code> performs integer division and produces an <code>Int</code>.</p><p>Use templates to join text:</p><pre style=""><code class='codeblock'>greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-string'>&quot;Hello, &quot;</span>, <span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>]</span></code></pre><p>Templates handle all string joining and interpolation. <code>+</code> is for numbers only.</p>
-</div>
-
-<div class="doc-level__panel doc-level__panel--advanced">
-    <p>Moth keeps equality and logical operators readable.</p><pre style=""><code class='codeblock'>same <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> right
-different <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>is</span> <span class='moth-code-operator'>not</span> right
-ready <span class='moth-code-operator'>=</span> has_input <span class='moth-code-operator'>and</span> is_valid
-should_retry <span class='moth-code-operator'>=</span> timed_out <span class='moth-code-operator'>or</span> disconnected
-blocked <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>not</span> ready</code></pre><ul><li><code>and</code> and <code>or</code> require <code>Bool</code> operands.</li><li><code>not</code> requires one <code>Bool</code> operand.</li><li>Symbolic equality and symbolic logical-not forms are not language operators.</li></ul><h3>Arithmetic results</h3><ul><li><code>Int</code>, <code>Int</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>%</code>, <code>^</code>, <code>//</code> produces <code>Int</code></li><li><code>Int</code>, <code>Int</code> with <code>/</code> produces <code>Float</code></li><li><code>Float</code>, <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li><li>mixed <code>Int</code> and <code>Float</code> with <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>^</code> produces <code>Float</code></li></ul><p><code>//</code> is integer division and is valid only for two <code>Int</code> operands.</p><h3>Comparisons</h3><ul><li><code>Int</code> and <code>Float</code> support equality and ordering, including mixed numeric comparisons.</li><li><code>Char</code> supports equality and ordering.</li><li><code>Bool</code> supports equality only.</li><li><code>String</code> supports <code>is</code> and <code>is not</code>. It does not support ordering operators.</li><li>Choices and options have additional equality rules in their own references.</li></ul><p><code>+</code> is a numeric operator only. Source string concatenation uses templates. See <a href="../language-overview/#strings-and-characters">Strings and characters</a> for the canonical concatenation form.</p><h3>Precedence and associativity</h3><p>From highest to lowest:</p><ul><li>level 6: unary <code>not</code>, unary <code>-</code></li><li>level 5: <code>^</code></li><li>level 4: <code>*</code>, <code>/</code>, <code>//</code>, <code>%</code></li><li>level 3: <code>+</code>, <code>-</code></li><li>level 2: <code>is</code>, <code>is not</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></li><li>level 1: <code>and</code></li><li>level 0: <code>or</code></li></ul><p><code>^</code> is right-associative. Other binary operators are left-associative.</p><p>Parentheses override normal precedence.</p><h3>Spacing</h3><p>Symbolic binary operators require spaces on both sides. Assignment <code>=</code> follows the same outer-spacing rule, but it is not a binary operator.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> left <span class='moth-code-operator'>+</span> right
-count <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1</span></code></pre><p>These forms are invalid:</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- INVALID: missing required spacing</span>
-total<span class='moth-code-operator'>=</span>left<span class='moth-code-operator'>+</span>right
-count<span class='moth-code-operator'>=</span><span class='moth-code-number'>1</span></code></pre><p>The compound forms <code>+=</code>, <code>-=</code>, <code>*=</code>, <code>/=</code>, <code>//=</code>, <code>%=</code> and <code>^=</code> follow the same rule:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
-count <span class='moth-code-operator'>//=</span> <span class='moth-code-number'>2</span></code></pre><p><code>count+=1</code>, <code>count +=1</code> and <code>count+= 1</code> are invalid.</p><p>The mutable declaration spelling <code>~=</code> stays adjacent. It needs whitespace before <code>~</code> and after <code>=</code>:</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>1</span></code></pre><p><code>count~= 1</code>, <code>count ~=1</code> and <code>count ~ = 1</code> are invalid.</p><p>Operator overloading is outside Moth&#39;s language design. Operators remain compiler-owned and predictable.</p>
-</div>
-</fieldset></section>
-<section class="container"><fieldset class="doc-level">
-    <legend class="visually-hidden">
-        Choose the explanation level: Checked arithmetic
-</legend>
-
-<input
-    class="doc-level__input doc-level__input--basic"
-    type="radio"
-    name="checked-arithmetic-level"
-                id="checked-arithmetic-basic"
-                value="basic"
-                checked
-            >
-
-            <input
-                class="doc-level__input doc-level__input--advanced"
-                type="radio"
-                name="checked-arithmetic-level"
-                id="checked-arithmetic-advanced"
-                value="advanced"
-            >
-
-            <header class="doc-level__header">
-                <h2 class="doc-level__title" id="checked-arithmetic">
-                    Checked arithmetic
-</h2>
-
-<div class="doc-level__switch">
-    <label
-        class="doc-level__option doc-level__option--basic"
-        for="checked-arithmetic-basic"
-                    >
-                        Basic
-                    </label>
-
-                    <label
-                        class="doc-level__option doc-level__option--advanced"
-                        for="checked-arithmetic-advanced"
-                    >
-                        Advanced
-                    </label>
-                </div>
-            </header>
-
-            <div class="doc-level__panel doc-level__panel--basic">
-                
-
-
-
-        <p>Moth checks arithmetic instead of quietly wrapping or producing invalid floating-point values.</p><p>These operations can fail:</p><ul><li>overflowing an <code>Int</code></li><li>dividing by zero</li><li>using an invalid integer exponent</li><li>producing <code>NaN</code> or infinity</li></ul><p>A function with an <code>Error!</code> return can pass that failure through its normal error path:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>divide</span> <span class='moth-code-delimiter'>|</span>left <span class='moth-code-type'>Int</span>, right <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
-<span class='moth-code-delimiter'>;</span></code></pre><p>Outside that kind of function, an unexpected runtime numeric failure stops the current program path.</p><p>A failure the compiler can prove in advance is reported during compilation.</p>
-</div>
-
-<div class="doc-level__panel doc-level__panel--advanced">
-    <p>Runtime numeric operations are checked.</p><p>Failures include:</p><ul><li>integer overflow</li><li>division or modulo by zero</li><li>invalid integer exponents</li><li>non-finite <code>Float</code> results</li></ul><h3>Failure mode</h3><p>When the enclosing function has builtin <code>Error!</code> as its error return slot, checked numeric failures use that error channel.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>divide</span> <span class='moth-code-delimiter'>|</span>left <span class='moth-code-type'>Int</span>, right <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>return</span> left <span class='moth-code-operator'>/</span> right
-<span class='moth-code-delimiter'>;</span>
-
-ratio <span class='moth-code-operator'>=</span> <span class='moth-code-function'>divide</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>0</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0.0</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>Custom fallible channels, non-fallible functions and entry-selected top-level runtime code use trap mode for checked numeric failure.</p><p>Numeric operators remain ordinary source expressions. The compiler lowers their failure path. They are not source-visible <code>Error!</code> values that can be handled in the middle of an arbitrary expression.</p><h3>Compile-time failures</h3><p>A statically known numeric failure is a compile-time diagnostic.</p><p>This remains true inside a function with builtin <code>Error!</code>.</p><h3>Related behaviour</h3><p>Range-loop counter updates use the same checked numeric operations.</p><p>Conversions that may lose information, such as <code>Float -&gt; Int</code>, belong to the Casts documentation rather than implicit arithmetic coercion.</p>
-</div>
-</fieldset></section>
-<section class="container"><nav class="doc-pager" aria-label="Language documentation">
-    <a
-        class="doc-pager__link doc-pager__link--previous"
-        href="../bindings/"
-                rel="prev"
-            >
-                <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">Values and bindings</span>
-            </a>
-
-            <a
-                class="doc-pager__link doc-pager__link--next"
-                href="../casts/"
-                rel="next"
-            >
-                <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">Casts</span>
-            </a>
-
-            
-
-
-
-</nav></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

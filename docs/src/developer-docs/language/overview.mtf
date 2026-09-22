@@ -265,10 +265,14 @@ Builder packages have paired Advanced and Basic pages:
 
 For MON work, read `language-overview/mon-syntax.mtf`, `functions/calls-and-access.mtf`,
 `constants/const-records.mtf` and `structs/anonymous-records.mtf` under `docs/src/docs/`
-together. The shared notation does not merge call-slot validation, folded records
+together with the durable literal-data format authority `docs/src/docs/mon/mon-format.mtf`
+(and teaching `mon-format-basic.mtf`). The shared notation does not merge call-slot validation, folded records
 and hidden runtime nominal types into one semantic representation. Moth MON source
 syntax allows ordinary expressions according to the receiving context; MON serialised
 data is self-contained literal data only, and a MON reader never evaluates Moth
-expressions, including foldable ones. The Rust-facing codec contract is accepted and
-queued. Moth-native `$mon`, automatic schema extraction and the static project builder
-remain deferred separately.
+expressions, including foldable ones. The literal-data format and Rust-only API/ownership contract (future `moth::mon`
+over private `src/compiler_frontend/mon/`, owned Value/Schema/PreparedSchema) is documented;
+no executable codec is delivered and no implementation or coverage is claimed. Moth-native `$mon`, automatic schema extraction and the static project builder
+remain deferred separately. Source `{=}` empty-map enforcement, source Unicode escapes beyond
+the existing five, and contextual `::Variant` construction remain deferred source parity gaps;
+contract publication does not implement them.

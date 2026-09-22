@@ -35,13 +35,14 @@ It owns:
 - diagnostic schema declaration and validation
 - reduced type-display snapshots for diagnostics
 - build-then-freeze compiler identity contexts
+- the MON caller-owned input snapshot, cursor, span, public error context and owned-result handoff, which uses no compiler identity table
 - the boundary between user diagnostics, operational infrastructure failures and compiler bugs
-- layout assertions, measurement requirements and anti-drift rules for these systems
 
 It does not override:
 
 - `docs/compiler-design-overview.md` for compiler stage and semantic ownership
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
+- `docs/src/docs/mon/mon-format.mtf` for MON literal-data format semantics
 - `docs/src/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
 - `docs/src/docs/progress/@page.moth` for current implementation status
@@ -1460,6 +1461,124 @@ Rules:
 The existing local fork/delta string-table strategy may be retained and improved. This design does
 not require a globally contended string interner.
 
+## MON data handoff
+
+This section owns the one MON snapshot, cursor, span and owned-result handoff.
+It reuses the active representation rules below without changing them: compiler-retained numeric text remains owned by the numeric token side store, while MON retains only bounded, caller-borrowed lossless literal text until its receiving schema is known. Compiler diagnostic storage stays in the compact diagnostic architecture, and MON never becomes source compilation.
+The MON literal-data format itself is owned by `docs/src/docs/mon/mon-format.mtf`;
+the compiler and Rust API boundary is owned by
+`docs/compiler-design-overview.md` > `Rust-only MON service`.
+
+### Caller-owned input snapshot and cursor lifetime
+
+The caller owns the UTF-8 input text and its lifetime. Decoding accepts either a
+borrowed `&str`, already valid UTF-8, or a byte slice through
+`decode_document_bytes`, which reports invalid UTF-8 through the public error
+projection instead of the compiler diagnostic lanes. The MON cursor borrows that
+input only for the duration of the call. It may borrow internally while parsing,
+but no borrow escapes: decoded values outlive and release the input text without
+a caller-retained backing buffer, and the default public API has no borrowed
+document view.
+
+Input accounting runs before the affected allocation or expansion under checked
+arithmetic, using the accepted defaults of 1 MiB input bytes, depth 64, 100,000
+nodes, 4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
+default expansions. Accepted recursion stays bounded so the cursor and owned-tree
+destruction remain within the documented depth. Limits are receiver resource
+policy, not grammar dialects: a valid document that exceeds a receiver's budget
+fails distinctly from syntax and schema errors.
+
+The cursor never constructs `SourceId`, `PathId`, `StringId`, `SourceDatabase`,
+AST, HIR or compiler cursors. It performs no file IO, module import, schema
+discovery, command execution, builder registration, output write or runtime
+evaluation. It uses no compiler identity table: there is no build-lifetime
+source database, no path interner, no string table and no frozen identity
+context on this path. Root elision consumes the existing cursor with original
+offsets rather than a copied string with synthetic parentheses.
+
+### MON spans without compiler identity
+
+`Span` is an exact half-open UTF-8 byte range over the caller-owned input, never
+a `SourceSpan` or `LocalSpan` and never an index into compiler-owned source
+storage. It carries no path, line or column pair and no syntax-aware end recipe,
+matching the durable-span rule that spans stay exact byte ranges. Absence uses
+`Option<Span>`, never a magic valid value. Reserved distinctions in the public
+error stay semantic codes rather than packed record bits; this section adds no
+layout assertion and changes no locked size.
+
+Diagnostic rendering of a `Span` resolves against the caller's retained input,
+not against a build-lifetime source database or frozen identity context.
+Releasing the input text after a successful decode is the ordinary pattern; a
+later render of a retained error needs the input the span was measured against.
+Line and column conversion, where a caller wants it, happens at that caller's
+rendering boundary and is never stored in the span.
+
+### Retained numeric text and shared escapes
+
+Whole-number and decimal or exponent spellings stay distinguishable through a
+lossless numeric literal representation until the destination is known. The
+accepted lexical owner is `numeric_text` grammar, normalisation, separator and
+exponent validation with text materialisation; MON performs only the bounded
+literal normalisation, range and scale checks the codec needs and adds no second
+arithmetic runtime. Exact `Integer` and `Decimal` values retain their text
+without routing through `f64` or display formatting. `Float` materialisation
+follows the numeric authority and rejects non-finite source values and
+conversion results, emitting `-0.0` for negative zero and `0` for positive zero
+while decoding preserves the sign bit.
+
+String and character escapes share the accepted decoding primitive without
+widening source syntax: MON enables its Unicode `\u{H...}` branch with one to
+six ASCII hex digits while Moth source remains limited to its existing five
+escapes. Writer output uses uppercase hex; unescaped newlines and CRLF stay
+byte-for-byte content because MON is data, not Moth source. Sharing the owner
+adds no source-language change, so the `Non-goals` rule against source-syntax
+changes still holds.
+
+### Immutable prepared schema and owned result
+
+The caller builds an immutable `Schema` once and shares the validated
+`PreparedSchema` across calls. Preparation validates the static schema and its
+prevalidated default data before any document is processed; schema misuse is a
+structured failure, never a panic. Preparation rejects a transitive
+`SchemaType::Unsupported` member before any document is processed; there is no
+public unsupported value. Defaults apply at the exact missing field only, with
+no deep merge and no replacement of a supplied `none`. Typed encoding emits all
+completed fields in schema declaration order over the same writer in pretty and
+compact modes, which differ only in whitespace.
+
+Results are owned trees with no alias or allocation-identity promise: repeated shared source values encode at each occurrence, decoding establishes no preserved alias relationship, and cyclic host data fails encoding. Writers are deterministic without canonical-byte semantics. Every public encode/decode operation publishes only a complete successful result: decoding discards partial values, encoders build a private `String` and discard it on error, and no caller buffer or partial public result exists on the guaranteed path.
+
+### Public error context beside compiler diagnostics
+
+The public error is `MonError { code: MonErrorCode, span: Option<Span>, path:
+Vec<PathSegment>, detail: String }` with no compiler identity table. Its codes
+keep input, schema, resource, budget and internal lanes distinct: UTF-8,
+literal and syntax, schema and type, duplicate and qualifier and arity, numeric
+and Unicode, resource, each budget kind and internal invariant failures each
+have their own codes. A missing field points at its containing record rather
+than fabricated source text; duplicate map-key errors point at the duplicate
+key. Messages render only at the caller's diagnostic boundary.
+
+This projection stays beside, not inside, the compiler failure architecture. It
+does not create a `DiagnosticRecord`, side store, `InfrastructureFailure` or
+`compiler_bug!` site, does not start the later compact-diagnostics migration and
+adds no competing global error taxonomy. Decoding returns the first structured
+failure with its stable reason, original input byte range and field or element
+path where available.
+
+### What this handoff does not use or change
+
+- No `SourceDatabase`, `SourceId`, `PathId`, `StringId`, `PathSyntaxTable`,
+  token store, diagnostic store, `TypeEnvironment` or frozen identity context.
+- No AST, HIR, TIR, borrow fact, lifetime fact, link fact or module artefact.
+- No source tokenizer cursor, header preparation, interface binding, declaration
+  ordering, constant folding, template evaluation or backend lowering.
+- No locked layout decision: `LocalSpan`, `SourceSpan`, `TokenShape`,
+  `DiagnosticRecord` and every hard representation invariant keep their exact
+  sizes, ownership and failure-lane contracts.
+- No later diagnostic storage work: compact diagnostic records, side stores and
+  the failure lanes keep their owners and their deferred-work list.
+
 ## Failure architecture
 
 Moth compiler failures have exactly three lanes. They are not converted into one another merely
@@ -1956,7 +2075,7 @@ left as vague future work.
 
 Implementation of this design requires synchronized changes to:
 
-- `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
+- `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes, including the `Rust-only MON service` boundary owned with this document's `MON data handoff`
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries
 - `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; keep
@@ -2049,6 +2168,13 @@ src/compiler_frontend/context/
     worker_delta.rs
     tests/
 ```
+
+The accepted future MON handoff lives beside this map without changing it: a
+crate-private `src/compiler_frontend/mon/` owner holds the caller-borrowed input
+cursor, `Span` byte ranges, retained numeric text handling, immutable prepared
+schema and owned `Value` results, reporting through the public `MonError`
+projection. It owns no source database, identity table, token store, diagnostic
+store or frozen context.
 
 Core pipeline and `mod.rs` files remain orchestration maps. Bit codecs, capacity formulas, schema
 internals and benchmark-only accounting do not accumulate in broad pipeline files.
