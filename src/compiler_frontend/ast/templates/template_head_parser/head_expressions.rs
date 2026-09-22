@@ -238,8 +238,16 @@ pub(super) fn push_template_head_expression(
 
     // Record head segments into parser TIR in source order before any body
     // nodes are appended.
+    // Text nodes carry no provenance, so a constant reference that already folded to a
+    // `StringSlice` must stay a dynamic expression when it bears provenance. The dynamic
+    // fold path merges the selected payload's provenance into the template output, while
+    // ordinary provenance-free literals keep the text fast path.
     match &snapshot_expression.kind {
-        ExpressionKind::StringSlice(text) => {
+        ExpressionKind::StringSlice(text)
+            if snapshot_expression
+                .synthetic_interface_provenance
+                .is_empty() =>
+        {
             let byte_len = string_table.resolve(*text).len();
             target
                 .construction_context

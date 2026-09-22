@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::const_values::store::{
 };
 use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
 use crate::compiler_frontend::build_config::{
-    BuildConfigInputSet, BuildConfigProjectFieldDependency, BuildInputName, BuilderConfigGlobalSet,
-    ConfigResolutionRecord, ConfigResolutionServices, FoldedConfigProjectFieldDependency,
+    BuildConfigInputSet, BuildInputName, BuilderConfigGlobalSet, ConfigResolutionRecord,
+    ConfigResolutionServices, FoldedConfigProjectFieldDependency,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
@@ -347,11 +347,8 @@ fn compile_prepared_config_source(
         path_fork,
         &config_resolution,
     )?;
-    let project_field_dependencies = project_config_field_dependencies(
-        &declarations,
-        config_resolution.take_project_field_dependencies(),
-        string_table,
-    )?;
+    let project_field_dependencies =
+        project_config_field_dependencies(&declarations, string_table)?;
 
     Ok(CompiledConfigSource {
         declarations,
@@ -359,107 +356,62 @@ fn compile_prepared_config_source(
         project_field_dependencies,
     })
 }
-/// Pair retained dependency identities with the already projected folded project fields.
+/// Project folded `ConstValue` provenance into owned project-field dependency records.
 ///
-/// The compiler service owns this join while field type identities, values and spans remain
-/// available. Build validation receives only these owned records.
+/// Each receiving project field's folded metadata already carries the union of every
+/// declaration-owned input that contributed to its value. The join reads that provenance
+/// through `input_names_for_provenance`, so this is the sole semantic owner for
+/// project-field dependence.
 fn project_config_field_dependencies(
     declarations: &[FoldedConfigDeclaration],
-    dependencies: Vec<BuildConfigProjectFieldDependency>,
     string_table: &mut StringTable,
 ) -> Result<Vec<FoldedConfigProjectFieldDependency>, CompilerMessages> {
-    let mut dependencies = dependencies;
     let Some(project) = declarations
         .iter()
         .find(|declaration| string_table.resolve(declaration.name) == "project")
     else {
-        if dependencies.is_empty() {
+        return Ok(Vec::new());
+    };
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        if project
+            .direct_field_dependencies
+            .iter()
+            .all(|names| names.is_empty())
+        {
             return Ok(Vec::new());
         }
         return Err(CompilerMessages::from_error(
             CompilerError::compiler_error(
-                "config project-field dependency was recorded without a project declaration",
+                "config project-field dependency was recorded for a non-record project value",
             ),
             string_table.clone(),
         ));
     };
-    let (fields, fallback_dependencies) = match &project.value {
-        PublicFoldedValue::Record(fields) => {
-            let fallback_dependencies = project
-                .direct_field_dependencies
-                .iter()
-                .enumerate()
-                .filter(|(_, names)| !names.is_empty())
-                .filter_map(|(index, names)| {
-                    fields
-                        .get(index)
-                        .map(|field| BuildConfigProjectFieldDependency {
-                            field_name: string_table.intern(&field.name),
-                            input_names: names.clone(),
-                        })
-                })
-                .collect::<Vec<_>>();
-            (fields, fallback_dependencies)
-        }
-        _ if dependencies.is_empty()
-            && project
-                .direct_field_dependencies
-                .iter()
-                .all(|names| names.is_empty()) =>
-        {
-            return Ok(Vec::new());
-        }
-        _ => {
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(
-                    "config project-field dependency was recorded for a non-record project value",
-                ),
-                string_table.clone(),
-            ));
-        }
-    };
-
-    for fallback in fallback_dependencies {
-        if let Some(existing) = dependencies
-            .iter_mut()
-            .find(|dependency| dependency.field_name == fallback.field_name)
-        {
-            existing.input_names.extend(fallback.input_names);
-            existing.input_names.sort();
-            existing.input_names.dedup();
-        } else {
-            dependencies.push(fallback);
-        }
-    }
-    if dependencies.is_empty() {
-        return Ok(Vec::new());
+    if project.direct_field_dependencies.len() != fields.len() {
+        return Err(CompilerMessages::from_error(
+            CompilerError::compiler_error(
+                "config field provenance must align with folded record fields",
+            ),
+            string_table.clone(),
+        ));
     }
 
-    let mut projected = Vec::with_capacity(dependencies.len());
-    for dependency in dependencies {
-        let field_name = string_table.resolve(dependency.field_name);
-        let Some((field_index, field)) = fields
-            .iter()
-            .enumerate()
-            .find(|(_, field)| field.name == field_name)
-        else {
-            return Err(CompilerMessages::from_error(
-                CompilerError::compiler_error(format!(
-                    "config dependency field '{field_name}' was absent from folded project value",
-                )),
-                string_table.clone(),
-            ));
-        };
+    let mut projected = Vec::new();
+    for (index, field) in fields.iter().enumerate() {
+        let input_names = project
+            .direct_field_dependencies
+            .get(index)
+            .cloned()
+            .unwrap_or_default();
+        if input_names.is_empty() {
+            continue;
+        }
         projected.push(FoldedConfigProjectFieldDependency {
-            field_name: dependency.field_name,
-            input_names: dependency.input_names,
+            field_name: string_table.intern(&field.name),
+            input_names,
             type_identity: field.type_identity.clone(),
             value: field.value.clone(),
-            span: project
-                .direct_field_spans
-                .get(field_index)
-                .copied()
-                .flatten(),
+            span: project.direct_field_spans.get(index).copied().flatten(),
         });
     }
     Ok(projected)

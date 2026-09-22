@@ -1,11 +1,10 @@
 //! AST declaration-owned configuration resolution.
 //!
-//! WHAT: resolves declaration-owned `#Config of T` metadata and records the resulting
-//!       folded project-field dependency facts.
+//! WHAT: resolves declaration-owned `#Config of T` metadata and seeds one stable
+//!       `SyntheticInterfaceProvenance` input fact per declaration-owned input.
 //! WHY: configuration validation and primitive materialisation are a focused semantic phase,
 //!      separate from the ordinary top-level constant session and its compile-time fold.
 
-use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -22,7 +21,6 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, ConfigResolutionServices, PrimitiveBuildInputType, PrimitiveBuildValue,
     ResolvedBuildConfigValue, build_config_fingerprint,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -40,17 +38,18 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 /// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
 ///
 /// Top-level declarations are the bootstrap owner. The declaration-boundary path records the
-/// input contract and only records a receiving project field when a folded field depends on
-/// that input.
+/// input contract and seeds the input's stable provenance. Folded `ConstValue` metadata
+/// carries that provenance into each receiving project field through the ordinary fold, so
+/// this pass records no pre-fold project-field dependency facts.
 pub(super) fn resolve_config_declaration(
     declaration: &mut Declaration,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     services: &ConfigResolutionServices,
     string_table: &mut StringTable,
-    path_fork: &PathInternerFork,
+    _path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let declaration_name = path_fork.component(declaration.id);
+    let declaration_name = _path_fork.component(declaration.id);
     if let Some(qualifier) = declaration.config_qualifier.take() {
         let Some(declaration_name) = declaration_name else {
             return Err(config_expression_error(
@@ -209,119 +208,16 @@ pub(super) fn resolve_config_declaration(
                 )),
             );
         services.record_input_provenance(
-            input_name.clone(),
+            input_name,
             declaration.value.synthetic_interface_provenance.clone(),
         );
-        services.record_declaration_dependencies(declaration.id, vec![input_name]);
         return Ok(());
     }
 
-    let is_project = declaration_name.is_some_and(|name| string_table.resolve(name) == "project");
-    let ExpressionKind::AnonymousConstRecord { fields } = &mut declaration.value.kind else {
-        let dependencies = expression_dependencies(&declaration.value, services);
-        services.record_declaration_dependencies(declaration.id, dependencies);
-        return Ok(());
-    };
-
-    let mut declaration_dependencies = Vec::new();
-    for field in fields {
-        let field_name = path_fork.component(field.id);
-
-        let dependencies = expression_dependencies(&field.value, services);
-        declaration_dependencies.extend(dependencies.iter().cloned());
-        if is_project && !dependencies.is_empty() {
-            let field_name = field_name.ok_or_else(|| {
-                CompilerError::compiler_error("project record field has no terminal name")
-            })?;
-            let field_text = string_table.resolve(field_name);
-            if services.project_field_policy(field_text) != ProjectFieldConfigPolicy::Configurable {
-                return Err(config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigQualifierFixedField,
-                    field.value.span,
-                ));
-            }
-            services.record_project_field_dependency(field_name, dependencies.clone());
-        }
-        services.record_declaration_dependencies(field.id, dependencies);
-    }
-    declaration_dependencies.sort();
-    declaration_dependencies.dedup();
-    services.record_declaration_dependencies(declaration.id, declaration_dependencies);
+    // Non-`#Config` declarations carry whatever provenance the ordinary parse already
+    // attached. The const-store fold propagates that provenance into folded field metadata,
+    // so no pre-fold dependency walk is needed here.
     Ok(())
-}
-
-fn expression_dependencies(
-    expression: &Expression,
-    services: &ConfigResolutionServices,
-) -> Vec<BuildInputName> {
-    fn visit(
-        expression: &Expression,
-        services: &ConfigResolutionServices,
-        dependencies: &mut Vec<BuildInputName>,
-    ) {
-        match &expression.kind {
-            ExpressionKind::Reference(path) => {
-                dependencies.extend(services.declaration_dependencies(*path));
-            }
-            ExpressionKind::FieldAccess { base, .. }
-            | ExpressionKind::OptionPropagation { value: base }
-            | ExpressionKind::Coerced { value: base, .. }
-            | ExpressionKind::HandledFallibleExpression { value: base, .. } => {
-                visit(base, services, dependencies);
-            }
-            ExpressionKind::Copy(place) => visit_place(place, services, dependencies),
-            ExpressionKind::Collection(values) => {
-                for value in values {
-                    visit(value, services, dependencies);
-                }
-            }
-            ExpressionKind::Range(start, end) => {
-                visit(start, services, dependencies);
-                visit(end, services, dependencies);
-            }
-            ExpressionKind::AnonymousConstRecord { fields }
-            | ExpressionKind::StructInstance(fields)
-            | ExpressionKind::ChoiceConstruct { fields, .. } => {
-                for field in fields {
-                    visit(&field.value, services, dependencies);
-                }
-            }
-            ExpressionKind::Runtime(rpn) => {
-                for item in &rpn.items {
-                    if let crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem::Operand(
-                        operand,
-                    ) = item
-                    {
-                        visit(operand, services, dependencies);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn visit_place(
-        place: &crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpression,
-        services: &ConfigResolutionServices,
-        dependencies: &mut Vec<BuildInputName>,
-    ) {
-        match &place.kind {
-            crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionKind::Local(
-                path,
-            ) => dependencies.extend(services.declaration_dependencies(*path)),
-            crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpressionKind::Field {
-                base,
-                ..
-            } => visit_place(base, services, dependencies),
-        }
-    }
-
-    let mut dependencies = Vec::new();
-    visit(expression, services, &mut dependencies);
-    dependencies.sort();
-    dependencies.dedup();
-    dependencies
 }
 
 /// A source config declaration's authored default after primitive validation.

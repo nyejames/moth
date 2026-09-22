@@ -34,7 +34,7 @@ use crate::compiler_frontend::numeric_text::parse::{
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
@@ -797,18 +797,10 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 
-/// A folded project-field dependency on one or more declaration-owned config inputs.
-///
-/// This is intentionally a narrow handoff fact. The compiler records dependencies while the AST
-/// still owns declaration paths; the config service later pairs this identity with the owned folded
-/// field value. Build code consumes the finished record and never walks AST values.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BuildConfigProjectFieldDependency {
-    pub(crate) field_name: StringId,
-    pub(crate) input_names: Vec<BuildInputName>,
-}
-
 /// Folded value paired with the receiving project field at the compiler/build boundary.
+///
+/// The compiler service owns this join while field type identities, values and spans remain
+/// available. Build validation receives only these owned records.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FoldedConfigProjectFieldDependency {
     pub(crate) field_name: StringId,
@@ -823,14 +815,11 @@ pub(crate) struct FoldedConfigProjectFieldDependency {
 /// The service owns resolution; this carrier only snapshots typed inputs, builder globals and the
 /// schema-derived project-field policy. It deliberately contains no build `Config`, target or
 /// platform identity.
-#[derive(Clone, Debug)]
 pub(crate) struct ConfigResolutionServices {
     explicit_inputs: BuildConfigInputSet,
     builder_globals: BuilderConfigGlobalSet,
     project_field_policies: crate::builder_surface::config_schema::ProjectFieldConfigPolicies,
     records: RefCell<Vec<ConfigResolutionRecord>>,
-    declaration_dependencies: RefCell<FxHashMap<PathId, Vec<BuildInputName>>>,
-    project_field_dependencies: RefCell<Vec<BuildConfigProjectFieldDependency>>,
     input_provenances: RefCell<
         FxHashMap<
             BuildInputName,
@@ -850,8 +839,6 @@ impl ConfigResolutionServices {
             builder_globals: builder_globals.clone(),
             project_field_policies,
             records: RefCell::new(Vec::new()),
-            declaration_dependencies: RefCell::new(FxHashMap::default()),
-            project_field_dependencies: RefCell::new(Vec::new()),
             input_provenances: RefCell::new(FxHashMap::default()),
         })
     }
@@ -876,50 +863,11 @@ impl ConfigResolutionServices {
         std::mem::take(&mut *self.records.borrow_mut())
     }
 
-    /// Publish dependency names for one declaration or record field after its initializer is
-    /// parsed. Source order guarantees every referenced declaration is already in this map.
-    pub(crate) fn record_declaration_dependencies(
-        &self,
-        declaration: PathId,
-        mut input_names: Vec<BuildInputName>,
-    ) {
-        input_names.sort();
-        input_names.dedup();
-        self.declaration_dependencies
-            .borrow_mut()
-            .insert(declaration, input_names);
-    }
-
-    pub(crate) fn declaration_dependencies(&self, declaration: PathId) -> Vec<BuildInputName> {
-        self.declaration_dependencies
-            .borrow()
-            .get(&declaration)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn record_project_field_dependency(
-        &self,
-        field_name: StringId,
-        mut input_names: Vec<BuildInputName>,
-    ) {
-        input_names.sort();
-        input_names.dedup();
-        if input_names.is_empty() {
-            return;
-        }
-        self.project_field_dependencies
-            .borrow_mut()
-            .push(BuildConfigProjectFieldDependency {
-                field_name,
-                input_names,
-            });
-    }
-
-    pub(crate) fn take_project_field_dependencies(&self) -> Vec<BuildConfigProjectFieldDependency> {
-        std::mem::take(&mut *self.project_field_dependencies.borrow_mut())
-    }
-
+    /// Seed the stable provenance owned by one declaration-owned config input.
+    ///
+    /// The folded `ConstValue` metadata carries each project field's provenance through the
+    /// ordinary fold, so this map is the only pre-fold dependency state the resolution
+    /// service retains.
     pub(crate) fn record_input_provenance(
         &self,
         input_name: BuildInputName,

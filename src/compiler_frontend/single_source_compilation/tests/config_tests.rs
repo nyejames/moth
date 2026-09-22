@@ -698,6 +698,44 @@ fn declaration_config_bootstrap_preserves_multiple_folded_input_dependencies() {
         .collect::<Vec<_>>();
     assert_eq!(input_names, vec!["first_value", "second_value"]);
 }
+#[test]
+fn declaration_config_bootstrap_tracks_template_fold_provenance() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String = \"1.2\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             aggregate = [: v-[release_version]],\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("a template-folded project field should retain declaration-owned provenance");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "aggregate").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == " v-1.2"
+    ));
+    let dependency = compiled
+        .project_field_dependencies
+        .iter()
+        .find(|dependency| string_table.resolve(dependency.field_name) == "aggregate")
+        .expect("the template-folded aggregate field dependency should be retained");
+    let input_names = dependency
+        .input_names
+        .iter()
+        .map(|name| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(input_names, vec!["release_version"]);
+}
 
 #[test]
 fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_multiple_inputs() {
