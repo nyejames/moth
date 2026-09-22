@@ -391,6 +391,32 @@ fn named_only_receiving_context_rejects_positional_arguments() {
 }
 
 #[test]
+fn positional_only_without_signature_rejects_named_arguments() {
+    let diagnostics =
+        super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        });
+    let receiving_context = super::CallArgumentReceivingContext::with_policies(
+        diagnostics,
+        super::CallArgumentNamingPolicy::PositionalOnly,
+        super::CallArgumentValuePolicy::Ordinary,
+    );
+    let error = parse_args_with_receiving_context("directive(name = 1)", receiving_context, None)
+        .expect_err("positional-only receivers must reject named arguments without a signature");
+
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected a user diagnostic for a named positional-only argument");
+    };
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidCallShape {
+            reason: InvalidCallShapeReason::NamedArgumentsNotSupported,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn const_required_receiving_context_reuses_expression_const_classification() {
     let diagnostics =
         super::CallArgumentDiagnosticContext::from_syntax(super::CallArgumentSyntax::Supported {

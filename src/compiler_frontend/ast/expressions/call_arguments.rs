@@ -820,6 +820,41 @@ impl<'a> ParameterSlotRouter<'a> {
             named_target_spans.insert(*target_name, *target_span);
         }
 
+        if let Some((_, target_span)) = named_target
+            && matches!(
+                self.receiving_context.naming_policy,
+                CallArgumentNamingPolicy::PositionalOnly
+            )
+        {
+            match self.receiving_context.diagnostics.syntax {
+                CallArgumentSyntax::UnsupportedCall { callee_name } => {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::NamedArgumentsNotSupported,
+                        callee_name,
+                        *target_span,
+                    )
+                    .into());
+                }
+                CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
+                    return Err(CompilerDiagnostic::invalid_builtin_call(
+                        InvalidBuiltinCallReason::NamedArgumentsNotSupported,
+                        member_name,
+                        *target_span,
+                    )
+                    .into());
+                }
+                CallArgumentSyntax::Supported { .. } => {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::NamedArgumentsNotSupported,
+                        self.callee_name(),
+                        *target_span,
+                    )
+                    .into());
+                }
+                CallArgumentSyntax::AnonymousConstRecord => {}
+            }
+        }
+
         let Some(expectations) = self.expectations else {
             if named_target.is_some() {
                 self.saw_named_argument = true;
@@ -832,22 +867,6 @@ impl<'a> ParameterSlotRouter<'a> {
 
         if let Some((target_name, target_span)) = named_target {
             self.saw_named_argument = true;
-
-            if matches!(
-                self.receiving_context.naming_policy,
-                CallArgumentNamingPolicy::PositionalOnly
-            ) && matches!(
-                self.receiving_context.diagnostics.syntax,
-                CallArgumentSyntax::Supported { .. }
-            ) {
-                return Err(CompilerDiagnostic::invalid_call_shape(
-                    InvalidCallShapeReason::NamedArgumentsNotSupported,
-                    self.callee_name(),
-                    *target_span,
-                )
-                .into());
-            }
-
             match self.receiving_context.diagnostics.syntax {
                 CallArgumentSyntax::UnsupportedCall { callee_name } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(

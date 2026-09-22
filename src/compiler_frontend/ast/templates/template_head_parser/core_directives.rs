@@ -32,18 +32,32 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Typed result for the connected core-directive family.
 type CoreDirectiveResult<T> = Result<T, TemplateError>;
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "slot helper dispatch keeps the token stream, scope, mutable interner/build/string/path state, and the directive kind as separate borrows"
+)]
 pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     directive_kind: &StyleDirectiveKind,
     token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
 ) -> CoreDirectiveResult<bool> {
     if matches!(
         directive_kind,
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::Slot)
     ) {
         let slot_name = string_table.intern("slot");
-        let slot_key = parse_optional_slot_target_argument(slot_name, token_stream, string_table)?;
+        let slot_key = parse_optional_slot_target_argument(
+            slot_name,
+            token_stream,
+            context,
+            type_interner,
+            string_table,
+            path_fork,
+        )?;
         build_state.kind = TemplateType::SlotDefinition(slot_key);
         return Ok(true);
     }
@@ -53,7 +67,14 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
         StyleDirectiveKind::Core(CoreStyleDirectiveKind::Insert)
     ) {
         let insert_name = string_table.intern("insert");
-        let slot_name = parse_required_slot_name_argument(insert_name, token_stream, string_table)?;
+        let slot_name = parse_required_slot_name_argument(
+            insert_name,
+            token_stream,
+            context,
+            type_interner,
+            string_table,
+            path_fork,
+        )?;
         build_state.kind = TemplateType::SlotInsert(SlotKey::named(slot_name));
         return Ok(true);
     }
