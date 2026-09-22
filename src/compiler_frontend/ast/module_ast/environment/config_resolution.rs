@@ -47,9 +47,9 @@ pub(super) fn resolve_config_declaration(
     type_interner: &mut AstTypeInterner<'_>,
     services: &ConfigResolutionServices,
     string_table: &mut StringTable,
-    _path_fork: &PathInternerFork,
+    path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let declaration_name = _path_fork.component(declaration.id);
+    let declaration_name = path_fork.component(declaration.id);
     if let Some(qualifier) = declaration.config_qualifier.take() {
         let Some(declaration_name) = declaration_name else {
             return Err(config_expression_error(
