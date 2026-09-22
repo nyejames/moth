@@ -43,5 +43,7 @@ Strictness is the point. These inputs fail:
     titl = "Strategy",
 ]
 
-Availability is Rust-only. The accepted Rust caller is the future `moth::mon`
-library surface, and Moth-native operations remain deferred separately.
+Availability is Rust-only. The implemented Rust caller surface is public as
+`moth::mon`, re-exported from `src/lib.rs` over the crate-private
+`src/compiler_frontend/mon/` owner. Moth-native operations remain deferred
+separately, and compiled Moth programs have no runtime codec support.

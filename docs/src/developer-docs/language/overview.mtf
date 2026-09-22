@@ -270,9 +270,13 @@ together with the durable literal-data format authority `docs/src/docs/mon/mon-f
 and hidden runtime nominal types into one semantic representation. Moth MON source
 syntax allows ordinary expressions according to the receiving context; MON serialised
 data is self-contained literal data only, and a MON reader never evaluates Moth
-expressions, including foldable ones. The literal-data format and Rust-only API/ownership contract (future `moth::mon`
-over private `src/compiler_frontend/mon/`, owned Value/Schema/PreparedSchema) is documented;
-no executable codec is delivered and no implementation or coverage is claimed. Moth-native `$mon`, automatic schema extraction and the static project builder
-remain deferred separately. Source `{=}` empty-map enforcement, source Unicode escapes beyond
-the existing five, and contextual `::Variant` construction remain deferred source parity gaps;
-contract publication does not implement them.
+expressions, including foldable ones. The literal-data format and implemented
+Rust API/ownership contract are available now at `moth::mon`, re-exported from
+`src/lib.rs` over the crate-private `src/compiler_frontend/mon/` owner. The
+service is executable from another Rust crate and returns owned values, but
+compiled Moth programs have no runtime codec support. Its exact public
+operations and types are documented in the compiler boundary; no Moth-native
+`$mon`, automatic schema extraction, or static project builder is implied.
+Source `{=}` empty-map enforcement, source Unicode escapes beyond the existing
+five, and contextual `::Variant` construction remain deferred source parity
+gaps; sharing the Rust codec does not implement them.

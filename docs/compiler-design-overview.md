@@ -94,7 +94,7 @@ or thorough reviews.
 - Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
 - Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
 - MON decoding never enters the canonical module compilation service and never constructs AST, HIR, TIR, borrow facts or module artefacts.
-- The Rust-only MON service owns exactly one public root: `moth::mon` after implementation. `compiler_frontend` internals stay crate-private; no MON path exposes them.
+- The Rust-only MON service owns exactly one public root: `moth::mon`. `compiler_frontend` internals stay crate-private; no MON path exposes them.
 - MON decoded values are owned trees a caller can keep after releasing the input text. The public boundary has no borrowed document view and publishes no partial result on failure.
 
 ## Compiler input and result boundary
@@ -1613,9 +1613,13 @@ Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript gl
 The Rust-only MON service is a narrow public library service beside the canonical
 module compilation service. It accepts caller-owned UTF-8 MON text and returns
 owned data values; it never compiles a module, evaluates a Moth program, reads a
-file, discovers a project or writes a build output. Its accepted public root is
-`moth::mon` after implementation. `compiler_frontend` internals stay crate-private
-and no MON path exposes them. The MON literal-data format itself is owned by
+file, discovers a project or writes a build output. Its public root is
+`moth::mon`, re-exported by `src/lib.rs`; the implementation owner is the
+crate-private `src/compiler_frontend/mon/`. The service is executable from
+another Rust crate, using only the Moth dependency and ordinary Rust data
+conversion code. It has no compiler command, source-file IO, compilable Moth
+source kind, builder registration or backend path, and compiled Moth programs
+cannot call its services. The MON literal-data format itself is owned by
 `docs/src/docs/mon/mon-format.mtf`; this section owns only the compiler and Rust
 API boundary for that format.
 
@@ -1637,19 +1641,17 @@ composition requires final document validation.
 
 ### Public root and crate boundary
 
-The future public surface is exactly the accepted Phase 0 names re-exported
-through `moth::mon`: `decode_document`, `decode_document_bytes`,
+The public surface is available through `moth::mon` with the exact names fixed
+for the Rust service: `decode_document`, `decode_document_bytes`,
 `encode_document`, `encode_value`, `Field`, `PreparedSchema`, `Schema`,
 `SchemaType`, `Variant`, `Value`, `Limits`, `MonError`, `MonErrorCode`,
-`PathSegment` and `Span`. The companion file `tmp/mon-rust-tooling-v1-consumer.rs`
-is the accepted external-style consumer shape: it builds a static schema once,
-encodes a record, decodes it, drops the source `String` and converts the owned
-result into native Rust data. After implementation, the service stays usable from
-another crate with only a Moth dependency and ordinary data conversion code; it
-needs no compiler command, source project, backend, JSON adapter or Bevy
-dependency.
-Availability of that surface is not an assertion that compiled Moth programs can
-call MON services.
+`PathSegment` and `Span`. The checked-in outside-crate coverage in
+`tests/mon_public_api.rs` follows the companion consumer shape in
+`tmp/mon-rust-tooling-v1-consumer.rs`: it builds a static schema once,
+encodes a record, decodes it, drops the source `String` and converts the
+owned result into native Rust data. The public path does not expose
+`compiler_frontend` internals, and availability here is not an assertion
+that compiled Moth programs can call MON services.
 
 `mon` owns an input cursor over the caller-provided text, `Span` byte ranges and
 owned `Value` results. It never constructs `SourceId`, `PathId`, `StringId`,
@@ -1843,7 +1845,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Generated request canonicalisation, materialisation, convergence and delta: `src/compiler_frontend/module_compilation/generated/`
 - Project config compilation and direct Moth-template compilation: `src/compiler_frontend/single_source_compilation/`
 - The stage facade those services drive, which is not an entry point of its own: `src/compiler_frontend/pipeline.rs`
-- Rust-only MON service (accepted, not yet implemented): future `moth::mon` re-exported from `src/lib.rs` over a crate-private `src/compiler_frontend/mon/` owner
+- Rust-only MON service (implemented public Rust service): `moth::mon`, re-exported from `src/lib.rs`, over the crate-private `src/compiler_frontend/mon/` owner
 
 ### Stage owners
 

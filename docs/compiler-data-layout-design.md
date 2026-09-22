@@ -7,8 +7,8 @@
 > at `4cfd9d492`. The owning plan records constant and nominal fits within their locked budgets and
 > explicitly accepts the inherited generic `n^1.70` exception (`n^1.770`) without raising or
 > loosening that budget or claiming no worsening. The post-Phase-3 compiler tidy-up is accepted on
-> main. MON syntax, MON Rust tooling, Wiring and native result-slot checkpoints precede explicit
-> Phase 4 reactivation.
+> main. The MON syntax and Rust tooling checkpoints are implemented; Wiring and native result-slot
+> checkpoints still precede explicit Phase 4 reactivation.
 > User-facing diagnostic improvement work remains paused until that gate.
 >
 > **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
@@ -1464,10 +1464,16 @@ not require a globally contended string interner.
 ## MON data handoff
 
 This section owns the one MON snapshot, cursor, span and owned-result handoff.
-It reuses the active representation rules below without changing them: compiler-retained numeric text remains owned by the numeric token side store, while MON retains only bounded, caller-borrowed lossless literal text until its receiving schema is known. Compiler diagnostic storage stays in the compact diagnostic architecture, and MON never becomes source compilation.
-The MON literal-data format itself is owned by `docs/src/docs/mon/mon-format.mtf`;
-the compiler and Rust API boundary is owned by
-`docs/compiler-design-overview.md` > `Rust-only MON service`.
+The implemented service is publicly available as `moth::mon`, re-exported by
+`src/lib.rs`; its crate-private owner is `src/compiler_frontend/mon/`. Exact
+public operation and type names are defined by `docs/compiler-design-overview.md`
+> `Rust-only MON service`.
+It reuses the active representation rules below without changing them:
+compiler-retained numeric text remains owned by the numeric token side store,
+while MON retains only bounded, caller-borrowed lossless literal text until its
+receiving schema is known. Compiler diagnostic storage stays in the compact
+diagnostic architecture, and MON never becomes source compilation. The MON
+literal-data format itself is owned by `docs/src/docs/mon/mon-format.mtf`.
 
 ### Caller-owned input snapshot and cursor lifetime
 
@@ -1490,11 +1496,12 @@ fails distinctly from syntax and schema errors.
 
 The cursor never constructs `SourceId`, `PathId`, `StringId`, `SourceDatabase`,
 AST, HIR or compiler cursors. It performs no file IO, module import, schema
-discovery, command execution, builder registration, output write or runtime
-evaluation. It uses no compiler identity table: there is no build-lifetime
-source database, no path interner, no string table and no frozen identity
-context on this path. Root elision consumes the existing cursor with original
-offsets rather than a copied string with synthetic parentheses.
+discovery, command execution, source-kind registration, builder registration,
+output write, backend path or runtime evaluation. It uses no compiler identity
+table: there is no build-lifetime source database, no path interner, no string
+table and no frozen identity context on this path. Root elision consumes the
+existing cursor with original offsets rather than a copied string with synthetic
+parentheses.
 
 ### MON spans without compiler identity
 
@@ -2169,12 +2176,12 @@ src/compiler_frontend/context/
     tests/
 ```
 
-The accepted future MON handoff lives beside this map without changing it: a
+The implemented MON handoff lives beside this map without changing it: a
 crate-private `src/compiler_frontend/mon/` owner holds the caller-borrowed input
 cursor, `Span` byte ranges, retained numeric text handling, immutable prepared
 schema and owned `Value` results, reporting through the public `MonError`
-projection. It owns no source database, identity table, token store, diagnostic
-store or frozen context.
+projection at `moth::mon`. It owns no source database, identity table, token
+store, diagnostic store or frozen context.
 
 Core pipeline and `mod.rs` files remain orchestration maps. Bit codecs, capacity formulas, schema
 internals and benchmark-only accounting do not accumulate in broad pipeline files.

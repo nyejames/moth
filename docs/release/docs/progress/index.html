@@ -1101,8 +1101,8 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> MON Rust codec</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Focused decoder and writer unit coverage</td>
- <td style="padding: 0.1em 0.5em; "> Phases 2 and 3 are implemented behind the private compiler frontend owner: literal-only complete-document reading, deterministic nested/document writers, owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips and bounded first-error diagnostics. Phase 4 public Rust export, external consumer and bounded hardening remain later slices.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad public API, focused codec and bounded hardening coverage</td>
+ <td style="padding: 0.1em 0.5em; "> The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; release measurements are recorded separately. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

@@ -1078,15 +1078,37 @@ Tooling-only metadata never creates an artefact entry.
 
 ## MON Rust tooling boundary
 
-The MON Rust codec is a compiler-library service consumed by an external Rust caller through the future `moth::mon` surface. It is not a command, an artefact builder, a source kind or a tooling overlay.
+The MON Rust codec is an implemented compiler-library service available to an
+external Rust caller through `moth::mon`, re-exported from `src/lib.rs`. Its
+crate-private implementation owner is `src/compiler_frontend/mon/`. It is not a
+command, an artefact builder, a source kind or a tooling overlay. The service is
+executable from another Rust crate with the Moth dependency and ordinary Rust
+data conversion code, but compiled Moth programs have no runtime codec support.
 
-The caller supplies complete MON text and an explicit prepared schema; the service returns an owned String or an owned schema-checked value. The public surface carries owned values and prepared schemas only; `compiler_frontend` internals stay private and there is no public Resource value. The service performs no project discovery, no source indexing, no module imports, no schema auto-discovery, no builder registration, no filesystem IO, no output writes and no backend lowering. It defines no CLI command, no `build`/`dev`/`check` surface and no runtime opcode callable from compiled Moth programs. Host-side Rust execution is not Moth runtime execution, and this boundary claims no executable codec support.
+The caller supplies complete MON text and an explicit prepared schema; the
+service returns an owned `String` or an owned schema-checked value. The public
+surface carries owned values and prepared schemas only; `compiler_frontend`
+internals stay private and there is no public Resource value. The service
+performs no project discovery, no source indexing, no module imports, no schema
+auto-discovery, no command, no source-kind registration, no builder registration,
+no filesystem IO, no output writes and no backend path or lowering. It defines
+no CLI command, no `build`/`dev`/`check` surface and no runtime opcode callable
+from compiled Moth programs.
 
-A `.mon` file is data, not a compilable Moth source kind. It never enters the canonical source index, a semantic source set, a dependency clause or a provider graph.
+A `.mon` file is data, not a compilable Moth source kind. It never enters the
+canonical source index, a semantic source set, a dependency clause or a
+provider graph.
 
-Resource-bearing compiler values must be materialised to ordinary String before encoding. Unresolved anchors fail at conversion. No string scan reconstructs dependencies, and the codec performs no path discovery, URL generation, filesystem checks or resource loading.
+Resource-bearing compiler values must be materialised to ordinary String before
+encoding. Unresolved anchors fail at conversion. No string scan reconstructs
+dependencies, and the codec performs no path discovery, URL generation,
+filesystem checks or resource loading.
 
-The static `.mon` project builder remains a late deferred follow-up. When delivered, it generates compile-time-known assets through the ordinary `Resource linking and output placement` and `Output ownership` contracts. This section creates no second resource, output or builder-registration path and changes neither contract.
+The static `.mon` project builder remains a late deferred follow-up. When
+delivered, it generates compile-time-known assets through the ordinary
+`Resource linking and output placement` and `Output ownership` contracts. This
+section creates no second resource, output or builder-registration path and
+changes neither contract.
 
 `docs/compiler-design-overview.md` > `Rust-only MON service` owns the compiler-side service, ownership and error/limit contracts for this boundary. The durable MON format authority is `docs/src/docs/mon/mon-format.mtf`; the syntax-versus-data distinction is owned by the canonical `docs/src/docs/language-overview/mon-syntax.mtf` > `MON format boundary`.
 

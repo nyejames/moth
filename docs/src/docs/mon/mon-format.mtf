@@ -7,10 +7,12 @@ casts, field projections, variables and constant references are rejected even
 when the compiler could fold them. Rejection happens before expression
 evaluation, not after evaluating and inspecting a result.
 
-Availability is Rust-only. The accepted Rust caller is the future `moth::mon`
-library surface. Moth-native operations, automatic schema extraction and the
-static project builder remain deferred separately. See @../progress (Progress)
-for current support.
+Availability is Rust-only. The implemented Rust caller surface is public as
+`moth::mon`, re-exported from `src/lib.rs` over the crate-private
+`src/compiler_frontend/mon/` owner. Another Rust crate can execute the service,
+but compiled Moth programs have no runtime codec support. Moth-native
+operations, automatic schema extraction and the static project builder remain
+deferred separately. See @../progress (Progress) for current support.
 
 ### One root record
 
