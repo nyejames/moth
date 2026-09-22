@@ -79,18 +79,36 @@ pub(crate) fn prepare_schema(schema: Schema) -> Result<PreparedSchema, MonError>
     Ok(PreparedSchema { root, limits })
 }
 
-/// Validate an owned value against a prepared type and fill only the exact record fields
-/// omitted by that record's own defaults. The reader may use this for programmatically
-/// supplied nested values after parsing; defaults are already complete in the prepared
-/// fields, and a supplied `None` is never replaced.
+/// Validate a borrowed value against a prepared type and complete it into an owned value,
+/// filling only the exact record fields omitted by that record's own defaults. Defaults are
+/// already complete in the prepared fields, and a supplied `None` is never replaced.
 pub(super) fn validate_and_complete_value(
-    value: Value,
+    value: &Value,
     ty: &PreparedType,
     limits: &Limits,
 ) -> Result<Value, MonError> {
     let mut path = Vec::new();
     let mut budget = BudgetState::new(limits);
-    complete_value(value, ty, &mut budget, &mut path, 0)
+    complete_value(
+        value,
+        ty,
+        &mut budget,
+        &mut path,
+        0,
+        CompletionContext::Input,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompletionContext {
+    Default,
+    Input,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordContext {
+    Record,
+    Choice,
 }
 
 fn prepare_type(
@@ -290,7 +308,14 @@ fn prepare_field(
                     "choice payload fields cannot have defaults",
                 ));
             }
-            Some(complete_value(value, &ty, budget, path, depth)?)
+            Some(complete_value(
+                &value,
+                &ty,
+                budget,
+                path,
+                depth,
+                CompletionContext::Default,
+            )?)
         }
         None => None,
     };
@@ -381,69 +406,85 @@ fn charge_default(budget: &mut BudgetState<'_>, path: &[PathSegment]) -> Result<
 }
 
 fn complete_value(
-    value: Value,
+    value: &Value,
     ty: &PreparedType,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
+    context: CompletionContext,
 ) -> Result<Value, MonError> {
     check_depth(budget, depth, path)?;
     if let PreparedType::Optional(inner) = ty {
-        if matches!(&value, Value::None) {
+        if matches!(value, Value::None) {
             charge_nodes(budget, 1, path)?;
             return Ok(Value::None);
         }
-        return complete_value(value, inner, budget, path, depth);
+        return complete_value(value, inner, budget, path, depth, context);
     }
     charge_nodes(budget, 1, path)?;
 
     match (value, ty) {
         (Value::None, PreparedType::None) => Ok(Value::None),
-        (Value::None, _) => Err(invalid_default(
+        (Value::None, _) => Err(value_error(
+            context,
+            MonErrorCode::TypeMismatch,
             path,
             "none is not accepted by this schema type",
         )),
 
-        (Value::Bool(value), PreparedType::Bool) => Ok(Value::Bool(value)),
-        (Value::Int(value), PreparedType::Int) => Ok(Value::Int(value)),
+        (Value::Bool(value), PreparedType::Bool) => Ok(Value::Bool(*value)),
+        (Value::Int(value), PreparedType::Int) => Ok(Value::Int(*value)),
         (Value::Char(value), PreparedType::Char) => {
             charge_decoded_bytes(budget, value.len_utf8(), path)?;
-            Ok(Value::Char(value))
+            Ok(Value::Char(*value))
         }
         (Value::String(value), PreparedType::String) => {
             charge_decoded_bytes(budget, value.len(), path)?;
-            Ok(Value::String(value))
+            Ok(Value::String(value.clone()))
         }
         (Value::Float(value), PreparedType::Float) => {
             if value.is_finite() {
-                Ok(Value::Float(value))
+                Ok(Value::Float(*value))
             } else {
-                Err(invalid_default(path, "Float defaults must be finite"))
+                Err(value_error(
+                    context,
+                    MonErrorCode::NonFiniteFloat,
+                    path,
+                    "Float values must be finite",
+                ))
             }
         }
 
         (Value::Integer(value), PreparedType::Integer) => {
             charge_decoded_bytes(budget, value.len(), path)?;
-            validate_integer_text(&value, budget.limits, path)?;
-            Ok(Value::Integer(value))
+            validate_integer_text(value, budget.limits, path, context)?;
+            Ok(Value::Integer(value.clone()))
         }
         (Value::Decimal(value), PreparedType::Decimal { scale }) => {
             charge_decoded_bytes(budget, value.len(), path)?;
-            validate_decimal_text(&value, *scale, budget.limits, path)?;
-            Ok(Value::Decimal(value))
+            validate_decimal_text(value, *scale, budget.limits, path, context)?;
+            Ok(Value::Decimal(value.clone()))
         }
 
         (Value::Record(values), PreparedType::Record { fields })
         | (Value::Record(values), PreparedType::Struct { fields, .. }) => {
-            let values = complete_record(values, fields, budget, path, depth)?;
+            let values = complete_record(
+                values,
+                fields,
+                budget,
+                path,
+                depth,
+                context,
+                RecordContext::Record,
+            )?;
             Ok(Value::Record(values))
         }
 
         (Value::Collection(values), PreparedType::Collection { element }) => {
             let mut completed = Vec::new();
-            for (index, value) in values.into_iter().enumerate() {
+            for (index, value) in values.iter().enumerate() {
                 path.push(PathSegment::Index(index));
-                let value = complete_value(value, element, budget, path, depth + 1)?;
+                let value = complete_value(value, element, budget, path, depth + 1, context)?;
                 path.pop();
                 completed.push(value);
             }
@@ -452,16 +493,22 @@ fn complete_value(
 
         (Value::Map(entries), PreparedType::Map { key, value }) => {
             let mut completed = Vec::new();
-            for (index, (key_value, value_value)) in entries.into_iter().enumerate() {
+            for (index, (key_value, value_value)) in entries.iter().enumerate() {
                 path.push(PathSegment::Index(index));
-                let key_value = complete_value(key_value, key, budget, path, depth + 1)?;
+                let key_value = complete_value(key_value, key, budget, path, depth + 1, context)?;
                 if completed
                     .iter()
                     .any(|(known_key, _)| known_key == &key_value)
                 {
-                    return Err(invalid_default(path, "duplicate map key in default value"));
+                    return Err(value_error(
+                        context,
+                        MonErrorCode::DuplicateMapKey,
+                        path,
+                        "MON map contains a duplicate decoded key",
+                    ));
                 }
-                let value_value = complete_value(value_value, value, budget, path, depth + 1)?;
+                let value_value =
+                    complete_value(value_value, value, budget, path, depth + 1, context)?;
                 path.pop();
                 completed.push((key_value, value_value));
             }
@@ -476,9 +523,11 @@ fn complete_value(
             },
             PreparedType::Choice { name, variants },
         ) => {
-            if let Some(qualifier) = qualifier.as_deref() {
+            if let Some(qualifier) = qualifier {
                 if !is_identifier(qualifier) {
-                    return Err(invalid_default(
+                    return Err(value_error(
+                        context,
+                        MonErrorCode::InvalidIdentifier,
                         path,
                         "choice qualifier is not a valid identifier",
                     ));
@@ -492,16 +541,12 @@ fn complete_value(
                     ));
                 }
             }
-            let qualifier = match qualifier {
-                Some(value) => {
-                    charge_decoded_bytes(budget, value.len(), path)?;
-                    Some(value)
-                }
-                None => None,
-            };
+            if let Some(qualifier) = qualifier {
+                charge_decoded_bytes(budget, qualifier.len(), path)?;
+            }
             charge_decoded_bytes(budget, variant.len(), path)?;
             let Some(expected_variant) =
-                variants.iter().find(|candidate| candidate.name == variant)
+                variants.iter().find(|candidate| candidate.name == *variant)
             else {
                 return Err(schema_error(
                     MonErrorCode::UnknownVariant,
@@ -510,53 +555,82 @@ fn complete_value(
                 ));
             };
 
-            path.push(PathSegment::Variant(variant.clone()));
-            let fields = complete_record(values, &expected_variant.fields, budget, path, depth)?;
+            let qualifier = qualifier.clone();
+            let variant_name = variant.clone();
+            path.push(PathSegment::Variant(variant_name.clone()));
+            let fields = complete_record(
+                values,
+                &expected_variant.fields,
+                budget,
+                path,
+                depth,
+                context,
+                RecordContext::Choice,
+            )?;
             path.pop();
 
             Ok(Value::Choice {
                 qualifier,
-                variant,
+                variant: variant_name,
                 fields,
             })
         }
 
-        (_, _) => Err(invalid_default(
+        (Value::Collection(_), PreparedType::Map { .. })
+        | (Value::Map(_), PreparedType::Collection { .. }) => Err(value_error(
+            context,
+            MonErrorCode::MapKind,
+            path,
+            "collection and map values are distinct MON container kinds",
+        )),
+        (_, _) => Err(value_error(
+            context,
+            MonErrorCode::TypeMismatch,
             path,
             "value does not match its receiving schema type",
         )),
     }
 }
-
 fn complete_record(
-    values: Vec<(String, Value)>,
+    values: &[(String, Value)],
     fields: &[PreparedField],
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
+    context: CompletionContext,
+    record_context: RecordContext,
 ) -> Result<Vec<(String, Value)>, MonError> {
     charge_nodes(budget, fields.len(), path)?;
-    let mut supplied: Vec<Option<Value>> = (0..fields.len()).map(|_| None).collect();
+    let mut supplied: Vec<Option<&Value>> = (0..fields.len()).map(|_| None).collect();
 
     for (name, value) in values {
-        if !is_identifier(&name) {
+        if !is_identifier(name) {
             charge_decoded_bytes(budget, name.len(), path)?;
             let mut field_path = path.clone();
-            field_path.push(PathSegment::Field(name));
-            return Err(invalid_default(
+            field_path.push(PathSegment::Field(name.clone()));
+            return Err(value_error(
+                context,
+                MonErrorCode::InvalidIdentifier,
                 &field_path,
                 "record field name is not a valid identifier",
             ));
         }
 
-        let Some(index) = fields.iter().position(|field| field.name == name) else {
+        let Some(index) = fields.iter().position(|field| field.name == *name) else {
             charge_decoded_bytes(budget, name.len(), path)?;
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(name.clone()));
+            let code = if matches!(context, CompletionContext::Input)
+                && matches!(record_context, RecordContext::Choice)
+            {
+                MonErrorCode::UnknownArgument
+            } else {
+                MonErrorCode::UnknownField
+            };
             return Err(schema_error(
-                MonErrorCode::UnknownField,
+                code,
                 &field_path,
-                format!("unknown field '{name}' in default value"),
+                format!("unknown field '{name}'"),
             ));
         };
 
@@ -564,10 +638,17 @@ fn complete_record(
             charge_decoded_bytes(budget, name.len(), path)?;
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(name.clone()));
+            let code = if matches!(context, CompletionContext::Input)
+                && matches!(record_context, RecordContext::Choice)
+            {
+                MonErrorCode::DuplicateArgument
+            } else {
+                MonErrorCode::DuplicateField
+            };
             return Err(schema_error(
-                MonErrorCode::DuplicateField,
+                code,
                 &field_path,
-                format!("duplicate field '{name}' in default value"),
+                format!("duplicate field '{name}'"),
             ));
         }
         supplied[index] = Some(value);
@@ -578,14 +659,21 @@ fn complete_record(
         charge_decoded_bytes(budget, field.name.len(), path)?;
         path.push(PathSegment::Field(field.name.clone()));
         let value = match supplied[index].take() {
-            Some(value) => complete_value(value, &field.ty, budget, path, depth + 1)?,
+            Some(value) => complete_value(value, &field.ty, budget, path, depth + 1, context)?,
             None => match &field.default {
                 Some(default) => {
                     charge_default(budget, path)?;
                     clone_default(default, budget, path, depth + 1)?
                 }
                 None => {
-                    return Err(invalid_default(
+                    let code = if matches!(record_context, RecordContext::Choice) {
+                        MonErrorCode::Arity
+                    } else {
+                        MonErrorCode::MissingField
+                    };
+                    return Err(value_error(
+                        context,
+                        code,
                         path,
                         format!("required field '{}' is missing", field.name),
                     ));
@@ -703,17 +791,20 @@ fn validate_integer_text(
     text: &str,
     limits: &Limits,
     path: &[PathSegment],
+    context: CompletionContext,
 ) -> Result<(), MonError> {
     check_numeric_text_budget(text, limits, path)?;
     let unsigned = unsigned_numeric_text(text);
-    let parsed =
-        parse_numeric_literal(unsigned).map_err(|reason| numeric_default_error(path, reason))?;
+    let parsed = parse_numeric_literal(unsigned)
+        .map_err(|reason| numeric_value_error(path, reason, context))?;
     check_numeric_budget(parsed.digit_count as usize, limits, path)?;
 
     if parsed.kind != NumericLiteralKind::WholeNumber {
-        return Err(invalid_default(
+        return Err(value_error(
+            context,
+            MonErrorCode::NumericType,
             path,
-            "Integer defaults require whole-number spelling",
+            "Integer requires whole-number spelling",
         ));
     }
 
@@ -725,11 +816,12 @@ fn validate_decimal_text(
     scale: u8,
     limits: &Limits,
     path: &[PathSegment],
+    context: CompletionContext,
 ) -> Result<(), MonError> {
     check_numeric_text_budget(text, limits, path)?;
     let unsigned = unsigned_numeric_text(text);
-    let parsed =
-        parse_numeric_literal(unsigned).map_err(|reason| numeric_default_error(path, reason))?;
+    let parsed = parse_numeric_literal(unsigned)
+        .map_err(|reason| numeric_value_error(path, reason, context))?;
     check_numeric_budget(parsed.digit_count as usize, limits, path)?;
 
     let Some(exponent_separator) = parsed.normalized_text.find('e') else {
@@ -834,16 +926,30 @@ fn check_numeric_budget(
             MonErrorCode::NumericBudget,
             path,
             format!(
-                "numeric default has {} digits, above limit {}",
-                digit_count, limits.max_numeric_digits
+                "MON numeric digit budget exceeded (limit {})",
+                limits.max_numeric_digits
             ),
         ));
     }
     Ok(())
 }
 
-fn numeric_default_error(path: &[PathSegment], reason: NumberLiteralErrorReason) -> MonError {
-    invalid_default(path, format!("invalid numeric default: {reason:?}"))
+fn numeric_value_error(
+    path: &[PathSegment],
+    reason: NumberLiteralErrorReason,
+    context: CompletionContext,
+) -> MonError {
+    let code = match reason {
+        NumberLiteralErrorReason::OutsideIntRange => MonErrorCode::NumericRange,
+        NumberLiteralErrorReason::NonFiniteFloat => MonErrorCode::NonFiniteFloat,
+        _ => MonErrorCode::NumericSyntax,
+    };
+    value_error(
+        context,
+        code,
+        path,
+        format!("invalid MON numeric literal ({reason:?})"),
+    )
 }
 
 fn is_identifier(name: &str) -> bool {
@@ -853,6 +959,18 @@ fn is_identifier(name: &str) -> bool {
     };
     (first == '_' || first.is_alphabetic())
         && characters.all(|character| character == '_' || character.is_alphanumeric())
+}
+
+fn value_error(
+    context: CompletionContext,
+    code: MonErrorCode,
+    path: &[PathSegment],
+    detail: impl Into<String>,
+) -> MonError {
+    match context {
+        CompletionContext::Default => invalid_default(path, detail),
+        CompletionContext::Input => schema_error(code, path, detail),
+    }
 }
 
 fn invalid_default(path: &[PathSegment], detail: impl Into<String>) -> MonError {

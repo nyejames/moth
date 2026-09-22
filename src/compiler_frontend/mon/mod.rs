@@ -6,12 +6,17 @@
 
 mod reader;
 mod schema;
+mod writer;
 
 #[allow(unused_imports)]
 pub(crate) use reader::decode_document;
 #[allow(unused_imports)]
 pub(crate) use schema::prepare_schema;
-
+#[allow(unused_imports)]
+pub(crate) use writer::{
+    WriteOptions, encode_document, encode_document_with_options, encode_value,
+    encode_value_with_options,
+};
 /// A half-open byte range in the caller-provided UTF-8 input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -75,6 +80,7 @@ pub enum MonErrorCode {
     NodeBudget,
     NumericBudget,
     DecodedBudget,
+    OutputBudget,
     DefaultBudget,
     InternalInvariant,
 }

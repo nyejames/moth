@@ -693,8 +693,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: MON Rust codec]
             [: Partial]
-            [: Focused decoder unit coverage]
-            [: Phase 2 is implemented behind the private compiler frontend owner: literal-only complete-document reading, owned values, immutable prepared schemas/defaults, strict field/choice/map routing and bounded first-error diagnostics. Phase 3 writers, the public Rust export/consumer gate and the native Moth integration remain later slices.]
+            [: Focused decoder and writer unit coverage]
+            [: Phases 2 and 3 are implemented behind the private compiler frontend owner: literal-only complete-document reading, deterministic nested/document writers, owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips and bounded first-error diagnostics. Phase 4 public Rust export, external consumer and bounded hardening remain later slices.]
         ]
 
         [data:
