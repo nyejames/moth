@@ -69,6 +69,7 @@ or thorough reviews.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
+- Moth-source modules and packages always use Moth semantic interfaces, including when their physical output is Wasm. WIT is the foreign Wasm/component boundary and never replaces `PublicSemanticInterface`.
 - Every physical-target-bearing file-value path in selected source is graph-active before AST reachability, folding or static specialisation. Ordinary `if` keeps both branches in selected source. Future `$feature` selection excludes source before graph and declaration publication. Filesystem resolution happens once per retained physical-target-bearing structural reference, with no later source or rendered-string rescan. `SourceKindNoFileValue` remains diagnostic-only and has no physical target.
 - Graph and input validity is separate from executable and output liveness. Graph activity is conservative for physical-target-bearing authored path occurrences; `SourceKindNoFileValue` remains diagnostic-only. Emission is exact and follows entry or package reachability.
 - A file value has language type `String`. There is no source-visible `Path` type. Resource and site-root anchors stay structural inside the string until a builder assigns output placement and a URL context.
@@ -445,6 +446,10 @@ Binding-backed packages are typed semantic interfaces rather than Moth modules. 
 - may expose recursive package-local namespace paths
 - do not expose source-defined receiver methods
 - map to target helpers, imports, glue or native operations only after HIR
+
+WIT components enter through this binding-backed boundary. Discovery validates the supported WIT profile and projects it once into Moth canonical types and stable binding identities. Ordinary interface binding, AST and HIR do not carry WIT syntax. Link and backend planning retain only the closed WIT boundary classification needed for Canonical ABI lowering.
+
+A future component export is an optional WIT-compatible projection of a Moth package facade. It does not replace the facade's `PublicSemanticInterface` and Moth-only declarations remain available to Moth consumers.
 
 Source-owned wrapper types provide method-style APIs over external handles when needed.
 

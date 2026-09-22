@@ -59,6 +59,7 @@ refactors or thorough reviews.
 - Stage 0 schedules one compiler-owned module compilation service and consumes its outcome. It does not sequence interface binding, declaration ordering, AST, HIR or borrow stages, and it does not mutate compiler semantic state.
 - Structural provider references, structural file references, dependency symbol bindings and module-local declaration-ordering edges are different data classes.
 - Successful module and dependency artefacts are immutable.
+- Moth-source modules and packages remain Moth-linked even when their physical output is Wasm. WIT components are external bindings, not Moth package interfaces.
 - A diagnosed module exposes no partial public interface.
 - Tooling may inspect successful independent branches, but project builders receive success-only linkable project payloads.
 - Entry activation, package assembly and backend partitioning never trigger deferred source compilation.
@@ -868,7 +869,7 @@ Origin and backing classify provenance and implementation. They do not change:
 
 Source and binding registries remain separate because discovery, semantic and runtime needs differ.
 
-A precompiled artefact preserves the package's semantic backing classification. Precompiled is an artefact storage state rather than another `PackageBacking` variant.
+A precompiled artefact preserves the package's semantic backing classification. Precompiled is an artefact storage state rather than another `PackageBacking` variant. A precompiled Moth Wasm artefact therefore remains `MothSource`. A WIT component imported into Moth is `ExternalBinding`.
 
 ### Dependency package graphs
 
@@ -1228,9 +1229,11 @@ Validation is a compiler service over the completed build-owned partition. A tar
 
 Partitioning is entry-specific. Follow `Mixed-target planning and validation` through family/layout refinement, memory-plan validation and fingerprinting before constructing the final physical-variant key. Matching pre-plan layouts alone do not establish reuse. Deduplication applies only to completed validated variants.
 
+For an HTML entry, the Wasm physical variant is one entry bundle over the selected Wasm-owned reachable Moth function set across its module dependency closure. Semantic module boundaries remain compilation and visibility boundaries and do not force separate Wasm modules. Separately emitted Moth-source package artefacts remain Moth-native and use Moth link and ABI contracts rather than WIT.
+
 The final conceptual physical-variant key contains:
 
-- module identity
+- entry or package assembly identity
 - selected concrete function set
 - target assignment
 - build profile
@@ -1257,11 +1260,11 @@ Donor-local or process-local indexes are never fingerprinted directly.
 
 Physical coalescing is finalised before plan validation and fingerprinting, so a coalescing decision is part of the fingerprinted plan rather than a later lowering choice.
 
-Entries with the same key reuse one variant. Different keys produce separate JavaScript companion or Wasm variants.
+Entries with the same key reuse one physical variant. Different keys produce separate JavaScript companion or Wasm entry variants.
 
 One source function may be JavaScript in one entry variant and Wasm in another.
 
-Each selected module variant has a generated JavaScript companion facade. Wasm is emitted per selected module variant.
+Each entry physical variant has a generated JavaScript companion facade. Wasm is emitted once for the entry's selected Wasm-owned Moth closure.
 
 ### Link planning and lifetime topology
 
@@ -1300,11 +1303,11 @@ A project builder may verify after reachability and memory planning that a produ
 
 ### Runtime and memory
 
-Each page owns one runtime instance and one memory shared by its linked Moth Wasm variants.
+Each page owns one runtime instance and one memory for its Moth Wasm entry bundle.
 
-Linked Moth Wasm variants import the page runtime rather than owning separate memories.
+The entry bundle imports the page runtime rather than owning a separate memory.
 
-This one-page runtime/memory contract applies to linked Moth Wasm variants. It does not require imported WIT components to share page memory. Imported components own private runtime memory and cross the boundary only through closed value conversion profiles.
+This page memory is Moth-internal. Imported WIT components are separate external bindings with private runtime memory and cross the boundary only through closed value conversion profiles. Separately emitted Moth-source package artefacts remain Moth-native and do not become WIT components.
 
 Project-level runtime bytes may be emitted once and instantiated separately for each page.
 
