@@ -266,5 +266,9 @@ Builder packages have paired Advanced and Basic pages:
 For MON work, read `language-overview/mon-syntax.mtf`, `functions/calls-and-access.mtf`,
 `constants/const-records.mtf` and `structs/anonymous-records.mtf` under `docs/src/docs/`
 together. The shared notation does not merge call-slot validation, folded records
-and hidden runtime nominal types into one semantic representation. The MON format
-and compiler-native builder remain a separate contract to define and implement.
+and hidden runtime nominal types into one semantic representation. Moth MON source
+syntax allows ordinary expressions according to the receiving context; MON serialised
+data is self-contained literal data only, and a MON reader never evaluates Moth
+expressions, including foldable ones. The Rust-facing codec contract is accepted and
+queued. Moth-native `$mon`, automatic schema extraction and the static project builder
+remain deferred separately.

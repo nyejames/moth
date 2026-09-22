@@ -38,10 +38,13 @@ notation. @../constants/#const-records (Const records) and
 compile-time and runtime contracts. Nominal construction stays explicit, and
 anonymous type declarations, structural conversion and tuples are not added.
 
-A compiler-native MON builder and reusable compiler services are the accepted
-future direction for a named-only, const-required data profile. Its supported
-values, authoring and serialised forms, read/write API and serialisation rules
-still need a separate design and hardening pass. That direction does not make
+Moth MON source syntax allows ordinary expressions according to the receiving
+Moth context. MON serialised data is self-contained literal data only, and a MON
+reader never evaluates Moth expressions, including foldable ones.
+
+The Rust-facing codec contract is accepted and queued; see @../progress (Progress)
+for current support. Moth-native `$mon`, automatic schema extraction and the
+static project builder remain deferred separately. That direction does not make
 the format implemented or give every MON-syntax value a serialisation guarantee.
 Engine and application schemas remain separate from the format contract.
 
