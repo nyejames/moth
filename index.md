@@ -5,7 +5,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 ## Root
 
 - [moth CLI entry](src/main.rs)
-- [crate module surface](src/lib.rs) (planned `moth::mon` public root not yet delivered; `compiler_frontend` stays crate-private and no implementation is claimed)
+- [crate module surface](src/lib.rs), including the public `moth::mon` service re-exported over the crate-private [MON owner](src/compiler_frontend/mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
     - [@html Builder package](packages/html/@mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
