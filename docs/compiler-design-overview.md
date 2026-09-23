@@ -1748,7 +1748,10 @@ parsing is allowed. The default public API has no borrowed document view and
 exposes no partially built result. Repeated shared source values encode at each
 occurrence and decode with no preserved alias relationship or allocation
 identity. The public `Value` model is an owned tree and cannot represent cyclic
-host data; finite values of recursive schemas remain ordinary nested values.
+host data. `SchemaType` is likewise a finite owned schema tree rather than a
+named-reference graph. The API has no schema-reference mechanism for recursive
+definitions; each declaration spells out every nesting level values are checked
+against, subject to the receiver's limits.
 
 Writing is deterministic without canonical-byte semantics: given the same
 ordered value, schema and encoder version, output is deterministic, but
@@ -1819,9 +1822,12 @@ Limits are receiver resource policy, not grammar dialects: a valid document may
 exceed a receiver's budget and is reported distinctly from syntax and schema
 errors. Every counter uses checked arithmetic and is charged before the affected
 allocation or expansion, including default expansion and repeated shared-value
-expansion. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes, 4,096
-numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000 default
-expansions. Configurable `max_depth` has an implementation ceiling of 64
+expansion. A map entry carries one additional node charge beyond its key and
+value nodes, and that charge is the same for parsed input, programmatic
+completion and default expansion, so one shape consumes one node budget however
+it enters the service. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes,
+4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
+default expansions. Configurable `max_depth` has an implementation ceiling of 64
 (`Limits::MAX_SAFE_DEPTH`); schema preparation rejects larger policies.
 Accepted recursion and rejected-schema/default cleanup stay bounded, and
 there is no unsafe unlimited switch.

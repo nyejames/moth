@@ -225,16 +225,19 @@ and values equal to defaults.
 The data format represents value trees. Repeated shared source values are
 encoded at each occurrence, and decoding establishes no preserved alias
 relationship or allocation identity. Public `Value` is an owned tree, so cyclic
-host data cannot be represented by this API. Recursive schemas still accept
-finite nested values. Applications can encode graph links as ordinary
+host data cannot be represented by this API. Public `SchemaType` values form finite
+owned schema trees rather than named schema references. Each schema describes only
+its explicit nesting levels, and the codec validates values against those levels
+and the receiver's limits. Applications can encode graph links as ordinary
 identifiers and reconstruct them explicitly.
 
 ### Limits and first errors
 
 The codec consumes complete documents and fails fast. Incremental input,
 streams and multiple-document framing remain deferred. Finite configurable
-budgets bound input bytes, nesting, node and entry counts, numeric digits and
-materialisation, decoded data and encoded output. The default depth budget is
+budgets bound input bytes, nesting, node counts (including one additional
+node for each map entry), numeric digits, materialisation, decoded data and
+encoded output. The default depth budget is
 64; `Limits::MAX_SAFE_DEPTH` sets a hard ceiling of 64 for configurable
 `max_depth`, and schema preparation rejects larger policies. Each counter is checked
 before the affected allocation or expansion, including default expansion and

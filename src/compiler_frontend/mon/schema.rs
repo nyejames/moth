@@ -1449,3 +1449,7 @@ fn drop_variant_tree(variant: Variant) {
     let Variant { fields, .. } = variant;
     drop_fields_tree(fields);
 }
+
+#[cfg(test)]
+#[path = "tests/schema_tests.rs"]
+mod tests;
