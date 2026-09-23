@@ -298,6 +298,445 @@ fn prepared_schema_is_reusable_across_decodes() {
         }
     );
 }
+#[test]
+fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
+    let schema = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::required("café", SchemaType::Int),
+        Field::required("alpha", SchemaType::Int),
+        Field::required(
+            "panel",
+            SchemaType::Struct {
+                name: "Panel".into(),
+                fields: vec![
+                    Field::required("left", SchemaType::Int),
+                    Field::required("right", SchemaType::Int),
+                ],
+            },
+        ),
+    ])
+    .prepare()
+    .expect("record schema prepares");
+    let expected = Value::Record(vec![
+        ("zeta".into(), Value::Int(1)),
+        ("café".into(), Value::Int(2)),
+        ("alpha".into(), Value::Int(3)),
+        (
+            "panel".into(),
+            Value::Record(vec![
+                ("left".into(), Value::Int(4)),
+                ("right".into(), Value::Int(5)),
+            ]),
+        ),
+    ]);
+
+    let decoded = decode_document(
+        "panel = Panel(4, right = 5), alpha = 3, café = 2, zeta = 1",
+        &schema,
+    )
+    .expect("permuted Unicode names and positional-before-named values route");
+    assert_eq!(decoded, expected);
+
+    let programmatic = Value::Record(vec![
+        (
+            "panel".into(),
+            Value::Record(vec![
+                ("right".into(), Value::Int(5)),
+                ("left".into(), Value::Int(4)),
+            ]),
+        ),
+        ("alpha".into(), Value::Int(3)),
+        ("café".into(), Value::Int(2)),
+        ("zeta".into(), Value::Int(1)),
+    ]);
+    let encoded = encode_document(&programmatic, &schema).expect("permuted value encodes");
+    let output_positions: Vec<_> = ["zeta", "café", "alpha", "panel", "left", "right"]
+        .map(|name| {
+            encoded
+                .find(name)
+                .expect("encoded output contains each field")
+        })
+        .into();
+    assert!(
+        output_positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "record and nested fields stay in schema order: {encoded}",
+    );
+    assert_eq!(
+        decode_document(&encoded, &schema).expect("encoded document decodes"),
+        expected,
+    );
+
+    let unknown = decode_document("mystery = 9", &schema).expect_err("unknown fields stay closed");
+    assert_eq!(unknown.code, MonErrorCode::UnknownField);
+    assert_eq!(unknown.path, vec![PathSegment::Field("mystery".into())]);
+
+    let unknown_programmatic = Value::Record(vec![("mystery".into(), Value::Int(9))]);
+    let unknown_programmatic_error = encode_document(&unknown_programmatic, &schema)
+        .expect_err("programmatic values reject unknown fields");
+    assert_eq!(unknown_programmatic_error.code, MonErrorCode::UnknownField);
+    assert_eq!(
+        unknown_programmatic_error.path,
+        vec![PathSegment::Field("mystery".into())],
+    );
+
+    let duplicate = decode_document("zeta = 1, zeta = 2", &schema)
+        .expect_err("a record slot cannot be supplied more than once");
+    assert_eq!(duplicate.code, MonErrorCode::DuplicateField);
+    assert_eq!(duplicate.path, vec![PathSegment::Field("zeta".into())]);
+
+    let duplicate_declaration = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::required("alpha", SchemaType::Int),
+        Field::required("zeta", SchemaType::Int),
+        Field::required("alpha", SchemaType::Int),
+    ])
+    .prepare()
+    .expect_err("the earliest duplicate declaration remains the diagnostic");
+    assert_eq!(duplicate_declaration.code, MonErrorCode::DuplicateField);
+    assert_eq!(
+        duplicate_declaration.path,
+        vec![PathSegment::Field("zeta".into())],
+    );
+
+    let overlap = decode_document("panel = Panel(1, left = 2, right = 3)", &schema)
+        .expect_err("named fields cannot repeat a positional slot");
+    assert_eq!(overlap.code, MonErrorCode::DuplicateField);
+    assert_eq!(
+        overlap.path,
+        vec![
+            PathSegment::Field("panel".into()),
+            PathSegment::Field("left".into()),
+        ],
+    );
+
+    let late_positional = decode_document("panel = Panel(left = 1, 2)", &schema)
+        .expect_err("positional arguments still precede named arguments");
+    assert_eq!(late_positional.code, MonErrorCode::ArgumentOrder);
+}
+
+#[test]
+fn choice_name_lookup_preserves_unicode_order_and_diagnostics() {
+    let schema = Schema::record(vec![Field::required(
+        "choice",
+        SchemaType::Choice {
+            name: "Palette".into(),
+            variants: vec![
+                Variant::payload(
+                    "Zebra",
+                    vec![
+                        Field::required("zeta", SchemaType::Int),
+                        Field::required("café", SchemaType::Int),
+                        Field::required("alpha", SchemaType::Int),
+                    ],
+                ),
+                Variant::unit("Amber"),
+                Variant::unit("Café"),
+            ],
+        },
+    )])
+    .prepare()
+    .expect("choice schema prepares");
+    let expected = Value::Record(vec![(
+        "choice".into(),
+        Value::Choice {
+            qualifier: None,
+            variant: "Zebra".into(),
+            fields: vec![
+                ("zeta".into(), Value::Int(1)),
+                ("café".into(), Value::Int(2)),
+                ("alpha".into(), Value::Int(3)),
+            ],
+        },
+    )]);
+
+    let decoded = decode_document("choice = ::Zebra(alpha = 3, zeta = 1, café = 2)", &schema)
+        .expect("permuted Unicode payload names route");
+    assert_eq!(decoded, expected);
+    assert_eq!(
+        decode_document("choice = ::Café", &schema).expect("Unicode variant name routes"),
+        Value::Record(vec![(
+            "choice".into(),
+            Value::Choice {
+                qualifier: None,
+                variant: "Café".into(),
+                fields: vec![],
+            },
+        )]),
+    );
+
+    let programmatic = Value::Record(vec![(
+        "choice".into(),
+        Value::Choice {
+            qualifier: None,
+            variant: "Zebra".into(),
+            fields: vec![
+                ("alpha".into(), Value::Int(3)),
+                ("café".into(), Value::Int(2)),
+                ("zeta".into(), Value::Int(1)),
+            ],
+        },
+    )]);
+    let encoded = encode_document(&programmatic, &schema).expect("permuted payload encodes");
+    let payload_positions: Vec<_> = ["zeta", "café", "alpha"]
+        .map(|name| {
+            encoded
+                .find(name)
+                .expect("encoded payload contains each field")
+        })
+        .into();
+    assert!(
+        payload_positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "choice payload fields stay in schema order: {encoded}",
+    );
+    assert_eq!(
+        decode_document(&encoded, &schema).expect("encoded choice decodes"),
+        expected,
+    );
+
+    let unknown_variant =
+        decode_document("choice = ::Missing", &schema).expect_err("unknown variants stay closed");
+    assert_eq!(unknown_variant.code, MonErrorCode::UnknownVariant);
+    assert_eq!(
+        unknown_variant.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Missing".into()),
+        ],
+    );
+
+    let unknown_field = decode_document("choice = ::Zebra(mystery = 9)", &schema)
+        .expect_err("unknown payload names stay closed");
+    assert_eq!(unknown_field.code, MonErrorCode::UnknownArgument);
+    assert_eq!(
+        unknown_field.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Zebra".into()),
+            PathSegment::Field("mystery".into()),
+        ],
+    );
+
+    let duplicate = decode_document("choice = ::Zebra(zeta = 1, zeta = 2)", &schema)
+        .expect_err("a payload slot cannot be supplied twice");
+    assert_eq!(duplicate.code, MonErrorCode::DuplicateArgument);
+    assert_eq!(
+        duplicate.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Zebra".into()),
+            PathSegment::Field("zeta".into()),
+        ],
+    );
+
+    let overlap = decode_document(
+        "choice = ::Zebra(1, zeta = 2, café = 3, alpha = 4)",
+        &schema,
+    )
+    .expect_err("named arguments cannot repeat a positional payload slot");
+    assert_eq!(overlap.code, MonErrorCode::DuplicateArgument);
+    assert_eq!(overlap.path, duplicate.path);
+
+    let programmatic_duplicate = Value::Record(vec![(
+        "choice".into(),
+        Value::Choice {
+            qualifier: None,
+            variant: "Zebra".into(),
+            fields: vec![
+                ("zeta".into(), Value::Int(1)),
+                ("zeta".into(), Value::Int(2)),
+            ],
+        },
+    )]);
+    let programmatic_duplicate_error = encode_document(&programmatic_duplicate, &schema)
+        .expect_err("duplicate payload fields fail");
+    assert_eq!(
+        programmatic_duplicate_error.code,
+        MonErrorCode::DuplicateArgument,
+    );
+    assert_eq!(programmatic_duplicate_error.path, duplicate.path);
+
+    let late_positional = decode_document("choice = ::Zebra(zeta = 1, 2)", &schema)
+        .expect_err("choice positional arguments still precede named arguments");
+    assert_eq!(late_positional.code, MonErrorCode::ArgumentOrder);
+
+    let duplicate_variant = Schema::record(vec![Field::required(
+        "choice",
+        SchemaType::Choice {
+            name: "Palette".into(),
+            variants: vec![
+                Variant::unit("Zebra"),
+                Variant::unit("Amber"),
+                Variant::unit("Zebra"),
+                Variant::unit("Amber"),
+            ],
+        },
+    )])
+    .prepare()
+    .expect_err("the earliest duplicate variant remains the diagnostic");
+    assert_eq!(duplicate_variant.code, MonErrorCode::InvalidSchema);
+    assert_eq!(
+        duplicate_variant.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Zebra".into()),
+        ],
+    );
+}
+
+#[test]
+fn duplicate_declarations_keep_the_earliest_error() {
+    // Duplicate detection indexes the declarations before the walk, so it must not report a
+    // repeat that an earlier declaration's own error already outranks, and the earliest
+    // declaration-order repeat must stay the diagnostic.
+    let field_error_first = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::required("9bad", SchemaType::Int),
+        Field::required("zeta", SchemaType::Int),
+    ])
+    .prepare()
+    .expect_err("the earlier invalid field name remains the diagnostic");
+    assert_eq!(field_error_first.code, MonErrorCode::InvalidIdentifier);
+
+    let duplicate_field_first = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::required("zeta", SchemaType::Int),
+        Field::required("9bad", SchemaType::Int),
+    ])
+    .prepare()
+    .expect_err("a repeat outranks a later invalid field name");
+    assert_eq!(duplicate_field_first.code, MonErrorCode::DuplicateField);
+    assert_eq!(
+        duplicate_field_first.path,
+        vec![PathSegment::Field("zeta".into())],
+    );
+    let duplicate_field_before_child_error = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::required(
+            "zeta",
+            SchemaType::Unsupported {
+                name: "Missing".into(),
+            },
+        ),
+    ])
+    .prepare()
+    .expect_err("the duplicate check precedes the child schema validation");
+    assert_eq!(
+        duplicate_field_before_child_error.code,
+        MonErrorCode::DuplicateField,
+    );
+
+    let duplicate_field_before_default_error = Schema::record(vec![
+        Field::required("zeta", SchemaType::Int),
+        Field::with_default(
+            "zeta",
+            SchemaType::Int,
+            Value::String("not an integer".into()),
+        ),
+    ])
+    .prepare()
+    .expect_err("the duplicate check precedes default validation");
+    assert_eq!(
+        duplicate_field_before_default_error.code,
+        MonErrorCode::DuplicateField,
+    );
+
+    let variant_error_first = Schema::record(vec![Field::required(
+        "choice",
+        SchemaType::Choice {
+            name: "Palette".into(),
+            variants: vec![
+                Variant::unit("Zebra"),
+                Variant::unit("9bad"),
+                Variant::unit("Zebra"),
+            ],
+        },
+    )])
+    .prepare()
+    .expect_err("the earlier invalid variant name remains the diagnostic");
+    assert_eq!(variant_error_first.code, MonErrorCode::InvalidIdentifier);
+    assert_eq!(
+        variant_error_first.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("9bad".into()),
+        ],
+    );
+
+    let duplicate_variant_first = Schema::record(vec![Field::required(
+        "choice",
+        SchemaType::Choice {
+            name: "Palette".into(),
+            variants: vec![
+                Variant::unit("Zebra"),
+                Variant::payload("Zebra", vec![Field::required("9bad", SchemaType::Int)]),
+                Variant::unit("9bad"),
+            ],
+        },
+    )])
+    .prepare()
+    .expect_err("a repeat outranks a later invalid variant name");
+    assert_eq!(duplicate_variant_first.code, MonErrorCode::InvalidSchema);
+    assert_eq!(
+        duplicate_variant_first.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Zebra".into()),
+        ],
+    );
+}
+
+#[test]
+fn duplicate_declarations_respect_the_node_budget_prefix() {
+    // Every declaration pays one node before its own duplicate check, so a repeat the
+    // remaining node budget cannot reach must keep the budget error.
+    let field_repeat = |max_nodes: usize| {
+        Schema::record(vec![
+            Field::required("zeta", SchemaType::Int),
+            Field::required("zeta", SchemaType::Int),
+        ])
+        .with_limits(Limits {
+            max_nodes,
+            ..Limits::default()
+        })
+        .prepare()
+    };
+
+    let exhausted = field_repeat(3).expect_err("the field repeat sits past the remaining nodes");
+    assert_eq!(exhausted.code, MonErrorCode::NodeBudget);
+
+    let reachable = field_repeat(4).expect_err("the field repeat stays inside the node budget");
+    assert_eq!(reachable.code, MonErrorCode::DuplicateField);
+    assert_eq!(reachable.path, vec![PathSegment::Field("zeta".into())]);
+
+    let variant_repeat = |max_nodes: usize| {
+        Schema::record(vec![Field::required(
+            "choice",
+            SchemaType::Choice {
+                name: "Palette".into(),
+                variants: vec![Variant::unit("Zebra"), Variant::unit("Zebra")],
+            },
+        )])
+        .with_limits(Limits {
+            max_nodes,
+            ..Limits::default()
+        })
+        .prepare()
+    };
+
+    let exhausted =
+        variant_repeat(4).expect_err("the variant repeat sits past the remaining nodes");
+    assert_eq!(exhausted.code, MonErrorCode::NodeBudget);
+
+    let reachable = variant_repeat(5).expect_err("the variant repeat stays inside the node budget");
+    assert_eq!(reachable.code, MonErrorCode::InvalidSchema);
+    assert_eq!(
+        reachable.path,
+        vec![
+            PathSegment::Field("choice".into()),
+            PathSegment::Variant("Zebra".into()),
+        ],
+    );
+}
 
 #[test]
 fn first_error_is_deterministic() {

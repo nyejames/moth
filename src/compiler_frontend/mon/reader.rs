@@ -10,7 +10,7 @@ use crate::compiler_frontend::numeric_text::parse::{
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
-use super::schema::{PreparedField, PreparedType, PreparedVariant, clone_default};
+use super::schema::{PreparedFields, PreparedType, PreparedVariants, clone_default};
 use super::{
     BudgetState, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema, Span, Value,
 };
@@ -1443,7 +1443,7 @@ fn decimal_effective_scale(number: &NumericRaw<'_>) -> usize {
 fn validate_record(
     raw: RawValue<'_>,
     expected_qualifier: Option<&str>,
-    fields: &[PreparedField],
+    fields: &PreparedFields,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
@@ -1510,7 +1510,7 @@ fn validate_record(
                 ..
             } => {
                 named_started = true;
-                let Some(index) = fields.iter().position(|field| field.name == name) else {
+                let Some(index) = fields.find(name) else {
                     charge_decoded_bytes(budget, name.len(), Some(name_span), path)?;
                     let mut field_path = path.to_owned();
                     field_path.push(PathSegment::Field(name.to_owned()));
@@ -1640,7 +1640,7 @@ fn owned_choice_header(
 fn validate_choice(
     raw: RawValue<'_>,
     expected_name: &str,
-    variants: &[PreparedVariant],
+    variants: &PreparedVariants,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
@@ -1664,10 +1664,7 @@ fn validate_choice(
             format!("choice qualifier must be '{expected_name}'"),
         ));
     }
-    let Some(expected_variant) = variants
-        .iter()
-        .find(|candidate| candidate.name == variant.name)
-    else {
+    let Some(expected_index) = variants.find(variant.name) else {
         charge_decoded_bytes(budget, variant.name.len(), Some(variant.span), path)?;
         let mut variant_path = path.to_owned();
         variant_path.push(PathSegment::Variant(variant.name.to_owned()));
@@ -1679,6 +1676,7 @@ fn validate_choice(
         ));
     };
 
+    let expected_variant = &variants[expected_index];
     if expected_variant.fields.is_empty() {
         if args.is_some() {
             return Err(MonError::new(
@@ -1757,11 +1755,7 @@ fn validate_choice(
                 ..
             } => {
                 named_started = true;
-                let Some(index) = expected_variant
-                    .fields
-                    .iter()
-                    .position(|field| field.name == name)
-                else {
+                let Some(index) = expected_variant.fields.find(name) else {
                     charge_decoded_bytes(budget, variant.name.len(), Some(variant.span), path)?;
                     charge_decoded_bytes(budget, name.len(), Some(name_span), path)?;
                     let mut argument_path = path.to_owned();

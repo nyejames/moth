@@ -29,11 +29,11 @@ pub(super) enum PreparedType {
     },
     Optional(Box<PreparedType>),
     Record {
-        fields: Vec<PreparedField>,
+        fields: PreparedFields,
     },
     Struct {
         name: String,
-        fields: Vec<PreparedField>,
+        fields: PreparedFields,
     },
     Collection {
         element: Box<PreparedType>,
@@ -44,7 +44,7 @@ pub(super) enum PreparedType {
     },
     Choice {
         name: String,
-        variants: Vec<PreparedVariant>,
+        variants: PreparedVariants,
     },
 }
 
@@ -56,11 +56,115 @@ pub(super) struct PreparedField {
     pub(super) default: Option<Value>,
 }
 
+/// Declaration-order record fields plus a private sorted name-slot index.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PreparedFields {
+    pub(super) fields: Vec<PreparedField>,
+    lookup: Vec<usize>,
+}
+
+impl PreparedFields {
+    /// Build from declaration-ordered fields plus their sorted slot index.
+    ///
+    /// WHY: preparation only reaches this point once every declaration has paid its own
+    ///      node charge, so the reachable prefix the duplicate scan sorted already covers
+    ///      every slot and the index is not rebuilt here.
+    fn new(fields: Vec<PreparedField>, lookup: Vec<usize>) -> Self {
+        debug_assert_eq!(
+            fields.len(),
+            lookup.len(),
+            "prepared field lookup must cover every declaration slot"
+        );
+        Self { fields, lookup }
+    }
+
+    pub(super) fn find(&self, name: &str) -> Option<usize> {
+        let mut low = 0usize;
+        let mut high = self.lookup.len();
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let slot = self.lookup[mid];
+            match self.fields[slot].name.as_str().cmp(name) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid,
+                std::cmp::Ordering::Equal => return Some(slot),
+            }
+        }
+        None
+    }
+}
+
+impl std::ops::Deref for PreparedFields {
+    type Target = [PreparedField];
+    fn deref(&self) -> &[PreparedField] {
+        &self.fields
+    }
+}
+
+impl std::ops::Index<usize> for PreparedFields {
+    type Output = PreparedField;
+    fn index(&self, index: usize) -> &PreparedField {
+        &self.fields[index]
+    }
+}
+
 /// A prepared nominal choice variant. Payload fields are always required.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct PreparedVariant {
     pub(super) name: String,
-    pub(super) fields: Vec<PreparedField>,
+    pub(super) fields: PreparedFields,
+}
+
+/// Declaration-order choice variants plus a private sorted name-slot index.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PreparedVariants {
+    pub(super) variants: Vec<PreparedVariant>,
+    lookup: Vec<usize>,
+}
+
+impl PreparedVariants {
+    /// Build from declaration-ordered variants plus their sorted slot index.
+    ///
+    /// WHY: preparation only reaches this point once every declaration has paid its own
+    ///      node charge, so the reachable prefix the duplicate scan sorted already covers
+    ///      every slot and the index is not rebuilt here.
+    fn new(variants: Vec<PreparedVariant>, lookup: Vec<usize>) -> Self {
+        debug_assert_eq!(
+            variants.len(),
+            lookup.len(),
+            "prepared variant lookup must cover every declaration slot"
+        );
+        Self { variants, lookup }
+    }
+
+    pub(super) fn find(&self, name: &str) -> Option<usize> {
+        let mut low = 0usize;
+        let mut high = self.lookup.len();
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let slot = self.lookup[mid];
+            match self.variants[slot].name.as_str().cmp(name) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid,
+                std::cmp::Ordering::Equal => return Some(slot),
+            }
+        }
+        None
+    }
+}
+
+impl std::ops::Deref for PreparedVariants {
+    type Target = [PreparedVariant];
+    fn deref(&self) -> &[PreparedVariant] {
+        &self.variants
+    }
+}
+
+impl std::ops::Index<usize> for PreparedVariants {
+    type Output = PreparedVariant;
+    fn index(&self, index: usize) -> &PreparedVariant {
+        &self.variants[index]
+    }
 }
 
 /// Prepare a schema once so later reader calls only inspect immutable validated data.
@@ -228,32 +332,35 @@ fn prepare_type(
                 return Err(error);
             }
             let mut prepared_variants = Vec::new();
-            let mut variants = variants.into_iter();
+            // Deterministic first-duplicate diagnostic in declaration order, from a
+            // name-sorted index of declaration slots: no prior-prefix rescan and no
+            // cloned variant names.
+            let (duplicate_slots, duplicate_slot) =
+                duplicate_candidates(&variants, |variant| variant.name.as_str(), budget);
+            let mut variants = variants.into_iter().enumerate();
 
-            while let Some(variant) = variants.next() {
+            while let Some((slot, variant)) = variants.next() {
                 if let Err(error) = charge_decoded_bytes(budget, variant.name.len(), path) {
                     drop_variant_tree(variant);
-                    for remaining in variants {
+                    for (_, remaining) in variants {
                         drop_variant_tree(remaining);
                     }
                     return Err(error);
                 }
                 if let Err(error) = charge_nodes(budget, 1, path) {
                     drop_variant_tree(variant);
-                    for remaining in variants {
+                    for (_, remaining) in variants {
                         drop_variant_tree(remaining);
                     }
                     return Err(error);
                 }
-                if prepared_variants
-                    .iter()
-                    .any(|known: &PreparedVariant| known.name == variant.name)
-                {
+
+                if duplicate_slot == Some(slot) {
                     let mut variant_path = path.clone();
                     variant_path.push(PathSegment::Variant(variant.name.clone()));
                     let duplicate_name = variant.name.clone();
                     drop_variant_tree(variant);
-                    for remaining in variants {
+                    for (_, remaining) in variants {
                         drop_variant_tree(remaining);
                     }
                     return Err(schema_error(
@@ -285,7 +392,7 @@ fn prepare_type(
                         fields,
                     }),
                     Err(error) => {
-                        for remaining in variants {
+                        for (_, remaining) in variants {
                             drop_variant_tree(remaining);
                         }
                         return Err(error);
@@ -295,7 +402,7 @@ fn prepare_type(
 
             Ok(PreparedType::Choice {
                 name,
-                variants: prepared_variants,
+                variants: PreparedVariants::new(prepared_variants, duplicate_slots),
             })
         }
 
@@ -311,38 +418,79 @@ fn prepare_type(
     }
 }
 
+/// Declaration slots sorted by name then slot, plus the repeat that walk reaches first.
+///
+/// WHY: every declaration charges at least one node before its own duplicate check, so a
+///      declaration past the remaining node budget can never reach that check: the walk
+///      fails with its budget error first. Restricting the sort to that reachable prefix
+///      keeps the index proportional to what preparation can actually inspect, and sorting
+///      slots rather than names keeps the caller's declarations the only copies of the
+///      names. Equal names are adjacent in this order, so the second occurrence of every
+///      repeated name is the later slot of its adjacent pair; the smallest of those is the
+///      duplicate the declaration-order walk reaches first.
+///
+/// The returned index is the complete lookup once preparation succeeds, because success
+/// requires every declaration to have paid its node charge.
+fn duplicate_candidates<T>(
+    declarations: &[T],
+    name_of: impl Fn(&T) -> &str,
+    budget: &BudgetState<'_>,
+) -> (Vec<usize>, Option<usize>) {
+    let reachable = declarations
+        .len()
+        .min(budget.limits.max_nodes.saturating_sub(budget.nodes));
+    let mut slots: Vec<usize> = (0..reachable).collect();
+    slots.sort_by(|&left, &right| {
+        name_of(&declarations[left])
+            .cmp(name_of(&declarations[right]))
+            .then_with(|| left.cmp(&right))
+    });
+
+    let mut duplicate: Option<usize> = None;
+    for index in 1..slots.len() {
+        let previous = slots[index - 1];
+        let current = slots[index];
+        if name_of(&declarations[previous]) == name_of(&declarations[current]) {
+            duplicate = Some(duplicate.map_or(current, |earliest| earliest.min(current)));
+        }
+    }
+
+    (slots, duplicate)
+}
+
 fn prepare_fields(
     fields: Vec<Field>,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     allow_defaults: bool,
     depth: usize,
-) -> Result<Vec<PreparedField>, MonError> {
+) -> Result<PreparedFields, MonError> {
     let mut prepared_fields = Vec::new();
-    let mut fields = fields.into_iter();
+    // Deterministic first-duplicate diagnostic in declaration order, from a name-sorted
+    // index of declaration slots: no prior-prefix rescan and no cloned field names.
+    let (duplicate_slots, duplicate_slot) =
+        duplicate_candidates(&fields, |field| field.name.as_str(), budget);
+    let mut fields = fields.into_iter().enumerate();
 
-    while let Some(field) = fields.next() {
+    while let Some((slot, field)) = fields.next() {
         if let Err(error) = charge_nodes(budget, 1, path) {
             drop_field_into_stack(field);
-            for remaining in fields {
+            for (_, remaining) in fields {
                 drop_field_into_stack(remaining);
             }
             return Err(error);
         }
         if let Err(error) = validate_identifier(&field.name, path, "field name") {
             drop_field_into_stack(field);
-            for remaining in fields {
+            for (_, remaining) in fields {
                 drop_field_into_stack(remaining);
             }
             return Err(error);
         }
-        if prepared_fields
-            .iter()
-            .any(|known: &PreparedField| known.name == field.name)
-        {
+        if duplicate_slot == Some(slot) {
             if let Err(error) = charge_decoded_bytes(budget, field.name.len(), path) {
                 drop_field_into_stack(field);
-                for remaining in fields {
+                for (_, remaining) in fields {
                     drop_field_into_stack(remaining);
                 }
                 return Err(error);
@@ -351,7 +499,7 @@ fn prepare_fields(
             field_path.push(PathSegment::Field(field.name.clone()));
             let duplicate_name = field.name.clone();
             drop_field_into_stack(field);
-            for remaining in fields {
+            for (_, remaining) in fields {
                 drop_field_into_stack(remaining);
             }
             return Err(schema_error(
@@ -364,7 +512,7 @@ fn prepare_fields(
         if !allow_defaults && field.default.is_some() {
             if let Err(error) = charge_decoded_bytes(budget, field.name.len(), path) {
                 drop_field_into_stack(field);
-                for remaining in fields {
+                for (_, remaining) in fields {
                     drop_field_into_stack(remaining);
                 }
                 return Err(error);
@@ -372,7 +520,7 @@ fn prepare_fields(
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(field.name.clone()));
             drop_field_into_stack(field);
-            for remaining in fields {
+            for (_, remaining) in fields {
                 drop_field_into_stack(remaining);
             }
             return Err(schema_error(
@@ -385,7 +533,7 @@ fn prepare_fields(
         match prepare_field(field, budget, path, allow_defaults, depth + 1) {
             Ok(prepared) => prepared_fields.push(prepared),
             Err(error) => {
-                for remaining in fields {
+                for (_, remaining) in fields {
                     drop_field_into_stack(remaining);
                 }
                 return Err(error);
@@ -393,7 +541,7 @@ fn prepare_fields(
         }
     }
 
-    Ok(prepared_fields)
+    Ok(PreparedFields::new(prepared_fields, duplicate_slots))
 }
 
 fn prepare_field(
@@ -700,9 +848,7 @@ fn complete_value(
                 charge_decoded_bytes(budget, qualifier.len(), path)?;
             }
             charge_decoded_bytes(budget, variant.len(), path)?;
-            let Some(expected_variant) =
-                variants.iter().find(|candidate| candidate.name == *variant)
-            else {
+            let Some(expected_index) = variants.find(variant) else {
                 return Err(schema_error(
                     MonErrorCode::UnknownVariant,
                     path,
@@ -713,6 +859,7 @@ fn complete_value(
             let qualifier = qualifier.clone();
             let variant_name = variant.clone();
             path.push(PathSegment::Variant(variant_name.clone()));
+            let expected_variant = &variants[expected_index];
             let fields = complete_record(
                 values,
                 &expected_variant.fields,
@@ -748,7 +895,7 @@ fn complete_value(
 }
 fn complete_record(
     values: &[(String, Value)],
-    fields: &[PreparedField],
+    fields: &PreparedFields,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
@@ -772,7 +919,7 @@ fn complete_record(
             ));
         }
 
-        let Some(index) = fields.iter().position(|field| field.name == *name) else {
+        let Some(index) = fields.find(name) else {
             charge_decoded_bytes(budget, name.len(), path)?;
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(name.clone()));

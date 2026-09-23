@@ -167,7 +167,7 @@ impl<'a> Writer<'a> {
     fn write_record(
         &mut self,
         fields: &[(String, Value)],
-        schema_fields: &[super::schema::PreparedField],
+        schema_fields: &super::schema::PreparedFields,
         depth: usize,
     ) -> Result<(), MonError> {
         if fields.len() != schema_fields.len() {
@@ -297,15 +297,16 @@ impl<'a> Writer<'a> {
         &mut self,
         variant: &str,
         fields: &[(String, Value)],
-        variants: &[super::schema::PreparedVariant],
+        variants: &super::schema::PreparedVariants,
         depth: usize,
     ) -> Result<(), MonError> {
-        let Some(expected) = variants.iter().find(|candidate| candidate.name == variant) else {
+        let Some(expected_index) = variants.find(variant) else {
             return self.fail(
                 MonErrorCode::InternalInvariant,
                 "validated MON choice variant was not found in its schema",
             );
         };
+        let expected = &variants[expected_index];
         if fields.len() != expected.fields.len() {
             return self.fail(
                 MonErrorCode::InternalInvariant,
