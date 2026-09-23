@@ -286,6 +286,44 @@ fn materialize_i32_text_with_sign(
     }
 }
 
+/// Materialize already validated normalized whole-number text to `i32`.
+///
+/// WHAT: reuses the shared signed-i32 boundary policy without reparsing the literal
+///       grammar. MON has already validated separators, kind and digit counts through
+///       `parse_numeric_literal`.
+/// WHY: MON `Int` retains normalized facts from its single parse; reparsing the original
+///      text would normalize the same literal twice.
+pub(crate) fn materialize_normalized_i32(
+    normalized: &str,
+    negative: bool,
+) -> Result<i32, NumberLiteralErrorReason> {
+    let sign = if negative {
+        NumericLiteralSign::Negative
+    } else {
+        NumericLiteralSign::Positive
+    };
+    materialize_i32_text_with_sign(normalized, sign)
+}
+
+/// Materialize already validated normalized numeric text to a finite `f64`.
+///
+/// WHAT: parses the unsigned normalized text once, then applies the token sign by
+///       negation so no signed intermediate string is allocated.
+/// WHY: MON `Float` retains normalized facts from its single parse; rebuilding a signed
+///      string would allocate a duplicate scratch buffer.
+pub(crate) fn materialize_normalized_f64(
+    normalized: &str,
+    negative: bool,
+) -> Result<f64, NumberLiteralErrorReason> {
+    let value = normalized
+        .parse::<f64>()
+        .map_err(|_| NumberLiteralErrorReason::ParseOverflow)?;
+    if !value.is_finite() {
+        return Err(NumberLiteralErrorReason::NonFiniteFloat);
+    }
+    Ok(if negative { -value } else { value })
+}
+
 /// Parse signed numeric text into an `i32` using the Moth whole-number grammar.
 ///
 /// WHAT: applies the shared numeric text grammar to an entire input string, including

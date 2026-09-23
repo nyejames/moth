@@ -639,3 +639,201 @@ fn rejecting_a_deep_default_releases_its_unvisited_tail_iteratively() {
         .expect_err("the nested default does not match its schema");
     assert_eq!(error.code, MonErrorCode::InvalidDefault);
 }
+
+#[test]
+fn retained_numeric_scratch_respects_decoded_byte_budget() {
+    use moth::mon::{Field, Limits, MonErrorCode, Schema, SchemaType, decode_document};
+
+    let schema = Schema::record(vec![Field::required(
+        "n",
+        SchemaType::Collection {
+            element: Box::new(SchemaType::Int),
+        },
+    )])
+    .with_limits(Limits {
+        max_decoded_bytes: 64,
+        ..Limits::default()
+    })
+    .prepare()
+    .expect("the small schema fits its limits");
+
+    // Each number is in i32 range. Input size, depth, node count and the
+    // per-literal digit limit remain comfortably within their budgets.
+    let numbers = vec!["1234567890"; 256].join(",");
+    let input = format!("n = {{{numbers}}}");
+    let error = decode_document(&input, &schema)
+        .expect_err("retained numeric normalization must be budgeted");
+    assert_eq!(error.code, MonErrorCode::DecodedBudget);
+}
+
+#[test]
+fn malformed_numeric_scratch_is_budgeted_before_syntax() {
+    use moth::mon::{Field, Limits, MonErrorCode, Schema, SchemaType, decode_document};
+
+    let schema = Schema::record(vec![Field::required("n", SchemaType::Int)])
+        .with_limits(Limits {
+            max_decoded_bytes: 64,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("the small schema fits its limits");
+
+    // One digit stays under the numeric-digit limit while the malformed suffix
+    // makes normalization reserve the full token length.
+    let token = format!("1{}", "_".repeat(100));
+    let error = decode_document(&format!("n = {token}"), &schema)
+        .expect_err("malformed long numeric scratch must be budgeted");
+    assert_eq!(error.code, MonErrorCode::DecodedBudget);
+}
+
+#[test]
+fn schema_numeric_scratch_is_budgeted_before_syntax() {
+    use moth::mon::{Field, Limits, MonErrorCode, Schema, SchemaType, Value};
+
+    let token = format!("1{}", "_".repeat(100));
+
+    let programmatic_schema = Schema::value(SchemaType::Integer)
+        .with_limits(Limits {
+            max_decoded_bytes: token.len(),
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("the programmatic schema fits the output-copy budget");
+    let programmatic_error = encode_value(&Value::Integer(token.clone()), &programmatic_schema)
+        .expect_err("numeric normalization scratch must be charged before parsing");
+    assert_eq!(programmatic_error.code, MonErrorCode::DecodedBudget);
+
+    let default_error = Schema::record(vec![Field::with_default(
+        "n",
+        SchemaType::Decimal { scale: 0 },
+        Value::Decimal(token.clone()),
+    )])
+    .with_limits(Limits {
+        max_decoded_bytes: token.len() + 1,
+        ..Limits::default()
+    })
+    .prepare()
+    .expect_err("default normalization scratch must be charged before parsing");
+    assert_eq!(default_error.code, MonErrorCode::DecodedBudget);
+}
+
+#[test]
+fn exact_numeric_results_fit_their_decoded_byte_budget() {
+    use moth::mon::{
+        Field, Limits, MonErrorCode, Schema, SchemaType, Span, Value, decode_document,
+    };
+
+    let integer_schema = Schema::record(vec![Field::required("x", SchemaType::Integer)])
+        .with_limits(Limits {
+            max_decoded_bytes: 6,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("the integer schema fits the decoded-byte budget");
+    assert_eq!(
+        decode_document("x = 123", &integer_schema).expect("exact integer fits its budget"),
+        Value::Record(vec![("x".into(), Value::Integer("123".into()))]),
+    );
+
+    let decimal_schema =
+        Schema::record(vec![Field::required("x", SchemaType::Decimal { scale: 2 })])
+            .with_limits(Limits {
+                max_decoded_bytes: 10,
+                ..Limits::default()
+            })
+            .prepare()
+            .expect("the decimal schema fits the decoded-byte budget");
+    assert_eq!(
+        decode_document("x = -1.2300", &decimal_schema)
+            .expect("signed exact decimal fits its budget"),
+        Value::Record(vec![("x".into(), Value::Decimal("-1.2300".into()))]),
+    );
+
+    // The parsed and validated key plus unsigned scratch consume eight bytes;
+    // the restored sign is byte nine.
+    let sign_charge_schema =
+        Schema::record(vec![Field::required("x", SchemaType::Decimal { scale: 2 })])
+            .with_limits(Limits {
+                max_decoded_bytes: 8,
+                ..Limits::default()
+            })
+            .prepare()
+            .expect("the tight-budget schema prepares");
+    let sign_charge_error = decode_document("x = -1.2300", &sign_charge_schema)
+        .expect_err("the restored sign must be charged before insertion");
+    assert_eq!(sign_charge_error.code, MonErrorCode::DecodedBudget);
+    assert_eq!(sign_charge_error.span, Some(Span { start: 4, end: 11 }),);
+    assert_eq!(sign_charge_error.path, vec![PathSegment::Field("x".into())],);
+}
+
+#[test]
+fn decimal_default_scale_failure_keeps_numeric_scale_code() {
+    use moth::mon::{Field, MonErrorCode, Schema, SchemaType, Value};
+
+    let error = Schema::record(vec![Field::with_default(
+        "amount",
+        SchemaType::Decimal { scale: 2 },
+        Value::Decimal("1.239".into()),
+    )])
+    .prepare()
+    .expect_err("an out-of-scale default must be rejected");
+
+    assert_eq!(error.code, MonErrorCode::NumericScale);
+    assert_eq!(error.path, vec![PathSegment::Field("amount".into())],);
+    assert_eq!(
+        error.detail,
+        "Decimal value has effective scale 3, above declared scale 2",
+    );
+}
+
+#[test]
+fn decimal_exponents_preserve_scale_and_exact_text() {
+    use moth::mon::{Field, MonErrorCode, Schema, SchemaType, Value, decode_document};
+
+    let schema = Schema::record(vec![Field::required(
+        "amount",
+        SchemaType::Decimal { scale: 2 },
+    )])
+    .prepare()
+    .expect("the Decimal schema prepares");
+    assert_eq!(
+        decode_document("amount = 1_2e-2", &schema).expect("in-scale exponent decodes"),
+        Value::Record(vec![("amount".into(), Value::Decimal("12e-2".into()))]),
+    );
+
+    let reader_error = decode_document("amount = 1e-30", &schema)
+        .expect_err("an exponent beyond the Decimal scale must fail");
+    assert_eq!(reader_error.code, MonErrorCode::NumericScale);
+
+    let default_error = Schema::record(vec![Field::with_default(
+        "amount",
+        SchemaType::Decimal { scale: 2 },
+        Value::Decimal("1e-30".into()),
+    )])
+    .prepare()
+    .expect_err("the same out-of-scale exponent default must fail");
+    assert_eq!(default_error.code, MonErrorCode::NumericScale);
+    assert_eq!(
+        default_error.detail,
+        "Decimal value has effective scale 30, above declared scale 2",
+    );
+}
+
+#[test]
+fn extreme_float_exponent_reports_non_finite_float() {
+    use moth::mon::{Field, Limits, MonErrorCode, Schema, SchemaType, Value, decode_document};
+
+    let schema = Schema::record(vec![Field::required("v", SchemaType::Float)])
+        .with_limits(Limits {
+            max_numeric_digits: 10_000,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("the exponent schema fits its limits");
+
+    let value = decode_document("v = 1e+21", &schema).expect("large finite exponent decodes");
+    assert_eq!(value, Value::Record(vec![("v".into(), Value::Float(1e21))]));
+    let error = decode_document("v = 1e10000", &schema)
+        .expect_err("a non-finite exponent must fail as float range");
+    assert_eq!(error.code, MonErrorCode::NonFiniteFloat);
+}

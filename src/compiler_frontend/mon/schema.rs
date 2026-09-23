@@ -589,13 +589,17 @@ fn complete_value(
         }
 
         (Value::Integer(value), PreparedType::Integer) => {
+            // Caller-owned output copy stays charged here; normalization scratch is
+            // charged inside validation before the shared helper reserves it.
             charge_decoded_bytes(budget, value.len(), path)?;
-            validate_integer_text(value, budget.limits, path, context)?;
+            validate_integer_text(value, budget, path, context)?;
             Ok(Value::Integer(value.clone()))
         }
         (Value::Decimal(value), PreparedType::Decimal { scale }) => {
+            // Caller-owned output copy stays charged here; normalization scratch is
+            // charged inside validation before the shared helper reserves it.
             charge_decoded_bytes(budget, value.len(), path)?;
-            validate_decimal_text(value, *scale, budget.limits, path, context)?;
+            validate_decimal_text(value, *scale, budget, path, context)?;
             Ok(Value::Decimal(value.clone()))
         }
 
@@ -941,15 +945,18 @@ fn clone_default(
 
 fn validate_integer_text(
     text: &str,
-    limits: &Limits,
+    budget: &mut BudgetState<'_>,
     path: &[PathSegment],
     context: CompletionContext,
 ) -> Result<(), MonError> {
-    check_numeric_text_budget(text, limits, path)?;
+    check_numeric_text_budget(text, budget.limits, path)?;
+    // The shared helper reserves capacity for the decoded unsigned-token bytes, so
+    // charge that owned scratch before parsing. Malformed tokens still allocate it.
     let unsigned = unsigned_numeric_text(text);
+    charge_decoded_bytes(budget, unsigned.len(), path)?;
     let parsed = parse_numeric_literal(unsigned)
         .map_err(|reason| numeric_value_error(path, reason, context))?;
-    check_numeric_budget(parsed.digit_count as usize, limits, path)?;
+    check_numeric_budget(parsed.digit_count as usize, budget.limits, path)?;
 
     if parsed.kind != NumericLiteralKind::WholeNumber {
         return Err(value_error(
@@ -966,88 +973,99 @@ fn validate_integer_text(
 fn validate_decimal_text(
     text: &str,
     scale: u8,
-    limits: &Limits,
+    budget: &mut BudgetState<'_>,
     path: &[PathSegment],
     context: CompletionContext,
 ) -> Result<(), MonError> {
-    check_numeric_text_budget(text, limits, path)?;
+    check_numeric_text_budget(text, budget.limits, path)?;
+    // The shared helper reserves capacity for the decoded unsigned-token bytes, so
+    // charge that owned scratch before parsing. Malformed tokens still allocate it.
     let unsigned = unsigned_numeric_text(text);
+    charge_decoded_bytes(budget, unsigned.len(), path)?;
     let parsed = parse_numeric_literal(unsigned)
         .map_err(|reason| numeric_value_error(path, reason, context))?;
-    check_numeric_budget(parsed.digit_count as usize, limits, path)?;
+    check_numeric_budget(parsed.digit_count as usize, budget.limits, path)?;
 
-    let Some(exponent_separator) = parsed.normalized_text.find('e') else {
-        return check_decimal_scale(&parsed.normalized_text, 0, false, scale, path);
-    };
-    let coefficient = &parsed.normalized_text[..exponent_separator];
-    let exponent = &parsed.normalized_text[(exponent_separator + 1)..];
-    let negative_exponent = exponent.starts_with('-');
-    let exponent_digits = exponent
-        .strip_prefix('+')
-        .or_else(|| exponent.strip_prefix('-'))
-        .unwrap_or(exponent);
-    let exponent_magnitude = saturating_decimal_usize(exponent_digits);
-
-    check_decimal_scale(
-        coefficient,
-        exponent_magnitude,
-        negative_exponent,
-        scale,
-        path,
-    )
+    let (coefficient, exponent_magnitude, negative_exponent) =
+        match parsed.normalized_text.find('e') {
+            None => (parsed.normalized_text.as_str(), 0, false),
+            Some(separator) => {
+                let coefficient = &parsed.normalized_text[..separator];
+                let exponent = &parsed.normalized_text[(separator + 1)..];
+                let negative_exponent = exponent.starts_with('-');
+                let digits = exponent
+                    .strip_prefix('+')
+                    .or_else(|| exponent.strip_prefix('-'))
+                    .unwrap_or(exponent);
+                (
+                    coefficient,
+                    saturating_decimal_usize(digits),
+                    negative_exponent,
+                )
+            }
+        };
+    let effective = decimal_effective_scale(coefficient, exponent_magnitude, negative_exponent);
+    if effective > scale as usize {
+        return Err(schema_error(
+            MonErrorCode::NumericScale,
+            path,
+            format!("Decimal value has effective scale {effective}, above declared scale {scale}"),
+        ));
+    }
+    Ok(())
 }
 
-fn check_decimal_scale(
+/// Borrowed effective-scale calculation shared by reader and programmatic validation.
+///
+/// WHY: both paths must apply the same exact-decimal scale policy without a second
+///      arithmetic runtime or a mantissa-digit copy. The inputs borrow the normalized
+///      literal (already stripped of separators and the exponent separator), so this
+///      helper allocates nothing. Each caller keeps its own error context.
+pub(super) fn decimal_effective_scale(
     coefficient: &str,
     exponent_magnitude: usize,
     negative_exponent: bool,
-    scale: u8,
-    path: &[PathSegment],
-) -> Result<(), MonError> {
+) -> usize {
     let (integer_part, fractional_part) = match coefficient.split_once('.') {
         Some((integer_part, fractional_part)) => (integer_part, fractional_part),
         None => (coefficient, ""),
     };
     let fractional_digits = fractional_part.len();
-    let all_zero = integer_part
-        .bytes()
-        .chain(fractional_part.bytes())
-        .all(|character| character == b'0');
+    let mut all_zero = true;
+    let mut trailing_zeroes = 0usize;
+    let mut seen_nonzero = false;
+    // Borrow the coefficient digits in reverse so trailing zeroes are counted without
+    // copying the mantissa into a temporary vector.
+    for character in integer_part.bytes().chain(fractional_part.bytes()).rev() {
+        if character == b'0' {
+            if !seen_nonzero {
+                trailing_zeroes += 1;
+            }
+        } else {
+            all_zero = false;
+            seen_nonzero = true;
+        }
+    }
     if all_zero {
-        return Ok(());
+        return 0;
     }
 
-    let trailing_zeroes = integer_part
-        .bytes()
-        .chain(fractional_part.bytes())
-        .rev()
-        .take_while(|character| *character == b'0')
-        .count();
+    // Keep the full host-sized scale for diagnostics. Exponent parsing and scale
+    // arithmetic saturate at usize::MAX without allocating arbitrary precision.
     let untrimmed_scale = if negative_exponent {
         fractional_digits.saturating_add(exponent_magnitude)
     } else {
         fractional_digits.saturating_sub(exponent_magnitude)
     };
-    let effective_scale = untrimmed_scale.saturating_sub(trailing_zeroes);
-
-    if effective_scale > scale as usize {
-        return Err(schema_error(
-            MonErrorCode::NumericScale,
-            path,
-            format!(
-                "Decimal value has effective scale {effective_scale}, above declared scale {scale}"
-            ),
-        ));
-    }
-
-    Ok(())
+    let trailing_zeroes = trailing_zeroes.min(untrimmed_scale);
+    untrimmed_scale.saturating_sub(trailing_zeroes)
 }
 
 fn unsigned_numeric_text(text: &str) -> &str {
     text.strip_prefix('-').unwrap_or(text)
 }
 
-fn saturating_decimal_usize(text: &str) -> usize {
+pub(super) fn saturating_decimal_usize(text: &str) -> usize {
     let mut value = 0usize;
     for character in text.bytes() {
         let digit = usize::from(character.saturating_sub(b'0'));

@@ -6,7 +6,7 @@
 //! produces the public owned [`Value`] tree.
 
 use crate::compiler_frontend::numeric_text::parse::{
-    parse_numeric_literal, parse_numeric_text_to_f64, parse_numeric_text_to_i32,
+    materialize_normalized_f64, materialize_normalized_i32, parse_numeric_literal,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
@@ -1013,6 +1013,11 @@ impl<'a> Parser<'a> {
             ));
         }
         let unsigned = text.strip_prefix('-').unwrap_or(text);
+        // The shared helper reserves capacity for the unsigned token bytes, and the
+        // retained normalized string keeps that allocation. Charge it first so even
+        // malformed tokens account for their scratch bytes.
+        self.budget
+            .charge_decoded_bytes(unsigned.len(), Some(Span::new(start, self.pos)))?;
         let parsed = parse_numeric_literal(unsigned).map_err(|reason| {
             MonError::at(
                 MonErrorCode::NumericSyntax,
@@ -1043,7 +1048,6 @@ impl<'a> Parser<'a> {
                 text,
                 normalized: parsed.normalized_text,
                 kind: parsed.kind,
-                digit_count,
             }),
         })
     }
@@ -1099,7 +1103,6 @@ struct NumericRaw<'a> {
     text: &'a str,
     normalized: String,
     kind: NumericLiteralKind,
-    digit_count: usize,
 }
 
 #[derive(Debug)]
@@ -1306,7 +1309,7 @@ fn validate_int(
             "Int requires whole-number spelling",
         ));
     }
-    parse_numeric_text_to_i32(number.text)
+    materialize_normalized_i32(&number.normalized, number.text.starts_with('-'))
         .map(Value::Int)
         .map_err(|reason| {
             let code = match reason {
@@ -1333,7 +1336,7 @@ fn validate_float(
     let RawKind::Number(number) = raw.kind else {
         return type_mismatch(span, path, "expected Float numeric literal");
     };
-    parse_numeric_text_to_f64(number.text)
+    materialize_normalized_f64(&number.normalized, number.text.starts_with('-'))
         .map(Value::Float)
         .map_err(|reason| {
             let code = match reason {
@@ -1371,9 +1374,9 @@ fn validate_integer(
             "Integer requires whole-number spelling",
         ));
     }
-    let owned_len = signed_normalized_len(&number);
-    charge_decoded_bytes(budget, owned_len, Some(span), path)?;
-    Ok(Value::Integer(signed_normalized(&number)))
+
+    let normalized = take_signed_normalized_text(number, budget, span, path)?;
+    Ok(Value::Integer(normalized))
 }
 
 fn validate_decimal(
@@ -1386,7 +1389,7 @@ fn validate_decimal(
     let RawKind::Number(number) = raw.kind else {
         return type_mismatch(span, path, "expected exact Decimal numeric literal");
     };
-    if effective_decimal_scale(&number).is_none_or(|effective| effective > scale as usize) {
+    if decimal_effective_scale(&number) > scale as usize {
         return Err(MonError::new(
             MonErrorCode::NumericScale,
             Some(span),
@@ -1394,75 +1397,47 @@ fn validate_decimal(
             format!("Decimal literal exceeds declared scale {scale}"),
         ));
     }
-    let owned_len = signed_normalized_len(&number);
-    charge_decoded_bytes(budget, owned_len, Some(span), path)?;
-    Ok(Value::Decimal(signed_normalized(&number)))
+
+    let normalized = take_signed_normalized_text(number, budget, span, path)?;
+    Ok(Value::Decimal(normalized))
 }
 
-fn signed_normalized_len(number: &NumericRaw<'_>) -> usize {
-    number.normalized.len() + usize::from(number.text.starts_with('-'))
-}
-
-fn signed_normalized(number: &NumericRaw<'_>) -> String {
+fn take_signed_normalized_text(
+    mut number: NumericRaw<'_>,
+    budget: &mut BudgetState<'_>,
+    span: Span,
+    path: &[PathSegment],
+) -> Result<String, MonError> {
     if number.text.starts_with('-') {
-        let mut text = String::with_capacity(number.normalized.len() + 1);
-        text.push('-');
-        text.push_str(&number.normalized);
-        text
-    } else {
-        number.normalized.clone()
+        // The unsigned token bytes already cover the normalized buffer; only the
+        // restored sign adds another logical byte to the exact result.
+        charge_decoded_bytes(budget, 1, Some(span), path)?;
+        number.normalized.insert(0, '-');
     }
+
+    Ok(number.normalized)
 }
 
-fn effective_decimal_scale(number: &NumericRaw<'_>) -> Option<usize> {
-    let (mantissa, exponent) = number.normalized.split_once('e').map_or(
-        (number.normalized.as_str(), None),
-        |(mantissa, exponent)| (mantissa, Some(exponent)),
-    );
-    let fractional = mantissa
-        .find('.')
-        .map_or(0, |point| mantissa.len().saturating_sub(point + 1));
-    let digits = mantissa
-        .bytes()
-        .filter(u8::is_ascii_digit)
-        .collect::<Vec<_>>();
-    if digits.iter().all(|digit| *digit == b'0') {
-        return Some(0);
-    }
-    let trailing_zeroes = digits
-        .iter()
-        .rev()
-        .take_while(|digit| **digit == b'0')
-        .count();
-    let mut exponent_negative = false;
-    let mut exponent_magnitude = 0usize;
-    if let Some(exponent) = exponent {
-        let digits = if let Some(rest) = exponent.strip_prefix('-') {
-            exponent_negative = true;
-            rest
-        } else {
-            exponent.strip_prefix('+').unwrap_or(exponent)
-        };
-        // Only the range around the declared scale and source coefficient matters.  Saturating
-        // here avoids a second arbitrary-precision arithmetic implementation while still making
-        // very large negative exponents fail the exact-scale check deterministically.
-        let cap = fractional
-            .saturating_add(number.digit_count)
-            .saturating_add(19);
-        for digit in digits.bytes() {
-            let digit = usize::from(digit - b'0');
-            exponent_magnitude = exponent_magnitude
-                .saturating_mul(10)
-                .saturating_add(digit)
-                .min(cap.saturating_add(1));
-        }
-    }
-    let base_scale = if exponent_negative {
-        fractional.saturating_add(exponent_magnitude)
-    } else {
-        fractional.saturating_sub(exponent_magnitude)
+fn decimal_effective_scale(number: &NumericRaw<'_>) -> usize {
+    let (coefficient, exponent) = match number.normalized.split_once('e') {
+        Some((coefficient, exponent)) => (coefficient, Some(exponent)),
+        None => (number.normalized.as_str(), None),
     };
-    Some(base_scale.saturating_sub(trailing_zeroes.min(base_scale)))
+    let (exponent_magnitude, negative_exponent) = match exponent {
+        None => (0, false),
+        Some(exponent) => {
+            let negative_exponent = exponent.starts_with('-');
+            let digits = exponent
+                .strip_prefix('+')
+                .or_else(|| exponent.strip_prefix('-'))
+                .unwrap_or(exponent);
+            (
+                super::schema::saturating_decimal_usize(digits),
+                negative_exponent,
+            )
+        }
+    };
+    super::schema::decimal_effective_scale(coefficient, exponent_magnitude, negative_exponent)
 }
 
 fn validate_record(
@@ -2133,7 +2108,7 @@ mod tests {
         let exact_error = decode_document("x = 123", &exact_schema)
             .expect_err("exact numeric output must honor decoded-byte budget");
         assert_eq!(exact_error.code, MonErrorCode::DecodedBudget);
-        assert!(exact_error.path.is_empty());
+        assert_eq!(exact_error.path, vec![PathSegment::Field("x".into())]);
 
         let label_schema = Schema::record(Vec::new())
             .with_limits(Limits {
@@ -2515,7 +2490,6 @@ mod tests {
                     text: "1",
                     normalized: "1".into(),
                     kind: NumericLiteralKind::WholeNumber,
-                    digit_count: 1,
                 }),
             },
             RawValue {
@@ -2524,7 +2498,6 @@ mod tests {
                     text: "10",
                     normalized: "10".into(),
                     kind: NumericLiteralKind::WholeNumber,
-                    digit_count: 2,
                 }),
             },
         )];

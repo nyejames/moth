@@ -1468,11 +1468,14 @@ The implemented service is publicly available as `moth::mon`, re-exported by
 `src/lib.rs`; its crate-private owner is `src/compiler_frontend/mon/`. Exact
 public operation and type names are defined by `docs/compiler-design-overview.md`
 > `Rust-only MON service`.
-It reuses the active representation rules below without changing them:
-compiler-retained numeric text remains owned by the numeric token side store,
-while MON retains only bounded, caller-borrowed lossless literal text until its
-receiving schema is known. Compiler diagnostic storage stays in the compact
-diagnostic architecture, and MON never becomes source compilation. The MON
+Compiler-retained numeric text remains owned by the numeric token side store.
+The MON reader borrows original token spelling from caller input and retains a
+bounded owned normalized string until the schema selects a destination. `Int`
+and `Float` materialize from its facts; exact `Integer` and `Decimal` values
+transfer the normalized buffer into the result. The normalized buffer's
+decoded-byte accounting is described below. Compiler diagnostic storage stays
+in the compact diagnostic architecture, and MON never becomes source
+compilation. The MON
 literal-data format itself is owned by `docs/src/docs/mon/mon-format.mtf`.
 
 ### Caller-owned input snapshot and cursor lifetime
@@ -1534,6 +1537,21 @@ without routing through `f64` or display formatting. `Float` materialisation
 follows the numeric authority and rejects non-finite source values and
 conversion results, emitting `-0.0` for negative zero and `0` for positive zero
 while decoding preserves the sign bit.
+
+Numeric normalization storage is included in the logical `max_decoded_bytes`
+budget. The reader charges the unsigned token byte length before
+`parse_numeric_literal` reserves that capacity, including for malformed
+tokens. Programmatic `Integer`/`Decimal` values and defaults charge the same
+scratch before parsing. Reader `Int` and `Float` materialize from the normalized
+facts. Exact reader `Integer` and `Decimal` values transfer the normalized
+buffer into the result instead of cloning it; a negative sign is charged before
+it is inserted. Schema validation charges its caller-owned output clone
+separately from normalization scratch.
+Reader and schema validation share one allocation-free borrowed effective-scale
+rule; each path keeps its own span, error code and detail context. These are
+logical byte charges against `max_decoded_bytes`, not exact allocator-resident
+memory measurements: allocator rounding, excess capacity and deallocation
+timing are not represented.
 
 MON string and character escapes are decoded by a bounded literal reader owned
 by the MON format; no Moth source escape owner is shared. MON's Unicode
