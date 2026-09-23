@@ -11,7 +11,7 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
 use super::{
     BudgetState, Field, Limits, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema,
-    Schema, SchemaType, Value, Variant,
+    Schema, SchemaType, Span, Value, Variant,
 };
 
 /// A schema type after eligibility, names, scales and defaults have been checked.
@@ -655,8 +655,8 @@ fn complete_value(
                         "MON map contains a duplicate decoded key",
                     ));
                 }
-                // Charge the validation-only index before it can grow. Strings are cloned
-                // only after their additional storage is included in the decoded-byte budget.
+                // Charge the stable per-entry node cost before the entry can grow. Strings are
+                // cloned only after their additional storage is in the decoded-byte budget.
                 charge_nodes(budget, 1, path)?;
                 if matches!(&key_value, Value::String(_)) {
                     charge_decoded_bytes(budget, key_value_string_len(&key_value), path)?;
@@ -819,7 +819,7 @@ fn complete_record(
             None => match &field.default {
                 Some(default) => {
                     charge_default(budget, path)?;
-                    clone_default(default, budget, path, depth + 1)?
+                    clone_default(default, budget, path, depth + 1, None)?
                 }
                 None => {
                     let code = if matches!(record_context, RecordContext::Choice) {
@@ -843,45 +843,66 @@ fn complete_record(
     Ok(completed)
 }
 
-fn clone_default(
+/// Bounded copy of an already-validated prepared default.
+///
+/// WHY: prepared defaults are complete at schema preparation, so copies pay the
+/// same per-entry map node cost as validated maps without rebuilding the
+/// duplicate-key index.
+pub(super) fn clone_default(
     value: &Value,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
+    span: Option<Span>,
 ) -> Result<Value, MonError> {
-    check_depth(budget, depth, path)?;
-    charge_nodes(budget, 1, path)?;
+    budget
+        .check_depth(depth, span)
+        .map_err(|error| with_budget_path(error, path))?;
+    budget
+        .charge_nodes(1, span)
+        .map_err(|error| with_budget_path(error, path))?;
 
     match value {
         Value::None => Ok(Value::None),
         Value::Bool(value) => Ok(Value::Bool(*value)),
         Value::Char(value) => {
-            charge_decoded_bytes(budget, value.len_utf8(), path)?;
+            budget
+                .charge_decoded_bytes(value.len_utf8(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             Ok(Value::Char(*value))
         }
         Value::String(value) => {
-            charge_decoded_bytes(budget, value.len(), path)?;
+            budget
+                .charge_decoded_bytes(value.len(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             Ok(Value::String(value.clone()))
         }
         Value::Int(value) => Ok(Value::Int(*value)),
         Value::Float(value) => Ok(Value::Float(*value)),
         Value::Integer(value) => {
-            charge_decoded_bytes(budget, value.len(), path)?;
+            budget
+                .charge_decoded_bytes(value.len(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             Ok(Value::Integer(value.clone()))
         }
         Value::Decimal(value) => {
-            charge_decoded_bytes(budget, value.len(), path)?;
+            budget
+                .charge_decoded_bytes(value.len(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             Ok(Value::Decimal(value.clone()))
         }
         Value::Record(fields) => {
             let mut output = Vec::new();
             for (name, value) in fields {
-                charge_decoded_bytes(budget, name.len(), path)?;
-                let path_name = name.clone();
-                path.push(PathSegment::Field(path_name));
-                let copied = clone_default(value, budget, path, depth + 1)?;
+                budget
+                    .charge_decoded_bytes(name.len(), span)
+                    .map_err(|error| with_budget_path(error, path))?;
+                path.push(PathSegment::Field(name.clone()));
+                let copied = clone_default(value, budget, path, depth + 1, span)?;
                 path.pop();
-                charge_decoded_bytes(budget, name.len(), path)?;
+                budget
+                    .charge_decoded_bytes(name.len(), span)
+                    .map_err(|error| with_budget_path(error, path))?;
                 output.push((name.clone(), copied));
             }
             Ok(Value::Record(output))
@@ -890,7 +911,7 @@ fn clone_default(
             let mut output = Vec::new();
             for (index, value) in values.iter().enumerate() {
                 path.push(PathSegment::Index(index));
-                let copied = clone_default(value, budget, path, depth + 1)?;
+                let copied = clone_default(value, budget, path, depth + 1, span)?;
                 path.pop();
                 output.push(copied);
             }
@@ -900,8 +921,11 @@ fn clone_default(
             let mut output = Vec::new();
             for (index, (key, value)) in entries.iter().enumerate() {
                 path.push(PathSegment::Index(index));
-                let copied_key = clone_default(key, budget, path, depth + 1)?;
-                let copied_value = clone_default(value, budget, path, depth + 1)?;
+                let copied_key = clone_default(key, budget, path, depth + 1, span)?;
+                budget
+                    .charge_nodes(1, span)
+                    .map_err(|error| with_budget_path(error, path))?;
+                let copied_value = clone_default(value, budget, path, depth + 1, span)?;
                 path.pop();
                 output.push((copied_key, copied_value));
             }
@@ -914,23 +938,32 @@ fn clone_default(
         } => {
             let qualifier = match qualifier {
                 Some(value) => {
-                    charge_decoded_bytes(budget, value.len(), path)?;
+                    budget
+                        .charge_decoded_bytes(value.len(), span)
+                        .map_err(|error| with_budget_path(error, path))?;
                     Some(value.clone())
                 }
                 None => None,
             };
-            charge_decoded_bytes(budget, variant.len(), path)?;
+            budget
+                .charge_decoded_bytes(variant.len(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             let variant_name = variant.clone();
-            charge_decoded_bytes(budget, variant.len(), path)?;
+            budget
+                .charge_decoded_bytes(variant.len(), span)
+                .map_err(|error| with_budget_path(error, path))?;
             path.push(PathSegment::Variant(variant.clone()));
             let mut copied_fields = Vec::new();
             for (name, value) in fields {
-                charge_decoded_bytes(budget, name.len(), path)?;
-                let path_name = name.clone();
-                path.push(PathSegment::Field(path_name));
-                let copied = clone_default(value, budget, path, depth + 1)?;
+                budget
+                    .charge_decoded_bytes(name.len(), span)
+                    .map_err(|error| with_budget_path(error, path))?;
+                path.push(PathSegment::Field(name.clone()));
+                let copied = clone_default(value, budget, path, depth + 1, span)?;
                 path.pop();
-                charge_decoded_bytes(budget, name.len(), path)?;
+                budget
+                    .charge_decoded_bytes(name.len(), span)
+                    .map_err(|error| with_budget_path(error, path))?;
                 copied_fields.push((name.clone(), copied));
             }
             path.pop();

@@ -523,6 +523,190 @@ fn encoder_preserves_decoded_node_budget() {
 }
 
 #[test]
+fn default_maps_use_the_same_node_cost_as_authored_maps() {
+    use moth::mon::{
+        Field, Limits, MonErrorCode, PreparedSchema, Schema, SchemaType, Value, decode_document,
+        encode_document,
+    };
+
+    fn prepared(max_nodes: usize) -> PreparedSchema {
+        Schema::record(vec![Field::required(
+            "items",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Record {
+                    fields: vec![Field::with_default(
+                        "m",
+                        SchemaType::Map {
+                            key: Box::new(SchemaType::Int),
+                            value: Box::new(SchemaType::Int),
+                        },
+                        Value::Map(vec![(Value::Int(1), Value::Int(2))]),
+                    )],
+                }),
+            },
+        )])
+        .with_limits(Limits {
+            max_nodes,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("schema preparation fits the selected budget")
+    }
+
+    let omitted = "items = {(), (), (), ()}";
+    let explicit = "items = {(m = {1 = 2}), (m = {1 = 2}), \
+                    (m = {1 = 2}), (m = {1 = 2})}";
+
+    let tight = prepared(18);
+    for input in [omitted, explicit] {
+        let error = decode_document(input, &tight)
+            .expect_err("the same completed maps need the same node budget");
+        assert_eq!(error.code, MonErrorCode::NodeBudget);
+    }
+
+    let sufficient = prepared(22);
+    let from_defaults =
+        decode_document(omitted, &sufficient).expect("defaulted maps fit the complete node budget");
+    let from_explicit =
+        decode_document(explicit, &sufficient).expect("explicit maps fit the complete node budget");
+    assert_eq!(from_defaults, from_explicit);
+
+    let encoded = encode_document(&from_defaults, &sufficient)
+        .expect("the completed decoded value remains encodable");
+    assert_eq!(
+        decode_document(&encoded, &sufficient).expect("encoded maps decode"),
+        from_defaults,
+    );
+}
+
+#[test]
+fn default_maps_inside_choice_payload_share_the_same_node_cost() {
+    use moth::mon::{
+        Field, Limits, MonErrorCode, PreparedSchema, Schema, SchemaType, Value, Variant,
+        decode_document, encode_document,
+    };
+
+    fn prepared(max_nodes: usize) -> PreparedSchema {
+        Schema::record(vec![Field::required(
+            "items",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Choice {
+                    name: "Pick".to_owned(),
+                    variants: vec![Variant::payload(
+                        "With",
+                        vec![Field::required(
+                            "settings",
+                            SchemaType::Record {
+                                fields: vec![Field::with_default(
+                                    "m",
+                                    SchemaType::Map {
+                                        key: Box::new(SchemaType::Int),
+                                        value: Box::new(SchemaType::Int),
+                                    },
+                                    Value::Map(vec![
+                                        (Value::Int(1), Value::Int(2)),
+                                        (Value::Int(3), Value::Int(4)),
+                                    ]),
+                                )],
+                            },
+                        )],
+                    )],
+                }),
+            },
+        )])
+        .with_limits(Limits {
+            max_nodes,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("schema preparation fits the selected budget")
+    }
+
+    let omitted = "items = {::With(settings = ()), ::With(settings = ()), ::With(settings = ())}";
+    let explicit = "items = {::With(settings = (m = {1 = 2, 3 = 4})), \
+                    ::With(settings = (m = {1 = 2, 3 = 4})), \
+                    ::With(settings = (m = {1 = 2, 3 = 4}))}";
+
+    let tight = prepared(26);
+    for input in [omitted, explicit] {
+        let error = decode_document(input, &tight)
+            .expect_err("the same completed choice maps need the same node budget");
+        assert_eq!(error.code, MonErrorCode::NodeBudget);
+    }
+    let programmatic = Value::Record(vec![(
+        "items".into(),
+        Value::Collection(vec![
+            Value::Choice {
+                qualifier: None,
+                variant: "With".into(),
+                fields: vec![("settings".into(), Value::Record(vec![]))],
+            },
+            Value::Choice {
+                qualifier: None,
+                variant: "With".into(),
+                fields: vec![("settings".into(), Value::Record(vec![]))],
+            },
+            Value::Choice {
+                qualifier: None,
+                variant: "With".into(),
+                fields: vec![("settings".into(), Value::Record(vec![]))],
+            },
+        ]),
+    )]);
+    let error = encode_document(&programmatic, &tight)
+        .expect_err("programmatic choice defaults need the same node budget");
+    assert_eq!(error.code, MonErrorCode::NodeBudget);
+
+    let sufficient = prepared(29);
+    let from_defaults = decode_document(omitted, &sufficient)
+        .expect("defaulted choice maps fit the complete node budget");
+    let from_explicit = decode_document(explicit, &sufficient)
+        .expect("explicit choice maps fit the complete node budget");
+    assert_eq!(from_defaults, from_explicit);
+
+    let encoded_programmatic = encode_document(&programmatic, &sufficient)
+        .expect("programmatic choice defaults fit the complete node budget");
+    assert_eq!(
+        decode_document(&encoded_programmatic, &sufficient)
+            .expect("encoded programmatic choice maps decode"),
+        from_defaults,
+    );
+
+    let encoded = encode_document(&from_defaults, &sufficient)
+        .expect("the completed decoded choice value remains encodable");
+    assert_eq!(
+        decode_document(&encoded, &sufficient).expect("encoded choice maps decode"),
+        from_defaults,
+    );
+}
+
+#[test]
+fn input_and_output_byte_limits_are_distinct() {
+    use moth::mon::{
+        Field, Limits, MonErrorCode, Schema, SchemaType, Value, decode_document, encode_document,
+    };
+
+    let schema = Schema::record(vec![Field::required("v", SchemaType::String)])
+        .with_limits(Limits {
+            max_input_bytes: 8,
+            max_output_bytes: 1024,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("schema prepares despite the tight input limit");
+
+    let value = Value::Record(vec![("v".into(), Value::String("hello".into()))]);
+    let encoded = encode_document(&value, &schema).expect("output fits the larger output budget");
+    assert!(
+        encoded.len() > 8,
+        "encoded text exceeds the input budget: {encoded:?}"
+    );
+    let error =
+        decode_document(&encoded, &schema).expect_err("the same text exceeds the input budget");
+    assert_eq!(error.code, MonErrorCode::InputBudget);
+}
+
+#[test]
 fn encoded_duplicate_map_key_reports_the_key_path() {
     let schema = Schema::value(SchemaType::Map {
         key: Box::new(SchemaType::String),
