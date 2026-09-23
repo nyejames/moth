@@ -10,8 +10,8 @@ use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
 use super::{
-    BudgetState, Field, Limits, MonError, MonErrorCode, PathSegment, PreparedSchema, Schema,
-    SchemaType, Value,
+    BudgetState, Field, Limits, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema,
+    Schema, SchemaType, Value, Variant,
 };
 
 /// A schema type after eligibility, names, scales and defaults have been checked.
@@ -70,6 +70,19 @@ pub(super) struct PreparedVariant {
 /// the same prepared representation without that document-only restriction.
 pub(crate) fn prepare_schema(schema: Schema) -> Result<PreparedSchema, MonError> {
     let Schema { root, limits } = schema;
+    if limits.max_depth > Limits::MAX_SAFE_DEPTH {
+        let requested = limits.max_depth;
+        drop_schema_type_tree(root);
+        return Err(MonError::new(
+            MonErrorCode::DepthBudget,
+            None,
+            &[],
+            format!(
+                "MON max_depth {requested} exceeds implementation-safe ceiling {}",
+                Limits::MAX_SAFE_DEPTH
+            ),
+        ));
+    }
     let mut path = Vec::new();
     let root = {
         let mut budget = BudgetState::new(&limits);
@@ -117,8 +130,14 @@ fn prepare_type(
     path: &mut Vec<PathSegment>,
     depth: usize,
 ) -> Result<PreparedType, MonError> {
-    check_depth(budget, depth, path)?;
-    charge_nodes(budget, 1, path)?;
+    if let Err(error) = check_depth(budget, depth, path) {
+        drop_schema_type_tree(schema_type);
+        return Err(error);
+    }
+    if let Err(error) = charge_nodes(budget, 1, path) {
+        drop_schema_type_tree(schema_type);
+        return Err(error);
+    }
 
     match schema_type {
         SchemaType::None => Ok(PreparedType::None),
@@ -157,8 +176,14 @@ fn prepare_type(
         }),
 
         SchemaType::Struct { name, fields } => {
-            charge_decoded_bytes(budget, name.len(), path)?;
-            validate_identifier(&name, path, "struct name")?;
+            if let Err(error) = charge_decoded_bytes(budget, name.len(), path) {
+                drop_fields_tree(fields);
+                return Err(error);
+            }
+            if let Err(error) = validate_identifier(&name, path, "struct name") {
+                drop_fields_tree(fields);
+                return Err(error);
+            }
             Ok(PreparedType::Struct {
                 name,
                 fields: prepare_fields(fields, budget, path, true, depth)?,
@@ -170,8 +195,15 @@ fn prepare_type(
         }),
 
         SchemaType::Map { key, value } => {
-            let key = prepare_type(*key, budget, path, depth + 1)?;
+            let key = match prepare_type(*key, budget, path, depth + 1) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    drop_schema_type_tree(*value);
+                    return Err(error);
+                }
+            };
             if !is_supported_map_key(&key) {
+                drop_schema_type_tree(*value);
                 return Err(schema_error(
                     MonErrorCode::InvalidMapKey,
                     path,
@@ -187,36 +219,78 @@ fn prepare_type(
         }
 
         SchemaType::Choice { name, variants } => {
-            charge_decoded_bytes(budget, name.len(), path)?;
-            validate_identifier(&name, path, "choice name")?;
+            if let Err(error) = charge_decoded_bytes(budget, name.len(), path) {
+                drop_variants_tree(variants);
+                return Err(error);
+            }
+            if let Err(error) = validate_identifier(&name, path, "choice name") {
+                drop_variants_tree(variants);
+                return Err(error);
+            }
             let mut prepared_variants = Vec::new();
+            let mut variants = variants.into_iter();
 
-            for variant in variants {
-                charge_decoded_bytes(budget, variant.name.len(), path)?;
-                charge_nodes(budget, 1, path)?;
+            while let Some(variant) = variants.next() {
+                if let Err(error) = charge_decoded_bytes(budget, variant.name.len(), path) {
+                    drop_variant_tree(variant);
+                    for remaining in variants {
+                        drop_variant_tree(remaining);
+                    }
+                    return Err(error);
+                }
+                if let Err(error) = charge_nodes(budget, 1, path) {
+                    drop_variant_tree(variant);
+                    for remaining in variants {
+                        drop_variant_tree(remaining);
+                    }
+                    return Err(error);
+                }
                 if prepared_variants
                     .iter()
                     .any(|known: &PreparedVariant| known.name == variant.name)
                 {
                     let mut variant_path = path.clone();
                     variant_path.push(PathSegment::Variant(variant.name.clone()));
+                    let duplicate_name = variant.name.clone();
+                    drop_variant_tree(variant);
+                    for remaining in variants {
+                        drop_variant_tree(remaining);
+                    }
                     return Err(schema_error(
                         MonErrorCode::InvalidSchema,
                         &variant_path,
                         format!(
-                            "duplicate choice variant '{}'; names must be unique",
-                            variant.name
+                            "duplicate choice variant '{duplicate_name}'; names must be unique"
                         ),
                     ));
                 }
-                path.push(PathSegment::Variant(variant.name.clone()));
-                validate_identifier(&variant.name, path, "choice variant name")?;
-                let prepared_fields = prepare_fields(variant.fields, budget, path, false, depth)?;
+
+                let Variant {
+                    name: variant_name,
+                    fields: variant_fields,
+                } = variant;
+                path.push(PathSegment::Variant(variant_name.clone()));
+                let prepared_fields = if let Err(error) =
+                    validate_identifier(&variant_name, path, "choice variant name")
+                {
+                    drop_fields_tree(variant_fields);
+                    Err(error)
+                } else {
+                    prepare_fields(variant_fields, budget, path, false, depth)
+                };
                 path.pop();
-                prepared_variants.push(PreparedVariant {
-                    name: variant.name,
-                    fields: prepared_fields,
-                });
+                match prepared_fields {
+                    Ok(fields) => prepared_variants.push(PreparedVariant {
+                        name: variant_name,
+                        fields,
+                    }),
+                    Err(error) => {
+                        for remaining in variants {
+                            drop_variant_tree(remaining);
+                        }
+                        return Err(error);
+                    }
+                }
             }
 
             Ok(PreparedType::Choice {
@@ -245,28 +319,62 @@ fn prepare_fields(
     depth: usize,
 ) -> Result<Vec<PreparedField>, MonError> {
     let mut prepared_fields = Vec::new();
+    let mut fields = fields.into_iter();
 
-    for field in fields {
-        charge_nodes(budget, 1, path)?;
-        validate_identifier(&field.name, path, "field name")?;
+    while let Some(field) = fields.next() {
+        if let Err(error) = charge_nodes(budget, 1, path) {
+            drop_field_into_stack(field);
+            for remaining in fields {
+                drop_field_into_stack(remaining);
+            }
+            return Err(error);
+        }
+        if let Err(error) = validate_identifier(&field.name, path, "field name") {
+            drop_field_into_stack(field);
+            for remaining in fields {
+                drop_field_into_stack(remaining);
+            }
+            return Err(error);
+        }
         if prepared_fields
             .iter()
             .any(|known: &PreparedField| known.name == field.name)
         {
-            charge_decoded_bytes(budget, field.name.len(), path)?;
+            if let Err(error) = charge_decoded_bytes(budget, field.name.len(), path) {
+                drop_field_into_stack(field);
+                for remaining in fields {
+                    drop_field_into_stack(remaining);
+                }
+                return Err(error);
+            }
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(field.name.clone()));
+            let duplicate_name = field.name.clone();
+            drop_field_into_stack(field);
+            for remaining in fields {
+                drop_field_into_stack(remaining);
+            }
             return Err(schema_error(
                 MonErrorCode::DuplicateField,
                 &field_path,
-                format!("duplicate field '{}'; names must be unique", field.name),
+                format!("duplicate field '{duplicate_name}'; names must be unique"),
             ));
         }
 
         if !allow_defaults && field.default.is_some() {
-            charge_decoded_bytes(budget, field.name.len(), path)?;
+            if let Err(error) = charge_decoded_bytes(budget, field.name.len(), path) {
+                drop_field_into_stack(field);
+                for remaining in fields {
+                    drop_field_into_stack(remaining);
+                }
+                return Err(error);
+            }
             let mut field_path = path.clone();
             field_path.push(PathSegment::Field(field.name.clone()));
+            drop_field_into_stack(field);
+            for remaining in fields {
+                drop_field_into_stack(remaining);
+            }
             return Err(schema_error(
                 MonErrorCode::InvalidSchema,
                 &field_path,
@@ -274,13 +382,15 @@ fn prepare_fields(
             ));
         }
 
-        prepared_fields.push(prepare_field(
-            field,
-            budget,
-            path,
-            allow_defaults,
-            depth + 1,
-        )?);
+        match prepare_field(field, budget, path, allow_defaults, depth + 1) {
+            Ok(prepared) => prepared_fields.push(prepared),
+            Err(error) => {
+                for remaining in fields {
+                    drop_field_into_stack(remaining);
+                }
+                return Err(error);
+            }
+        }
     }
 
     Ok(prepared_fields)
@@ -295,27 +405,43 @@ fn prepare_field(
 ) -> Result<PreparedField, MonError> {
     let Field { name, ty, default } = field;
 
-    charge_decoded_bytes(budget, name.len(), path)?;
+    if let Err(error) = charge_decoded_bytes(budget, name.len(), path) {
+        drop_schema_type_tree(ty);
+        if let Some(default) = default {
+            drop_value_tree(default);
+        }
+        return Err(error);
+    }
     path.push(PathSegment::Field(name.clone()));
-    let ty = prepare_type(ty, budget, path, depth)?;
+    let ty = match prepare_type(ty, budget, path, depth) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            path.pop();
+            if let Some(default) = default {
+                drop_value_tree(default);
+            }
+            return Err(error);
+        }
+    };
     let default = match default {
         Some(value) => {
             if !allow_defaults {
                 path.pop();
+                drop_value_tree(value);
                 return Err(schema_error(
                     MonErrorCode::InvalidSchema,
                     path,
                     "choice payload fields cannot have defaults",
                 ));
             }
-            Some(complete_value(
-                &value,
-                &ty,
-                budget,
-                path,
-                depth,
-                CompletionContext::Default,
-            )?)
+            match complete_value(&value, &ty, budget, path, depth, CompletionContext::Default) {
+                Ok(completed) => Some(completed),
+                Err(error) => {
+                    path.pop();
+                    drop_value_tree(value);
+                    return Err(error);
+                }
+            }
         }
         None => None,
     };
@@ -358,6 +484,13 @@ fn is_supported_map_key(ty: &PreparedType) -> bool {
         ty,
         PreparedType::String | PreparedType::Int | PreparedType::Bool | PreparedType::Char
     )
+}
+
+fn key_value_string_len(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.len(),
+        _ => 0,
+    }
 }
 
 fn accepts_none(ty: &PreparedType) -> bool {
@@ -493,13 +626,24 @@ fn complete_value(
 
         (Value::Map(entries), PreparedType::Map { key, value }) => {
             let mut completed = Vec::new();
+            let mut seen = MapKeyIndex::new();
             for (index, (key_value, value_value)) in entries.iter().enumerate() {
                 path.push(PathSegment::Index(index));
                 let key_value = complete_value(key_value, key, budget, path, depth + 1, context)?;
-                if completed
-                    .iter()
-                    .any(|(known_key, _)| known_key == &key_value)
-                {
+                let Some(is_duplicate) = seen.contains_value(&key_value) else {
+                    path.pop();
+                    return Err(value_error(
+                        context,
+                        MonErrorCode::InvalidMapKey,
+                        path,
+                        "MON map key type is not supported",
+                    ));
+                };
+                if is_duplicate {
+                    charge_decoded_bytes(budget, super::map_key_name_len(&key_value), path)?;
+                    let key_name = super::map_key_name(&key_value);
+                    path.pop();
+                    path.push(PathSegment::MapKey(key_name));
                     return Err(value_error(
                         context,
                         MonErrorCode::DuplicateMapKey,
@@ -507,6 +651,13 @@ fn complete_value(
                         "MON map contains a duplicate decoded key",
                     ));
                 }
+                // Charge the validation-only index before it can grow. Strings are cloned
+                // only after their additional storage is included in the decoded-byte budget.
+                charge_nodes(budget, 1, path)?;
+                if matches!(&key_value, Value::String(_)) {
+                    charge_decoded_bytes(budget, key_value_string_len(&key_value), path)?;
+                }
+                seen.insert_value(&key_value);
                 let value_value =
                     complete_value(value_value, value, budget, path, depth + 1, context)?;
                 path.pop();
@@ -600,7 +751,8 @@ fn complete_record(
     context: CompletionContext,
     record_context: RecordContext,
 ) -> Result<Vec<(String, Value)>, MonError> {
-    charge_nodes(budget, fields.len(), path)?;
+    // Schema preparation already bounded this per-record routing table. Charging its
+    // field slots for every value would double-count repeated records during encoding.
     let mut supplied: Vec<Option<&Value>> = (0..fields.len()).map(|_| None).collect();
 
     for (name, value) in values {
@@ -979,4 +1131,123 @@ fn invalid_default(path: &[PathSegment], detail: impl Into<String>) -> MonError 
 
 fn schema_error(code: MonErrorCode, path: &[PathSegment], detail: impl Into<String>) -> MonError {
     MonError::new(code, None, path, detail)
+}
+
+/// Iteratively release an unvisited `SchemaType` tree without recursion.
+///
+/// Preparation moves rejected schema values out of their owners before
+/// returning an error (duplicate names, invalid identifiers, map keys,
+/// invalid defaults and budget failures). A recursive drop of an arbitrarily
+/// deep untouched tail could overflow native stack on cleanup, so rejection
+/// paths route through this explicit work-list first.
+fn drop_schema_type_tree(root: SchemaType) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node {
+            SchemaType::Optional(inner) => stack.push(*inner),
+            SchemaType::Record { fields } | SchemaType::Struct { fields, .. } => {
+                drop_fields_into_stack(fields, &mut stack)
+            }
+            SchemaType::Collection { element } => stack.push(*element),
+            SchemaType::Map { key, value } => {
+                stack.push(*key);
+                stack.push(*value);
+            }
+            SchemaType::Choice { variants, .. } => {
+                for variant in variants {
+                    drop_variant_into_stack(variant, &mut stack);
+                }
+            }
+            SchemaType::None
+            | SchemaType::Bool
+            | SchemaType::Char
+            | SchemaType::String
+            | SchemaType::Int
+            | SchemaType::Float
+            | SchemaType::Integer
+            | SchemaType::Decimal { .. }
+            | SchemaType::Unsupported { .. } => {}
+        }
+    }
+}
+
+fn drop_fields_tree(fields: Vec<Field>) {
+    for field in fields {
+        drop_field_into_stack(field);
+    }
+}
+
+fn drop_variants_tree(variants: Vec<Variant>) {
+    for variant in variants {
+        drop_variant_tree(variant);
+    }
+}
+
+/// Iteratively release an unvisited `Value` default tree without recursion.
+///
+/// Rejected malformed defaults still own their untouched tail; dropping that
+/// tail recursively could exceed native stack on cleanup.
+fn drop_value_tree(root: Value) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Record(fields) => {
+                for (_, value) in fields.into_iter().rev() {
+                    stack.push(value);
+                }
+            }
+            Value::Collection(values) => {
+                for value in values.into_iter().rev() {
+                    stack.push(value);
+                }
+            }
+            Value::Map(entries) => {
+                for (key, value) in entries.into_iter().rev() {
+                    stack.push(key);
+                    stack.push(value);
+                }
+            }
+            Value::Choice { fields, .. } => {
+                for (_, value) in fields.into_iter().rev() {
+                    stack.push(value);
+                }
+            }
+            Value::None
+            | Value::Bool(_)
+            | Value::Char(_)
+            | Value::String(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Integer(_)
+            | Value::Decimal(_) => {}
+        }
+    }
+}
+
+fn drop_fields_into_stack(fields: Vec<Field>, stack: &mut Vec<SchemaType>) {
+    for field in fields.into_iter().rev() {
+        let Field { ty, default, .. } = field;
+        if let Some(default) = default {
+            drop_value_tree(default);
+        }
+        stack.push(ty);
+    }
+}
+
+fn drop_variant_into_stack(variant: Variant, stack: &mut Vec<SchemaType>) {
+    let Variant { fields, .. } = variant;
+    drop_fields_into_stack(fields, stack);
+}
+
+fn drop_field_into_stack(field: Field) {
+    let Field { ty, default, .. } = field;
+    if let Some(default) = default {
+        drop_value_tree(default);
+    }
+    drop_schema_type_tree(ty);
+}
+
+fn drop_variant_tree(variant: Variant) {
+    let Variant { fields, .. } = variant;
+    drop_fields_tree(fields);
 }

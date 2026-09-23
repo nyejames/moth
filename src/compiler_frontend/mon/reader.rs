@@ -11,7 +11,9 @@ use crate::compiler_frontend::numeric_text::parse::{
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
 use super::schema::{PreparedField, PreparedType, PreparedVariant};
-use super::{BudgetState, MonError, MonErrorCode, PathSegment, PreparedSchema, Span, Value};
+use super::{
+    BudgetState, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema, Span, Value,
+};
 
 /// Decode one complete MON document against a prepared root record schema.
 ///
@@ -454,22 +456,10 @@ impl<'a> Parser<'a> {
         if self.starts_with("::") {
             self.bump();
             self.bump();
+            // No trivia is permitted between `::` and the variant name: the separator and
+            // the variant form one lexical header.
             let (variant, variant_span) = self.parse_identifier()?;
-            let args = if self.peek() == Some('(') {
-                self.bump();
-                self.budget
-                    .charge_decoded_bytes(variant.len(), Some(variant_span))?;
-                let base_len = self.path.len();
-                self.path.push(PathSegment::Variant(variant.to_owned()));
-                let parsed = {
-                    let parsed = self.parse_argument_list_after_open(')', depth + 1)?;
-                    self.path.truncate(base_len);
-                    parsed
-                };
-                Some(parsed)
-            } else {
-                None
-            };
+            let args = self.parse_optional_payload(variant_span, variant, depth)?;
             let end = args
                 .as_ref()
                 .and_then(|_| self.last_consumed_end())
@@ -490,7 +480,10 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.peek() == Some('(') {
+        // A trivia-tolerant `(` still denotes a nominal payload, exactly as an adjacent
+        // `(` did before; keywords are only literals when no payload follows.
+        if self.payload_opens_after_trivia() {
+            self.skip_space_and_comments();
             self.bump();
             let args = self.parse_argument_list_after_open(')', depth + 1)?;
             return Ok(RawValue {
@@ -539,22 +532,11 @@ impl<'a> Parser<'a> {
     ) -> Result<RawValue<'a>, MonError> {
         self.bump();
         self.bump();
+        // No trivia is permitted between `::` and the variant name: the separator and the
+        // variant form one lexical header. Trivia before `(` is handled when the payload
+        // is probed below.
         let (variant, variant_span) = self.parse_identifier()?;
-        let args = if self.peek() == Some('(') {
-            self.bump();
-            self.budget
-                .charge_decoded_bytes(variant.len(), Some(variant_span))?;
-            let base_len = self.path.len();
-            self.path.push(PathSegment::Variant(variant.to_owned()));
-            let parsed = {
-                let parsed = self.parse_argument_list_after_open(')', depth + 1)?;
-                self.path.truncate(base_len);
-                parsed
-            };
-            Some(parsed)
-        } else {
-            None
-        };
+        let args = self.parse_optional_payload(variant_span, variant, depth)?;
         let end = args
             .as_ref()
             .and_then(|_| self.last_consumed_end())
@@ -570,6 +552,59 @@ impl<'a> Parser<'a> {
                 args,
             },
         })
+    }
+
+    fn payload_opens_after_trivia(&self) -> bool {
+        let mut cursor = self.pos;
+        loop {
+            let Some(fragment) = self.input.get(cursor..) else {
+                return false;
+            };
+            let mut characters = fragment.chars();
+            let Some(first) = characters.next() else {
+                return false;
+            };
+            if first.is_whitespace() {
+                cursor += first.len_utf8();
+                continue;
+            }
+            if fragment.starts_with("--") {
+                let mut end = cursor + 2;
+                while let Some(next) = self.input.get(end..).and_then(|rest| rest.chars().next()) {
+                    if next == '\r' || next == '\n' {
+                        break;
+                    }
+                    end += next.len_utf8();
+                }
+                cursor = end;
+                continue;
+            }
+            return first == '(';
+        }
+    }
+
+    fn parse_optional_payload(
+        &mut self,
+        variant_span: Span,
+        variant: &str,
+        depth: usize,
+    ) -> Result<Option<Vec<RawArg<'a>>>, MonError> {
+        if !self.payload_opens_after_trivia() {
+            return Ok(None);
+        }
+        self.skip_space_and_comments();
+        debug_assert_eq!(self.peek(), Some('('));
+        self.bump();
+        self.budget
+            .charge_decoded_bytes(variant.len(), Some(variant_span))?;
+        let base_len = self.path.len();
+        self.path.push(PathSegment::Variant(variant.to_owned()));
+        let parsed = {
+            let parsed = self.parse_argument_list_after_open(')', depth + 1)?;
+            self.path.truncate(base_len);
+            parsed
+        };
+        Ok(Some(parsed))
     }
 
     fn last_consumed_end(&self) -> Option<usize> {
@@ -1568,89 +1603,47 @@ fn validate_map(
     depth: usize,
 ) -> Result<Value, MonError> {
     let mut output: Vec<(Value, Value)> = Vec::new();
+    let mut seen = MapKeyIndex::new();
     for (index, (raw_key, raw_value)) in entries.into_iter().enumerate() {
         let key_span = raw_key.span;
         let base_path_len = path.len();
         path.push(PathSegment::Index(index));
         let key = validate_value(raw_key, key_type, budget, path, depth + 1)?;
         path.truncate(base_path_len);
-        if !is_supported_map_key(&key) {
-            let span = value_span(&key);
+        let Some(is_duplicate) = seen.contains_value(&key) else {
             path.push(PathSegment::Index(index));
             return Err(MonError::new(
                 MonErrorCode::InvalidMapKey,
-                Some(span),
+                Some(key_span),
                 path,
                 "MON map key type is not supported",
             ));
-        }
-        let key_name_len = map_key_name_len(&key);
+        };
+        let key_name_len = super::map_key_name_len(&key);
         charge_decoded_bytes(budget, key_name_len, Some(key_span), path)?;
-        let key_name = map_key_name(&key);
-        if output.iter().any(|(existing, _)| existing == &key) {
-            let duplicate_span = key_span;
+        let key_name = super::map_key_name(&key);
+        if is_duplicate {
             path.push(PathSegment::MapKey(key_name));
             return Err(MonError::new(
                 MonErrorCode::DuplicateMapKey,
-                Some(duplicate_span),
+                Some(key_span),
                 path,
                 "MON map contains a duplicate decoded key",
             ));
         }
+        // Charge the validation-only index before it can grow. Strings are cloned
+        // only after their additional storage is included in the decoded-byte budget.
+        charge_nodes(budget, 1, Some(key_span), path)?;
+        if matches!(&key, Value::String(_)) {
+            charge_decoded_bytes(budget, key_name_len, Some(key_span), path)?;
+        }
+        seen.insert_value(&key);
         path.push(PathSegment::MapKey(key_name));
         let value = validate_value(raw_value, value_type, budget, path, depth + 1)?;
         path.truncate(base_path_len);
         output.push((key, value));
     }
     Ok(Value::Map(output))
-}
-
-fn is_supported_map_key(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::String(_) | Value::Int(_) | Value::Bool(_) | Value::Char(_)
-    )
-}
-
-fn map_key_name(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        Value::Int(number) => number.to_string(),
-        Value::Bool(value) => value.to_string(),
-        Value::Char(value) => value.to_string(),
-        _ => String::new(),
-    }
-}
-
-fn map_key_name_len(value: &Value) -> usize {
-    match value {
-        Value::String(text) => text.len(),
-        Value::Int(number) => {
-            let mut magnitude = number.unsigned_abs();
-            let mut digits = 1;
-            while magnitude >= 10 {
-                magnitude /= 10;
-                digits += 1;
-            }
-            digits + usize::from(*number < 0)
-        }
-        Value::Bool(value) => {
-            if *value {
-                4
-            } else {
-                5
-            }
-        }
-        Value::Char(value) => value.len_utf8(),
-        _ => 0,
-    }
-}
-
-fn value_span(_value: &Value) -> Span {
-    // Owned values intentionally carry no source span.  Callers only reach this path if a
-    // malformed prepared map-key schema bypassed schema preparation, so use an empty local range
-    // rather than inventing a source location.
-    Span::new(0, 0)
 }
 
 fn owned_choice_header(
@@ -2356,6 +2349,194 @@ mod tests {
         );
     }
     #[test]
+    fn accepts_trivia_before_constructor_payloads_but_not_around_separator() {
+        let struct_schema = schema(vec![Field::required(
+            "size",
+            SchemaType::Struct {
+                name: "Size".into(),
+                fields: vec![
+                    Field::required("width", SchemaType::Int),
+                    Field::required("height", SchemaType::Int),
+                ],
+            },
+        )]);
+        assert_eq!(
+            decode_document("size = Size (width = 1, height = 2)", &struct_schema),
+            Ok(Value::Record(vec![(
+                "size".into(),
+                Value::Record(vec![
+                    ("width".into(), Value::Int(1)),
+                    ("height".into(), Value::Int(2)),
+                ]),
+            )]))
+        );
+        assert_eq!(
+            decode_document(
+                "size = Size -- payload\n(width = 1, height = 2)",
+                &struct_schema
+            ),
+            Ok(Value::Record(vec![(
+                "size".into(),
+                Value::Record(vec![
+                    ("width".into(), Value::Int(1)),
+                    ("height".into(), Value::Int(2)),
+                ]),
+            )]))
+        );
+
+        let choice_schema = schema(vec![Field::required(
+            "theme",
+            SchemaType::Choice {
+                name: "Theme".into(),
+                variants: vec![
+                    Variant::unit("Light"),
+                    Variant::payload("Custom", vec![Field::required("name", SchemaType::String)]),
+                ],
+            },
+        )]);
+        assert_eq!(
+            decode_document("theme = Theme::Custom (name = \"Gold\")", &choice_schema),
+            Ok(Value::Record(vec![(
+                "theme".into(),
+                Value::Choice {
+                    qualifier: Some("Theme".into()),
+                    variant: "Custom".into(),
+                    fields: vec![("name".into(), Value::String("Gold".into()))],
+                },
+            )]))
+        );
+        assert_eq!(
+            decode_document(
+                "theme = ::Custom -- payload\n(name = \"Gold\")",
+                &choice_schema
+            ),
+            Ok(Value::Record(vec![(
+                "theme".into(),
+                Value::Choice {
+                    qualifier: None,
+                    variant: "Custom".into(),
+                    fields: vec![("name".into(), Value::String("Gold".into()))],
+                },
+            )]))
+        );
+        // `payload_opens_after_trivia` only accepts whitespace/comments, never `/`.
+        assert_eq!(
+            decode_document("theme = ::Custom / (name = \"Gold\")", &choice_schema)
+                .unwrap_err()
+                .code,
+            MonErrorCode::MissingComma
+        );
+        assert_eq!(
+            decode_document("theme = Theme ::Custom(name = \"Gold\")", &choice_schema)
+                .unwrap_err()
+                .code,
+            MonErrorCode::UnexpectedToken
+        );
+        assert_eq!(
+            decode_document("theme = Theme:: Custom(name = \"Gold\")", &choice_schema)
+                .unwrap_err()
+                .code,
+            MonErrorCode::InvalidIdentifier
+        );
+        assert_eq!(
+            decode_document(
+                "theme = Theme::Custom -- payload\n(name = \"Gold\")",
+                &choice_schema
+            ),
+            Ok(Value::Record(vec![(
+                "theme".into(),
+                Value::Choice {
+                    qualifier: Some("Theme".into()),
+                    variant: "Custom".into(),
+                    fields: vec![("name".into(), Value::String("Gold".into()))],
+                },
+            )]))
+        );
+    }
+
+    #[test]
+    fn typed_map_keys_keep_distinctions_and_first_duplicate_wins() {
+        let int_key_schema = schema(vec![Field::required(
+            "counts",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        assert_eq!(
+            decode_document("counts = {1 = 10, 2 = 20}", &int_key_schema),
+            Ok(Value::Record(vec![(
+                "counts".into(),
+                Value::Map(vec![
+                    (Value::Int(1), Value::Int(10)),
+                    (Value::Int(2), Value::Int(20)),
+                ]),
+            )]))
+        );
+        let duplicate = decode_document("counts = {1 = 10, 1 = 20}", &int_key_schema)
+            .expect_err("duplicate int keys must fail");
+        assert_eq!(duplicate.code, MonErrorCode::DuplicateMapKey);
+        assert_eq!(duplicate.span, Some(Span::new(18, 19)));
+        assert_eq!(
+            duplicate.path,
+            vec![
+                PathSegment::Field("counts".into()),
+                PathSegment::MapKey("1".into()),
+            ]
+        );
+
+        let repeated = decode_document("counts = {1 = 10, 2 = 20, 1 = 30}", &int_key_schema)
+            .expect_err("the first repeated key must fail even after distinct keys");
+        assert_eq!(repeated.code, MonErrorCode::DuplicateMapKey);
+        assert_eq!(repeated.path.last(), Some(&PathSegment::MapKey("1".into())));
+
+        // Exercise the budgeted index path directly with an exhausted budget: the
+        // per-key index charge fails before any further validation work.
+        let tight_schema = schema(vec![Field::required(
+            "counts",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let map_key = PreparedType::Int;
+        let map_value = PreparedType::Int;
+        let mut budget = BudgetState::new(tight_schema.limits());
+        budget
+            .charge_nodes(tight_schema.limits().max_nodes, None)
+            .expect("budget starts exhausted");
+        let mut path = vec![PathSegment::Field("counts".into())];
+        let key_span = Span::new(10, 11);
+        let value_span = Span::new(14, 16);
+        let entries = vec![(
+            RawValue {
+                span: key_span,
+                kind: RawKind::Number(NumericRaw {
+                    text: "1",
+                    normalized: "1".into(),
+                    kind: NumericLiteralKind::WholeNumber,
+                    digit_count: 1,
+                }),
+            },
+            RawValue {
+                span: value_span,
+                kind: RawKind::Number(NumericRaw {
+                    text: "10",
+                    normalized: "10".into(),
+                    kind: NumericLiteralKind::WholeNumber,
+                    digit_count: 2,
+                }),
+            },
+        )];
+        assert_eq!(
+            validate_map(entries, &map_key, &map_value, &mut budget, &mut path, 0)
+                .unwrap_err()
+                .code,
+            MonErrorCode::NodeBudget
+        );
+    }
+
+    #[test]
     fn routes_qualified_struct_arguments_and_preserves_nested_map_paths() {
         let struct_schema = schema(vec![Field::required(
             "size",
@@ -2514,8 +2695,10 @@ break", letter = '\u{1F600}'"#,
 
         let unsupported = Schema::record(vec![Field::required(
             "resource",
-            SchemaType::Unsupported {
-                name: "Resource".into(),
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Unsupported {
+                    name: "Resource".into(),
+                }),
             },
         )])
         .prepare()
@@ -2647,5 +2830,264 @@ break", letter = '\u{1F600}'"#,
         .prepare()
         .expect_err("optional none schemas must be rejected");
         assert_eq!(optional_none.code, MonErrorCode::InvalidSchema);
+    }
+
+    #[test]
+    fn rejects_expressions_in_nested_literal_contexts() {
+        let text_schema = schema(vec![Field::required("text", SchemaType::String)]);
+        for (source, expected) in [
+            ("text = external_name", MonErrorCode::UnexpectedToken),
+            ("text = module.value", MonErrorCode::UnexpectedToken),
+            ("text = $\"template\"", MonErrorCode::UnexpectedToken),
+        ] {
+            assert_eq!(
+                decode_document(source, &text_schema).unwrap_err().code,
+                expected,
+                "source: {source}",
+            );
+        }
+
+        let int_schema = schema(vec![Field::required("value", SchemaType::Int)]);
+        for source in ["value = 1 + 2", "value = 1 as Int"] {
+            assert_eq!(
+                decode_document(source, &int_schema).unwrap_err().code,
+                MonErrorCode::MissingComma,
+                "source: {source}",
+            );
+        }
+
+        let record_schema = schema(vec![Field::required(
+            "record",
+            SchemaType::Record {
+                fields: vec![Field::required("value", SchemaType::Int)],
+            },
+        )]);
+        let collection_schema = schema(vec![Field::required(
+            "items",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Int),
+            },
+        )]);
+        let map_schema = schema(vec![Field::required(
+            "lookup",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let choice_schema = schema(vec![Field::required(
+            "theme",
+            SchemaType::Choice {
+                name: "Theme".into(),
+                variants: vec![Variant::payload(
+                    "Payload",
+                    vec![Field::required("value", SchemaType::Int)],
+                )],
+            },
+        )]);
+
+        for (expression, expected) in [
+            ("external_name", MonErrorCode::UnexpectedToken),
+            ("constant_reference", MonErrorCode::UnexpectedToken),
+            ("1 + 2", MonErrorCode::MissingComma),
+            ("foldable_call()", MonErrorCode::TypeMismatch),
+            ("1 as Int", MonErrorCode::MissingComma),
+            ("$\"template\"", MonErrorCode::UnexpectedToken),
+            ("module.value", MonErrorCode::UnexpectedToken),
+        ] {
+            for (context, schema, source) in [
+                (
+                    "record",
+                    &record_schema,
+                    format!("record = (value = {expression})"),
+                ),
+                (
+                    "collection",
+                    &collection_schema,
+                    format!("items = {{0, {expression}}}"),
+                ),
+                ("map", &map_schema, format!("lookup = {{0 = {expression}}}")),
+                (
+                    "choice payload",
+                    &choice_schema,
+                    format!("theme = ::Payload(value = {expression})"),
+                ),
+            ] {
+                assert_eq!(
+                    decode_document(&source, schema).unwrap_err().code,
+                    expected,
+                    "{context} input: {source}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_map_keys_compare_decoded_string_and_integer_values() {
+        let string_schema = schema(vec![Field::required(
+            "values",
+            SchemaType::Map {
+                key: Box::new(SchemaType::String),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let escaped_duplicate =
+            decode_document(r#"values = {"x" = 1, "\u{78}" = 2}"#, &string_schema)
+                .expect_err("different escapes decode to the same string key");
+        assert_eq!(escaped_duplicate.code, MonErrorCode::DuplicateMapKey);
+
+        let integer_schema = schema(vec![Field::required(
+            "values",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let separated_duplicate =
+            decode_document("values = {1000 = 1, 1_000 = 2}", &integer_schema)
+                .expect_err("numeric separators do not change the decoded integer key");
+        assert_eq!(separated_duplicate.code, MonErrorCode::DuplicateMapKey);
+    }
+
+    #[test]
+    fn choice_schema_rejections_cover_nominality_and_payload_routing() {
+        let choice_schema = schema(vec![Field::required(
+            "theme",
+            SchemaType::Choice {
+                name: "Theme".into(),
+                variants: vec![
+                    Variant::unit("Ready"),
+                    Variant::payload("Text", vec![Field::required("value", SchemaType::String)]),
+                ],
+            },
+        )]);
+        for (source, expected) in [
+            ("theme = Other::Ready", MonErrorCode::QualifierMismatch),
+            ("theme = ::Missing", MonErrorCode::UnknownVariant),
+            ("theme = ::Ready()", MonErrorCode::Arity),
+            ("theme = ::Text", MonErrorCode::Arity),
+            (
+                "theme = ::Text(value = \"first\", \"second\")",
+                MonErrorCode::ArgumentOrder,
+            ),
+            (
+                "theme = ::Text(\"first\", value = \"second\")",
+                MonErrorCode::DuplicateArgument,
+            ),
+        ] {
+            assert_eq!(
+                decode_document(source, &choice_schema).unwrap_err().code,
+                expected,
+                "source: {source}",
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_schema_and_defaults_fail_during_preparation() {
+        let invalid_default = Schema::record(vec![Field::with_default(
+            "value",
+            SchemaType::Int,
+            Value::String("not an Int".into()),
+        )])
+        .prepare()
+        .expect_err("schema defaults are checked before use");
+        assert_eq!(invalid_default.code, MonErrorCode::InvalidDefault);
+
+        let invalid_key = Schema::record(vec![Field::required(
+            "values",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Collection {
+                    element: Box::new(SchemaType::Int),
+                }),
+                value: Box::new(SchemaType::Int),
+            },
+        )])
+        .prepare()
+        .expect_err("only supported scalar families may be map keys");
+        assert_eq!(invalid_key.code, MonErrorCode::InvalidMapKey);
+
+        let duplicate_variant = Schema::record(vec![Field::required(
+            "value",
+            SchemaType::Choice {
+                name: "Choice".into(),
+                variants: vec![Variant::unit("Same"), Variant::unit("Same")],
+            },
+        )])
+        .prepare()
+        .expect_err("choice variant names must be unique");
+        assert_eq!(duplicate_variant.code, MonErrorCode::InvalidSchema);
+    }
+
+    #[test]
+    fn wide_unique_map_decodes_in_insertion_order() {
+        const ENTRY_COUNT: usize = 2_048;
+        let schema = schema(vec![Field::required(
+            "values",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let entries = (0..ENTRY_COUNT)
+            .map(|value| format!("{value} = {value}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("values = {{{entries}}}");
+        let decoded = decode_document(&source, &schema).expect("wide unique map decodes");
+        let Value::Record(fields) = decoded else {
+            panic!("document root is a record");
+        };
+        let Some((_, Value::Map(entries))) = fields.first() else {
+            panic!("values field is a map");
+        };
+        assert_eq!(entries.len(), ENTRY_COUNT);
+        assert_eq!(entries.first(), Some(&(Value::Int(0), Value::Int(0))));
+        assert_eq!(
+            entries.last(),
+            Some(&(
+                Value::Int((ENTRY_COUNT - 1) as i32),
+                Value::Int((ENTRY_COUNT - 1) as i32),
+            )),
+        );
+    }
+    #[test]
+    fn rejects_trailing_roots_and_closed_record_violations() {
+        let schema = schema(vec![Field::with_default(
+            "setting",
+            SchemaType::Int,
+            Value::Int(0),
+        )]);
+
+        let trailing = decode_document("(setting = 1) (setting = 2)", &schema).unwrap_err();
+        assert_eq!(trailing.code, MonErrorCode::TrailingInput);
+
+        let unknown = decode_document("seting = 2", &schema).unwrap_err();
+        assert_eq!(unknown.code, MonErrorCode::UnknownField);
+        assert_eq!(unknown.path, vec![PathSegment::Field("seting".into())],);
+
+        let duplicate = decode_document("setting = 1, setting = 2", &schema).unwrap_err();
+        assert_eq!(duplicate.code, MonErrorCode::DuplicateField);
+        assert_eq!(duplicate.span, Some(Span::new(13, 20)));
+        assert_eq!(duplicate.path, vec![PathSegment::Field("setting".into())],);
+    }
+
+    #[test]
+    fn rejects_bare_names_as_map_keys() {
+        let schema = schema(vec![Field::required(
+            "scores",
+            SchemaType::Map {
+                key: Box::new(SchemaType::String),
+                value: Box::new(SchemaType::Int),
+            },
+        )]);
+        let error = decode_document("scores = {player = 10}", &schema)
+            .expect_err("bare names cannot become implicit map-key strings");
+        assert_eq!(error.code, MonErrorCode::InvalidMapKey);
+        assert_eq!(error.span, Some(Span::new(10, 16)));
+        assert_eq!(
+            error.path,
+            vec![PathSegment::Field("scores".into()), PathSegment::Index(0),],
+        );
     }
 }

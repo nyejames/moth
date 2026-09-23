@@ -149,7 +149,7 @@ defaults and bounded first errors. This reference owns the shared notation and
 the distinction between grouping, supplied arguments and anonymous
 construction.
 
-The Rust-facing codec contract is accepted and queued; see @../progress (Progress)
+The Rust-only `moth::mon` codec is implemented; see @../progress (Progress)
 for current support. Moth-native `$mon`, automatic schema extraction and the
 static project builder remain deferred separately. The engine or application
 validates its own schema over that data.

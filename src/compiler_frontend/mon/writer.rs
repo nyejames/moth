@@ -803,6 +803,10 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(duplicate_map_error.code, MonErrorCode::DuplicateMapKey);
+        assert_eq!(
+            duplicate_map_error.path,
+            vec![PathSegment::MapKey("same".into())]
+        );
 
         let arity_error = encode_document(
             &Value::Record(vec![(
@@ -818,23 +822,17 @@ mod tests {
         .unwrap_err();
         assert_eq!(arity_error.code, MonErrorCode::Arity);
 
-        let node_schema = Schema::record(vec![Field::required(
-            "values",
-            SchemaType::Collection {
-                element: Box::new(SchemaType::Int),
-            },
-        )])
+        let node_schema = Schema::value(SchemaType::Collection {
+            element: Box::new(SchemaType::Int),
+        })
         .with_limits(Limits {
-            max_nodes: 4,
+            max_nodes: 2,
             ..Limits::default()
         })
         .prepare()
         .expect("schema preparation fits node budget");
-        let node_error = encode_document(
-            &Value::Record(vec![(
-                "values".into(),
-                Value::Collection(vec![Value::Int(1), Value::Int(2)]),
-            )]),
+        let node_error = encode_value(
+            &Value::Collection(vec![Value::Int(1), Value::Int(2)]),
             &node_schema,
         )
         .unwrap_err();
@@ -858,5 +856,83 @@ mod tests {
             encode_value(&Value::None, &optional_schema).unwrap(),
             "none"
         );
+    }
+
+    #[test]
+    fn finite_float_boundaries_materialise_and_round_trip() {
+        let schema = schema(vec![Field::required(
+            "values",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Float),
+            },
+        )]);
+        let bits_of = |value: &Value| {
+            let Value::Record(fields) = value else {
+                panic!("float boundary document decoded to a non-record");
+            };
+            let Some((_, Value::Collection(values))) =
+                fields.iter().find(|(name, _)| name == "values")
+            else {
+                panic!("decoded float boundary field is not a collection");
+            };
+            values
+                .iter()
+                .map(|value| match value {
+                    Value::Float(number) => number.to_bits(),
+                    _ => panic!("decoded float boundary element is not a Float"),
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Decoder materialisation from literal source text, without the writer.
+        let materialised = decode_document(
+            "values = {1.7976931348623157e+308, -1.7976931348623157e+308, \
+             2.2250738585072014e-308, -2.2250738585072014e-308, \
+             5e-324, -5e-324, -0.0, 0}",
+            &schema,
+        )
+        .expect("float boundary literals decode");
+        assert_eq!(
+            bits_of(&materialised),
+            [
+                f64::MAX.to_bits(),
+                (-f64::MAX).to_bits(),
+                f64::MIN_POSITIVE.to_bits(),
+                (-f64::MIN_POSITIVE).to_bits(),
+                f64::from_bits(1).to_bits(),
+                f64::from_bits(0x8000_0000_0000_0001).to_bits(),
+                (-0.0f64).to_bits(),
+                0.0f64.to_bits(),
+            ]
+        );
+
+        // Writer-to-reader round trip, including neighbours of each boundary.
+        let boundaries = [
+            f64::MAX,
+            -f64::MAX,
+            f64::from_bits(f64::MAX.to_bits() - 1),
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            f64::from_bits(f64::MIN_POSITIVE.to_bits() - 1),
+            f64::from_bits(f64::MIN_POSITIVE.to_bits() + 1),
+            f64::from_bits(1),
+            f64::from_bits(0x8000_0000_0000_0001),
+            -0.0,
+            0.0,
+            1.0,
+            f64::from_bits(1.0f64.to_bits() + 1),
+        ];
+        let value = Value::Record(vec![(
+            "values".into(),
+            Value::Collection(
+                boundaries
+                    .iter()
+                    .map(|value| Value::Float(*value))
+                    .collect(),
+            ),
+        )]);
+        let encoded = encode_document(&value, &schema).expect("float boundaries encode");
+        let round_tripped = decode_document(&encoded, &schema).expect("float boundaries decode");
+        assert_eq!(bits_of(&round_tripped), boundaries.map(f64::to_bits));
     }
 }

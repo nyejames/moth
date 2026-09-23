@@ -87,9 +87,21 @@ This is a bunch of notes for work that will likely be picked up in the future, b
 
 MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format is literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The initial format and Rust compiler-library codec were delivered immediately after the syntax checkpoint; they are not deferred with language integration.
 
-The final roadmap follow-up adds Moth-native usage and the static MON project builder. It reuses the codec, shared lexical/argument owners and ordinary Moth types rather than adding explicit serialisation traits, a second schema language or a second parser. Compiler-owned `$mon` convenience is accepted direction, but its exact invocation syntax is not defined. Source typing, automatic schema extraction, backend operations and builder commands are not delivered by the Rust-only v1 delivery.
+The final roadmap follow-up adds Moth-native usage and the static MON project
+builder. It reuses the delivered codec, MON syntax notation and ordinary Moth
+types. MON literal traversal and escape decoding remain local; this follow-up
+does not add a second MON parser, depend on the Moth expression parser for
+literal reading, or introduce explicit serialisation traits or a second schema
+language. Compiler-owned `$mon` convenience is accepted direction, but its exact
+invocation syntax is not defined. Source typing, automatic schema extraction,
+backend operations and builder commands are not delivered by the Rust-only v1
+delivery.
 
-Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains a collection even at a map receiving context, Unicode escapes use a shared lexical contract and `::Variant(...)` uses a known expected choice type. Track any undelivered source portions explicitly rather than assuming support from the data reader.
+Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
+a collection even at a map receiving context, and `::Variant(...)` uses a known
+expected choice type. MON Unicode escapes remain local to the MON format; source
+Unicode-escape support is explicitly deferred. Track undelivered source
+portions rather than assuming support from the data reader.
 
 The static builder emits compile-time-known `.mon` assets through ordinary build output ownership. Evaluated runtime templates remain ordinary serialisable Strings for consuming builders. Templates acquire no hidden schema, wire, route or subscription. Resource-bearing strings require concrete builder-assigned characters before MON encoding. Applications own schema versions, migrations and resource interpretation.
 

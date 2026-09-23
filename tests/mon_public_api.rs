@@ -483,3 +483,159 @@ fn nested_scalar_encoding_quotes_strings() {
         "none"
     );
 }
+
+#[test]
+fn max_depth_policy_has_an_implementation_safe_ceiling() {
+    let schema = Schema::value(SchemaType::Int)
+        .with_limits(Limits {
+            max_depth: Limits::MAX_SAFE_DEPTH + 1,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect_err("unsafe recursion policies are rejected");
+    assert_eq!(schema.code, MonErrorCode::DepthBudget);
+}
+
+#[test]
+fn encoder_preserves_decoded_node_budget() {
+    let schema = Schema::record(vec![Field::required(
+        "items",
+        SchemaType::Collection {
+            element: Box::new(SchemaType::Record {
+                fields: vec![Field::required("value", SchemaType::Int)],
+            }),
+        },
+    )])
+    .with_limits(Limits {
+        max_nodes: 6,
+        ..Limits::default()
+    })
+    .prepare()
+    .expect("schema types fit the node budget");
+    let decoded = decode_document("items = {(value = 1), (value = 2)}", &schema)
+        .expect("collection records fit the node budget");
+
+    let encoded = encode_document(&decoded, &schema)
+        .expect("encoding a decoded value uses the same node budget");
+    let round_trip =
+        decode_document(&encoded, &schema).expect("encoded output remains valid under the schema");
+    assert_eq!(round_trip, decoded);
+}
+
+#[test]
+fn encoded_duplicate_map_key_reports_the_key_path() {
+    let schema = Schema::value(SchemaType::Map {
+        key: Box::new(SchemaType::String),
+        value: Box::new(SchemaType::Int),
+    })
+    .prepare()
+    .expect("map schema prepares");
+    let error = encode_value(
+        &Value::Map(vec![
+            (Value::String("same".into()), Value::Int(1)),
+            (Value::String("same".into()), Value::Int(2)),
+        ]),
+        &schema,
+    )
+    .expect_err("duplicate map keys must fail");
+
+    assert_eq!(error.code, MonErrorCode::DuplicateMapKey);
+    assert_eq!(error.path, vec![PathSegment::MapKey("same".into())]);
+}
+
+#[test]
+fn encoded_duplicate_key_path_respects_decoded_byte_budget() {
+    let schema = Schema::value(SchemaType::Map {
+        key: Box::new(SchemaType::String),
+        value: Box::new(SchemaType::Int),
+    })
+    .with_limits(Limits {
+        max_decoded_bytes: 12,
+        ..Limits::default()
+    })
+    .prepare()
+    .expect("map schema prepares");
+    let error = encode_value(
+        &Value::Map(vec![
+            (Value::String("same".into()), Value::Int(1)),
+            (Value::String("same".into()), Value::Int(2)),
+        ]),
+        &schema,
+    )
+    .expect_err("duplicate diagnostic path bytes are budgeted before allocation");
+
+    assert_eq!(error.code, MonErrorCode::DecodedBudget);
+}
+#[test]
+fn max_safe_depth_accepts_decodes_and_drops_nested_records() {
+    let mut nested_type = SchemaType::Int;
+    let mut nested_value = Value::Int(7);
+    let mut nested_literal = "7".to_owned();
+    for _ in 0..Limits::MAX_SAFE_DEPTH - 1 {
+        nested_type = SchemaType::Record {
+            fields: vec![Field::required("next", nested_type)],
+        };
+        nested_value = Value::Record(vec![("next".to_owned(), nested_value)]);
+        nested_literal = format!("(next = {nested_literal})");
+    }
+
+    let schema = Schema::record(vec![Field::required("value", nested_type)])
+        .with_limits(Limits {
+            max_depth: Limits::MAX_SAFE_DEPTH,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("schema at the safe depth ceiling prepares");
+    let source = format!("value = {nested_literal}");
+    let decoded = decode_document(&source, &schema)
+        .expect("nested document at the safe depth ceiling decodes");
+    let expected = Value::Record(vec![("value".to_owned(), nested_value)]);
+    assert_eq!(decoded, expected);
+
+    let encoded = encode_document(&decoded, &schema)
+        .expect("the writer accepts a value at the safe depth ceiling");
+    let round_trip = decode_document(&encoded, &schema)
+        .expect("encoded output remains valid at the safe depth ceiling");
+    assert_eq!(round_trip, decoded);
+
+    drop(decoded);
+    drop(round_trip);
+    drop(expected);
+    drop(schema);
+}
+#[test]
+fn rejecting_a_deep_schema_releases_its_unvisited_tail_iteratively() {
+    let mut ty = SchemaType::Int;
+    for _ in 0..20_000 {
+        ty = SchemaType::Optional(Box::new(ty));
+    }
+
+    let error = Schema::value(ty)
+        .prepare()
+        .expect_err("the default depth limit rejects the schema");
+    assert_eq!(error.code, MonErrorCode::DepthBudget);
+}
+
+#[test]
+fn rejecting_a_deep_default_releases_its_unvisited_tail_iteratively() {
+    let mut ty = SchemaType::Int;
+    for _ in 0..32 {
+        ty = SchemaType::Collection {
+            element: Box::new(ty),
+        };
+    }
+
+    let mut value = Value::String("wrong leaf".into());
+    for _ in 0..20_000 {
+        value = Value::Collection(vec![value]);
+    }
+
+    let error = Schema::record(vec![Field::with_default("nested", ty, value)])
+        .with_limits(Limits {
+            max_depth: Limits::MAX_SAFE_DEPTH,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect_err("the nested default does not match its schema");
+    assert_eq!(error.code, MonErrorCode::InvalidDefault);
+}

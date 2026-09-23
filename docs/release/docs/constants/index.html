@@ -914,7 +914,7 @@ settings <span class='moth-code-operator'>#=</span> <span class='moth-code-delim
     <span class='moth-code-delimiter'>)</span>,
 <span class='moth-code-delimiter'>)</span>
 
-width <span class='moth-code-operator'>#=</span> settings.window.size.width</code></pre><p>All nested initializers must fold. Initializers use the surrounding scope, not names introduced by earlier fields. Nesting introduces neither arbitrary compile-time execution nor implicit construction of a named type.</p><p>Input contracts belong to declarations rather than record entries. Exact configuration placement and processing rules are owned by <a href="../project-structure/#build-inputs">Build configuration values</a>. The MON format&#39;s serialisation domain is an accepted Rust-only contract owned by <a href="../mon/#mon-format">MON format</a>; its codec is queued, and it does not change const-record evaluation or source syntax.</p>
+width <span class='moth-code-operator'>#=</span> settings.window.size.width</code></pre><p>All nested initializers must fold. Initializers use the surrounding scope, not names introduced by earlier fields. Nesting introduces neither arbitrary compile-time execution nor implicit construction of a named type.</p><p>Input contracts belong to declarations rather than record entries. Exact configuration placement and processing rules are owned by <a href="../project-structure/#build-inputs">Build configuration values</a>. The MON format&#39;s serialisation domain is an accepted Rust-only contract owned by <a href="../mon/#mon-format">MON format</a>; its <code>moth::mon</code> codec is implemented, and it does not change const-record evaluation or source syntax.</p>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">

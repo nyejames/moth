@@ -13,7 +13,7 @@
     `$test` and custom metadata remain future work. For more detailed breakdowns, see
     the @../ (Moth documentation).
     The literal MON data format contract is documented separately at @../mon/#mon-format (MON format).
-    That contract is not implemented source behaviour and not an executable codec: source `{=}` enforcement,
+    The Rust-only `moth::mon` codec is implemented and executable from Rust; it is not implemented Moth source or runtime behaviour: source `{=}` enforcement,
     source Unicode escapes beyond the five below, contextual `::Variant` construction and `$mon` remain deferred.
 
 ## Rules to internalise first
@@ -1540,4 +1540,4 @@ Do not invent shadowing, macros, general closures/function values, exceptions, c
 Outside scope also includes target/platform conditional compilation, conditionally present imports,
 declarations or exports, builder-provided target identity flags and backend-specific source legality.
 
-Further detail: @../language-overview (language), @../mon/#mon-format (MON format, documented contract; not implemented source behaviour and no executable codec), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).
+Further detail: @../language-overview (language), @../mon/#mon-format (MON format, executable Rust-only codec; not implemented Moth source or runtime behaviour), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).

@@ -224,20 +224,23 @@ and values equal to defaults.
 
 The data format represents value trees. Repeated shared source values are
 encoded at each occurrence, and decoding establishes no preserved alias
-relationship or allocation identity. Cyclic values fail encoding. Finite
-values of recursive schemas are distinct from cyclic values. Applications
-encode graph links as ordinary identifiers and reconstruct them explicitly.
+relationship or allocation identity. Public `Value` is an owned tree, so cyclic
+host data cannot be represented by this API. Recursive schemas still accept
+finite nested values. Applications can encode graph links as ordinary
+identifiers and reconstruct them explicitly.
 
 ### Limits and first errors
 
 The codec consumes complete documents and fails fast. Incremental input,
 streams and multiple-document framing remain deferred. Finite configurable
 budgets bound input bytes, nesting, node and entry counts, numeric digits and
-materialisation, decoded data and encoded output. Each counter is checked
+materialisation, decoded data and encoded output. The default depth budget is
+64; `Limits::MAX_SAFE_DEPTH` sets a hard ceiling of 64 for configurable
+`max_depth`, and schema preparation rejects larger policies. Each counter is checked
 before the affected allocation or expansion, including default expansion and
-repeated shared-value expansion. The default ceiling is 1 MiB of input, depth
-64, 100,000 nodes, 4,096 numeric digits, 16 MiB of decoded bytes, 16 MiB of
-output bytes and 10,000 default expansions.
+repeated shared-value expansion. The other defaults are 1 MiB of input,
+100,000 nodes, 4,096 numeric digits, 16 MiB of decoded bytes, 16 MiB of output
+bytes and 10,000 default expansions.
 
 Limits are receiver resource policy, not grammar dialects. A valid document
 may exceed a receiver's budget, and that outcome is reported distinctly from
@@ -245,18 +248,19 @@ syntax and schema errors.
 
 Both operations publish only complete successful results. On failure, partial
 values and output buffers are discarded and no partial public result exists.
-Each failure is one structured first error with a stable reason, the original
-input byte range and the field or element path where available. A missing
-field points to its containing record, not fabricated source text. Messages
-are rendered only at the caller's diagnostic boundary.
+Each failure is a structured first error with a stable reason and a field or
+element path where available; decode errors include the original input byte
+range when available. Messages are rendered only at the caller's diagnostic
+boundary.
 
 ### Deterministic writing
 
 Typed record fields write in schema declaration order. Collection and map
-order is preserved. Pretty and compact modes differ only in whitespace and
-share one writer. Given the same ordered value, schema, options and encoder
-version, output is deterministic, with no promise that all semantically
-equivalent documents share identical bytes.
+order is preserved. Public `encode_document` and `encode_value` emit compact
+output; pretty formatting is private to writer tests and has no public mode.
+Given the same ordered value, schema and encoder version, output is
+deterministic, with no promise that all semantically equivalent documents share
+identical bytes.
 
 Formatting authored text is distinct from typed encoding. It cannot silently
 fill omitted fields, reorder maps, remove unchecked qualifiers or erase
@@ -284,7 +288,7 @@ with its invocation syntax still undecided, belongs to later Moth-native
 integration, as do Moth-side encode and decode operations, automatic schema
 extraction from ordinary Moth types and the static `.mon` project builder.
 
-Sharing a decoding primitive does not widen the source language. The
-`{=}` empty-map distinction, Unicode escapes and contextual `::Variant`
-construction remain deferred source parity unless another authorised syntax
-change has already delivered them.
+MON's local escape decoder adds no source-language syntax. The `{=}` empty-map
+distinction, Unicode escapes and contextual `::Variant` construction remain
+deferred source parity unless another authorised syntax change has already
+delivered them.

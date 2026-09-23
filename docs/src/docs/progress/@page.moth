@@ -694,7 +694,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: MON Rust codec]
             [: Partial]
             [: Broad public API, focused codec and bounded hardening coverage]
-            [: The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; release measurements are recorded separately. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.]
+            [: The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.]
         ]
 
         [data:

@@ -82,7 +82,7 @@ pub enum MonErrorCode {
     InternalInvariant,
 }
 
-/// A structured first failure from schema preparation or complete-document decoding.
+/// A structured first failure from schema preparation, MON encoding, or complete-document decoding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonError {
     pub code: MonErrorCode,
@@ -112,15 +112,31 @@ impl MonError {
 }
 
 /// Finite resource policy applied before parsing and while expanding owned data.
+///
+/// `max_depth` is bounded by an implementation-safe ceiling so recursive
+/// parser, schema, validation and rendering walks stay within native stack.
+/// Policies above [`Limits::MAX_SAFE_DEPTH`] are rejected during
+/// [`Schema::prepare`] with a structured depth-budget failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_input_bytes: usize,
+    /// Maximum accepted nesting depth. Values above
+    /// [`Limits::MAX_SAFE_DEPTH`] are rejected during preparation.
     pub max_depth: usize,
     pub max_nodes: usize,
     pub max_numeric_digits: usize,
     pub max_decoded_bytes: usize,
     pub max_output_bytes: usize,
     pub max_default_expansions: usize,
+}
+
+impl Limits {
+    /// Implementation-safe ceiling for `max_depth`.
+    ///
+    /// Recursive parser, schema preparation, validation and rendering walks
+    /// check depth against the accepted policy, so every prepared schema
+    /// stays at or below this bound. There is no unlimited switch.
+    pub const MAX_SAFE_DEPTH: usize = 64;
 }
 
 impl Default for Limits {
@@ -396,5 +412,79 @@ impl<'a> BudgetState<'a> {
             ));
         }
         Ok(())
+    }
+}
+/// Render a supported map key and its byte length for diagnostic paths.
+fn map_key_name(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Int(number) => number.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Char(value) => value.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn map_key_name_len(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.len(),
+        Value::Int(number) => {
+            let mut magnitude = number.unsigned_abs();
+            let mut digits = 1;
+            while magnitude >= 10 {
+                magnitude /= 10;
+                digits += 1;
+            }
+            digits + usize::from(*number < 0)
+        }
+        Value::Bool(value) => {
+            if *value {
+                4
+            } else {
+                5
+            }
+        }
+        Value::Char(value) => value.len_utf8(),
+        _ => 0,
+    }
+}
+
+/// Validation-only duplicate index for MON maps.
+///
+/// The owned [`Value::Map`] output keeps insertion order; these typed sets only
+/// answer “have we seen this key” without rescanning prior entries.
+#[derive(Debug, Default)]
+pub(super) struct MapKeyIndex {
+    strings: std::collections::HashSet<String>,
+    ints: std::collections::HashSet<i32>,
+    bools: std::collections::HashSet<bool>,
+    chars: std::collections::HashSet<char>,
+}
+
+impl MapKeyIndex {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns `None` for a value outside the supported map-key families.
+    pub(super) fn contains_value(&self, value: &Value) -> Option<bool> {
+        match value {
+            Value::String(text) => Some(self.strings.contains(text)),
+            Value::Int(number) => Some(self.ints.contains(number)),
+            Value::Bool(flag) => Some(self.bools.contains(flag)),
+            Value::Char(character) => Some(self.chars.contains(character)),
+            _ => None,
+        }
+    }
+
+    /// Inserts a supported key, cloning strings only after callers charge the copy.
+    pub(super) fn insert_value(&mut self, value: &Value) -> bool {
+        match value {
+            Value::String(text) => self.strings.insert(text.clone()),
+            Value::Int(number) => self.ints.insert(*number),
+            Value::Bool(flag) => self.bools.insert(*flag),
+            Value::Char(character) => self.chars.insert(*character),
+            _ => false,
+        }
     }
 }

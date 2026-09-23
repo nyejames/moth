@@ -1487,12 +1487,14 @@ a caller-retained backing buffer, and the default public API has no borrowed
 document view.
 
 Input accounting runs before the affected allocation or expansion under checked
-arithmetic, using the accepted defaults of 1 MiB input bytes, depth 64, 100,000
-nodes, 4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
-default expansions. Accepted recursion stays bounded so the cursor and owned-tree
-destruction remain within the documented depth. Limits are receiver resource
-policy, not grammar dialects: a valid document that exceeds a receiver's budget
-fails distinctly from syntax and schema errors.
+arithmetic. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes, 4,096
+numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000 default
+expansions. Configurable `max_depth` is capped at `Limits::MAX_SAFE_DEPTH`
+(`64`), with larger policies rejected during schema preparation. Accepted
+recursion stays bounded so the cursor and owned-tree destruction remain within
+the documented depth. Limits are receiver resource policy, not grammar
+dialects: a valid document that exceeds a receiver's budget fails distinctly
+from syntax and schema errors.
 
 The cursor never constructs `SourceId`, `PathId`, `StringId`, `SourceDatabase`,
 AST, HIR or compiler cursors. It performs no file IO, module import, schema
@@ -1520,7 +1522,7 @@ later render of a retained error needs the input the span was measured against.
 Line and column conversion, where a caller wants it, happens at that caller's
 rendering boundary and is never stored in the span.
 
-### Retained numeric text and shared escapes
+### Retained numeric text and local escape decoding
 
 Whole-number and decimal or exponent spellings stay distinguishable through a
 lossless numeric literal representation until the destination is known. The
@@ -1533,13 +1535,12 @@ follows the numeric authority and rejects non-finite source values and
 conversion results, emitting `-0.0` for negative zero and `0` for positive zero
 while decoding preserves the sign bit.
 
-String and character escapes share the accepted decoding primitive without
-widening source syntax: MON enables its Unicode `\u{H...}` branch with one to
-six ASCII hex digits while Moth source remains limited to its existing five
-escapes. Writer output uses uppercase hex; unescaped newlines and CRLF stay
-byte-for-byte content because MON is data, not Moth source. Sharing the owner
-adds no source-language change, so the `Non-goals` rule against source-syntax
-changes still holds.
+MON string and character escapes are decoded by a bounded literal reader owned
+by the MON format; no Moth source escape owner is shared. MON's Unicode
+`\u{H...}` form accepts one to six ASCII hex digits. Moth source remains limited
+to its existing five escapes. Writer output uses uppercase hex; unescaped
+newlines and CRLF remain byte-for-byte content because MON is data, not Moth
+source. The local decoder adds no source-language change.
 
 ### Immutable prepared schema and owned result
 
@@ -1550,10 +1551,17 @@ structured failure, never a panic. Preparation rejects a transitive
 `SchemaType::Unsupported` member before any document is processed; there is no
 public unsupported value. Defaults apply at the exact missing field only, with
 no deep merge and no replacement of a supplied `none`. Typed encoding emits all
-completed fields in schema declaration order over the same writer in pretty and
-compact modes, which differ only in whitespace.
+completed fields in schema declaration order. Public `encode_document` and
+`encode_value` emit compact output; pretty formatting is private to writer tests,
+not a public mode.
 
-Results are owned trees with no alias or allocation-identity promise: repeated shared source values encode at each occurrence, decoding establishes no preserved alias relationship, and cyclic host data fails encoding. Writers are deterministic without canonical-byte semantics. Every public encode/decode operation publishes only a complete successful result: decoding discards partial values, encoders build a private `String` and discard it on error, and no caller buffer or partial public result exists on the guaranteed path.
+Results are owned trees with no alias or allocation-identity promise: repeated
+shared source values encode at each occurrence, and decoding preserves no alias
+relationship. The public `Value` model cannot represent cyclic host data. Writers
+are deterministic without canonical-byte semantics. Every public encode/decode
+operation publishes only a complete successful result: decoding discards partial
+values, encoders build a private `String` and discard it on error, and no caller
+buffer or partial public result exists on the guaranteed path.
 
 ### Public error context beside compiler diagnostics
 
@@ -1568,10 +1576,10 @@ key. Messages render only at the caller's diagnostic boundary.
 
 This projection stays beside, not inside, the compiler failure architecture. It
 does not create a `DiagnosticRecord`, side store, `InfrastructureFailure` or
-`compiler_bug!` site, does not start the later compact-diagnostics migration and
-adds no competing global error taxonomy. Decoding returns the first structured
-failure with its stable reason, original input byte range and field or element
-path where available.
+`compiler_bug!` site, does not start the later compact-diagnostics migration
+and adds no competing global error taxonomy. Encoding and decoding return the
+first structured `MonError` with its stable reason, original input byte range
+when decoding, and field or element path where available.
 
 ### What this handoff does not use or change
 

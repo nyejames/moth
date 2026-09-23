@@ -1646,8 +1646,7 @@ for the Rust service: `decode_document`, `decode_document_bytes`,
 `encode_document`, `encode_value`, `Field`, `PreparedSchema`, `Schema`,
 `SchemaType`, `Variant`, `Value`, `Limits`, `MonError`, `MonErrorCode`,
 `PathSegment` and `Span`. The checked-in outside-crate coverage in
-`tests/mon_public_api.rs` follows the companion consumer shape in
-`tmp/mon-rust-tooling-v1-consumer.rs`: it builds a static schema once,
+`tests/mon_public_api.rs` builds a static schema once,
 encodes a record, decodes it, drops the source `String` and converts the
 owned result into native Rust data. The public path does not expose
 `compiler_frontend` internals, and availability here is not an assertion
@@ -1736,9 +1735,9 @@ shapes, field types, nominal identities, choice variants and explicit default
 values; it defines no second expression language and adds no rename, skip,
 flatten, custom codec hook or user predicate. A schema-checked owned MON value is
 the initial codec result. The engine maps that value to its native struct with
-ordinary Rust functions, as the accepted consumer sketch demonstrates. Automatic
-derives, procedural macros, Serde traits, broad reflection and automatic
-extraction from Moth types are not part of this boundary.
+ordinary Rust functions, as the checked-in coverage in `tests/mon_public_api.rs`
+demonstrates. Automatic derives, procedural macros, Serde traits, broad reflection
+and automatic extraction from Moth types are not part of this boundary.
 
 Public values are owned trees: `None`, `Bool`, `Char`, `String`, `Int(i32)`,
 `Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
@@ -1748,21 +1747,23 @@ input text without a caller-retained backing buffer; internal borrowing during
 parsing is allowed. The default public API has no borrowed document view and
 exposes no partially built result. Repeated shared source values encode at each
 occurrence and decode with no preserved alias relationship or allocation
-identity. Cyclic host data fails encoding; finite values of recursive schemas
-are distinct from cyclic values but add no recursive Moth type feature.
+identity. The public `Value` model is an owned tree and cannot represent cyclic
+host data; finite values of recursive schemas remain ordinary nested values.
 
-Writing is deterministic without canonical-byte semantics: given the same ordered
-value, schema, options and encoder version the output is deterministic, but
-semantically equivalent documents need not share bytes. Pretty and compact modes
-differ only in whitespace over the same writer. A comment-preserving formatter
-and canonical hashing or signing facility are not part of this service.
+Writing is deterministic without canonical-byte semantics: given the same
+ordered value, schema and encoder version, output is deterministic, but
+semantically equivalent documents need not share bytes. Public `encode_document`
+and `encode_value` emit compact output; pretty formatting is private to writer
+tests, not a public mode. A comment-preserving formatter and canonical hashing
+or signing facility are not part of this service.
 
-### Shared lexical owners without source widening
+### Lexical contracts without source widening
 
-MON reuses the compiler's lexical owners and reproduces only the accepted
-delimiter and slot policy in its own data cursor. It does not clone the source
-grammar, rescan repeatedly or route through `f64`, an `Int` token payload or
-display formatting. Whole-number and decimal or exponent spellings stay
+MON reuses the `numeric_text` grammar for numbers and otherwise decodes its
+literal data locally. Its data cursor reproduces only the accepted delimiter
+and slot policy; it does not clone the Moth source grammar, rescan repeatedly
+or route through `f64`, an `Int` token payload or display formatting.
+Whole-number and decimal or exponent spellings stay
 distinguishable through a lossless numeric literal representation until the
 destination is known. Signed numeric literals are allowed without allowing
 general unary expressions.
@@ -1779,16 +1780,16 @@ adapters fail explicitly rather than narrowing or converting through `Float`.
 MON performs only the bounded literal normalisation, range and scale checks the
 codec needs; it adds no second arithmetic runtime.
 
-Unicode sharing is exactly the Phase 0 contract: MON quoted `String` escapes are
-`\\`, `\"`, `\n`, `\r`, `\t` and `\u{H...}`, and `Char` escapes are `\\`,
-`\'`, `\n`, `\r`, `\t` and `\u{H...}`. Unicode braces contain one to six ASCII
-hex digits, accept either case on input, reject empty, too-long, non-hex,
+The MON-local decoder accepts quoted `String` escapes `\\`, `\"`, `\n`, `\r`,
+`\t` and `\u{H...}`, and `Char` escapes `\\`, `\'`, `\n`, `\r`, `\t` and
+`\u{H...}`. Unicode braces contain one to six ASCII hex digits, accept either
+case on input, reject empty, too-long, non-hex,
 surrogate and out-of-range scalars, and writer output uses uppercase hex. `\0`,
 `\xNN`, fixed-width `\uXXXX`, escaped physical newlines and unknown escapes
 fail. Unescaped string newlines and CRLF remain byte-for-byte content because
-MON is data, not Moth source. Moth source remains limited to its existing five
-escapes: sharing the decoding primitive does not widen the source language, and
-source `{=}`, Unicode-escape and contextual `::Variant` parity stay deferred. A
+MON's bounded reader decodes its own escape grammar; no source escape owner is
+shared. Moth source remains limited to its existing five escapes, so source
+`{=}`, Unicode-escape and contextual `::Variant` parity stay deferred. A
 schema-free internal parse may preserve qualifiers without claiming they have
 been validated.
 
@@ -1805,17 +1806,25 @@ source text; duplicate map-key errors point at the duplicate key. Messages rende
 only at the caller's diagnostic boundary. The service does not start the later
 compact-diagnostics migration and adds no competing global error taxonomy.
 
-Each public decode/encode operation returns the first structured failure with its stable reason, original input byte range and field or element path where available, and discards partial values. Encoding builds a private `String` and discards it on error; where an internal writer supports caller-owned buffers, its public contract either rolls back to the original length or keeps that facility private. Incremental input, streams and multiple-document framing remain deferred; complete documents fail fast.
+Each public encode/decode operation reports failures through the same public
+`MonError` projection. Decoding can attach an original input byte range, while
+either operation can carry an available field or element path; both preserve the
+stable error reason and discard partial values. Encoding builds a private
+`String` and discards it on error; where an internal writer supports caller-owned
+buffers, its public contract either rolls back to the original length or keeps
+that facility private. Incremental input, streams and multiple-document framing
+remain deferred; complete documents fail fast.
 
 Limits are receiver resource policy, not grammar dialects: a valid document may
 exceed a receiver's budget and is reported distinctly from syntax and schema
 errors. Every counter uses checked arithmetic and is charged before the affected
 allocation or expansion, including default expansion and repeated shared-value
-expansion. The accepted defaults are 1 MiB input bytes, depth 64, 100,000 nodes,
-4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
-default expansions. Accepted recursion stays bounded so the parser and owned-tree
-destruction remain within the documented depth, and there is no unsafe unlimited
-switch.
+expansion. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes, 4,096
+numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000 default
+expansions. Configurable `max_depth` has an implementation ceiling of 64
+(`Limits::MAX_SAFE_DEPTH`); schema preparation rejects larger policies.
+Accepted recursion and rejected-schema/default cleanup stay bounded, and
+there is no unsafe unlimited switch.
 
 ### Deferred source, backend and builder surface
 
@@ -1876,7 +1885,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
 - Target-contract validation: backend feature and external package validation owners under
   `src/backends/`
-- Rust-only MON literal reader, static schema preparation, deterministic writer, bounded budgets and structured `MonError` reporting: the crate-private MON owner above; shares `numeric_text` grammar and the accepted escape owner without widening source syntax
+- Rust-only MON literal reader, static schema preparation, deterministic writer, bounded budgets and structured `MonError` reporting: the crate-private MON owner above; shares `numeric_text` grammar and locally decodes bounded MON escapes without widening source syntax
 - Phase 3 probe-only ownership accounting:
   `src/compiler_frontend/instrumentation/memory_ledger.rs`,
   `src/benchmarking/frontend.rs`, `src/bin/data_layout_memory_probe.rs`
