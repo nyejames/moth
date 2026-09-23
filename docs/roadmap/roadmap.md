@@ -11,7 +11,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Phase 0 foundations and Phase 1 workflow activation are merged. Delivered on `packages-and-builder-progress-plan`: the bounded pre-checkpoint hardening slice for the five existing `@core/text` functions; `@core/math` activated ahead of order, its whole surface covered, its registration simplified and the accepted scalar expansion of thirteen functions and three constants published and implemented; and the `@core/time` v1, where the semantic contract was published first and the implementation then replaced host-defined parsing and rendering with an explicit grammar, calendar and offset validation, compiler-owned error codes, a fallible `to_iso_string` and the accepted Duration and Timestamp arithmetic. Package development is now paused by the user under the ordered MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval scheduling prerequisites; data-layout Phase 3 closeout `4cfd9d492` is accepted. Integrating at the accepted Phase 2 checkpoint synchronises the branch without resuming the lane. Package slices that need result-slot or const-eval changes stay blocked independently.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
 
