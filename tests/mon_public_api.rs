@@ -1390,6 +1390,30 @@ fn exact_numeric_results_fit_their_decoded_byte_budget() {
 }
 
 #[test]
+fn negative_ints_preserve_signed_i32_boundaries() {
+    use moth::mon::{Field, MonErrorCode, Schema, SchemaType, Value, decode_document};
+
+    let schema = Schema::record(vec![Field::required("whole", SchemaType::Int)])
+        .prepare()
+        .expect("the Int schema prepares");
+
+    assert_eq!(
+        decode_document("whole = -2147483648", &schema).expect("the smallest Int is accepted"),
+        Value::Record(vec![("whole".into(), Value::Int(i32::MIN))]),
+    );
+    assert_eq!(
+        decode_document("whole = -5", &schema).expect("negative Int values keep their sign"),
+        Value::Record(vec![("whole".into(), Value::Int(-5))]),
+    );
+    assert_eq!(
+        decode_document("whole = -2147483649", &schema)
+            .expect_err("values below the Int range are rejected")
+            .code,
+        MonErrorCode::NumericRange,
+    );
+}
+
+#[test]
 fn decimal_default_scale_failure_keeps_numeric_scale_code() {
     use moth::mon::{Field, MonErrorCode, Schema, SchemaType, Value};
 

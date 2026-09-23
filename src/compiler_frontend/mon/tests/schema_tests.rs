@@ -1,4 +1,6 @@
-use crate::compiler_frontend::mon::{Field, MonErrorCode, Schema, SchemaType, Value, Variant};
+use crate::compiler_frontend::mon::{
+    Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, Variant,
+};
 
 #[test]
 fn malformed_schema_and_defaults_fail_during_preparation() {
@@ -10,6 +12,28 @@ fn malformed_schema_and_defaults_fail_during_preparation() {
     .prepare()
     .expect_err("schema defaults are checked before use");
     assert_eq!(invalid_default.code, MonErrorCode::InvalidDefault);
+
+    let duplicate_map_key_default = Schema::record(vec![Field::with_default(
+        "values",
+        SchemaType::Map {
+            key: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::Int),
+        },
+        Value::Map(vec![
+            (Value::Int(1), Value::Int(2)),
+            (Value::Int(1), Value::Int(3)),
+        ]),
+    )])
+    .prepare()
+    .expect_err("prepared map defaults reject duplicate keys before copying");
+    assert_eq!(duplicate_map_key_default.code, MonErrorCode::InvalidDefault);
+    assert_eq!(
+        duplicate_map_key_default.path,
+        vec![
+            PathSegment::Field("values".into()),
+            PathSegment::MapKey("1".into()),
+        ],
+    );
 
     let invalid_key = Schema::record(vec![Field::required(
         "values",
