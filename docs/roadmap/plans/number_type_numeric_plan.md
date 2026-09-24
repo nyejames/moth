@@ -4,8 +4,8 @@
 
 - Status: active on numeric-type-expanding.
 - Current slice: Phase 2, canonical types, profile and materialisation.
-- Blockers: baseline `bench-scaling` generic-instantiation exponent exceeds its locked budget; code-bearing checkpoints require a genuine fix, not a budget increase.
-- Next action: start Phase 2 HIR-reaching canonical semantics.
+- Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.46 against the n^1.70 budget).
+- Next action: Slice 1a, the compiler-owned numeric profile, then HIR-reaching canonical semantics.
 
 ## Goal and delivery order
 

@@ -39,6 +39,8 @@ fn prepared_module(source: &str, package: &str) -> PreparedModule {
     // one identity its single template needs to reach the freeze boundary.
     let template = build_result
         .materialisation_context
+        .as_mut()
+        .expect("module builds retain their materialisation context")
         .generic_function_templates_mut()
         .values_mut()
         .next()
@@ -55,6 +57,7 @@ fn prepared_module(source: &str, package: &str) -> PreparedModule {
 
     let mut preparation = build_result
         .materialisation_context
+        .expect("module builds retain their materialisation context")
         .finish_preparation()
         .expect("generic template identity index should build");
     preparation.module_origin = Some(module_origin.clone());

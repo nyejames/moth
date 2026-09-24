@@ -8,9 +8,7 @@
 //!       afterwards. A transaction publishes nothing: a diagnosed module simply drops it.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironmentRemapCache;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
-use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::module_compilation::generated::artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar,
@@ -19,8 +17,6 @@ use crate::compiler_frontend::module_compilation::generated::known::KnownGenerat
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use rustc_hash::FxHashMap;
 
@@ -263,36 +259,6 @@ impl<'a> GeneratedFunctionTransaction<'a> {
                     "Generated transaction summary index for {identity:?} is out of range"
                 ))
             })
-    }
-
-    pub(crate) fn sidecar_count(&self) -> usize {
-        self.completed_records.len()
-    }
-
-    /// Remap sidecars completed after `first_sidecar` into a merged string domain.
-    ///
-    /// WHY: nested requests materialise against their own local string table, so the sidecars they
-    ///      produced must follow the same merge as their requester's generated module.
-    pub(crate) fn remap_sidecars_and_module_from(
-        &mut self,
-        first_sidecar: usize,
-        module: &mut Module,
-        string_remap: &StringIdRemap,
-        path_remap: &PathIdRemap,
-    ) {
-        let mut type_environment_cache = TypeEnvironmentRemapCache::default();
-        for record in &mut self.completed_records[first_sidecar..] {
-            record.sidecar.remap_string_ids_with_type_environment_cache(
-                string_remap,
-                &mut type_environment_cache,
-            );
-            record.sidecar.module.remap_path_ids(path_remap);
-        }
-        module.remap_string_ids_with_type_environment_cache(
-            string_remap,
-            &mut type_environment_cache,
-        );
-        module.remap_path_ids(path_remap);
     }
 
     /// Close the transaction and hand back everything it completed.

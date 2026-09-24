@@ -19,7 +19,9 @@ use crate::compiler_frontend::ast::module_ast::environment::builder::import_proj
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleEnvironment, AstModuleLookups, ResolvedConstantSet, TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
+use crate::compiler_frontend::ast::module_ast::finalization::{
+    AstFinalizer, MaterialisationContextRetention,
+};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -44,7 +46,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::environment::{
@@ -202,7 +203,7 @@ impl ModuleMaterialisationPreparation {
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_span: Option<SourceSpan>,
-        boundary_string_table: &StringTable,
+        string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
@@ -285,14 +286,13 @@ impl ModuleMaterialisationPreparation {
             stable_nested_bodies.push((*path, nested_template.source_file, stable_nested_body));
         }
 
-        let (mut string_table, requester_string_remap, string_table_base_len) = self
-            .fork_materialisation_string_table(boundary_string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
+        self.validate_requester_string_prefix(string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let source_file = template.source_file;
         let identity_tables = body.source_identity_tables();
         let materialised_body = stable_body
-            .materialise(source_file, path_fork, &mut string_table, identity_tables)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            .materialise(source_file, path_fork, string_table, identity_tables)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
             Rc::clone(&module_resources),
@@ -302,7 +302,7 @@ impl ModuleMaterialisationPreparation {
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: &self.style_directives,
-            string_table: &mut string_table,
+            string_table,
             path_fork,
             entry_dir: self.entry_dir,
             root_role: ModuleRootRole::Support,
@@ -378,7 +378,6 @@ impl ModuleMaterialisationPreparation {
                 identity,
                 function_path: template.function_path,
                 requester_context,
-                requester_string_remap: &requester_string_remap,
                 requester_call_span,
             },
             self,
@@ -387,8 +386,6 @@ impl ModuleMaterialisationPreparation {
         )?;
         Ok(MaterialisedGenericAst {
             build_result,
-            string_table,
-            string_table_base_len,
             instance_path,
         })
     }
@@ -403,7 +400,6 @@ pub(super) struct GeneratedSidecarRequest<'a> {
     pub identity: &'a GeneratedFunctionIdentity,
     pub function_path: PathId,
     pub requester_context: &'a ModuleMaterialisationPreparation,
-    pub requester_string_remap: &'a StringIdRemap,
     pub requester_call_span: Option<SourceSpan>,
 }
 
@@ -428,7 +424,6 @@ where
         identity,
         function_path,
         requester_context,
-        requester_string_remap,
         requester_call_span,
     } = request;
     let type_arguments = identity.type_arguments();
@@ -446,14 +441,8 @@ where
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         materialised_type_arguments.push(type_id);
     }
-    install_generated_request_evidence(
-        identity,
-        requester_context,
-        requester_string_remap,
-        &mut environment,
-        string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    install_generated_request_evidence(identity, requester_context, &mut environment, string_table)
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
     let request = GenericFunctionInstantiationRequest::generated(
         identity.declaration(),
@@ -491,19 +480,20 @@ where
         AstFinalizer::new(phase_context, environment, path_fork).finalize(
             emitted,
             &[],
+            MaterialisationContextRetention::ForDeferredRequests,
             string_table,
         )?
     };
     // The declaring source owns authored field provenance. Imported or synthetic requester
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.
-    build_result
-        .materialisation_context
-        .inherit_nominal_blueprints(primary_source)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    build_result
-        .materialisation_context
-        .inherit_nominal_blueprints(requester_context)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    if let Some(context) = &mut build_result.materialisation_context {
+        context
+            .inherit_nominal_blueprints(primary_source)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        context
+            .inherit_nominal_blueprints(requester_context)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    }
 
     Ok((build_result, instance_path))
 }
@@ -511,7 +501,6 @@ where
 fn install_generated_request_evidence(
     identity: &GeneratedFunctionIdentity,
     requester_context: &ModuleMaterialisationPreparation,
-    _requester_string_remap: &StringIdRemap,
     environment: &mut AstModuleEnvironment,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {

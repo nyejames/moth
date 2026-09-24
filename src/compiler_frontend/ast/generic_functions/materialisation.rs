@@ -42,13 +42,6 @@ pub(crate) use sidecar_build::bootstrap_call_summary_from_signature;
 
 pub(crate) struct MaterialisedGenericAst {
     pub(crate) build_result: AstBuildResult,
-    pub(crate) string_table: StringTable,
-    /// String-table length already present when this generated table was forked.
-    ///
-    /// The generated path fork is created from the same live compiler pair. Nested requests append
-    /// after this boundary, so merge-back must use this captured prefix rather than the requester's
-    /// older preparation prefix.
-    pub(crate) string_table_base_len: usize,
     pub(crate) instance_path: PathId,
 }
 
@@ -62,11 +55,12 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) requester_context: &'a ModuleMaterialisationPreparation,
     pub(crate) requester_call_span: Option<SourceSpan>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
-    /// The current string table paired with `path_fork`.
+    /// The live requester string table paired with `path_fork`.
     ///
-    /// A provider rebase may extend this table after the requester preparation was frozen. The
-    /// generated sidecar must fork from this live table so path component IDs remain resolvable.
-    pub(crate) boundary_string_table: &'a StringTable,
+    /// WHAT: the exact table generated materialisation interns into, so string IDs need no merge.
+    /// WHY: mirroring `path_fork` keeps generated strings in the requester domain directly; the
+    /// requester table is untouched between materialisation and lowering, so the IDs stay valid.
+    pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork:
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,

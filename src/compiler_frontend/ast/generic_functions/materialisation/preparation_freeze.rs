@@ -63,7 +63,7 @@ use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 
@@ -283,34 +283,30 @@ impl ModuleMaterialisationPreparation {
             .get_or_init(|| SharedDonorIdentity::freeze(&self.string_table))
     }
 
-    /// Fork one generated-local table from the live compiler identity prefix.
+    /// Validate the live requester string domain for generated materialisation.
     ///
-    /// Provider rebasing can extend the compiler table after this preparation was frozen. The
-    /// requester rows must remain an exact prefix so their path/string IDs stay valid; generated
-    /// work then inherits the current table that backs the live path fork.
-    pub(super) fn fork_materialisation_string_table(
+    /// WHAT: rejects a live compiler table whose prefix no longer matches the frozen requester rows.
+    /// WHY: generated materialisation interns straight into the live table, exactly as it already
+    /// does for paths; provider rebasing may extend the live table after this preparation froze,
+    /// so the requester rows must remain an exact prefix for their path/string IDs to stay valid.
+    pub(super) fn validate_requester_string_prefix(
         &self,
-        boundary_string_table: &StringTable,
-    ) -> Result<(StringTable, StringIdRemap, usize), CompilerError> {
+        live_string_table: &StringTable,
+    ) -> Result<(), CompilerError> {
         let requester_len = self.string_table.len();
-        let compatible_prefix = boundary_string_table.len() >= requester_len
-            && self
-                .string_table
-                .iter()
-                .zip(boundary_string_table.iter())
-                .all(|((requester_id, requester), (boundary_id, boundary))| {
+        let compatible_prefix = live_string_table.len() >= requester_len
+            && self.string_table.iter().zip(live_string_table.iter()).all(
+                |((requester_id, requester), (boundary_id, boundary))| {
                     requester_id == boundary_id && requester == boundary
-                });
+                },
+            );
         if !compatible_prefix {
             return Err(CompilerError::compiler_error(
                 "generated materialisation requester string table is not an exact prefix of the live boundary string table",
             ));
         }
 
-        let boundary_len = boundary_string_table.len();
-        let string_table = boundary_string_table.clone_preserving_inherited_prefix();
-        let requester_string_remap = StringIdRemap::identity(requester_len);
-        Ok((string_table, requester_string_remap, boundary_len))
+        Ok(())
     }
 
     pub(super) fn freeze(

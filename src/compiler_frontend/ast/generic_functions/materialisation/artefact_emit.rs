@@ -285,7 +285,7 @@ impl GenericTemplateArtefact {
             identity,
             requester_context,
             requester_call_span,
-            boundary_string_table,
+            string_table,
             path_fork,
             external_package_registry,
             style_directives,
@@ -294,20 +294,19 @@ impl GenericTemplateArtefact {
             #[cfg(feature = "timers")]
             timing_context,
         } = input;
-        let (mut string_table, requester_string_remap, string_table_base_len) = requester_context
-            .fork_materialisation_string_table(boundary_string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, boundary_string_table))?;
-
+        requester_context
+            .validate_requester_string_prefix(string_table)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let source_file = self.source_file;
         let function_path = self.function_path;
         let entry_dir = path_fork.parent(source_file).unwrap_or(PathId::ROOT);
         let identity_tables = context
             .retained_identity_arcs()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let materialised_body = self
             .body
-            .materialise(source_file, path_fork, &mut string_table, identity_tables)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            .materialise(source_file, path_fork, string_table, identity_tables)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
         let file_value_resolution = generated_file_value_resolution_services(
             Rc::clone(&module_resources),
@@ -317,7 +316,7 @@ impl GenericTemplateArtefact {
         let build_context = AstBuildContext {
             external_package_registry: Arc::new(external_package_registry.clone()),
             style_directives,
-            string_table: &mut string_table,
+            string_table,
             path_fork,
             entry_dir,
             root_role: ModuleRootRole::Support,
@@ -396,7 +395,6 @@ impl GenericTemplateArtefact {
                 identity,
                 function_path,
                 requester_context,
-                requester_string_remap: &requester_string_remap,
                 requester_call_span,
             },
             self,
@@ -405,8 +403,6 @@ impl GenericTemplateArtefact {
         )?;
         Ok(MaterialisedGenericAst {
             build_result,
-            string_table,
-            string_table_base_len,
             instance_path,
         })
     }

@@ -534,13 +534,18 @@ fn run_semantic_stages(
         ast: mut module_ast,
         public_interface_projection_input,
         module_resources,
-        materialisation_context: mut materialisation_context_builder,
+        materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
     } = module_ast_build;
 
     let module_resources = module_resources.ok_or_else(|| {
         CompilerError::compiler_error(
             "module AST finalization did not retain its module resource table",
+        )
+    })?;
+    let mut materialisation_context_builder = materialisation_context_builder.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "module AST finalization did not retain its materialisation context",
         )
     })?;
     // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The

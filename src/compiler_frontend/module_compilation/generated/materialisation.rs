@@ -38,6 +38,7 @@ use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use rustc_hash::FxHashSet;
 use std::path::Path;
@@ -176,7 +177,7 @@ fn materialise_generated_request_inner<'build>(
                 &request.identity,
                 requester_context,
                 request.call_span,
-                &compiler.string_table,
+                &mut compiler.string_table,
                 &mut compiler.path_fork,
                 #[cfg(feature = "timers")]
                 request.timing_context,
@@ -229,7 +230,7 @@ fn materialise_generated_request_inner<'build>(
                         identity: &request.identity,
                         requester_context,
                         requester_call_span: request.call_span,
-                        boundary_string_table: &compiler.string_table,
+                        string_table: &mut compiler.string_table,
                         path_fork: &mut compiler.path_fork,
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
@@ -248,7 +249,7 @@ fn materialise_generated_request_inner<'build>(
                         identity: &request.identity,
                         requester_context,
                         requester_call_span: request.call_span,
-                        boundary_string_table: &compiler.string_table,
+                        string_table: &mut compiler.string_table,
                         path_fork: &mut compiler.path_fork,
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
@@ -266,8 +267,6 @@ fn materialise_generated_request_inner<'build>(
     };
     let MaterialisedGenericAst {
         build_result,
-        string_table: generated_string_table,
-        string_table_base_len,
         instance_path,
     } = materialised;
     let AstBuildResult {
@@ -282,174 +281,191 @@ fn materialise_generated_request_inner<'build>(
             "generated AST finalization did not retain its sidecar resource table",
         ))
     })?;
-    let generated_context = generated_context_builder
-        .finish_preparation()
-        .map_err(PremergeFailure::Infrastructure)?;
-    let nested_requests = install_generated_request_contracts(
-        &nested_requests,
-        &generated_context,
-        generated_context.generic_function_templates(),
-        context.external_packages.as_ref(),
-        &compiler.path_fork,
-        &mut generated_ast,
-    )
-    .map_err(PremergeFailure::Infrastructure)?;
-    let nested_request_ids = transaction.register_requests(nested_requests.iter().map(|request| {
-        GeneratedRequestFacts {
-            identity: request.identity.clone(),
-            display_name: request
-                .function_name
-                .map(|name| generated_string_table.resolve(name).to_owned())
-                .unwrap_or_else(|| "<generated>".to_owned()),
-            call_span: request.call_span,
+    // Finalization retains the generated preparation only when this body deferred nested
+    // requests; it is their requester context and has no other reader.
+    let nested = match generated_context_builder {
+        Some(builder) => {
+            let generated_context = builder
+                .finish_preparation()
+                .map_err(PremergeFailure::Infrastructure)?;
+            let nested_requests = install_generated_request_contracts(
+                &nested_requests,
+                &generated_context,
+                generated_context.generic_function_templates(),
+                context.external_packages.as_ref(),
+                &compiler.path_fork,
+                &mut generated_ast,
+            )
+            .map_err(PremergeFailure::Infrastructure)?;
+            let nested_request_ids =
+                transaction.register_requests(nested_requests.iter().map(|request| {
+                    GeneratedRequestFacts {
+                        identity: request.identity.clone(),
+                        display_name: request
+                            .function_name
+                            .map(|name| compiler.string_table.resolve(name).to_owned())
+                            .unwrap_or_else(|| "<generated>".to_owned()),
+                        call_span: request.call_span,
+                    }
+                }));
+            Some((generated_context, nested_request_ids))
         }
-    }));
+        None if nested_requests.is_empty() => None,
+        None => {
+            return Err(PremergeFailure::Infrastructure(
+                CompilerError::compiler_error(
+                    "generated AST finalization dropped the requester context of its nested requests",
+                ),
+            ));
+        }
+    };
 
-    let first_nested_sidecar = transaction.sidecar_count();
-    let generated_path_fork = compiler.path_fork.fork_source().fork_for_module();
+    // Generated materialisation and lowering intern strings and paths straight into the
+    // requester's tables. Snapshotting either table per request made generic instantiation
+    // quadratic, and shared tables need no merge. Both tables return to the requester on
+    // every exit so failures still attach the full tables.
+    let requester_string_table = std::mem::take(&mut compiler.string_table);
+    let requester_path_fork = std::mem::replace(&mut compiler.path_fork, PathInternerFork::empty());
     let mut generated_compiler = CompilerFrontend::new(
         context.options.clone(),
-        generated_string_table,
-        generated_path_fork,
+        requester_string_table,
+        requester_path_fork,
         context.style_directives,
         &context.external_packages,
         context.project_path_resolver,
         context.source_files,
     );
-    for nested_request_id in &nested_request_ids {
-        let nested_identity = transaction
-            .identity(*nested_request_id)
-            .map_err(PremergeFailure::Infrastructure)?
-            .clone();
-        let (nested_name, nested_span) = transaction
-            .request_facts(*nested_request_id)
-            .map_err(PremergeFailure::Infrastructure)?;
-        materialise_generated_request(
-            context,
-            *nested_request_id,
-            &MaterialisingRequest {
-                identity: nested_identity,
-                display_name: nested_name,
-                call_span: nested_span,
-                #[cfg(feature = "timers")]
-                timing_context: request.timing_context,
-            },
-            transaction,
-            &generated_context,
-            &mut generated_compiler,
-            entry_file_path,
-        )?;
-    }
-    let generated_warnings = generated_ast.warnings.clone();
-    // The generated preparation retains a second handle only while nested requests are
-    // materialised; release it before lowering so the sidecar can own its table immutably.
-    drop(generated_context);
+    let lowered = (|| -> Result<Module, PremergeFailure> {
+        if let Some((generated_context, nested_request_ids)) = nested {
+            for nested_request_id in &nested_request_ids {
+                let nested_identity = transaction
+                    .identity(*nested_request_id)
+                    .map_err(PremergeFailure::Infrastructure)?
+                    .clone();
+                let (nested_name, nested_span) = transaction
+                    .request_facts(*nested_request_id)
+                    .map_err(PremergeFailure::Infrastructure)?;
+                materialise_generated_request(
+                    context,
+                    *nested_request_id,
+                    &MaterialisingRequest {
+                        identity: nested_identity,
+                        display_name: nested_name,
+                        call_span: nested_span,
+                        #[cfg(feature = "timers")]
+                        timing_context: request.timing_context,
+                    },
+                    transaction,
+                    &generated_context,
+                    &mut generated_compiler,
+                    entry_file_path,
+                )?;
+            }
+            // The generated preparation retains a second handle to the sidecar resources while
+            // nested requests materialise; release it before lowering takes sole ownership.
+            drop(generated_context);
+        }
+        let generated_warnings = generated_ast.warnings.clone();
 
-    let generated_lowering = lower_hir(
-        &mut generated_compiler,
-        generated_ast,
-        &generated_warnings,
-        HirFunctionOriginLookup::default(),
-        Some(Rc::clone(&module_resources)),
-        Some(&declaring_source_identity_handle),
-    )?;
-    let HirLoweringResult {
-        mut hir_module,
-        type_environment,
-        metadata: lowering_metadata,
-    } = generated_lowering;
-    let resource_table = Rc::try_unwrap(module_resources)
-        .map(|cell| cell.into_inner())
-        .map_err(|_| {
-            PremergeFailure::Infrastructure(CompilerError::compiler_error(
-                "generated sidecar resource table still has a live shared handle after HIR lowering",
-            ))
-        })?;
-    let function_id = hir_module
-        .functions
-        .iter()
-        .find_map(|function| {
-            (hir_module.side_table.function_name_path(function.id) == Some(instance_path))
-                .then_some(function.id)
-        })
-        .ok_or_else(|| {
-            PremergeFailure::Infrastructure(CompilerError::compiler_error(
-                "Generated HIR omitted its requested root function",
-            ))
-        })?;
-    hir_module
-        .function_ids_by_generated
-        .insert(request.identity.clone(), function_id);
-    increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
-    let borrow_analysis = check_borrows(
-        &mut generated_compiler,
-        &hir_module,
-        &generated_warnings,
-        Some(&declaring_source_identity_handle),
-    )?;
-    let functions =
-        collect_module_function_link_facts(&hir_module).map_err(PremergeFailure::Infrastructure)?;
-    let reachability = collect_reachability_from_function_link_facts(&functions, &[function_id])
-        .map_err(PremergeFailure::Infrastructure)?;
-    let mut reachable_package_ids = FxHashSet::default();
-    for external_function_id in &reachability.reachable_external_functions {
-        let package_id = context
-            .external_packages
-            .resolve_function_package_id(*external_function_id)
-            .ok_or_else(|| {
-                PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                    "Generated external function {external_function_id:?} has no owning package"
-                )))
-            })?;
-        reachable_package_ids.insert(package_id);
-    }
-    let external_import_candidates = collect_external_import_candidates_for_packages(
-        &reachable_package_ids,
-        context.external_dependency_resolution_table,
-        context.builder_runtime_packages,
-    );
-    let mut generated_module = Module {
-        executable: ModuleExecutable {
-            hir: hir_module,
-            resource_table,
+        let generated_lowering = lower_hir(
+            &mut generated_compiler,
+            generated_ast,
+            &generated_warnings,
+            HirFunctionOriginLookup::default(),
+            Some(Rc::clone(&module_resources)),
+            Some(&declaring_source_identity_handle),
+        )?;
+        let HirLoweringResult {
+            mut hir_module,
             type_environment,
-            borrow_analysis,
-            path_table: Arc::new(
-                crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
-                    .freeze(),
-            ),
-        },
-        link_facts: ModuleLinkFacts {
-            external_package_registry: Arc::clone(&context.external_packages),
-            external_import_candidates,
-            functions,
-        },
-        metadata: ModuleCompilerMetadata {
-            entry_point: entry_file_path.to_path_buf(),
-            warnings: generated_warnings,
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
-            doc_fragments: lowering_metadata.doc_fragments,
-            materialisation_context: None,
-        },
-    };
-    let generated_remap = compiler
-        .string_table
-        .merge_delta_from(&generated_compiler.string_table, string_table_base_len);
-    let generated_path_remap = compiler
-        .path_fork
-        .merge_delta_from(&generated_compiler.path_fork, &generated_remap)
-        .map_err(|error| {
-            PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "generated path merge failed: {error:?}"
-            )))
-        })?;
-    transaction.remap_sidecars_and_module_from(
-        first_nested_sidecar,
-        &mut generated_module,
-        &generated_remap,
-        &generated_path_remap,
-    );
+            metadata: lowering_metadata,
+        } = generated_lowering;
+        let resource_table = Rc::try_unwrap(module_resources)
+            .map(|cell| cell.into_inner())
+            .map_err(|_| {
+                PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    "generated sidecar resource table still has a live shared handle after HIR lowering",
+                ))
+            })?;
+        let function_id = hir_module
+            .functions
+            .iter()
+            .find_map(|function| {
+                (hir_module.side_table.function_name_path(function.id) == Some(instance_path))
+                    .then_some(function.id)
+            })
+            .ok_or_else(|| {
+                PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    "Generated HIR omitted its requested root function",
+                ))
+            })?;
+        hir_module
+            .function_ids_by_generated
+            .insert(request.identity.clone(), function_id);
+        increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
+        let borrow_analysis = check_borrows(
+            &mut generated_compiler,
+            &hir_module,
+            &generated_warnings,
+            Some(&declaring_source_identity_handle),
+        )?;
+        let functions = collect_module_function_link_facts(&hir_module)
+            .map_err(PremergeFailure::Infrastructure)?;
+        let reachability =
+            collect_reachability_from_function_link_facts(&functions, &[function_id])
+                .map_err(PremergeFailure::Infrastructure)?;
+        let mut reachable_package_ids = FxHashSet::default();
+        for external_function_id in &reachability.reachable_external_functions {
+            let package_id = context
+                .external_packages
+                .resolve_function_package_id(*external_function_id)
+                .ok_or_else(|| {
+                    PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                        "Generated external function {external_function_id:?} has no owning package"
+                    )))
+                })?;
+            reachable_package_ids.insert(package_id);
+        }
+        let external_import_candidates = collect_external_import_candidates_for_packages(
+            &reachable_package_ids,
+            context.external_dependency_resolution_table,
+            context.builder_runtime_packages,
+        );
+        Ok(Module {
+            executable: ModuleExecutable {
+                hir: hir_module,
+                resource_table,
+                type_environment,
+                borrow_analysis,
+                path_table: Arc::new(
+                    crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
+                        .freeze(),
+                ),
+            },
+            link_facts: ModuleLinkFacts {
+                external_package_registry: Arc::clone(&context.external_packages),
+                external_import_candidates,
+                functions,
+            },
+            metadata: ModuleCompilerMetadata {
+                entry_point: entry_file_path.to_path_buf(),
+                warnings: generated_warnings,
+                const_top_level_fragments: Vec::new(),
+                root_activity: ModuleRootActivity::default(),
+                doc_fragments: lowering_metadata.doc_fragments,
+                materialisation_context: None,
+            },
+        })
+    })();
+    let CompilerFrontend {
+        string_table: requester_string_table,
+        path_fork: requester_path_fork,
+        ..
+    } = generated_compiler;
+    compiler.string_table = requester_string_table;
+    compiler.path_fork = requester_path_fork;
+    let generated_module = lowered?;
+
     // The boundary install tail replaces each sidecar placeholder with the one final path table
     // after all publications, so successful materialisation does not snapshot the growing table.
     let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)

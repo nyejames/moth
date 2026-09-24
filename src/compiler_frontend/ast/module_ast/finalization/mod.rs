@@ -18,4 +18,6 @@ pub(super) mod static_if_specialization;
 pub(super) mod template_helpers;
 pub(super) mod validate_types;
 
-pub(in crate::compiler_frontend::ast) use finalizer::AstFinalizer;
+pub(in crate::compiler_frontend::ast) use finalizer::{
+    AstFinalizer, MaterialisationContextRetention,
+};
