@@ -399,7 +399,7 @@ promise restoration of the original order.
 
 # Implementation rules
 
-- Preserve one call parser and parameter-slot owner.
+- Preserve the delivered MON shared call parser and parameter-slot owner.
 - Keep one natural-order classifier.
 - Keep policy facts typed through AST and HIR.
 - Select static policies before runtime.
@@ -460,7 +460,7 @@ Establish the complete source API before sorting reaches HIR.
 - [ ] Expose it through the compiler-owned collection surface without a direct host-package import.
 - [ ] Reject redeclaration and shadowing through the reserved-name diagnostic owner.
 - [ ] Add one declarative builtin signature for `sort` with named slots and defaults.
-- [ ] Route arguments through the shared call parser and slot owner.
+- [ ] Route arguments through the delivered MON shared call parser and slot owner.
 - [ ] Insert both defaults through the normal default path.
 - [ ] Accept positional, named and mixed forms under ordinary routing rules.
 - [ ] Keep every existing builtin positional-only.

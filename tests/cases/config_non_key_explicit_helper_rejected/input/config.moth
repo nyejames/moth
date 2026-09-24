@@ -1,6 +1,6 @@
 helper #= "src"
-project #= |
+project #= (
     name = "test_project",
     entry_root = helper,
-|
-html #= ||
+)
+html #= ()

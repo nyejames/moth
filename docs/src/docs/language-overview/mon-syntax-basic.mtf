@@ -1,5 +1,6 @@
-**Accepted queued design.** Anonymous records using the notation below are not
-yet implemented. Calls and named constructors already use parentheses.
+MON syntax is implemented for supplied arguments and compile-time anonymous
+const records. Runtime anonymous records remain deferred. The MON format contract
+is accepted, with its Rust-only `moth::mon` codec implemented and Moth-native integration deferred.
 
 MON means Moth Object Notation. MON syntax gives supplied arguments and record
 values a common notation. Pipes declare fields or parameters. Parentheses supply
@@ -28,5 +29,14 @@ Commas separate entries, and a final comma is optional. Moth has no tuple values
 Named types still need their constructors. An anonymous record with matching
 fields does not become a `Size`.
 
-The MON serialisation format is separate future work. This syntax alone does
-not turn a record into text or make every Moth value serialisable.
+Moth MON source syntax allows ordinary expressions according to the receiving
+Moth context. MON serialised data is self-contained literal data only, and a MON
+reader never evaluates Moth expressions, including foldable ones.
+
+@../mon/#mon-format (MON format) owns the serialised literal-data contract.
+This page owns the shared notation only.
+
+The Rust-only `moth::mon` codec is implemented. Moth-native `$mon`,
+automatic schema extraction and the static project builder remain deferred
+separately. This syntax alone does not turn a record into text or make every
+Moth value serialisable.

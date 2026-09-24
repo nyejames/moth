@@ -1540,9 +1540,9 @@ pub(crate) struct BuildBootstrap {
     /// WHAT: the `BuildConfigInputSet` the command layer parsed or the programmatic caller
     ///       supplied, carried on the shared Stage 0 state so build, check and dev see one
     ///       set of explicit inputs.
-    /// WHY:  direct-project `#Config` resolution and later source-contract barriers consume
-    ///       exactly this set; command and programmatic paths own production up to here and
-    ///       the compiler config service will read it from here.
+    /// WHY: declaration-owned and grouped-project `#Config` resolution plus later source-contract
+    ///       barriers consume exactly this set; command and programmatic paths own production up
+    ///       to here and the compiler config service reads it from here.
     #[allow(dead_code)] // consumed by the build-configuration resolution phases
     pub(crate) build_config_inputs: BuildConfigInputSet,
 }
@@ -1847,9 +1847,10 @@ pub fn build_project(
     } else {
         None
     };
-    // Direct-project resolution records are consumed by the semantic boundary and are not
+    // Compiler-owned config handoffs are consumed by the semantic boundary and are not
     // retained in the successful build result.
     config.config_resolution_records.clear();
+    config.project_field_config_dependencies.clear();
     let source_database = project_source_files;
     Ok(BuildResult {
         project,

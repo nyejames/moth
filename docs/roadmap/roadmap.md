@@ -11,11 +11,9 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [MON syntax and nested const records](./plans/mon-syntax-and-nested-const-records-plan.md) - Ready next. The final Phase 3 closeout and post-Phase-3 cleanup prerequisites are accepted on main. Deliver parenthesised value construction through the shared argument parser, inline nested const records and a complete source/documentation cutover before MON Rust tooling and later directive work. Runtime records and MON serialisation remain separate follow-ups.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 
-- [MON v1: Rust-facing compiler tooling](./plans/mon-rust-tooling-v1-plan.md) - Queued immediately after the MON syntax checkpoint. Deliver literal-data encoding, nested-value encoding, strict schema-checked decoding and bounded fail-fast errors through the Moth Rust library for engine save files and other native consumers. Moth directives, source operations, backend integration and the static MON project builder remain deferred to the final roadmap entry.
-
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Phase 0 foundations and Phase 1 workflow activation are merged. Delivered on `packages-and-builder-progress-plan`: the bounded pre-checkpoint hardening slice for the five existing `@core/text` functions; `@core/math` activated ahead of order, its whole surface covered, its registration simplified and the accepted scalar expansion of thirteen functions and three constants published and implemented; and the `@core/time` v1, where the semantic contract was published first and the implementation then replaced host-defined parsing and rendering with an explicit grammar, calendar and offset validation, compiler-owned error codes, a fallible `to_iso_string` and the accepted Duration and Timestamp arithmetic. Package development is now paused by the user under the ordered MON syntax, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval scheduling prerequisites; data-layout Phase 3 closeout `4cfd9d492` is accepted. Integrating at the accepted Phase 2 checkpoint synchronises the branch without resuming the lane. Package slices that need result-slot or const-eval changes stay blocked independently.
+- [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
 
 - [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after the MON syntax and MON Rust tooling checkpoints and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
 
@@ -59,7 +57,9 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every other currently listed roadmap item. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+
+- [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
 
 ## Adding and maintaining plans
 
@@ -85,11 +85,23 @@ This is a bunch of notes for work that will likely be picked up in the future, b
 
 ## MON language integration and static builder
 
-MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format is literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The initial format and Rust compiler-library codec are queued immediately after the syntax checkpoint, not deferred with language integration.
+MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format is literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The initial format and Rust compiler-library codec were delivered immediately after the syntax checkpoint; they are not deferred with language integration.
 
-The final roadmap follow-up adds Moth-native usage and the static MON project builder. It reuses the codec, shared lexical/argument owners and ordinary Moth types rather than adding explicit serialisation traits, a second schema language or a second parser. Compiler-owned `$mon` convenience is accepted direction, but its exact invocation syntax is not defined. Source typing, automatic schema extraction, backend operations and builder commands are not delivered by the Rust-only v1 plan.
+The final roadmap follow-up adds Moth-native usage and the static MON project
+builder. It reuses the delivered codec, MON syntax notation and ordinary Moth
+types. MON literal traversal and escape decoding remain local; this follow-up
+does not add a second MON parser, depend on the Moth expression parser for
+literal reading, or introduce explicit serialisation traits or a second schema
+language. Compiler-owned `$mon` convenience is accepted direction, but its exact
+invocation syntax is not defined. Source typing, automatic schema extraction,
+backend operations and builder commands are not delivered by the Rust-only v1
+delivery.
 
-Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains a collection even at a map receiving context, Unicode escapes use a shared lexical contract and `::Variant(...)` uses a known expected choice type. Track any undelivered source portions explicitly rather than assuming support from the data reader.
+Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
+a collection even at a map receiving context, and `::Variant(...)` uses a known
+expected choice type. MON Unicode escapes remain local to the MON format; source
+Unicode-escape support is explicitly deferred. Track undelivered source
+portions rather than assuming support from the data reader.
 
 The static builder emits compile-time-known `.mon` assets through ordinary build output ownership. Evaluated runtime templates remain ordinary serialisable Strings for consuming builders. Templates acquire no hidden schema, wire, route or subscription. Resource-bearing strings require concrete builder-assigned characters before MON encoding. Applications own schema versions, migrations and resource interpretation.
 

@@ -12514,7 +12514,7 @@ role = "primary"
 id = "anonymous_const_record_positional_field_rejected"
 path = "anonymous_const_record_positional_field_rejected"
 tags = ["const-records"]
-contract = "language.constants.anonymous_const_record_positional_field_rejected"
+contract = "language.constants.anonymous_const_record_leading_positional_group_rejected"
 role = "primary"
 
 [[case]]
@@ -12546,17 +12546,10 @@ contract = "language.constants.anonymous_const_record_runtime_context_deferred"
 role = "primary"
 
 [[case]]
-id = "anonymous_const_record_nested_literal_rejected"
-path = "anonymous_const_record_nested_literal_rejected"
+id = "anonymous_const_record_empty_runtime_rejected"
+path = "anonymous_const_record_empty_runtime_rejected"
 tags = ["const-records"]
-contract = "language.constants.anonymous_const_record_nested_literal_rejected"
-role = "primary"
-
-[[case]]
-id = "anonymous_const_record_extra_pipe_rejected"
-path = "anonymous_const_record_extra_pipe_rejected"
-tags = ["const-records"]
-contract = "language.constants.anonymous_const_record_extra_pipe_rejected"
+contract = "language.constants.anonymous_const_record_empty_runtime_outside_surface"
 role = "primary"
 
 [[case]]
@@ -12648,27 +12641,6 @@ id = "anonymous_const_record_catch_value_block_success"
 path = "anonymous_const_record_catch_value_block_success"
 tags = ["const-records"]
 contract = "language.constants.anonymous_const_record_catch_value_block_projection"
-role = "primary"
-
-[[case]]
-id = "anonymous_const_record_config_field_rejected"
-path = "anonymous_const_record_config_field_rejected"
-tags = ["const-records", "config"]
-contract = "language.constants.anonymous_const_record_config_field_rejected"
-role = "primary"
-
-[[case]]
-id = "anonymous_const_record_uppercase_config_field_rejected"
-path = "anonymous_const_record_uppercase_config_field_rejected"
-tags = ["const-records", "config"]
-contract = "language.constants.anonymous_const_record_uppercase_config_field_rejected"
-role = "primary"
-
-[[case]]
-id = "anonymous_const_record_underscore_config_field_rejected"
-path = "anonymous_const_record_underscore_config_field_rejected"
-tags = ["const-records", "config"]
-contract = "language.constants.anonymous_const_record_underscore_config_field_rejected"
 role = "primary"
 
 [[case]]

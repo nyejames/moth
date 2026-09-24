@@ -88,7 +88,7 @@ pub(crate) struct ProjectGlobalsMemberMetadata {
     pub(crate) provenance: SyntheticInterfaceProvenance,
 }
 
-/// Immutable synthetic provider for direct project fields under `@project`.
+/// Immutable synthetic provider for grouped-project fields under `@project`.
 ///
 /// The ordinary public interface carries one constant declaration and export binding for every
 /// field. The parallel metadata vector is sorted by the same public field name, making both

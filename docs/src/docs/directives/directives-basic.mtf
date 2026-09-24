@@ -4,7 +4,9 @@ A `$` marker is not automatically harmless metadata. Compiler-owned directives m
 
 ### Current versus accepted syntax
 
-Today, `config.moth` still uses grouped `project` and `html` records, and pages still use reserved names such as `page_title`. The accepted configuration shape is:
+Today, `config.moth` uses declaration-owned `#Config of T` inputs with grouped
+parenthesised `project` and `html` records, and pages still use reserved names
+such as `page_title`. The accepted configuration shape is:
 
 [codeblock, $code("moth"):
     $config

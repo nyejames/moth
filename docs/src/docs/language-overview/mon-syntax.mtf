@@ -1,12 +1,11 @@
-**Accepted queued design.** Parenthesised anonymous const records are queued for
-implementation. Runtime anonymous records are a separate later feature. Ordinary
-calls and named constructors already use parentheses. See @../progress (Progress)
-for implementation and target support.
+MON syntax is implemented for supplied arguments and compile-time anonymous
+const records, including inline nested values. Runtime anonymous records remain
+a separate deferred feature. See @../progress (Progress) for current support.
 
 MON means Moth Object Notation. **MON syntax** names Moth's shared parenthesised
-argument and value-construction notation. **The MON format** is a future data
-profile with its own supported values and serialisation rules. Using MON syntax
-does not make a value serialisable or turn a call into a data document.
+argument and value-construction notation. **The MON format** is the separate
+serialised-data profile with its own supported values and serialisation rules.
+Using MON syntax does not make a value serialisable or turn a call into a data document.
 
 This reference owns the shared notation and the distinction between grouping,
 supplied arguments and anonymous construction. Calls, constructors, directives
@@ -140,15 +139,23 @@ labels, indices and helper wrappers retain their specialised meanings.
 
 ### MON format boundary
 
-The future MON data profile uses named-only, const-required parsing through the
-same compiler owners. Its reader and compiler-native builder need a defined
-value domain and serialisation contract before implementation. The engine or
-application validates its own schema over that data.
+Moth MON source syntax allows ordinary expressions according to the receiving
+Moth context. MON serialised data is self-contained literal data only. A MON
+reader never evaluates Moth expressions, including foldable ones.
 
-The format still needs decisions about root framing, scalars and numbers,
-optional values, collections and maps, tags, escaping, ordering, resources,
-round trips and input limits. Full compile-time Moth authoring expressions and
-the self-contained serialised representation are distinct surfaces.
+@../mon/#mon-format (MON format) owns the serialised literal-data contract:
+one root record, literal-only values, strict numeric conversion, qualifiers,
+defaults and bounded first errors. This reference owns the shared notation and
+the distinction between grouping, supplied arguments and anonymous
+construction.
+
+The Rust-only `moth::mon` codec is implemented; see @../progress (Progress)
+for current support. Moth-native `$mon`, automatic schema extraction and the
+static project builder remain deferred separately. The engine or application
+validates its own schema over that data.
+
+Full compile-time Moth authoring expressions and the self-contained serialised
+representation are distinct surfaces.
 
 Templates remain ordinary strings. MON syntax adds no automatic record printing,
 implicit live bindings, stored Wire capabilities or executable Route values.

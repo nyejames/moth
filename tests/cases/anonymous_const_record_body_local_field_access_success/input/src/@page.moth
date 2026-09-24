@@ -1,8 +1,8 @@
 show_first || -> String:
-    Shown #= |
+    shown #= (
         first = "a",
-    |
-    return Shown.first
+    )
+    return shown.first
 ;
 
 io.line([: body-local-field=[show_first()]])

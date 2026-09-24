@@ -452,8 +452,7 @@ fn compile_single_file_frontend_with_target(
             config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
-        let direct_project_facts =
-            config_boundary::direct_project_contract_facts(&effective_project_fields);
+        let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
         let fallback_span = None;
         let build_config_values = config_boundary::resolve_boundary_build_config(
             &source_facts,

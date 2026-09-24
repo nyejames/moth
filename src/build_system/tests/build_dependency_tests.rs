@@ -422,7 +422,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
@@ -501,7 +501,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -547,7 +547,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -587,7 +587,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -625,7 +625,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -680,7 +680,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -744,7 +744,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -819,7 +819,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -878,7 +878,7 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src_dir.join("@page.moth"), "value = 1\n").expect("should write homepage");

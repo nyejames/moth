@@ -709,11 +709,11 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
         InvalidExpressionReason::ExtensionlessFileValue => {
             "A file value needs an explicit extension. Write the path with a file extension, or use a dependency clause to bind declarations.".to_owned()
         }
+        InvalidExpressionReason::EmptyRuntimeAnonymousRecord => {
+            "Empty anonymous records are outside the initial runtime surface.".to_owned()
+        }
         InvalidExpressionReason::AnonymousRecordFieldNotNamed => {
             "Each const-record parameter needs a value. Write `name = value`.".to_owned()
-        }
-        InvalidExpressionReason::NestedAnonymousConstRecord => {
-            "Do not nest a `|...|` parameter list inside another. Declare the inner struct or record first, then use that name as a parameter value.".to_owned()
         }
     }
 }

@@ -11,7 +11,7 @@ Intended location: `docs/roadmap/plans/general-directives-and-project-config-pla
 
 ## Purpose and authority
 
-Extend Moth's existing template directive family into a constrained general directive system. Deliver `$config`, `$project` and `$html_builder` as its first non-template consumers. Replace the `#Config` qualifier and recognised configuration records rather than supporting both systems.
+Extend Moth's existing template directive family into a constrained general directive system. Deliver `$config`, `$project` and `$html_builder` as its first non-template consumers. Replace the delivered declaration-owned `#Config` inputs and grouped parenthesised `project #= (...)`/`html #= (...)` bootstrap rather than supporting both systems.
 
 The accepted decisions below are the implementation contract from the maintainer's design interview. The preceding documentation work publishes them into permanent references. At activation, read those references and reconcile any subsequent maintainer-approved changes. An older implementation or stale queued plan does not override this interview. Resolve a genuine later design conflict explicitly rather than silently choosing another behaviour.
 
@@ -83,7 +83,7 @@ $html_builder
 
 A directive with supplied arguments uses `$name(arguments)`. A directive with no supplied arguments uses `$name`. Empty parentheses are invalid even when all parameters have defaults. Bare invocation still runs ordinary required-parameter and default validation.
 
-Use the normal call parser and its parameter-slot routing for positional arguments, named arguments, ordering, duplicate/unknown arguments, expression boundaries, contextual types, default filling, commas and multiline whitespace. Ordinary calls retain their existing empty-parenthesis syntax. The directive entry boundary alone rejects an authored empty `()`.
+Require the already-delivered MON shared list/argument owner and template-list consolidation for positional arguments, named arguments, ordering, duplicate/unknown arguments, expression boundaries, contextual types, default filling, commas and multiline whitespace. Add no duplicated parser-delivery steps: do not (re)implement list parsing, template single-expression helper replacement or empty-`()` handling for ordinary calls. Ordinary calls retain their existing empty-parenthesis syntax. The directive entry boundary alone rejects an authored empty `()`.
 
 For example, these use the same signature:
 
@@ -98,13 +98,13 @@ The descriptor fixes the directive's form. `$project` and `$html_builder` are st
 
 Source modifiers may occupy their own line or precede their target on the same line where ordinary token boundaries permit it. Documentation uses the separate-line form. Standalone directives follow ordinary item boundaries. There is no semicolon statement terminator, comma-separated `with` clause or new block delimiter.
 
-### Preserve template semantics while sharing machinery
+### Preserve template semantics while consuming the delivered owner
 
-Move existing template directive argument parsing onto the same argument-list owner. Preserve each existing directive's accepted value domain, contextual meaning, head compatibility, formatter behaviour and literal-body mode. Register parameter expectations in the one signature authority rather than adding a second named-argument implementation.
+Consume the delivered MON shared list/argument owner and template-list consolidation for template directive arguments. Preserve each existing directive's accepted value domain, contextual meaning, head compatibility, formatter behaviour and literal-body mode. Register parameter expectations in the one signature authority rather than adding a second named-argument implementation.
 
 Slot labels, indices and helper templates remain their existing compiler-known argument categories. Sharing parsing must not turn a slot label into a source lookup, force a helper-only wrapper to render before slot composition or allow runtime argument evaluation. Use the owning template semantic contracts for these specialised arguments and the shared parser for list structure and slot routing.
 
-Current call syntax owns semantic parsing. Header preparation may retain an invocation's balanced token range with the existing delimiter owner, but must not parse a parallel argument language. The invocation's arguments are semantically parsed once through the shared owner when its receiving context is available. Reuse retained facts thereafter.
+Delivered call syntax owns semantic parsing. Header preparation may retain an invocation's balanced token range with the existing delimiter owner, but must not parse a parallel argument language. The invocation's arguments are semantically parsed once through the shared owner when its receiving context is available. Reuse retained facts thereafter.
 
 ## 3. `$config` declarations
 
@@ -303,11 +303,11 @@ $html_builder(
 
 `my_site` represents the existing escaped generated project name. Preserve the current generator's source-string escaping. The version declaration and explicit argument are required starter content, not an optional documentation example.
 
-Migrate all operational `config.moth` inputs and actual `#Config` contracts needed by the repository's commands, fixtures, benchmarks, package scaffolds and docs build. Custom open project metadata must move to ordinary source constants where needed. Update consumers instead of silently deleting still-used data.
+Migrate all operational `config.moth` inputs and actual declaration-owned `#Config` contracts needed by the repository's commands, fixtures, benchmarks, package scaffolds and docs build. Custom open project metadata must move to ordinary source constants where needed. Update consumers instead of silently deleting still-used data.
 
-Release recognised `project`/`html` record names and `Config` identifier reservations. Ordinary records with these names acquire no settings effect. Missing required directives then use normal missing-configuration diagnostics. Remove qualifier-only parsers, special spacing rules, record scanning and migration-only compatibility paths. A user-defined type named `Config` follows ordinary type syntax, so removal does not mean banning every textual `#Config` substring.
+Release the grouped parenthesised `project #= (...)`/`html #= (...)` bootstrap names and `Config` identifier reservations. Ordinary records with these names acquire no settings effect. Missing required directives then use normal missing-configuration diagnostics. Remove declaration-bootstrap-only parsers, special spacing rules, grouped-record scanning and migration-only compatibility paths. A user-defined type named `Config` follows ordinary type syntax, so removal does not mean banning every textual `#Config` substring.
 
-Keep the existing operational page template and `page_*` extraction working at this plan's completion. The later page cutover migrates those together. Template argument-parser consolidation may still require fixture updates here, but it does not authorise early `$page` activation.
+Keep the existing operational page template and `page_*` extraction working at this plan's completion. The later page cutover migrates those together. Delivered template-list consolidation is consumed, not reimplemented; remaining fixture updates here do not authorise early `$page` activation.
 
 ## 9. Current owner map
 
@@ -317,7 +317,7 @@ Recheck these anchors at activation:
 |---|---|
 | Directive definitions and registry | `src/compiler_frontend/style_directives/` |
 | Lexer and retained declaration syntax | `src/compiler_frontend/tokenizer/`, `headers/`, `declaration_syntax/` |
-| Current qualifier syntax | `src/compiler_frontend/declaration_syntax/build_config_contract.rs` |
+| Delivered declaration-owned bootstrap | `src/compiler_frontend/declaration_syntax/build_config_contract.rs` at activation; recheck after MON cutover |
 | Shared call arguments | Focused owner under `src/compiler_frontend/ast/expressions/` |
 | Input types and resolution | `src/compiler_frontend/build_config/` |
 | Config service | `src/compiler_frontend/single_source_compilation/config.rs` |
@@ -334,7 +334,7 @@ Extend or consolidate these owners. Do not add a broad `utils` module or a trait
 ### Phase 0: Refresh and contract baseline
 
 - [ ] Read the routed authorities and inspect the rebased source, status and concurrent-work boundaries.
-- [ ] Confirm obsolete reactive `$` syntax is gone. Preserve Wiring semantics and native-result-slot work already delivered.
+- [ ] Confirm obsolete reactive `$` syntax is gone and the delivered MON shared list parsing plus declaration-owned `#Config`/grouped bootstrap are the starting state. Preserve Wiring semantics and native-result-slot work already delivered.
 - [ ] Inventory registry, argument, config, scaffold and test owners. Record required removals and the existing page path that stays active.
 - [ ] Run the activation baseline gate. Record real failures rather than treating historical results as current.
 
@@ -342,19 +342,19 @@ Extend or consolidate these owners. Do not add a broad `utils` module or a trait
 
 - [ ] Add owner/context/form descriptors by extending the existing directive registration authority.
 - [ ] Reject registry conflicts deterministically, including duplicate builder registrations.
-- [ ] Reuse call syntax and slot routing for template and source directive arguments.
+- [ ] Reuse the delivered MON shared list/argument owner and slot routing for template and source directive arguments.
 - [ ] Retain balanced invocation ranges during preparation without another expression parser.
 - [ ] Add empty-parenthesis, placement, unknown and deferred-name diagnostics.
 - [ ] Keep deferred block and purpose forms non-executable. Move existing async/checked deferred diagnostics to directive spellings and update their feature-gated coverage/lane descriptions without implementing blocks. Keep real `export:` support unchanged. Review duplication and syntax regressions.
 
 ### Phase 2: Explicit `$config` contracts
 
-- [ ] Replace the qualifier with a prefix on ordinary explicitly typed compile-time declarations.
+- [ ] Replace the delivered declaration-owned `#Config` inputs with a `$config` prefix on ordinary explicitly typed compile-time declarations.
 - [ ] Preserve primitive/default normalisation and implement the exact attachment/placement rules.
 - [ ] Make bootstrap contracts independent of `$project` metadata. Remove fixed-field input supply.
 - [ ] Keep same-name compatibility, resolution precedence, package isolation and source-only input validation.
 - [ ] Preserve input-dependence facts through helpers for fixed-only receiving fields.
-- [ ] Migrate source contracts and delete the old qualifier machinery in the same coherent cutover.
+- [ ] Migrate source contracts and delete the old declaration-bootstrap machinery in the same coherent cutover.
 
 ### Phase 3: Config directive consumers
 

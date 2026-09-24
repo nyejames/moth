@@ -21,11 +21,10 @@ page_head #= language_theme_head
     `moth` compiles and tools Moth projects.
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
-    **Support notice.** The Alpha compiler still accepts grouped `project` and
-    `html` records, direct `#Config` fields and reserved `page_*` metadata.
+    **Support notice.** Live config syntax is parenthesised grouped `project` and
+    `html` records with declaration-owned `#Config of T` inputs, plus reserved `page_*` metadata.
     The accepted `$config`, `$project`, `$html_builder` and root-only `$page`
-    forms below are queued design. `moth new` does not emit those forms yet.
-    Keep live projects on the current syntax until the implementation cutover.
+    forms below remain queued design. `moth new` emits the current grouped parenthesised config, not those forms yet.
 
     Other tooling continues rapid development.
 
@@ -59,7 +58,7 @@ page_head #= language_theme_head
         [data:
             [$md:`new html`]
             [: Creates the current HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the current-syntax config, a conventional `src/@page.moth` root, an empty legacy `lib/` placeholder, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or a live `$page` declaration. The `lib/` folder has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the current grouped parenthesised config with a declaration-owned version input, a conventional `src/@page.moth` root, an empty legacy `lib/` placeholder, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or a live `$page` declaration. The `lib/` folder has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
         ]
 
         [data:
@@ -129,9 +128,9 @@ page_head #= language_theme_head
 #[section, $md:
     ## Create a new HTML project
 
-    The current scaffold creates a project with current-syntax config, a
+    The current scaffold creates a project with the current grouped parenthesised config and declaration-owned version input, a
     conventional root, generated output folders, build manifests and an
-    optional .gitignore. It does not yet emit the accepted starter below.
+    optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter below.
     The HTML project builder itself has more rules than this page needs to
     cover. See @../project-structure (the project structure guide) for page
     layout, routing, assets, fragments and generated output details.
@@ -162,7 +161,7 @@ page_head #= language_theme_head
     ]
 
     `moth new` does not emit these accepted forms yet. Keep operational
-    scaffolds on their current grouped config and reserved page metadata.
+    scaffolds on their current grouped parenthesised config and reserved page metadata.
 
     Start a new project:
 

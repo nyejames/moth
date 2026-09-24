@@ -4,8 +4,8 @@ Moth is a high-level language with first-class string templates. Its compiler is
 
 This document is the single source of truth for accepted core compiler architecture, semantic ownership and cross-stage compiler contracts. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
-The compiler implements template directives, grouped `project`/`html` configuration records, direct
-and source `#Config` values as ordinary folded constants, and immutable project fields through
+The compiler implements template directives, declaration-owned `#Config of T` inputs plus grouped
+`project`/`html` (`#=`) records as ordinary folded constants, and immutable project fields through
 explicit `@project`. General non-template directives, `$config` prefixes, closed `$project` /
 `$html_builder` configuration, root-only `$page` and explicit root purposes are accepted queued
 design. Other accepted end-state contracts are labelled in their owning sections.
@@ -17,6 +17,7 @@ design. Other accepted end-state contracts are labelled in their owning sections
 Companion authorities:
 
 - `docs/build-system-design.md` for project and build orchestration
+- `docs/src/docs/mon/mon-format.mtf` for MON literal-data format semantics; this document owns only the compiler and Rust API boundary for that format
 - `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
 - `docs/src/docs/directives/directives.mtf` for general directive syntax, ownership and argument rules
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
@@ -53,6 +54,7 @@ or thorough reviews.
 | Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/developer-docs/memory-management/retained-edge-counting/` and the backend memory route |
 | Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
 | Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
+| Rust-only MON data service, literal reader, schema boundary or MON errors | `Rust-only MON service` | `docs/compiler-data-layout-design.md` > `MON data handoff` when input lifetime, spans or owned results are affected |
 
 ## Architectural invariants
 
@@ -60,12 +62,16 @@ or thorough reviews.
 - A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
 - Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
 - Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
-- Call-shaped argument syntax has one parser and one parameter-slot routing owner. Functions,
+- Call-shaped argument syntax has one parser and one shared argument owner. Functions,
   constructors, receiver methods, builtin members, statement intrinsics and directive invocations
-  consume that shared syntax path rather than copying delimiter or named-argument handling.
+  route supplied values through signature parameter slots on that shared path rather than copying
+  delimiter or named-argument handling. Anonymous const-record entries and inline nested folded
+  values use the same shared owner with named-only field routing; signature parameter slots and
+  record fields remain distinct routings.
 - Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
 - Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
 - Module interfaces use stable semantic identities rather than donor-local indexes.
+- Moth-source modules and packages always use Moth semantic interfaces, including when their physical output is Wasm. WIT is the foreign Wasm/component boundary and never replaces `PublicSemanticInterface`.
 - Every physical-target-bearing file-value path in selected source is graph-active before AST reachability, folding or static specialisation. Ordinary `if` keeps both branches in selected source. Future `$feature` selection excludes source before graph and declaration publication. Filesystem resolution happens once per retained physical-target-bearing structural reference, with no later source or rendered-string rescan. `SourceKindNoFileValue` remains diagnostic-only and has no physical target.
 - Graph and input validity is separate from executable and output liveness. Graph activity is conservative for physical-target-bearing authored path occurrences; `SourceKindNoFileValue` remains diagnostic-only. Emission is exact and follows entry or package reachability.
 - A file value has language type `String`. There is no source-visible `Path` type. Resource and site-root anchors stay structural inside the string until a builder assigns output placement and a URL context.
@@ -74,7 +80,7 @@ or thorough reviews.
 - Stage 4 validates both branches of an ordinary `if` before static selection. A known compile-time Bool selects one branch before HIR, and the selected branch retains its lexical scope.
 - Terminality and durable generated requests are derived from the specialised active AST. An inactive static branch contributes no HIR or downstream executable facts.
 - HIR never receives an `if` whose condition is already a known compile-time Bool.
-- Ordinary `$config` values and static `if` specialise executable behaviour. They cannot change
+- Ordinary `#Config` values and static `if` specialise executable behaviour. They cannot change
   Stage 0 graphs or declaration structure. Future `$feature` is a separate compiler-owned
   structural-selection contract before graph and declaration publication.
 - Source does not select or inspect physical targets.
@@ -87,7 +93,9 @@ or thorough reviews.
 - Lifetime-region and escape validation is mandatory and backend-independent. GC cannot bypass topology legality.
 - Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
 - Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
-- Parallelism, reuse and caching preserve deterministic identities, diagnostics and output order.
+- MON decoding never enters the canonical module compilation service and never constructs AST, HIR, TIR, borrow facts or module artefacts.
+- The Rust-only MON service owns exactly one public root: `moth::mon`. `compiler_frontend` internals stay crate-private; no MON path exposes them.
+- MON decoded values are owned trees a caller can keep after releasing the input text. The public boundary has no borrowed document view and publishes no partial result on failure.
 
 ## Compiler input and result boundary
 
@@ -155,7 +163,7 @@ Source preparation and provider binding are deliberately separate.
 - structural file references
 - local declaration-ordering hints
 - root-activity and fragment-placement metadata
-- retained `$config` input-contract shells and other declaration-prefix directive metadata
+- retained `#Config` input-contract shells and other declaration-prefix directive metadata
 - source locations, diagnostics and remap information
 
 `BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained dependency clauses against immutable provider interfaces and produces:
@@ -443,6 +451,10 @@ Binding-backed packages are typed semantic interfaces rather than Moth modules. 
 - do not expose source-defined receiver methods
 - map to target helpers, imports, glue or native operations only after HIR
 
+WIT components enter through this binding-backed boundary. Discovery validates the supported WIT profile and projects it once into Moth canonical types and stable binding identities. Ordinary interface binding, AST and HIR do not carry WIT syntax. Link and backend planning retain only the closed WIT boundary classification needed for Canonical ABI lowering.
+
+A future component export is an optional WIT-compatible projection of a Moth package facade. It does not replace the facade's `PublicSemanticInterface` and Moth-only declarations remain available to Moth consumers.
+
 Source-owned wrapper types provide method-style APIs over external handles when needed.
 
 Source-module namespace records remain shallow and field-access-only. They do not silently acquire the recursive namespace behaviour of binding-backed packages.
@@ -524,7 +536,7 @@ A synthetic compile-time interface contains:
 - no HIR
 - no runtime body
 
-`@project` publishes only predefined project fields. Config helper constants and `$config` input
+`@project` publishes only predefined project fields. Config helper constants and `#Config` input
 declarations are not implicitly public project metadata.
 
 It enters visibility through the same dependency binding boundary as other interfaces. AST consumes
@@ -550,7 +562,7 @@ metadata, configuration dependence, public semantic facts and root metadata rema
 fingerprint inputs. Configuration dependencies use the existing fingerprint owners; they do not
 create a separate fingerprint family. Exported folded values or effect summaries may vary when they
 depend on configuration, with provenance retained, while structural public identity remains stable.
-Ordinary `$config` inputs cannot create or remove declarations or exports. They may change active
+Ordinary `#Config` inputs cannot create or remove declarations or exports. They may change active
 executable effects and derived link facts only. Future structural `$feature` selection needs
 distinct selection-compatibility facts before reuse; it is not ordinary configuration folding.
 
@@ -695,7 +707,7 @@ It owns:
 - root-role-aware `export:` parsing
 - dependency clause shells, flat direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
-- declaration-prefix metadata such as `$config` on the following eligible declaration
+- declaration-prefix metadata such as `#Config of T` on the following eligible declaration
 - retained config and root directive invocations, including their balanced argument token ranges
 - dormant normal-root start-body separation
 - compile-time fragment placement metadata
@@ -703,13 +715,13 @@ It owns:
 - structural provider references
 - structural file references, classified from the dense path rows tokenization already produced
 - conservative local declaration-ordering hints
-- retained `$config` input-contract shells
+- retained `#Config` input-contract shells
 
 Support roots and project package facades reject root runtime activity before executable HIR can be produced. Normal roots retain dormant start, fragment and root-directive metadata.
 
 Syntax preparation does not type-check executable bodies, fold expressions, parse a parallel argument language or open source provider interfaces. File-reference classification is shallow for the same reason: it reads path rows and their spelling, and never parses the surrounding expression. Directive arguments are semantically parsed once through the shared call owner when the receiving context is available.
 
-`$config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
+`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
 
 #### Interface binding
 
@@ -918,7 +930,9 @@ AST carries semantic `TypeId` values through fields, receiver lookup, calls, ope
 Call-shaped argument syntax has one focused AST owner. It consumes parentheses, commas, newline
 whitespace, positional and named targets, mutable-access markers, argument expression boundaries,
 expected-type and cast-target routing. Functions, constructors, receiver methods, builtin members,
-statement intrinsics and directive invocations consume that owner. The same owner retains each
+statement intrinsics and directive invocations route supplied values through signature parameter
+slots on that owner. Anonymous const-record entries and inline nested folded values use the same
+owner with named-only field routing and const-required values. The same owner retains each
 parsed argument's parameter slot for final validation, so call validation fills defaults and checks
 types and access without routing the source arguments a second time. Specialised template argument
 categories remain under their current template owners.
@@ -968,17 +982,19 @@ Constants are compile-time declarations and metadata rather than runtime top-lev
 
 Header preparation owns local dependency discovery. AST owns semantic checking and folding.
 
-`$config` is the accepted source spelling for an explicit input contract on one following typed
-compile-time `#` binding. Only those declarations create input contracts. Project fields and ordinary
-helper constants never implicitly supply or block same-named inputs.
+`#Config of T` is the implemented source spelling for an explicit input contract on one earlier
+explicitly typed top-level declaration. Only those declarations create input contracts. `$config`
+prefixes, closed `$project` / `$html_builder` configuration, root-only `$page` and explicit root
+purposes remain queued general directives. Fixed grouped-project fields retain their current
+authoritative provider and override-blocking policy; ordinary helper constants do not become input
+contracts.
 
-Bootstrap `$config` contracts resolve during the config compilation service. Source-module input
-defaults stay literal-only and resolve after graph discovery, before that module's AST semantics.
+Declaration-owned bootstrap `#Config` contracts resolve during the config compilation service. Source-module input defaults stay literal-only and resolve after graph discovery, before that module's AST semantics.
 Source defaults are deliberately restricted to self-contained primitive literals or `none`, as
 defined in `docs/build-system-design.md`. AST consumes the resolved primitive value and treats the
 declaration as an ordinary folded constant.
 
-A source `$config` declaration creates:
+A source `#Config` declaration creates:
 
 - no runtime wrapper type
 - no HIR node category
@@ -992,7 +1008,7 @@ Private inferred const facts are advisory optimisation metadata. They do not aff
 #### Static Bool control-flow specialisation
 
 Static specialisation applies to ordinary statement and value-producing `if` forms and uses the normal
-folded Bool authority. It has no `$config` special case and no config-specific branch node.
+folded Bool authority. It has no `#Config` special case and no config-specific branch node.
 
 The current AST finalisation owner performs this selection after type and value-production
 validation and before terminality, durable generated requests and executable const facts.
@@ -1009,9 +1025,7 @@ validation and before terminality, durable generated requests and executable con
 Terminality and durable executable summaries observe the specialised active AST. HIR receives no
 statically decided ordinary `if`; every `if` remaining in HIR has a runtime condition.
 
-Fully folded struct and anonymous-record constants may become const records. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
-
-Compile-time and runtime semantics agree on checked numeric failures, cast range checks, non-finite Float rejection and value-to-string formatting.
+Fully folded struct and anonymous-record constants may become const records. Anonymous const records use parenthesized named-only `(name = value)` entries; the empty record is permitted and fields may fold inline nested anonymous, already bound, or explicitly constructed nominal values. Records declare no nested types, perform no conversion, and whole records remain runtime-ineligible. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
 
 #### Generics
 
@@ -1258,7 +1272,7 @@ HIR does not:
 - carry compile-time page fragments
 - carry absolute source paths, output paths, routes, URLs, content hashes or builder names
 - receive a statically decided ordinary `if`
-- evaluate `$config` or recover page metadata from constant names
+- evaluate `#Config` or recover page metadata from constant names
 - choose target- or platform-specific source branches
 - solve generic arguments
 - decide trait conformance
@@ -1585,7 +1599,7 @@ Backend lowerers do not:
 - rediscover project topology
 - choose command, entry or route policy
 - reconsider source legality, borrow facts or lifetime topology
-- reinterpret `$config`, `$feature` or static branch selection
+- reinterpret `#Config`, `$feature` or static branch selection
 - write final project outputs directly
 
 A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.
@@ -1593,6 +1607,247 @@ A lowerer may implement a language-owned HIR operation with a target-native inst
 Numeric checks, cast failure, finite-Float validation, map behaviour, error propagation and reactive semantics are not weakened because a target provides a more permissive primitive.
 
 Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, resource output placement, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
+
+## Rust-only MON service
+
+The Rust-only MON service is a narrow public library service beside the canonical
+module compilation service. It accepts caller-owned UTF-8 MON text and returns
+owned data values; it never compiles a module, evaluates a Moth program, reads a
+file, discovers a project or writes a build output. Its public root is
+`moth::mon`, re-exported by `src/lib.rs`; the implementation owner is the
+crate-private `src/compiler_frontend/mon/`. The service is executable from
+another Rust crate, using only the Moth dependency and ordinary Rust data
+conversion code. It has no compiler command, source-file IO, compilable Moth
+source kind, builder registration or backend path, and compiled Moth programs
+cannot call its services. The MON literal-data format itself is owned by
+`docs/src/docs/mon/mon-format.mtf`; this section owns only the compiler and Rust
+API boundary for that format.
+
+The three accepted operations share one prepared schema and one writer:
+
+- `encode_document` receives a record value and its prepared static schema and
+  returns one complete ordinary UTF-8 MON `String` or a structured failure.
+- `encode_value` receives any eligible value and its schema and returns its
+  complete literal text, including string quotes or container delimiters, through
+  the same writer.
+- `decode_document` receives one complete document and its prepared record schema,
+  validates, applies defaults and returns an owned schema-checked record or the
+  first structured failure.
+
+Encoding a `String` always encodes string data. It never guesses that the text
+resembles MON and should be inserted raw or decoded. Nested encoded fragments are
+ordinary strings with no trusted marker, hidden schema or deferred computation;
+composition requires final document validation.
+
+### Public root and crate boundary
+
+The public surface is available through `moth::mon` with the exact names fixed
+for the Rust service: `decode_document`, `decode_document_bytes`,
+`encode_document`, `encode_value`, `Field`, `PreparedSchema`, `Schema`,
+`SchemaType`, `Variant`, `Value`, `Limits`, `MonError`, `MonErrorCode`,
+`PathSegment` and `Span`. The checked-in outside-crate coverage in
+`tests/mon_public_api.rs` builds a static schema once,
+encodes a record, decodes it, drops the source `String` and converts the
+owned result into native Rust data. The public path does not expose
+`compiler_frontend` internals, and availability here is not an assertion
+that compiled Moth programs can call MON services.
+
+`mon` owns an input cursor over the caller-provided text, `Span` byte ranges and
+owned `Value` results. It never constructs `SourceId`, `PathId`, `StringId`,
+`SourceDatabase`, AST, HIR or compiler cursors, and it performs no module
+compilation or evaluation. The AST call-argument owner remains unchanged because
+its `Expression` and scope contract cannot cross this boundary; MON reproduces
+only the accepted delimiter and slot policy in its data cursor.
+
+### Literal-only reader
+
+The reader consumes exactly one implicit or explicitly parenthesised root record.
+Empty and comments-only input denotes an empty root record; validation still
+checks every required field. Commas separate entries at every level with one
+optional trailing comma, and newlines are whitespace rather than a second
+separator. After an explicit root only whitespace and comments may remain.
+Multiple roots and concatenated documents are invalid. A lone scalar, collection
+or choice is not a document; the caller places it in a named root field.
+
+Every value in a completed document must be a supported literal form. The reader
+rejects names, arithmetic, calls, casts, field projections, variables, constant
+references and unevaluated templates before expression evaluation, even when the
+compiler could fold them. Constructor-shaped record and choice literals are data
+forms whose arguments recursively obey the literal restriction; they invoke no
+user code and create no structural-conversion rule. A folded const template is an
+ordinary `String` that an encoder can quote. An unevaluated template is not a
+serialisable value.
+
+Records are closed: every unknown field fails, including a misspelling of a field
+whose correct name has a default. Maps provide the explicit dynamic-key surface.
+`{}` always parses as a collection and `{=}` always parses as a map; schema
+context never changes a container's kind, and map entries and collection items
+cannot mix. Maps preserve insertion order, reject duplicate keys under the
+receiving key contract and carry only `String`, `Int`, `Bool` or `Char` keys.
+Bare names are references and are invalid as MON map keys. String and Char remain
+distinct keys and Bool is not a numeric key. A string-keyed map does not become a
+record.
+
+Qualifiers are one case-sensitive identifier with no dotted path, alias, registry
+lookup or whitespace-separated `::`. Anonymous records are named-only. A nominal
+`Struct(name)` record accepts anonymous `(...)` or one exact `name(...)`; an
+explicit mismatch fails. Choices accept contextual `::Variant` or one exact
+`Choice::Variant`. A unit variant has no parentheses and a payload variant
+requires them. Positional arguments precede named arguments, each schema slot is
+supplied exactly once, unknown or duplicate slots fail, and choice payloads have
+no defaults. A qualifier is a checked assertion against the expected schema and
+never selects another schema; writers omit the checked qualifier. Contextual
+source `::Variant` construction outside literal data remains a later Moth feature.
+
+Options permit `none` but never permit omission by themselves. Only an explicit
+field default permits omission, and a missing optional field without a default is
+an error. Defaults are prevalidated data applied at the exact missing field: a
+supplied `none` is validated as `none` and never replaced, a supplied nested
+record is validated as that record with no deep merge into a parent default, and
+`()` becomes a completed default-valued record only when its receiving schema
+permits every omission. Typed encoding emits all completed fields in schema
+declaration order, including explicit `none` and values equal to defaults.
+Eligibility is transitive over the complete concrete schema: an unsupported
+member makes the enclosing shape ineligible even when the current instance does
+not use it. `SchemaType::Unsupported` exists only so `prepare()` can reject such
+a schema before any document is processed; there is no public unsupported value.
+
+Resource identifiers cross this boundary as ordinary strings. Compiler structural
+Resource and SiteRoot pieces are materialised to their final characters before
+encoding, and an unresolved anchor fails conversion to MON data rather than
+entering the API. There is no public `Resource` value. Decoding performs no path
+discovery, URL generation, filesystem check or resource loading.
+
+There is no mandatory schema header, reserved universal version field or
+automatic schema discovery. Applications may declare an ordinary
+`format_version` field and explicit migrations. A successful producer-side check
+never removes validation at a receiving boundary, and the receiver publishes
+live state only after its own checks succeed.
+
+### Static schema boundary
+
+The Rust caller defines its save-data contract once as an immutable `Schema` and
+shares the validated `PreparedSchema` across calls. Preparation validates the
+static schema and its defaults before any document is processed; reuse of the
+prepared value across calls is the ordinary pattern. Schema misuse is a
+structured failure, never a panic. The schema language defines ordinary data
+shapes, field types, nominal identities, choice variants and explicit default
+values; it defines no second expression language and adds no rename, skip,
+flatten, custom codec hook or user predicate. A schema-checked owned MON value is
+the initial codec result. The engine maps that value to its native struct with
+ordinary Rust functions, as the checked-in coverage in `tests/mon_public_api.rs`
+demonstrates. Automatic derives, procedural macros, Serde traits, broad reflection
+and automatic extraction from Moth types are not part of this boundary.
+
+Public values are owned trees: `None`, `Bool`, `Char`, `String`, `Int(i32)`,
+`Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
+`Record(fields)`, `Collection(items)`, `Map(entries)` and
+`Choice { qualifier, variant, fields }`. Decoded values outlive and release the
+input text without a caller-retained backing buffer; internal borrowing during
+parsing is allowed. The default public API has no borrowed document view and
+exposes no partially built result. Repeated shared source values encode at each
+occurrence and decode with no preserved alias relationship or allocation
+identity. The public `Value` model is an owned tree and cannot represent cyclic
+host data. `SchemaType` is likewise a finite owned schema tree rather than a
+named-reference graph. The API has no schema-reference mechanism for recursive
+definitions; each declaration spells out every nesting level values are checked
+against, subject to the receiver's limits.
+
+Writing is deterministic without canonical-byte semantics: given the same
+ordered value, schema and encoder version, output is deterministic, but
+semantically equivalent documents need not share bytes. Public `encode_document`
+and `encode_value` emit compact output; pretty formatting is private to writer
+tests, not a public mode. A comment-preserving formatter and canonical hashing
+or signing facility are not part of this service.
+
+### Lexical contracts without source widening
+
+MON reuses the `numeric_text` grammar for numbers and otherwise decodes its
+literal data locally. Its data cursor reproduces only the accepted delimiter
+and slot policy; it does not clone the Moth source grammar, rescan repeatedly
+or route through `f64`, an `Int` token payload or display formatting.
+Whole-number and decimal or exponent spellings stay
+distinguishable through a lossless numeric literal representation until the
+destination is known. Signed numeric literals are allowed without allowing
+general unary expressions.
+Strict conversion keeps its accepted policy: `Int` and exact `Integer` require
+whole-number spelling, so `3.0` and `1e3` reject an `Int` target even when
+mathematically integral; lowercase `e` is the only accepted exponent marker and
+range checks are strict; finite `Float` materialisation follows the numeric
+authority and rejects non-finite source values and conversion results, emitting
+`-0.0` for negative zero and `0` for positive zero while decoding preserves the
+sign bit; exact `Number` and `NumberN` mapping uses the destination's declared
+scale of 0 to 18 and rejects inexactly representable input such as `1.239`
+against a scale-two target without rounding. Unsupported concrete compiler-type
+adapters fail explicitly rather than narrowing or converting through `Float`.
+MON performs only the bounded literal normalisation, range and scale checks the
+codec needs; it adds no second arithmetic runtime.
+
+The MON-local decoder accepts quoted `String` escapes `\\`, `\"`, `\n`, `\r`,
+`\t` and `\u{H...}`, and `Char` escapes `\\`, `\'`, `\n`, `\r`, `\t` and
+`\u{H...}`. Unicode braces contain one to six ASCII hex digits, accept either
+case on input, reject empty, too-long, non-hex,
+surrogate and out-of-range scalars, and writer output uses uppercase hex. `\0`,
+`\xNN`, fixed-width `\uXXXX`, escaped physical newlines and unknown escapes
+fail. Unescaped string newlines and CRLF remain byte-for-byte content because
+MON's bounded reader decodes its own escape grammar; no source escape owner is
+shared. Moth source remains limited to its existing five escapes, so source
+`{=}`, Unicode-escape and contextual `::Variant` parity stay deferred. A
+schema-free internal parse may preserve qualifiers without claiming they have
+been validated.
+
+### Errors, budgets and first-error rollback
+
+MON failures are structured public values, not compiler diagnostics. The public
+error is `MonError { code: MonErrorCode, span: Option<Span>, path:
+Vec<PathSegment>, detail: String }` with no compiler identity table. Codes keep
+input, schema, resource, budget and internal lanes distinct: UTF-8, literal and
+syntax, schema and type, duplicate and qualifier and arity, numeric and Unicode,
+resource, each budget kind and internal invariant failures each have their own
+codes. A missing field points at its containing record rather than fabricated
+source text; duplicate map-key errors point at the duplicate key. Messages render
+only at the caller's diagnostic boundary. The service does not start the later
+compact-diagnostics migration and adds no competing global error taxonomy.
+
+Each public encode/decode operation reports failures through the same public
+`MonError` projection. Decoding can attach an original input byte range, while
+either operation can carry an available field or element path; both preserve the
+stable error reason and discard partial values. Encoding builds a private
+`String` and discards it on error; where an internal writer supports caller-owned
+buffers, its public contract either rolls back to the original length or keeps
+that facility private. Incremental input, streams and multiple-document framing
+remain deferred; complete documents fail fast.
+
+Limits are receiver resource policy, not grammar dialects: a valid document may
+exceed a receiver's budget and is reported distinctly from syntax and schema
+errors. Every counter uses checked arithmetic and is charged before the affected
+allocation or expansion, including default expansion and repeated shared-value
+expansion. A map entry carries one additional node charge beyond its key and
+value nodes, and that charge is the same for parsed input, programmatic
+completion and default expansion, so one shape consumes one node budget however
+it enters the service. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes,
+4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
+default expansions. Configurable `max_depth` has an implementation ceiling of 64
+(`Limits::MAX_SAFE_DEPTH`); schema preparation rejects larger policies.
+Accepted recursion and rejected-schema/default cleanup stay bounded, and
+there is no unsafe unlimited switch.
+
+### Deferred source, backend and builder surface
+
+The following are explicitly not part of this service: compiler-owned `$mon`
+convenience with its undecided invocation syntax, Moth-side encode and decode
+operations, checked anonymous-record receiving contexts, automatic schema
+extraction from ordinary Moth types and generic instances, source-level `{=}`
+cutover, Unicode-escape widening, contextual `::Variant` construction where not
+already delivered, the static `.mon` project builder with its CLI, scaffolding,
+source-file integration and output ownership, Wasm and JS bindings, runtime code
+generation and engine UI lifecycle integration. MON text has no file IO, module
+import, schema discovery, command, builder registration, output write or runtime
+opcode. Dynamic schema construction and loading, public borrowed views,
+streaming, binary formats, graph identity preservation, automatic migrations,
+custom serialisation traits, field-transformation frameworks and byte-canonical
+output remain outside this boundary and are added only for a concrete accepted
+use case.
 
 ## Compiler implementation map
 
@@ -1605,6 +1860,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Generated request canonicalisation, materialisation, convergence and delta: `src/compiler_frontend/module_compilation/generated/`
 - Project config compilation and direct Moth-template compilation: `src/compiler_frontend/single_source_compilation/`
 - The stage facade those services drive, which is not an entry point of its own: `src/compiler_frontend/pipeline.rs`
+- Rust-only MON service (implemented public Rust service): `moth::mon`, re-exported from `src/lib.rs`, over the crate-private `src/compiler_frontend/mon/` owner
 
 ### Stage owners
 
@@ -1635,6 +1891,7 @@ Current locations are navigation aids rather than permanent architecture.
 - Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
 - Target-contract validation: backend feature and external package validation owners under
   `src/backends/`
+- Rust-only MON literal reader, static schema preparation, deterministic writer, bounded budgets and structured `MonError` reporting: the crate-private MON owner above; shares `numeric_text` grammar and locally decodes bounded MON escapes without widening source syntax
 - Phase 3 probe-only ownership accounting:
   `src/compiler_frontend/instrumentation/memory_ledger.rs`,
   `src/benchmarking/frontend.rs`, `src/bin/data_layout_memory_probe.rs`

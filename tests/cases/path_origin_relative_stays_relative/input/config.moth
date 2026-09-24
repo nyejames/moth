@@ -1,6 +1,6 @@
-project #= |
+project #= (
     name = "test_project",
-|
-html #= |
+)
+html #= (
     origin = "/mysite",
-|
+)

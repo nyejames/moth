@@ -39,6 +39,10 @@ An anonymous `(width = 1280, height = 720)` does not become a `Size` because the
 fields match. MON syntax adds no implicit nominal construction or structural
 conversion. Named type declarations remain separate, flat declarations.
 
+### MON data boundary
+
+Source construction above is unchanged: an anonymous record never becomes a nominal struct because the fields match. MON literal struct data documents both anonymous `(...)` and one exact `Name(...)` qualifier by reference. An explicit qualifier is a checked assertion against the receiving schema, never implicit conversion and never user-code invocation. That contract is Rust-only serialised-data documentation; source behaviour is unchanged. See @../mon/#mon-format (MON format).
+
 ### Field reads
 
 Use `.` to read a field.

@@ -64,7 +64,7 @@ fn check_rejects_config_filename_namesake_source_contract() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(
@@ -105,7 +105,7 @@ fn check_reports_missing_config_input_from_unselected_source() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -141,7 +141,7 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -170,7 +170,7 @@ fn check_compiles_unselected_same_module_source_closure() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -238,7 +238,7 @@ fn config_ast_timers_use_dedicated_identities() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
@@ -293,7 +293,7 @@ fn check_retains_source_package_warning() {
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -350,7 +350,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
         }
         fs::write(
             root.join("config.moth"),
-            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"dev\",\n    release_output = \"release\",\n|\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
         )
         .expect("should write config");
         fs::write(source_root.join("@page.moth"), "#[:<h1>Check</h1>]\n")
@@ -392,7 +392,7 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");

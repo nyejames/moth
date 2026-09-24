@@ -392,9 +392,9 @@ Closed audits and dated benchmark evidence are historical records. Preserve thei
 
 Title the general lesson along the lines of **Shared forms, clear context**. Teach through concrete code before introducing terms such as head-directed specialisation. The lesson must cover more than Wiring.
 
-#### A. One pipe-delimited member-list form
+#### A. One shared member-list shape with distinct contracts
 
-Show how the owner determines the meaning of `|...|`:
+Show how the declaration owner determines the meaning of pipe-delimited `|...|` member lists, followed by the distinct parenthesised const-record value form:
 
 ```moth
 -- Function parameters
@@ -414,14 +414,11 @@ PersonMessage ::
     Birthday,
 ;
 
--- Named compile-time values
-labels #= |
-    name = "Name",
-    age = "Age",
-|
+-- Named compile-time values (parenthesised const record)
+labels #= (name = "Name", age = "Age")
 ```
 
-Explain the shared member-list shape and its different contracts. The const record requires values that fold. The struct declares a constructable type. Choice payload fields retain their own restrictions. Reuse of punctuation does not erase those differences or authorize nested pipe lists and anonymous runtime records.
+Explain the shared member-list shape and its different contracts. The const record is a parenthesised named-only value that requires values that fold. The struct declares a constructable type. Choice payload fields retain their own restrictions. Reuse of punctuation does not erase those differences, does not authorize nested declaration pipe lists inside value records and does not enable deferred anonymous runtime records.
 
 #### B. One `of` specialisation separator
 
@@ -577,7 +574,7 @@ Extend the current parameter/declaration grammar. Do not add a second scanner, p
 - Tokenization remains responsible for lexical forms and owned token storage.
 - Declaration-shell parsing retains the syntax of parameter contracts using the delivered token ranges and cold-store conventions.
 - AST resolution decides whether a head is a generic type, wire contract or route contract. Tokenization does not query semantic types or resolve constructors.
-- The shared call-argument parser still owns delimiters, named arguments and parameter-slot association.
+- The delivered MON shared argument owner still owns delimiters, named arguments and parameter-slot association.
 - Route-aware validation operates from the immediate parameter slot before ordinary complete-constructor checking would reject an intentional trailing omission.
 - An ordinary constructor call never retries as a route after a diagnostic. No parse-fail-and-fallback path is permitted.
 
@@ -598,7 +595,7 @@ Represent only facts required by the foundation:
 
 Do not disguise a route argument as a normal Message value or expose TIR to HIR consumers. Do not widen every ordinary expression with a large permanent payload for a rare feature. Reuse current compact side-table or parameter-contract owners where justified.
 
-Use the activation tree's result-slot, call-argument and value-production representation. Captured expressions must integrate with that representation rather than reconstructing retired tuple/result carriers.
+Use the activation tree's call-argument and value-production representation as it exists at Wiring activation (pre-slot tuple transport still in force); do not reconstruct retired record parsers and do not anticipate post-Wiring result-slot shapes. Captured expressions must integrate with that representation rather than reconstructing retired tuple/result carriers.
 
 ### Public and generated boundaries
 

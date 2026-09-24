@@ -12,8 +12,7 @@ use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_sourc
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, InvalidExpressionReason,
-    TypeAnnotationContext,
+    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
@@ -65,7 +64,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code:
-                "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+                "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -114,7 +113,7 @@ fn projects_authored_anonymous_const_records() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "labels #= |\n    first = \"a\",\n|\n",
+            source_code: "labels #= (\n    first = \"a\",\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -339,48 +338,6 @@ fn rejects_authored_plain_bindings_inside_the_service() {
 }
 
 #[test]
-fn rejects_nested_record_literal_inside_a_grouped_project_record() {
-    // Nested `|...|` literals are rejected by the shared record grammar inside the service:
-    // record-valued children must be declared first and referenced by name.
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let surface = BuilderSurface::with_mandatory_core();
-    let style_directives = StyleDirectiveRegistry::built_ins();
-
-    let messages = compile_config_source(
-        ConfigCompilationRequest {
-            authored_path: Path::new("project/config.moth"),
-            file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    child = | value = 1 |,\n|\n",
-            style_directives: &style_directives,
-            binding_packages: &surface.binding_packages,
-            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
-            ),
-            builder_config_globals:
-                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
-            project_field_config_policies: surface
-                .config_schemas
-                .project()
-                .project_field_config_policies(),
-        },
-        &mut string_table,
-    )
-    .result
-    .err()
-    .expect("a nested record literal should be rejected by the compiler service");
-
-    let CompilerMessages { diagnostics, .. } = &messages;
-    assert!(diagnostics.iter().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InvalidExpression {
-                reason: InvalidExpressionReason::NestedAnonymousConstRecord,
-            }
-        )
-    }));
-}
-
-#[test]
 fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
     // Record fields resolve through the enclosing constant scope only: a sibling field name
     // is not a constant, so reusing it must be rejected instead of resolving implicitly.
@@ -393,7 +350,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "project #= |\n    name = \"docs\",\n    alias = name,\n|\n",
+            source_code: "project #= (\n    name = \"docs\",\n    alias = name,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -422,9 +379,9 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
 
 #[test]
 fn rejects_config_qualifier_on_builder_section_fields() {
-    // Builder and tooling section fields cannot declare `#Config`; the compiler-owned direct
-    // project qualifier is intentionally limited to grouped project fields. The service rejects
-    // this before any folded section value reaches build-side validation.
+    // Builder and tooling section fields cannot declare `#Config`; only top-level source
+    // compile-time declarations carry contracts. The service rejects this before any folded
+    // section value reaches build-side validation.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
@@ -434,7 +391,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "html #= |\n    origin #Config of String = \"/docs\",\n|\n",
+            source_code: "origin #Config of String = \"/docs\"\nhtml #= (\n    origin = origin,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -449,17 +406,110 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         &mut string_table,
     )
     .result
-    .err()
     .expect(
-        "a #Config qualifier on a builder section field should be rejected by the compiler service",
+        "a top-level contract referenced by a builder section field folds without a qualifier error",
     );
 
-    let CompilerMessages { diagnostics, .. } = &messages;
-    assert!(diagnostics.iter().any(|diagnostic| {
+    let compiled = messages;
+    let html = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "html")
+        .expect("the builder section should fold");
+    let PublicFoldedValue::Record(fields) = &html.value else {
+        panic!("the builder section should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "origin").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == "/docs"
+    ));
+}
+
+#[test]
+fn declaration_config_bootstrap_resolves_explicit_input_before_project_fold() {
+    let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    inputs
+        .insert(
+            crate::compiler_frontend::build_config::BuildConfigInputEntry::new(
+                crate::compiler_frontend::build_config::BuildInputName::new("release_version")
+                    .expect("release_version is valid"),
+                crate::compiler_frontend::build_config::PrimitiveBuildValue::String(
+                    "2.0".to_owned(),
+                ),
+                crate::compiler_frontend::build_config::BuildConfigValueLocation::Command(
+                    crate::compiler_frontend::build_config::BuildCommandLocation::new(0),
+                ),
+            ),
+        )
+        .expect("the explicit input name is unique");
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String = \"authored\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("the declaration-owned input should fold before the project field");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "version").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == "2.0"
+    ));
+    let input_record = compiled
+        .resolution_records
+        .iter()
+        .find(|record| record.input_name.as_str() == "release_version")
+        .expect("the declaration-owned input record should be retained");
+    assert_eq!(
+        input_record.origin,
+        crate::compiler_frontend::build_config::BuildConfigValueOrigin::ExplicitInput
+    );
+}
+
+#[test]
+fn declaration_config_bootstrap_validates_default_before_explicit_provider() {
+    let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    inputs
+        .insert(
+            crate::compiler_frontend::build_config::BuildConfigInputEntry::new(
+                crate::compiler_frontend::build_config::BuildInputName::new("release_version")
+                    .expect("release_version is valid"),
+                crate::compiler_frontend::build_config::PrimitiveBuildValue::String(
+                    "provided".to_owned(),
+                ),
+                crate::compiler_frontend::build_config::BuildConfigValueLocation::Command(
+                    crate::compiler_frontend::build_config::BuildCommandLocation::new(0),
+                ),
+            ),
+        )
+        .expect("the explicit input name is unique");
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let Err(messages) = compile_project_source(
+        "release_version #Config of String = 1\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &inputs,
+        &globals,
+    ) else {
+        panic!("an invalid authored fallback must fail before an explicit provider is applied");
+    };
+    assert!(messages.diagnostics().any(|diagnostic| {
         matches!(
-            &diagnostic.payload,
+            diagnostic.payload,
             DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
+                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
                 ..
             }
         )
@@ -467,7 +517,306 @@ fn rejects_config_qualifier_on_builder_section_fields() {
 }
 
 #[test]
-fn direct_project_config_qualifier_uses_explicit_typed_input() {
+fn declaration_config_bootstrap_uses_builder_global_and_validates_default() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let mut globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    globals
+        .insert(
+            crate::compiler_frontend::build_config::BuildInputName::new("release_version")
+                .expect("release_version is valid"),
+            crate::compiler_frontend::build_config::PrimitiveBuildValue::String(
+                "builder".to_owned(),
+            ),
+        )
+        .expect("the builder global name is unique");
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String = \"authored\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("the builder global should override a valid authored default");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "version").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == "builder"
+    ));
+
+    let Err(messages) = compile_project_source(
+        "release_version #Config of String = 1\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &inputs,
+        &globals,
+    ) else {
+        panic!("an invalid authored fallback must fail even when a builder global exists");
+    };
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::ConfigInputTypeMismatch { .. },
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn declaration_config_bootstrap_supports_required_omission_and_optional_absence() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String = \"authored\"\n\
+         optional_author #Config of String?\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+             author = optional_author,\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("a defaulted required input and optional absence should fold");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields
+            .iter()
+            .find(|field| field.name == "author")
+            .map(|field| &field.value),
+        Some(PublicFoldedValue::OptionNone)
+    ));
+}
+
+#[test]
+fn declaration_config_bootstrap_resolves_required_omission_and_rejects_missing_input() {
+    let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    inputs
+        .insert(
+            crate::compiler_frontend::build_config::BuildConfigInputEntry::new(
+                crate::compiler_frontend::build_config::BuildInputName::new("release_version")
+                    .expect("release_version is valid"),
+                crate::compiler_frontend::build_config::PrimitiveBuildValue::String(
+                    "2.0".to_owned(),
+                ),
+                crate::compiler_frontend::build_config::BuildConfigValueLocation::Command(
+                    crate::compiler_frontend::build_config::BuildCommandLocation::new(0),
+                ),
+            ),
+        )
+        .expect("the explicit input name is unique");
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("an explicit input should satisfy an omitted required declaration");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "version").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == "2.0"
+    ));
+
+    let empty_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let Err(messages) = compile_project_source(
+        "release_version #Config of String\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n",
+        &empty_inputs,
+        &globals,
+    ) else {
+        panic!("an omitted required declaration must reject a missing input");
+    };
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::MissingConfigInput,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn declaration_config_bootstrap_preserves_multiple_folded_input_dependencies() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "first_value #Config of Int = 1\n\
+         second_value #Config of Int = 2\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             aggregate = first_value + second_value,\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("a folded project field should retain every declaration-owned dependency");
+    let dependency = compiled
+        .project_field_dependencies
+        .iter()
+        .find(|dependency| string_table.resolve(dependency.field_name) == "aggregate")
+        .expect("the aggregate field dependency should be retained");
+    let input_names = dependency
+        .input_names
+        .iter()
+        .map(|name| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(input_names, vec!["first_value", "second_value"]);
+}
+#[test]
+fn declaration_config_bootstrap_tracks_template_fold_provenance() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let (compiled, string_table) = compile_project_source(
+        "release_version #Config of String = \"1.2\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             aggregate = [: v-[release_version]],\n\
+         )\n",
+        &inputs,
+        &globals,
+    )
+    .expect("a template-folded project field should retain declaration-owned provenance");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the project declaration should be present");
+    let PublicFoldedValue::Record(fields) = &project.value else {
+        panic!("the project declaration should fold to a record");
+    };
+    assert!(matches!(
+        fields.iter().find(|field| field.name == "aggregate").map(|field| &field.value),
+        Some(PublicFoldedValue::String(OwnedFoldedString::Text(value))) if value == " v-1.2"
+    ));
+    let dependency = compiled
+        .project_field_dependencies
+        .iter()
+        .find(|dependency| string_table.resolve(dependency.field_name) == "aggregate")
+        .expect("the template-folded aggregate field dependency should be retained");
+    let input_names = dependency
+        .input_names
+        .iter()
+        .map(|name| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(input_names, vec!["release_version"]);
+}
+
+#[test]
+fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_multiple_inputs() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let Err(messages) = compile_project_source(
+        "first_value #Config of Int = 1\n\
+         second_value #Config of Int = 2\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             template_const_loop_iteration_limit = first_value + second_value,\n\
+         )\n",
+        &inputs,
+        &globals,
+    ) else {
+        panic!("fixed-only project fields must reject multiple input dependence");
+    };
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::ConfigQualifierFixedField,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn declaration_config_bootstrap_rejects_forward_references_in_same_file() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let Err(messages) = compile_project_source(
+        "project #= (\n\
+             name = \"docs\",\n\
+             version = release_version,\n\
+         )\n\
+         release_version #Config of String = \"authored\"\n",
+        &inputs,
+        &globals,
+    ) else {
+        panic!("same-file forward references must remain invalid");
+    };
+    assert!(messages.diagnostics().next().is_some());
+}
+
+#[test]
+fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_nested_alias() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    let result = compile_project_source(
+        "source_root #Config of String = \"src\"\n\
+         helper #= (root = source_root,)\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             entry_root = helper.root,\n\
+         )\n",
+        &inputs,
+        &globals,
+    );
+    let messages = match result {
+        Err(messages) => messages,
+        Ok(_) => {
+            panic!(
+                "fixed-only fields must reject input dependence through aliases and projections"
+            );
+        }
+    };
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::ConfigQualifierFixedField,
+                ..
+            }
+        )
+    }));
+}
+
+#[test]
+fn declaration_config_uses_explicit_typed_input() {
     let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     inputs
         .insert(
@@ -485,7 +834,11 @@ fn direct_project_config_qualifier_uses_explicit_typed_input() {
         .expect("the explicit input name is unique");
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
+        "version #Config of String\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     )
@@ -505,7 +858,7 @@ fn direct_project_config_qualifier_uses_explicit_typed_input() {
 }
 
 #[test]
-fn direct_project_config_qualifier_uses_builder_global_before_default() {
+fn declaration_config_uses_builder_global_before_default() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let mut globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     globals
@@ -518,7 +871,11 @@ fn direct_project_config_qualifier_uses_builder_global_before_default() {
         )
         .expect("builder global name should be platform-neutral");
     let (compiled, string_table) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String = \"authored\",\n|\n",
+        "version #Config of String = \"authored\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     )
@@ -538,11 +895,15 @@ fn direct_project_config_qualifier_uses_builder_global_before_default() {
 }
 
 #[test]
-fn direct_project_config_qualifier_uses_authored_default() {
+fn declaration_config_uses_authored_default() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String = \"authored\",\n|\n",
+        "version #Config of String = \"authored\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     )
@@ -562,11 +923,15 @@ fn direct_project_config_qualifier_uses_authored_default() {
 }
 
 #[test]
-fn direct_project_optional_config_qualifier_absence_folds_to_option_none() {
+fn declaration_config_optional_absence_folds_to_option_none() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
+        "author #Config of String?\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             author = author,\n\
+         )\n",
         &inputs,
         &globals,
     )
@@ -588,11 +953,27 @@ fn direct_project_optional_config_qualifier_absence_folds_to_option_none() {
     ));
 }
 #[test]
-fn direct_project_open_metadata_supports_all_primitive_and_optional_contracts() {
+fn declaration_config_open_metadata_supports_all_primitive_and_optional_contracts() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    custom_string #Config of String = \"text\",\n    custom_int #Config of Int = 7,\n    custom_float #Config of Float = 1.25,\n    custom_bool #Config of Bool = true,\n    custom_char #Config of Char = 'c',\n    custom_string_optional #Config of String? = none,\n    custom_int_optional #Config of Int? = 9,\n|\n",
+        "custom_string #Config of String = \"text\"\n\
+         custom_int #Config of Int = 7\n\
+         custom_float #Config of Float = 1.25\n\
+         custom_bool #Config of Bool = true\n\
+         custom_char #Config of Char = 'c'\n\
+         custom_string_optional #Config of String? = none\n\
+         custom_int_optional #Config of Int? = 9\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             custom_string = custom_string,\n\
+             custom_int = custom_int,\n\
+             custom_float = custom_float,\n\
+             custom_bool = custom_bool,\n\
+             custom_char = custom_char,\n\
+             custom_string_optional = custom_string_optional,\n\
+             custom_int_optional = custom_int_optional,\n\
+         )\n",
         &inputs,
         &globals,
     )
@@ -646,11 +1027,15 @@ fn direct_project_open_metadata_supports_all_primitive_and_optional_contracts() 
 }
 
 #[test]
-fn direct_project_required_config_qualifier_reports_missing_input() {
+fn declaration_config_required_reports_missing_input() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
+        "version #Config of String\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -668,11 +1053,14 @@ fn direct_project_required_config_qualifier_reports_missing_input() {
 }
 
 #[test]
-fn direct_project_config_qualifier_rejects_fixed_fields() {
+fn declaration_config_rejects_fixed_fields() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name #Config of String = \"override\",\n|\n",
+        "name #Config of String = \"override\"\n\
+         project #= (\n\
+             name = name,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -689,11 +1077,15 @@ fn direct_project_config_qualifier_rejects_fixed_fields() {
     }));
 }
 #[test]
-fn direct_project_config_qualifier_rejects_fixed_entry_root_field() {
+fn declaration_config_rejects_fixed_entry_root_field() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    entry_root #Config of String = \"src\",\n|\n",
+        "entry_root #Config of String = \"src\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             entry_root = entry_root,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -732,11 +1124,15 @@ fn direct_project_config_qualifier_rejects_fixed_entry_root_field() {
 }
 
 #[test]
-fn direct_project_config_qualifier_rejects_nominal_contract_types() {
+fn declaration_config_rejects_nominal_contract_types() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of Version = \"1.0\",\n|\n",
+        "version #Config of Version = \"1.0\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -752,31 +1148,9 @@ fn direct_project_config_qualifier_rejects_nominal_contract_types() {
         )
     }));
 }
-#[test]
-fn direct_project_config_qualifier_rejects_known_schema_type_mismatch() {
-    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
-    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
-    let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of Int = 1,\n|\n",
-        &inputs,
-        &globals,
-    ) else {
-        panic!("a known project field must honor its schema contract shape");
-    };
-
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierSchemaTypeMismatch { .. },
-                ..
-            }
-        )
-    }));
-}
 
 #[test]
-fn direct_project_config_qualifier_rejects_mismatched_typed_input() {
+fn declaration_config_rejects_mismatched_typed_input() {
     let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     inputs
         .insert(
@@ -792,7 +1166,11 @@ fn direct_project_config_qualifier_rejects_mismatched_typed_input() {
         .expect("the explicit input name is unique");
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
+        "version #Config of String\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -823,7 +1201,7 @@ fn direct_project_config_qualifier_rejects_mismatched_typed_input() {
 }
 
 #[test]
-fn direct_project_config_qualifier_validates_authored_default_before_provider() {
+fn declaration_config_validates_authored_default_before_provider() {
     let mut inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     inputs
         .insert(
@@ -841,7 +1219,11 @@ fn direct_project_config_qualifier_validates_authored_default_before_provider() 
         .expect("the explicit input name is unique");
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of String = 7,\n|\n",
+        "version #Config of String = 7\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -859,48 +1241,27 @@ fn direct_project_config_qualifier_validates_authored_default_before_provider() 
 }
 
 #[test]
-fn config_source_contract_is_rejected_in_project_config_file() {
+fn config_source_contract_is_accepted_in_project_config_file() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
-    let Err(messages) = compile_project_source(
-        "version #Config of String = \"source\"\nproject #= |\n    name = \"docs\",\n|\n",
+    let (compiled, table) = compile_project_source(
+        "version #Config of String = \"source\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+         )\n",
         &inputs,
         &globals,
-    ) else {
-        panic!("project config files may not declare source-wide #Config contracts");
-    };
-
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
-                ..
-            }
-        )
-    }));
-}
-
-#[test]
-fn project_config_qualifier_is_rejected_on_non_project_record() {
-    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
-    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
-    let Err(messages) = compile_project_source(
-        "nested #= |\n    version #Config of String = \"nested\",\n|\nproject #= |\n    name = \"docs\",\n    metadata = nested,\n|\n",
-        &inputs,
-        &globals,
-    ) else {
-        panic!("#Config qualifiers must be limited to direct project fields");
-    };
-    assert!(messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
-                ..
-            }
-        )
-    }));
+    )
+    .expect("top-level config declarations are valid bootstrap inputs");
+    let version = compiled
+        .declarations
+        .iter()
+        .find(|declaration| table.resolve(declaration.name) == "version")
+        .expect("the top-level input declaration should be projected");
+    assert!(matches!(
+        &version.value,
+        PublicFoldedValue::String(OwnedFoldedString::Text(value)) if value == "source"
+    ));
 }
 
 #[test]
@@ -908,7 +1269,11 @@ fn config_qualifier_requires_adjacent_hash_and_config_tokens() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version # Config of String = \"v\",\n|\n",
+        "version # Config of String = \"v\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -938,7 +1303,11 @@ fn config_qualifier_requires_a_contract_type() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version #Config of = \"v\",\n|\n",
+        "version #Config of = \"v\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     ) else {
@@ -961,7 +1330,12 @@ fn config_qualifier_does_not_cross_field_name_newline() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let result = compile_project_source(
-        "project #= |\n    name = \"docs\",\n    version\n        #Config of String = \"v\",\n|\n",
+        "version\n\
+         #Config of String = \"v\"\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     );
@@ -972,11 +1346,16 @@ fn config_qualifier_does_not_cross_field_name_newline() {
 }
 
 #[test]
-fn direct_project_config_qualifier_accepts_folded_optional_default() {
+fn declaration_config_accepts_folded_optional_default() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "fallback #String? = \"fallback\"\nproject #= |\n    name = \"docs\",\n    version #Config of String? = fallback,\n|\n",
+        "fallback #String? = \"fallback\"\n\
+         version #Config of String? = fallback\n\
+         project #= (\n\
+             name = \"docs\",\n\
+             version = version,\n\
+         )\n",
         &inputs,
         &globals,
     )

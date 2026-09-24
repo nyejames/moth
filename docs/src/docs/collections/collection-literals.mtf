@@ -46,3 +46,7 @@ Collection items and map entries cannot be mixed.
 - Square brackets belong to templates.
 - Element reads and writes use compiler-owned collection members.
 - `~` is binding or access mode. It is not part of collection type identity.
+
+### MON data boundary
+
+Source `{}` keeps its implemented contextual behaviour: an empty literal needs an explicit collection type, and a non-empty `=` entry selects the map form. MON data keeps a distinct contract: `{}` is always an empty collection and `{=}` is always an empty map. That explicit empty-map spelling is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format). Shared notation is owned by @../language-overview/#mon-syntax (MON syntax).

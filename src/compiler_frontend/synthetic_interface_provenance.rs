@@ -130,6 +130,16 @@ impl SyntheticInterfaceProvenance {
     pub(crate) fn contains_class(&self, class: SyntheticInterfaceClass) -> bool {
         self.members.iter().any(|member| member.class == class)
     }
+    /// Whether every member in this provenance also appears in `other`.
+    ///
+    /// Provenance values are canonical and sorted, so the subset check avoids exposing the
+    /// internal member set while allowing a folded value to recover each direct dependency from
+    /// an aggregate provenance union.
+    pub(crate) fn is_subset_of(&self, other: &Self) -> bool {
+        self.members
+            .iter()
+            .all(|member| other.members.binary_search(member).is_ok())
+    }
 
     /// The sorted, duplicate-free member dependencies.
     ///

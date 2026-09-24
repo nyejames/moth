@@ -1,2 +1,2 @@
-project #= | name = "test_project", entry_root = "src" |
-html #= | dev_output = "../dev" |
+project #= ( name = "test_project", entry_root = "src" )
+html #= ( dev_output = "../dev" )

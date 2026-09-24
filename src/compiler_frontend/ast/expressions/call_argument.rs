@@ -74,6 +74,14 @@ pub struct CallArgument {
     /// authored source that the author must change.
     pub marker_span: Option<SourceSpan>,
 
+    /// Exact source span of the comma immediately following this argument, when present.
+    ///
+    /// WHAT: retains the shared list owner's separator span for receiving-boundary arity
+    /// diagnostics without rescanning the completed argument list.
+    /// WHY: directive adapters can point at an offending separator while the shared parser
+    /// remains the sole delimiter owner.
+    pub(crate) following_separator_span: Option<SourceSpan>,
+
     /// Parameter slot selected by the shared parser before this value was parsed.
     ///
     /// WHAT: retains the parser's named/positional routing decision through AST validation.
@@ -108,6 +116,7 @@ impl CallArgument {
             span,
             target_span: None,
             marker_span: None,
+            following_separator_span: None,
             parameter_slot: None,
         }
     }
@@ -127,6 +136,7 @@ impl CallArgument {
             span,
             target_span,
             marker_span: None,
+            following_separator_span: None,
             parameter_slot: None,
         }
     }
@@ -146,6 +156,15 @@ impl CallArgument {
         self
     }
 
+    /// Retain the exact comma span following this argument.
+    pub(crate) fn with_following_separator_span(
+        mut self,
+        following_separator_span: Option<SourceSpan>,
+    ) -> Self {
+        self.following_separator_span = following_separator_span;
+        self
+    }
+
     /// Retain the parser-selected declaration-order parameter slot.
     pub(crate) fn with_parameter_slot(mut self, parameter_slot: ParameterSlot) -> Self {
         self.parameter_slot = Some(parameter_slot);
@@ -156,7 +175,7 @@ impl CallArgument {
 /// Arrange parsed arguments by their retained declaration-order slots.
 ///
 /// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
-/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after
+/// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after the shared router has assigned every slot, so ordering must fail loudly instead of silently misrouting arguments.
 pub(crate) fn order_call_arguments_by_retained_slot(
     arguments: &[CallArgument],
     expected_slot_count: usize,

@@ -1,12 +1,40 @@
-empty #= | |
-labels #= | first = "a", second = "b" |
+empty #= ()
+labels #= (first = "a", second = "b")
 also #= labels
 first #= labels.first
 also_first #= also.first
-inner #= | x = 3 |
-nested #= | inner = inner |
+inner #= (x = 3)
+nested #= (inner = inner)
 x_value #= nested.inner.x
+Size = |
+    width Int,
+    height Int,
+|
+settings #= (
+    window = (
+        title = "Strategy",
+        size = Size(width = 8, height = 4),
+    ),
+)
+title #= "Outer"
+panel #= (
+    title = title,
+    details = (
+        title = "Overview",
+    ),
+)
+panel_title #= panel.title
+panel_detail_title #= panel.details.title
+settings_width #= settings.window.size.width
+grouped_first #= (labels).first
+
+render_grouped || -> String:
+    return "grouped-call"
+;
+
+grouped_runtime = (render_grouped())
+io.line([: grouped-call=[grouped_runtime]])
 label #String = cast 42
 
 io.line([: runtime-field=[labels.first] runtime-nested=[nested.inner.x]])
-[: const record label: [label] first: [first] also: [also_first] x: [x_value]]
+[: const record label: [label] first: [first] also: [also_first] x: [x_value] nominal=[settings_width] grouped=[grouped_first] panel=[panel_title] detail=[panel_detail_title]]

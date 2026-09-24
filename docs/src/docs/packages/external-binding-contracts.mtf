@@ -84,6 +84,10 @@ Observable external resources require explicit close or teardown. Host finalisat
 
 ### WIT value-only component profile
 
+WIT is the standard foreign Wasm/component boundary. It does not encode Moth module or package semantic interfaces. `MothSource` packages keep their Moth interfaces even when their physical output is Wasm.
+
+Component discovery validates the supported WIT profile and projects it into ordinary binding-backed package metadata before normal Moth semantic compilation.
+
 WIT component imports are accepted but deferred. Future general Wasm library imports use a value-only WIT component profile:
 
 - supported arguments lower from shared reads into independent component values

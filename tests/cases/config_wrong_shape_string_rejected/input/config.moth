@@ -1,5 +1,5 @@
-project #= |
+project #= (
     name = "test_project",
     entry_root = true,
-|
-html #= ||
+)
+html #= ()

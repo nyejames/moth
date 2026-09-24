@@ -8,7 +8,7 @@
 use super::super::BuilderSurface;
 use super::super::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, NamedConfigSectionSchema,
-    ProjectFieldConfigPolicies, ProjectFieldConfigPolicy, UnknownFieldPolicy,
+    ProjectFieldConfigPolicy, UnknownFieldPolicy,
 };
 
 #[test]
@@ -82,39 +82,6 @@ fn project_policy_snapshot_preserves_known_policies_and_unknown_fallback() {
     assert_eq!(
         policies.policy_for("unregistered_metadata"),
         ProjectFieldConfigPolicy::Configurable
-    );
-}
-
-#[test]
-fn project_policy_snapshot_preserves_required_optional_and_unsupported_shapes() {
-    let policies = BuilderSurface::with_mandatory_core()
-        .config_schemas
-        .project()
-        .project_field_config_policies();
-
-    assert_eq!(
-        policies.shape_for("name"),
-        Some(&ConfigFieldShape::String),
-        "required scalar fields retain their scalar shape"
-    );
-    assert_eq!(
-        policies.shape_for("version"),
-        Some(&ConfigFieldShape::Optional(Box::new(
-            ConfigFieldShape::String
-        ))),
-        "optional primitive fields retain their optional wrapper"
-    );
-    assert_eq!(
-        policies.shape_for("template_const_loop_iteration_limit"),
-        Some(&ConfigFieldShape::Int)
-    );
-    assert_eq!(policies.shape_for("unregistered_metadata"), None);
-
-    let default_policies = ProjectFieldConfigPolicies::default();
-    assert_eq!(
-        default_policies.policy_for("unregistered_metadata"),
-        ProjectFieldConfigPolicy::FixedOnly,
-        "the standalone policy default remains conservative"
     );
 }
 

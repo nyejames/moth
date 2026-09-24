@@ -12,7 +12,6 @@ language design. Implementation may be absent, partial or target-limited. A
 deferred feature may appear in the progress matrix and may have a structured
 deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
-- parenthesised MON construction with inline nested anonymous const records
 - local runtime anonymous records with recursive composition and hidden nominal identity
 - declared regions (`name:` / `into name`)
 - mandatory lifetime-region and escape validation
@@ -39,12 +38,25 @@ notation. @../constants/#const-records (Const records) and
 compile-time and runtime contracts. Nominal construction stays explicit, and
 anonymous type declarations, structural conversion and tuples are not added.
 
-A compiler-native MON builder and reusable compiler services are the accepted
-future direction for a named-only, const-required data profile. Its supported
-values, authoring and serialised forms, read/write API and serialisation rules
-still need a separate design and hardening pass. That direction does not make
-the format implemented or give every MON-syntax value a serialisation guarantee.
+Moth MON source syntax allows ordinary expressions according to the receiving
+Moth context. MON serialised data is self-contained literal data only, and a MON
+reader never evaluates Moth expressions, including foldable ones.
+
+The Rust-only `moth::mon` codec is implemented; see @../progress (Progress)
+for current support. Moth-native `$mon`, automatic schema extraction and the
+static project builder remain deferred separately. That direction does not make
+the format Moth-native or give every MON-syntax value a serialisation guarantee.
 Engine and application schemas remain separate from the format contract.
+
+Accepted late Moth integration covers compiler-owned `$mon` convenience,
+automatic schemas from ordinary Moth types, checked anonymous-record
+generation, explicit source encode/decode operations and the static `.mon`
+asset builder, reusing the delivered codec and shared MON syntax notation.
+Literal traversal and escape decoding remain local to MON. Dynamic schema
+construction and loading, public borrowed views, streaming, binary formats,
+graph identity preservation, automatic migrations, custom serialisation
+traits, field-transformation frameworks and byte-canonical output remain
+outside v1 and are added only for a concrete accepted use case.
 
 ### Open design question
 

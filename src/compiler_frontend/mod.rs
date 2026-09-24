@@ -39,6 +39,7 @@ pub(crate) mod ast;
 pub(crate) mod declaration_syntax;
 pub(crate) mod headers;
 pub(crate) mod module_dependencies;
+pub(crate) mod mon;
 pub(crate) mod numeric_text;
 pub(crate) mod plain_markdown;
 pub(crate) mod public_call_summary;

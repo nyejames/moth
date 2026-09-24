@@ -36,9 +36,6 @@ folded export and provenance rules remain in force.
 
 ### Anonymous const records
 
-**Accepted queued design.** Parenthesised anonymous const records and inline
-nesting are queued for implementation. See @../progress (Progress) for support.
-
 Anonymous construction uses the named-only form of
 @../language-overview/#mon-syntax (MON syntax):
 
@@ -85,4 +82,4 @@ compile-time execution nor implicit construction of a named type.
 Input contracts belong to declarations rather than record entries. Exact
 configuration placement and processing rules are owned by
 @../project-structure/#build-inputs (Build configuration values).
-The MON format's serialisation domain is a separate future contract.
+The MON format's serialisation domain is an accepted Rust-only contract owned by @../mon/#mon-format (MON format); its `moth::mon` codec is implemented, and it does not change const-record evaluation or source syntax.

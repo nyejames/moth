@@ -129,6 +129,10 @@ block remains undecided.
 lifecycle details are undefined. A separate custom-metadata directive remains
 open design, so `$project` stays strict in the meantime.
 
+### Literal data and small tooling
+
+MON serialised data follows the same bias: strict literal-only documents over one root record, ordinary data shapes with closed records, and a small implemented Rust-only codec with deterministic writing and bounded first errors. Sharing notation grants no implicit nominal conversion, no dynamic schema surface and no automatic serialisation for every source value. Full compile-time authoring and self-contained data stay distinct surfaces. The Rust-only `moth::mon` codec is implemented; Moth-native integration remains deferred separately. See @../mon/#mon-format (MON format) and @#deferred-and-outside-scope (Deferred, open and outside scope).
+
 ### Design review questions
 
 - Does this introduce a new source category when an existing mechanism is enough?

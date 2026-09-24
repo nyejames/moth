@@ -1,5 +1,5 @@
-project #= |
+project #= (
     name = "static_config_false",
     entry_root = "src",
-|
-html #= ||
+)
+html #= ()

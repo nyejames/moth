@@ -333,7 +333,7 @@ fn provider_created_package_registry_survives_into_module() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
@@ -393,7 +393,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -456,7 +456,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
@@ -543,7 +543,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -618,7 +618,7 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
@@ -673,7 +673,7 @@ fn linked_module_js_lowering_is_observed_separately() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -747,7 +747,7 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -799,7 +799,7 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -847,7 +847,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -905,7 +905,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -948,7 +948,7 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     fs::create_dir_all(dir.join("b")).expect("should create b dir");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -996,7 +996,7 @@ fn directory_project_rejects_missing_entry_root() {
     // Config declares an entry_root that does not exist.
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"nonexistent\",\n|\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"nonexistent\",\n)\n",
     )
     .expect("should write config");
 
@@ -1069,7 +1069,7 @@ fn html_js_provider_namespace_binding_resolves() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1117,7 +1117,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1243,7 +1243,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("a/@a.moth"), "@drawing.js draw\nvalue = draw()\n")
@@ -1362,7 +1362,7 @@ fn html_js_provider_direct_selection_resolves() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1407,7 +1407,7 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1452,7 +1452,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1514,7 +1514,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1568,7 +1568,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(

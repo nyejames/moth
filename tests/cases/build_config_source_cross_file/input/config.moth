@@ -1,5 +1,5 @@
-project #= |
+project #= (
     name = "source_config_cross_file",
     entry_root = "src",
-|
-html #= ||
+)
+html #= ()

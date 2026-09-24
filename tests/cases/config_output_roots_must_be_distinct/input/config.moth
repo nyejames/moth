@@ -1,2 +1,2 @@
-project #= | name = "test_project", entry_root = "src" |
-html #= | dev_output = "dist/release", release_output = "dist\\release" |
+project #= ( name = "test_project", entry_root = "src" )
+html #= ( dev_output = "dist/release", release_output = "dist\\release" )

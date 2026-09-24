@@ -14,6 +14,7 @@ use super::core_directives::{
     mark_template_body_whitespace_style_controlled, maybe_parse_slot_or_insert_helper_directive,
     parse_core_style_directive,
 };
+use super::directive_args::directive_has_arguments;
 use super::handler_directives::apply_handler_style_directive;
 use super::head_expressions::{
     TemplateHeadExpressionContext, handle_template_value_in_template_head,
@@ -710,17 +711,21 @@ pub fn parse_template_head(
                     )
                     .into());
                 };
-
                 enforce_head_compatibility(&head_state, &spec.head_compatibility, token_stream)?;
 
+                let slot_insert_had_arguments = directive_has_arguments(token_stream);
                 let handled_slot_insert = maybe_parse_slot_or_insert_helper_directive(
                     &spec.kind,
                     token_stream,
+                    context,
+                    type_interner,
                     build_state,
                     string_table,
+                    path_fork,
                 )?;
 
                 if handled_slot_insert {
+                    defer_comma_advance = slot_insert_had_arguments;
                     apply_head_compatibility(&mut head_state, &spec.head_compatibility);
                 } else {
                     defer_comma_advance = parse_style_directive_from_spec(
@@ -855,6 +860,7 @@ fn parse_style_directive_from_spec(
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> TemplateHeadResult<bool> {
+    let had_arguments = directive_has_arguments(token_stream);
     let directive_result = match &spec.kind {
         StyleDirectiveKind::Core(kind) => parse_core_style_directive(
             token_stream,
@@ -887,7 +893,7 @@ fn parse_style_directive_from_spec(
 
     directive_result?;
 
-    Ok(false)
+    Ok(had_arguments)
 }
 
 /// Find a control-flow suffix that follows a head item without a separating comma.

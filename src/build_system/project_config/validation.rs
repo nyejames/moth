@@ -218,7 +218,7 @@ impl SchemaFieldIndexes {
 //  Grouped Project Record Validation
 // -------------------------
 
-/// Validate a grouped `project #= |...|` record against the project schema root and apply it.
+/// Validate a grouped `project #= (...)` record against the project schema root and apply it.
 fn validate_and_apply_project_record(
     config: &mut Config,
     declaration: &FoldedConfigDeclaration,

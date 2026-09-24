@@ -21,9 +21,8 @@ instead. A field that is itself a const record keeps the same restriction.
 
 ### Anonymous records
 
-**Accepted queued design.** Anonymous construction uses
+Anonymous construction uses
 @../language-overview/#mon-syntax (MON syntax) and requires all fields to fold.
-Parenthesised anonymous records and inline nesting are not yet implemented.
 
 [codeblock, $code("moth"):
     settings #= (

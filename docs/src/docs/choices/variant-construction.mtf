@@ -39,3 +39,7 @@ Constructed payload fields are immutable.
 Direct payload field mutation is invalid.
 
 Use pattern matching to inspect payload fields.
+
+### MON data boundary
+
+Source construction keeps the explicit `Choice::Variant` form above; contextual `::Variant` source construction is deferred. MON literal data documents the same unit/payload distinction with either contextual `::Variant` or one exact `Choice::Variant` qualifier. The receiving schema selects the expected choice, and an explicit qualifier is a checked assertion that never selects another schema. Matching payload shapes do not make nominal choices interchangeable, and payload fields still have no defaults. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).

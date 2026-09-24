@@ -112,12 +112,14 @@ Retain:
 - JavaScript-to-Wasm wrappers (JS-owned functions may call Wasm-owned functions through generated wrappers)
 - explicit partition reasons (every decision records why)
 - entry-specific partition (partitioning is per-entry, not global)
-- physical variant keys (deduplicate by module identity, function set, target assignment, ABI, layout, capability requirements and backend config fingerprint)
-- page-local runtime and shared memory (each page owns one runtime instance and one shared memory)
-- generated JavaScript companions (each selected module variant has a JS companion facade)
+- physical variant keys (deduplicate by entry or package assembly identity, function set, target assignment, ABI, layout, capability requirements and backend config fingerprint)
+- one Moth Wasm entry bundle per physical entry variant. Semantic modules do not force separate Wasm modules
+- page-local runtime and memory (each page owns one runtime instance and one memory for its Moth Wasm entry bundle)
+- generated JavaScript companions (each entry physical variant has a JS companion facade)
 - structured derived HIR view (backend-neutral, derived, cached only as derived data)
 - structured backend-owned Wasm LIR (not a second frontend semantic authority)
-- imported runtime memory (Wasm variants import page runtime, not separate memories)
+- imported runtime memory (the entry Wasm bundle imports page runtime memory)
+- WIT is reserved for foreign component bindings and optional foreign projections. Moth-source dependencies stay Moth-to-Moth
 - explicit selected-function, import, export, capability and layout plans
 - central output writing (builders produce output records, build system writes)
 - no compatibility adapters
@@ -143,6 +145,8 @@ The final design removes (deleted rather than retained through compatibility ada
 - no whole-module JS or Wasm validation mode
 - no compatibility adapters for old paths
 - no standalone Wasm output pipeline design beyond the HTML builder orchestration
+- no WIT component import or export implementation beyond preserving its foreign-binding boundary
+- no conversion of Moth-source package interfaces to WIT
 
 ## Risks and blockers
 
@@ -174,6 +178,7 @@ See `docs/build-system-design.md` "Entry and package link planning" and "Per-fun
 - Replace `BackendBuilder::build_backend(Vec<Module>, ...)` with consumption of `ProjectCompilation`.
 - Build HTML link plans from entry assemblies and per-function link facts.
 - Compute exact reachable function and runtime-fact unions for each entry.
+- Plan one Wasm selected-function closure per entry physical variant. Do not map semantic modules one-to-one to Wasm binaries.
 - Keep backend-facing access narrow: module artefacts, generated sidecars, entry assemblies, package facade and runtime metadata.
 - Remove source-path graph reconstruction from the builder.
 
@@ -206,19 +211,22 @@ Context: JS backend needs a partition-selected emission mode, not all-functions 
 - Emit runtime fragment slots.
 - Invoke active `start` once through the selected runtime path.
 - Hydrate runtime fragments in source order.
-- Generate JavaScript companion facades for selected module variants.
+- Generate JavaScript companion facades for entry physical variants.
 
-### Phase 5: Page runtime and shared memory
+### Phase 5: Page runtime and entry memory
 
-Context: each page owns one runtime instance and one shared memory.
+Context: each page owns one runtime instance, one memory and one Moth Wasm entry bundle.
 
 See `docs/build-system-design.md` "Runtime and memory".
 
 - Generate one page-local Wasm runtime instance per entry.
-- Linked Wasm variants import the page runtime rather than owning separate memories.
+- Emit one Moth Wasm bundle for the selected Wasm-owned function closure of each entry physical variant.
+- Bundle ordinary Moth module dependencies into that entry output rather than creating per-module Wasm modules.
+- Import runtime memory into the entry bundle.
+- Keep imported WIT components separate with private component memory.
+- Keep separately emitted Moth-source package artefacts on Moth-native link and ABI contracts rather than WIT.
 - Project-level runtime bytes may be emitted once and instantiated separately for each page.
 - Remove per-module memory section emission for user modules.
-- Import runtime memory from the generated runtime module.
 
 ### Phase 6: Structured HIR view and structured Wasm LIR
 
@@ -256,6 +264,7 @@ See `docs/build-system-design.md` "External JavaScript".
 - Build-level runtime emission deduplicates runtime assets, required module specifiers and shared provider runtime files.
 - Entry-level glue generation emits only wrappers for external functions referenced by the selected JavaScript bundle, required import preambles and import-map entries.
 - Direct builder packages and provider-created packages use the same binding identity and runtime asset model.
+- Reserve WIT/component handling for a later foreign-Wasm binding plan. This phase must not encode Moth-source package interfaces as WIT.
 
 ### Phase 9: Physical variants, manifests and output ownership
 
@@ -263,10 +272,10 @@ Context: partitioning is entry-specific and physical variants are deduplicated b
 
 See `docs/build-system-design.md` "Physical variants" and "Output ownership".
 
-- Deduplicate physical variants by a key containing module identity, selected concrete function set, target assignment, ABI identity, layout identity, runtime capability requirements and relevant backend config fingerprint.
+- Deduplicate physical variants by a key containing entry or package assembly identity, selected concrete function set, target assignment, ABI identity, layout identity, runtime capability requirements and relevant backend config fingerprint.
 - Entries with the same key reuse one variant.
 - One source function may be JavaScript in one entry variant and Wasm in another.
-- Each selected module variant has a generated JavaScript companion facade. Wasm is emitted per selected module variant.
+- Each entry physical variant has a generated JavaScript companion facade and one Moth Wasm bundle for its selected Wasm-owned closure.
 - Central output writing with manifests, stale cleanup and conflict diagnostics.
 - Output ownership is keyed by stable builder identity and build profile.
 - Reject an output root containing a manifest owned by another builder.
@@ -284,6 +293,7 @@ Context: the refactor is not complete while old whole-module modes, dispatcher l
 - Delete dispatcher-loop emission code and `WasmCfgLoweringStrategy::DispatcherLoop`.
 - Delete `StringFromI64` bridge instruction.
 - Delete per-module memory section emission for user modules.
+- Delete per-module Wasm emission from the final HTML entry path once entry bundling is in place.
 - Delete `WasmFunctionEmissionPolicy::AllFunctions` and `ReachableFromExports` from the final module path.
 - Delete whole-module validation in `compile_one_module`.
 - Delete `I64` as Moth `Int` ABI path.
@@ -329,7 +339,9 @@ Cover:
 - explicit partition reasons
 - entry-specific partition
 - physical variant keys and reuse
-- page-local runtime and shared memory
+- one Moth Wasm entry bundle across ordinary module dependencies
+- page-local runtime and entry-bundle memory
+- WIT components remain separate external bindings and `MothSource` packages are not reclassified
 - generated JavaScript companions
 - structured Wasm LIR emission
 - imported runtime memory
@@ -372,7 +384,9 @@ Before marking this plan complete, verify:
 - `start` is JavaScript-owned with backwards propagation
 - no Wasm-to-JavaScript Moth call exists after propagation
 - Wasm LIR is structured, not flat basic-block with dispatcher loops
-- Wasm modules import page-local runtime memory rather than owning separate memories
+- each entry physical variant emits one Moth Wasm bundle rather than per-module Wasm modules
+- the entry Wasm bundle imports page-local runtime memory rather than owning a separate memory
+- WIT is not used as the semantic interface for Moth-source modules or packages
 - `moth_start`, `StringFromI64`, `i64` Int bridge and helper-export booleans are gone
 - no compatibility adapter remains
 - `check` runs the same planning and validation as `build`

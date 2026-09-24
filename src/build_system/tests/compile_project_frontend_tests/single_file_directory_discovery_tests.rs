@@ -200,7 +200,7 @@ fn directory_project_discovers_multiple_entry_modules() {
     fs::create_dir_all(dir.join("layout")).expect("should create layout dir");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("page/@page.moth"), "x ~= 10\n").expect("should write page");
@@ -244,7 +244,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     fs::create_dir_all(dir.join("second")).expect("should create second module dir");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(

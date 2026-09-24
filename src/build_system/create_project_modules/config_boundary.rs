@@ -125,7 +125,8 @@ pub(super) fn source_contract_facts_for_current_module(
         .collect()
 }
 
-/// Return the names that are known to one boundary's canonical or direct-project contracts.
+/// Return the names that are known to one boundary's canonical or declaration-owned input
+/// contracts.
 ///
 /// Fixed project fields are deliberately absent: they provide values only for a matching source
 /// contract and must not make an explicit input known on their own.
@@ -176,10 +177,10 @@ pub(super) fn first_unknown_build_config_input(
 
 /// One effective project field shared by fixed source providers and `@project`.
 ///
-/// The snapshot keeps the semantic folded value and canonical type together with the field's
-/// capability/provenance kind. Direct project `#Config` records retain their selected provider
-/// metadata; ordinary fixed fields retain fixed provenance; arbitrary metadata remains visible
-/// only through `@project`.
+/// The snapshot keeps the semantic folded value and canonical type together with the
+/// capability/provenance kind. Declaration-owned `#Config` contracts stay private provider facts;
+/// ordinary fixed fields retain fixed provenance; supported extra project metadata remains visible
+/// through `@project`; unregistered top-level names stay private helpers.
 pub(super) struct EffectiveProjectField {
     pub(super) name: String,
     pub(super) type_identity: CanonicalTypeIdentity,
@@ -191,9 +192,8 @@ pub(super) struct EffectiveProjectField {
 
 /// Capabilities and provenance retained for one effective project field.
 ///
-/// Keeping these cases together makes fixed-provider and direct-config projections exhaustive:
-/// metadata cannot accidentally acquire build-config contract state, while direct contracts always
-/// carry the values needed to preserve their already-selected provider.
+/// Keep fixed fields, private input contracts and projected receiving fields as separate
+/// capabilities so provider state cannot leak into `@project` metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum EffectiveProjectFieldKind {
     FixedPrimitive {
@@ -201,7 +201,10 @@ pub(super) enum EffectiveProjectFieldKind {
         value: Option<PrimitiveBuildValue>,
         required: bool,
     },
-    DirectConfig {
+    /// A declaration-owned input contract retained as a private provider fact. It is never
+    /// published through `@project`, even when its name matches a receiving field.
+    InputContract {
+        input_name: BuildInputName,
         contract: BuildInputType,
         value: Option<PrimitiveBuildValue>,
         required: bool,
@@ -209,15 +212,18 @@ pub(super) enum EffectiveProjectFieldKind {
         origin: BuildConfigValueOrigin,
         value_location: Option<BuildConfigValueLocation>,
     },
+    /// A public receiving field whose folded value depends on declaration-owned input(s).
+    InputDependent {
+        input_names: Vec<BuildInputName>,
+    },
     Metadata,
 }
 
 /// Build one deterministic snapshot of the project fields visible at this build boundary.
 ///
-/// Omitted optional metadata has no field unless a schema/default or authored/direct record made
-/// it effective. `entry_root` is always present for a loaded config because its schema default is
-/// applied by project-config validation. Direct project `#Config` records take precedence over
-/// fixed fields with the same name.
+/// Omitted optional metadata has no field unless a schema/default or authored record made it
+/// effective. `entry_root` is always present for a loaded config because its schema default is
+/// applied by project-config validation. Declaration-owned input records remain private.
 pub(super) fn effective_project_fields(
     config: &Config,
     string_table: &mut StringTable,
@@ -228,11 +234,11 @@ pub(super) fn effective_project_fields(
 
     let mut fields = Vec::new();
     let mut seen_names = FxHashSet::default();
-    for record in &config.config_resolution_records {
-        let field = effective_project_field_from_resolution_record(record, string_table)?;
+    for dependency in &config.project_field_config_dependencies {
+        let field = effective_project_field_from_dependency(dependency, string_table)?;
         if !seen_names.insert(field.name.clone()) {
             return Err(CompilerError::compiler_error(format!(
-                "direct project config field '{}' was retained more than once",
+                "project field '{}' has more than one folded dependency handoff",
                 field.name
             )));
         }
@@ -352,28 +358,46 @@ pub(super) fn effective_project_fields(
         }
         fields.push(effective_project_field_from_metadata(metadata));
     }
+    for record in &config.config_resolution_records {
+        fields.push(effective_input_contract_field(record));
+    }
 
     Ok(fields)
 }
 
-fn effective_project_field_from_resolution_record(
-    record: &crate::compiler_frontend::build_config::ConfigResolutionRecord,
+fn effective_project_field_from_dependency(
+    dependency: &crate::compiler_frontend::build_config::FoldedConfigProjectFieldDependency,
     string_table: &StringTable,
 ) -> Result<EffectiveProjectField, CompilerError> {
-    let field_name = string_table.resolve(record.field_name);
-    let name = BuildInputName::new(field_name).map_err(|_| {
-        CompilerError::compiler_error(format!(
-            "direct project config record has invalid build-input name '{field_name}'"
-        ))
-    })?;
-    let value = public_folded_value_for_build_input(record.contract, record.value.as_ref())?;
+    let field_name = string_table.resolve(dependency.field_name).to_owned();
+    let fingerprint =
+        project_metadata_fingerprint(&field_name, &dependency.type_identity, &dependency.value);
     Ok(EffectiveProjectField {
-        name: name.as_str().to_owned(),
+        name: field_name,
+        type_identity: dependency.type_identity.clone(),
+        value: dependency.value.clone(),
+        span: dependency.span,
+        fingerprint,
+        kind: EffectiveProjectFieldKind::InputDependent {
+            input_names: dependency.input_names.clone(),
+        },
+    })
+}
+
+fn effective_input_contract_field(
+    record: &crate::compiler_frontend::build_config::ConfigResolutionRecord,
+) -> EffectiveProjectField {
+    let name = record.input_name.as_str().to_owned();
+    let value = public_folded_value_for_build_input(record.contract, record.value.as_ref())
+        .expect("validated declaration-owned config input must materialize its primitive value");
+    EffectiveProjectField {
+        name,
         type_identity: canonical_type_identity_for_build_input(record.contract),
         value,
         span: record.qualifier_span,
         fingerprint: record.fingerprint,
-        kind: EffectiveProjectFieldKind::DirectConfig {
+        kind: EffectiveProjectFieldKind::InputContract {
+            input_name: record.input_name.clone(),
             contract: record.contract,
             value: record.value.clone(),
             required: record.required,
@@ -381,7 +405,7 @@ fn effective_project_field_from_resolution_record(
             origin: record.origin,
             value_location: record.value_location.clone(),
         },
-    })
+    }
 }
 
 fn effective_fixed_project_field(
@@ -453,36 +477,47 @@ pub(super) fn fixed_project_contract_facts(
         .collect()
 }
 
-/// Convert direct project `#Config` records in one effective snapshot into barrier facts.
-pub(super) fn direct_project_contract_facts(
+/// Convert declaration-owned input contracts into barrier facts.
+pub(super) fn input_contract_facts(
     fields: &[EffectiveProjectField],
 ) -> Vec<BuildConfigContractFact> {
     fields
         .iter()
         .filter_map(|field| {
-            let EffectiveProjectFieldKind::DirectConfig {
-                contract,
-                value,
-                required,
-                default,
-                origin,
-                value_location,
-            } = &field.kind
-            else {
-                return None;
-            };
+            let (input_name, contract, value, required, default, origin, value_location) =
+                match &field.kind {
+                    EffectiveProjectFieldKind::InputContract {
+                        input_name,
+                        contract,
+                        value,
+                        required,
+                        default,
+                        origin,
+                        value_location,
+                    } => (
+                        input_name,
+                        *contract,
+                        value,
+                        *required,
+                        default,
+                        *origin,
+                        value_location,
+                    ),
+                    EffectiveProjectFieldKind::FixedPrimitive { .. }
+                    | EffectiveProjectFieldKind::InputDependent { .. }
+                    | EffectiveProjectFieldKind::Metadata => return None,
+                };
             Some(
                 BuildConfigContractFact::new(
-                    BuildInputName::new(&field.name)
-                        .expect("effective direct project field has a valid name"),
-                    *contract,
-                    *required,
+                    input_name.clone(),
+                    contract,
+                    required,
                     default.clone(),
                     field.span,
                 )
                 .with_resolved_provider(
                     value.clone(),
-                    *origin,
+                    origin,
                     field.fingerprint,
                     value_location.clone(),
                 ),
@@ -503,6 +538,7 @@ pub(super) fn build_project_globals_interface(
 
     let project_fields = fields
         .iter()
+        .filter(|field| !matches!(field.kind, EffectiveProjectFieldKind::InputContract { .. }))
         .map(|field| {
             ProjectGlobalsFieldInput::new(
                 field.name.clone(),
@@ -731,8 +767,8 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
 ///
 /// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
 ///       constructing the final `CompilerMessages` vessel. User-facing failures move the
-///       boundary string table into a [`PremergeDiagnosticBatch`]; the direct-project
-///       invariant violation stays a typed infrastructure error.
+///       boundary string table into a [`PremergeDiagnosticBatch`]; the declaration-owned config
+///       handoff invariant stays a typed infrastructure error.
 /// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
 ///      typed until the final merge boundary owns the single vessel conversion. Moving the
 ///      table keeps every interned diagnostic id valid without cloning.
@@ -746,7 +782,7 @@ pub(super) fn build_config_resolution_failure(
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
         return PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "direct project build-config value for '{}' was not retained by config folding",
+            "grouped-project build-config value for '{}' was not retained by config folding",
             error.name().as_str()
         )));
     }
@@ -835,7 +871,10 @@ pub(super) fn build_config_resolution_failure(
         std::mem::take(string_table),
     ))
 }
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "boundary resolution keeps source, fixed-project and direct-project facts, explicit inputs, builder globals, and fallback-span/mutable string-table state as separate inputs"
+)]
 pub(super) fn resolve_boundary_build_config(
     source_facts: &[BuildConfigContractFact],
     fixed_project_facts: &[BuildConfigContractFact],

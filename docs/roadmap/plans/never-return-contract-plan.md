@@ -246,7 +246,7 @@ Use a targeted placement diagnostic such as:
 Call it as a standalone terminating statement instead.
 ```
 
-Preserve the one shared call-shaped argument parser and parameter-slot routing owner. Do not add a second call grammar.
+Preserve the one shared call-shaped argument parser and parameter-slot routing owner (the delivered MON shared owner). Do not add a second call grammar.
 
 ## Value-producing blocks
 
@@ -550,7 +550,7 @@ Do not add:
 - Keep one callable return-contract owner per compiler layer.
 - Use enums so invalid mixed states are unrepresentable.
 - Do not add a Never type definition or builtin to `TypeEnvironment`. Update only the existing function-type signature payload where callable function types need the return contract.
-- Keep one call-shaped parser and one parameter-slot routing owner.
+- Keep one call-shaped parser and one parameter-slot routing owner (the delivered MON shared owner).
 - Parse and resolve arguments once, then construct either a value call or terminating statement from the resolved callable contract and source context.
 - Do not let HIR, analyses, link planning or backends infer Never from an empty return vector, unit type, missing result local or all-failure body.
 - Do not let source validity depend on inlining or ordinary callee implementation inspection.
@@ -844,7 +844,7 @@ Activate complete source syntax, body validation, exact interfaces and standalon
 ## Audit
 
 - [ ] Confirm bare `!` is owned only by callable return syntax.
-- [ ] Confirm one call parser serves value and Never calls.
+- [ ] Confirm one delivered MON shared call parser serves value and Never calls.
 - [ ] Confirm Never calls never enter `ExpressionKind` and never get a result type.
 - [ ] Confirm explicitness diagnostics distinguish permanent intent from temporary placeholders.
 - [ ] Confirm only explicit contracts propagate divergence.

@@ -116,3 +116,7 @@ The exact contract is:
 
 Options are compiler-owned value shapes. Source code does not construct public
 `Option` variants.
+
+### MON data boundary
+
+Source optional rules above are unchanged. MON literal data documents the same explicit `none` by reference: optionality permits `none`, but only an explicit field default permits omission, so a missing optional field without a default is an error. Missing fields, explicit `none` and empty values stay distinct; defaults are prevalidated data applied only at the exact missing field, a supplied `none` is never replaced, and nested records are never deep-merged. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).

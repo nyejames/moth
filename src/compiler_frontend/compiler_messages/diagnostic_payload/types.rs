@@ -188,19 +188,13 @@ pub enum InvalidConfigReason {
     NotCompileTimeConstant,
     ValueCouldNotFold,
     EmptyProjectSetting,
-    /// A direct-project field was qualified but its schema policy is fixed-only.
+    /// A declaration-owned `#Config` dependency targeted a grouped-project field whose schema
+    /// policy is fixed-only.
     ConfigQualifierFixedField,
-    /// A known direct-project field's `#Config` contract does not match its schema shape.
-    ConfigQualifierSchemaTypeMismatch {
-        declared: StringId,
-        expected: StringId,
-    },
     /// A source or project field's name cannot become a build-config contract.
     ConfigContractNameInvalid,
-    /// A `#Config` qualifier appeared outside an allowed source declaration.
+    /// A `#Config` qualifier appeared outside a top-level source declaration.
     ConfigQualifierInvalidPlacement,
-    /// A `#Config` qualifier appeared outside a direct `project` record field.
-    ConfigQualifierInvalidProjectPlacement,
     /// A filesystem module or source-package prefix claimed the reserved `@project` root.
     ProjectGlobalsNameReserved,
     /// The qualifier's `of` type is outside the primitive/optional contract vocabulary.
@@ -230,7 +224,7 @@ pub enum InvalidConfigReason {
         expected: StringId,
         provided_argument_index: Option<usize>,
     },
-    /// A required direct-project config contract had no input, global or default.
+    /// A required declaration-owned config contract had no input, global or default.
     MissingConfigInput,
     UnknownKey {
         key: StringId,
@@ -493,10 +487,6 @@ impl InvalidConfigReason {
                 *record = remap.get(*record);
                 *field = remap.get(*field);
             }
-            Self::ConfigQualifierSchemaTypeMismatch { declared, expected } => {
-                *declared = remap.get(*declared);
-                *expected = remap.get(*expected);
-            }
             Self::ConfigContractConflict { first, conflicting } => {
                 *first = remap.get(*first);
                 *conflicting = remap.get(*conflicting);
@@ -531,7 +521,6 @@ impl InvalidConfigReason {
             | Self::ProjectGlobalsNameReserved
             | Self::ConfigContractNameInvalid
             | Self::ConfigQualifierInvalidPlacement
-            | Self::ConfigQualifierInvalidProjectPlacement
             | Self::ConfigQualifierUnsupportedType
             | Self::MissingConfigInput
             | Self::UnsupportedScalarValue
@@ -1807,10 +1796,11 @@ pub enum InvalidExpressionReason {
     MothFileHasNoValue,
     /// A value-position path is missing the explicit file extension the language requires.
     ExtensionlessFileValue,
+    /// A runtime expression used the empty anonymous-record shape, which is not in the initial
+    /// runtime surface.
+    EmptyRuntimeAnonymousRecord,
     /// A record literal field was not written as `name = value`.
     AnonymousRecordFieldNotNamed,
-    /// A record literal appeared as a field value of another record literal.
-    NestedAnonymousConstRecord,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

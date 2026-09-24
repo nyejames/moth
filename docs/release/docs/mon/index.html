@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>MON format | Moth</title>
+    <meta name="description" content="The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("../../styles/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+<style>.doc-level,
+.doc-pager {
+    --doc-level-accent: #3d4e8e;
+    --doc-level-accent-hover: #44a0cf;
+    --doc-level-border: #d7d9df;
+    --doc-level-switch-background: #f1f4f5;
+    --doc-level-selected-background: #ffffff;
+    --doc-level-text: #202127;
+    --doc-level-muted: #686971;
+    --doc-level-focus: #28c0d4;
+}
+
+.doc-level {
+    min-inline-size: 0;
+    margin: 2rem 0;
+    padding: 0;
+    border: 0;
+    color: var(--doc-level-text);
+}
+
+.visually-hidden,
+.doc-level__input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+.doc-level__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-block-end: 1.25rem;
+}
+
+.doc-level__title {
+    margin: 0;
+}
+
+.doc-level__switch {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+    gap: 0.2rem;
+    flex: none;
+    padding: 0.22rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    background: var(--doc-level-switch-background);
+}
+
+.doc-level__option {
+    padding: 0.42rem 0.8rem;
+    border-radius: 0.55rem;
+    color: var(--doc-level-muted);
+    font-size: 0.875rem;
+    font-weight: 650;
+    line-height: 1.3;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+
+    transition:
+        color 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-level__option:hover {
+    color: var(--doc-level-accent-hover);
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    color: var(--doc-level-accent);
+    background: var(--doc-level-selected-background);
+    box-shadow:
+        0 1px 2px rgb(20 40 24 / 10%),
+        0 0 0 1px rgb(63 143 78 / 8%);
+}
+
+.doc-level__input--basic:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--basic,
+.doc-level__input--advanced:focus-visible
+    ~ .doc-level__header
+    .doc-level__option--advanced {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-level__panel {
+    display: none;
+}
+
+.doc-level__input--basic:checked
+    ~ .doc-level__panel--basic,
+.doc-level__input--advanced:checked
+    ~ .doc-level__panel--advanced {
+    display: block;
+}
+
+.doc-pager {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin-block: 3rem 1rem;
+}
+
+.doc-pager--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.doc-pager--single .doc-pager__link {
+    width: min(100%, 32rem);
+}
+
+.doc-pager--single .doc-pager__link--previous {
+    justify-self: start;
+}
+
+.doc-pager--single .doc-pager__link--next {
+    justify-self: end;
+}
+
+.doc-pager__link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-inline-size: 0;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--doc-level-border);
+    border-radius: 0.75rem;
+    color: var(--doc-level-text);
+    text-decoration: none;
+    background: var(--doc-level-selected-background);
+
+    transition:
+        color 130ms ease,
+        border-color 130ms ease,
+        box-shadow 130ms ease;
+}
+
+.doc-pager__link:hover {
+    color: var(--doc-level-accent-hover);
+    border-color: var(--doc-level-accent);
+    box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+}
+
+.doc-pager__link:focus-visible {
+    outline: 3px solid var(--doc-level-focus);
+    outline-offset: 2px;
+}
+
+.doc-pager__link--next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.doc-pager__direction {
+    color: var(--doc-level-muted);
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.03rem;
+    text-transform: uppercase;
+}
+
+.doc-pager__title {
+    font-size: 1rem;
+    font-weight: 650;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        animation: doc-level-enter 150ms ease-out;
+    }
+
+    @keyframes doc-level-enter {
+        from {
+            opacity: 0;
+            transform: translateY(0.2rem);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+@media (max-width: 36rem) {
+    .doc-level__header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .doc-level__switch {
+        align-self: flex-start;
+    }
+
+    .doc-pager {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    .doc-pager--single .doc-pager__link {
+        width: 100%;
+        justify-self: stretch;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #aea9f9;
+        --doc-level-accent-hover: #a0b8d9;
+        --doc-level-border: #3a3a49;
+        --doc-level-switch-background: #221d25;
+        --doc-level-selected-background: #353447;
+        --doc-level-text: #edeff2;
+        --doc-level-muted: #a8aab3;
+        --doc-level-focus: #75e1ff;
+    }
+}
+
+@media print {
+    .doc-level__input,
+    .doc-level__switch,
+    .doc-pager {
+        display: none;
+    }
+
+    .doc-level__panel {
+        display: block;
+    }
+
+    .doc-level__panel--advanced {
+        margin-block-start: 1.5rem;
+        padding-block-start: 1.5rem;
+        border-block-start: 1px solid;
+    }
+
+    .doc-level__panel--basic::before,
+    .doc-level__panel--advanced::before {
+        display: block;
+        margin-block-end: 0.75rem;
+        font-weight: 700;
+    }
+
+    .doc-level__panel--basic::before {
+        content: "Basic";
+    }
+
+    .doc-level__panel--advanced::before {
+        content: "Advanced";
+    }
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+<section class="container"><p><a href="../">Documentation</a> / MON format</p><h1>MON format</h1><p>MON means Moth Object Notation. <strong>MON syntax</strong> names Moth&#39;s shared parenthesised argument and value-construction notation. <strong>The MON format</strong> is the separate serialised-data profile with its own supported values and serialisation rules.</p><p>Serialised MON is literal data only. A MON reader never evaluates Moth expressions, including foldable ones. Availability is Rust-only: the bounded decoder and deterministic document/nested-value writers are implemented and public at <code>moth::mon</code>, re-exported from <code>src/lib.rs</code>, over the crate-private <code>src/compiler_frontend/mon/</code> owner. Another Rust crate can execute the service, but compiled Moth programs have no runtime codec support. Moth-native operations, automatic schema extraction and the static project builder remain deferred separately.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: MON format
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="mon-format-level"
+                id="mon-format-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="mon-format-level"
+                id="mon-format-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="mon-format">
+                    MON format
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="mon-format-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="mon-format-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p>A small MON document is one root record of literal values. This save record shows the accepted shape: named fields, a nested record, a map, an explicit <code>none</code> and ordinary string data.</p><pre style=""><code class='codeblock'>format_version = 1,
+title = &quot;Strategy&quot;,
+window = (width = 1280, height = 720),
+scores = {&quot;Priya&quot; = 10, &quot;Rob&quot; = 12},
+note = none,</code></pre><p>The same record may carry explicit outer parentheses. A lone scalar, collection or choice is not a document: put it in a named root field. Encoding fills only exact missing field defaults and emits the completed record in schema order, including explicit <code>none</code> and values equal to defaults. See <a href="#mon-format">MON format</a> for the complete literal-data reference.</p><p>Strictness is the point. These inputs fail:</p><pre style=""><code class='codeblock'>-- INVALID: MON never evaluates expressions, including foldable ones
+width = 1280 + 0,
+
+-- INVALID: a template is producer syntax, not a MON string literal
+title = [: Strategy],
+
+-- INVALID: missing comma between entries
+title = &quot;Strategy&quot;
+width = 1280,
+
+-- INVALID: `{}` is a collection, never an empty map; use `{=}`
+scores = {},
+
+-- INVALID: duplicate keys are rejected, not merged
+scores = {&quot;Priya&quot; = 10, &quot;Priya&quot; = 12},
+
+-- INVALID: decimal spelling never converts to an Int target
+width = 1280.0,
+
+-- INVALID: unknown record fields fail, even with defaults nearby
+titl = &quot;Strategy&quot;,</code></pre><p>Availability is Rust-only. The implemented Rust caller surface is public as <code>moth::mon</code>, re-exported from <code>src/lib.rs</code> over the crate-private <code>src/compiler_frontend/mon/</code> owner. Moth-native operations remain deferred separately, and compiled Moth programs have no runtime codec support.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p>The MON format is Moth Object Notation as serialised literal data: one root record written in the shared MON notation and restricted to literal values. Every value in a completed document must be a supported literal form.</p><p>A MON reader never evaluates Moth expressions. Arithmetic, templates, calls, casts, field projections, variables and constant references are rejected even when the compiler could fold them. Rejection happens before expression evaluation, not after evaluating and inspecting a result.</p><p>Availability is Rust-only. The implemented Rust caller surface is public as <code>moth::mon</code>, re-exported from <code>src/lib.rs</code> over the crate-private <code>src/compiler_frontend/mon/</code> owner. Another Rust crate can execute the service, but compiled Moth programs have no runtime codec support. Moth-native operations, automatic schema extraction and the static project builder remain deferred separately. See <a href="../progress">Progress</a> for current support.</p><h3>One root record</h3><p>A complete document contains exactly one record. Its outer parentheses may be omitted. These forms have the same record meaning:</p><pre style=""><code class='codeblock'>title = &quot;Strategy&quot;,
+window = (width = 1280, height = 720),</code></pre><pre style=""><code class='codeblock'>(
+    title = &quot;Strategy&quot;,
+    window = (width = 1280, height = 720),
+)</code></pre><p>A lone scalar, collection or choice is not a document. Put it in a named root field. The explicit empty root is <code>()</code>. Empty and comments-only input denotes an empty root record. Validation still checks every required field.</p><p>Use commas between entries at every level, with one optional trailing comma. Newlines are whitespace, not a separator. Root fields create no bindings, scope or references to earlier fields. After an explicit root, only whitespace and comments may remain. Multiple roots and concatenated documents are invalid. The file and in-memory document grammars are identical.</p><h3>Records, collections and maps</h3><p>Values nest recursively subject to resource limits and the receiving schema. Supported values are records, ordered collections, maps, quoted strings, characters, booleans, numeric literal data, <code>none</code>, literal choices and qualified nominal record data.</p><p>Record fields have unique identifier labels and explicit <code>= value</code> entries. They are named-only and carry no annotations, declaration qualifiers, mutable markers or shorthand initialisers. <code>()</code> is an empty record, never a tuple or unit value.</p><p>MON collections may contain different literal kinds and different record shapes. The receiving schema enforces its element type. Heterogeneous text changes no Moth collection typing rule and adds no <code>Any</code> type to Moth.</p><p>Maps preserve insertion order. Keys use the supported Moth map-key families: String, Int, Bool and Char. Bare names are references, not key shorthand, and are invalid as MON map keys. The schema checks the declared key and value types. Map entries and collection items cannot be mixed.</p><p>Duplicate keys are rejected rather than keeping the first or last value. Keys compare as decoded values under the receiving key contract, so different escape or numeric spellings cannot evade uniqueness. String and Char remain distinct, and Bool is not a numeric key. Record labels remain identifiers, while map keys are data: a string-keyed map does not become a record.</p><p>The empty forms never change kind:</p><ul><li><code>{=}</code> is always an empty map and <code>{}</code> is always an empty collection.</li><li>A map schema rejects <code>{}</code> and a collection schema rejects <code>{=}</code>. Schema context never changes a container&#39;s kind.</li></ul><pre style=""><code class='codeblock'>scores = {&quot;Priya&quot; = 10, &quot;Rob&quot; = 12},
+empty_scores = {=},
+empty_items = {},
+empty_record = (),</code></pre><h3>Strings and characters</h3><p>Strings use double quotes and Char uses single quotes. A Char decodes as exactly one Unicode scalar value. String contents are preserved without Unicode normalisation or implicit line-ending conversion. An unescaped newline or CRLF inside a string stays byte-for-byte content, because MON is data, not Moth source.</p><p>MON strings accept exactly <code>\\</code>, <code>\&quot;</code>, <code>\n</code>, <code>\r</code>, <code>\t</code> and <code>\u{H...}</code>. MON characters accept exactly <code>\\</code>, <code>\&#39;</code>, <code>\n</code>, <code>\r</code>, <code>\t</code> and <code>\u{H...}</code>. The Unicode braces hold 1 to 6 ASCII hex digits and accept either case on input; writer output uses uppercase hex. Empty braces, more than six digits, non-hex digits, surrogate values and out-of-range scalars fail. <code>\0</code>, <code>\xNN</code>, fixed-width <code>\uXXXX</code>, an escaped physical newline and every other unknown escape fail.</p><p>Templates are producer syntax only and are not accepted string literals in MON. A folded const template and an evaluated runtime template are each an ordinary String that a producer quotes; an unevaluated template is not a serialisable value. Compile time versus runtime concerns the producer and never changes document validity.</p><h3>Numeric data</h3><p>A numeric literal keeps its lossless spelling until the destination is known. Whole-number spelling and decimal/exponent spelling remain distinguishable, and numbers are never routed through <code>f64</code> or display formatting.</p><p>The lexical rules are strict. Exponents use lowercase <code>e</code>; uppercase <code>E</code> fails. Unary <code>+</code> fails, and <code>-</code> is accepted only when attached to the literal. <code>_</code> is allowed only between decimal digits inside the integer, fraction or exponent runs. Malformed, edge and double separators fail, and <code>NaN</code> and infinity have no MON spelling.</p><p>Conversion is strict about categories:</p><ul><li><code>Int</code> and exact <code>Integer</code> require whole-number spelling. Decimal data such as <code>3.0</code> fails an Int target even when mathematically integral, and <code>1e3</code> fails it too. Formatting cannot rewrite one category as the other.</li><li>Exact <code>Decimal</code> with a declared scale from 0 to 18 accepts whole, decimal and exponent forms only when the value is exact after removing trailing fractional zeroes and the effective scale is at most the declared scale. A scale-two target accepts <code>1.2</code> but rejects <code>1.239</code> without rounding.</li><li><code>Float</code> accepts all valid finite categories and rejects non-finite source values and conversion results. Encoding round-trips the supported Float value including signed zero: negative zero writes <code>-0.0</code> and positive zero writes <code>0</code>.</li></ul><p>Large integer and exact decimal data are retained and round-tripped without a second arithmetic runtime. Unsupported concrete adapters fail explicitly rather than narrowing or converting through Float.</p><h3>Structs and choices</h3><p>Both nested record forms are accepted:</p><pre style=""><code class='codeblock'>size = (width = 1280, height = 720),
+size = Size(width = 1280, height = 720),</code></pre><p>These are alternative examples, not duplicate fields in one document. Anonymous records use named entries. A qualified nominal record literal follows the shared constructor argument rules without invoking user code.</p><p>A qualifier is one identifier: Unicode alphabetic or underscore start, Unicode alphanumeric or underscore continuation, case-sensitive. Dotted paths, aliases, registry lookup and whitespace-separated <code>::</code> are invalid. The receiving schema determines the expected nominal type. An explicit qualifier is an additional checked assertion, never ignored and never used to select another schema. Matching payload shapes do not make unrelated nominal types interchangeable.</p><p>Choice data uses Moth-shaped variants rather than an invented tagged-record mapping:</p><pre style=""><code class='codeblock'>widgets = {
+    ::Text(&quot;Gold&quot;),
+    Widget::Progress(value = 0.4),
+    ::Ready,
+},</code></pre><p>A unit variant has no parentheses and a payload variant requires them. <code>::Text(...)</code> uses the expected choice from the receiving schema, while an explicit <code>Widget</code> qualifier must name that same expected choice. An unknown or mismatching explicit name fails.</p><p>Positional arguments precede named arguments. Target slots are routed once, every required slot is supplied exactly once, and unknown variants, duplicate payload fields, wrong arity and payload type mismatches fail. Choice payload fields have no defaults. Typed encoding checks any supplied qualifier before omitting it, and prefers unqualified named records with named choice payloads.</p><h3>Schemas, defaults and options</h3><p>Schemas define ordinary data shapes, field types, nominal identities, choice variants and explicit default values. They do not define a second expression language. Records are closed: every unknown field fails, including a misspelling of a field whose correct name has a default. Maps provide the explicit dynamic-key surface.</p><p>V1 supplies a small immutable Rust schema description for host callers. The engine defines its save-data contract once and supplies it explicitly. A prepared schema and its defaults are validated when prepared, before any document is processed, and the immutable prepared schema is reused across calls. Schema misuse is a structured failure, not a panic. There are no schema files, remote schema loading, runtime schema editing, registries or predicate DSLs.</p><p>Eligibility is derived transitively from the complete concrete schema. Every field, element, map entry and variant payload must have a supported mapping, and an unsupported member makes the enclosing shape ineligible even when the current instance does not use it. Functions, wires, routes, closures, live handles, unresolved resource pieces and deferred computations have no ordinary data encoding. A completed runtime-generated String is eligible. No mandatory serialisation trait, per-type marker, rename or skip attribute, custom codec hook or constructor execution participates in decoding.</p><p>Optionality permits <code>none</code>. Only an explicit field default permits omission. A missing optional field without a default is an error. Missing fields, explicit <code>none</code> and empty values remain distinct.</p><p>Defaults are prevalidated data, not runtime factories. A default applies only at the exact missing field. A supplied <code>none</code> is validated as <code>none</code> and never replaced by a default. A supplied nested record is validated as that record, not deep-merged with the parent&#39;s default record.</p><p>For a parent field <code>layout</code> with no default, omission fails even when every field inside the Layout schema has a default. Supplying <code>layout = ()</code> permits those inner defaults to apply. If <code>layout</code> itself has a default, omission uses that complete value. <code>()</code> remains an empty record at the format level; it becomes a completed default-valued record only when its receiving schema permits every omission.</p><p>Normal typed encoding emits all completed fields, including explicit <code>none</code> and values equal to defaults.</p><h3>Trees, not graphs</h3><p>The data format represents value trees. Repeated shared source values are encoded at each occurrence, and decoding establishes no preserved alias relationship or allocation identity. Public <code>Value</code> is an owned tree, so cyclic host data cannot be represented by this API. Public <code>SchemaType</code> values form finite owned schema trees rather than named schema references. Each schema describes only its explicit nesting levels, and the codec validates values against those levels and the receiver&#39;s limits. Applications can encode graph links as ordinary identifiers and reconstruct them explicitly.</p><h3>Limits and first errors</h3><p>The codec consumes complete documents and fails fast. Incremental input, streams and multiple-document framing remain deferred. Finite configurable budgets bound input bytes, nesting, node counts (including one additional node for each map entry), numeric digits, default expansions, decoded bytes and encoded output bytes. The default depth budget is 64; <code>Limits::MAX_SAFE_DEPTH</code> sets a hard ceiling of 64 for configurable <code>max_depth</code>, and schema preparation rejects larger policies. Each counter is checked before the affected allocation or expansion, including default expansion and repeated shared-value expansion. The other defaults are 1 MiB of input, 100,000 nodes, 4,096 numeric digits, 16 MiB of decoded bytes, 16 MiB of output bytes and 10,000 default expansions.</p><p>Limits are receiver resource policy, not grammar dialects. A valid document may exceed a receiver&#39;s budget, and that outcome is reported distinctly from syntax and schema errors.</p><p>Both operations publish only complete successful results. On failure, partial values and output buffers are discarded and no partial public result exists. Each failure is a structured first error with a stable reason and a field or element path where available; decode errors include the original input byte range when available. Messages are rendered only at the caller&#39;s diagnostic boundary.</p><h3>Deterministic writing</h3><p>Typed record fields write in schema declaration order. Collection and map order is preserved. Public <code>encode_document</code> and <code>encode_value</code> emit compact output; pretty formatting is private to writer tests and has no public mode. Given the same ordered value, schema and encoder version, output is deterministic, with no promise that all semantically equivalent documents share identical bytes.</p><p>Formatting authored text is distinct from typed encoding. It cannot silently fill omitted fields, reorder maps, remove unchecked qualifiers or erase numeric categories.</p><h3>Resources and versions</h3><p>MON carries resource identifiers as ordinary strings. Compiler structural resource pieces are resolved to their final characters before encoding, and an unresolved value fails conversion to concrete MON data. V1 performs no path discovery, URL generation, filesystem checks or resource loading, and no string scan reconstructs dependencies.</p><p>The receiver supplies the schema. There is no mandatory schema header, reserved universal version field or automatic schema discovery. Applications may declare an ordinary <code>format_version</code> field with explicit migrations. Closed schemas never silently fall back to another version or repair mismatches.</p><h3>Deferred source and builder surfaces</h3><p>MON text has no file IO, module imports, schema discovery, command, builder registration, output write or runtime opcode. Compiler <code>$mon</code> convenience, with its invocation syntax still undecided, belongs to later Moth-native integration, as do Moth-side encode and decode operations, automatic schema extraction from ordinary Moth types and the static <code>.mon</code> project builder.</p><p>MON&#39;s local escape decoder adds no source-language syntax. The <code>{=}</code> empty-map distinction, Unicode escapes and contextual <code>::Variant</code> construction remain deferred source parity unless another authorised syntax change has already delivered them.</p>
+</div>
+</fieldset></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+    return {
+        __moth_kind: "fixed_collection",
+        items: items,
+        fixedCapacity: fixedCapacity,
+    };
+}
+
+function __moth_collection_items(collection) {
+    if (Array.isArray(collection)) {
+        return collection;
+    }
+    return collection.items;
+}
+
+function __moth_collection_is_valid(collection) {
+    if (Array.isArray(collection)) {
+        return true;
+    }
+    if (collection === null || typeof collection !== "object") {
+        return false;
+    }
+    if (collection.__moth_kind !== "fixed_collection") {
+        return false;
+    }
+    if (!Array.isArray(collection.items)) {
+        return false;
+    }
+    return (
+        Number.isInteger(collection.fixedCapacity)
+        && collection.fixedCapacity > 0
+        && collection.items.length <= collection.fixedCapacity
+    );
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+    const items = __moth_collection_items(collection);
+    return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    items[index] = value;
+    return { tag: "ok", value: null };
+}
+
+function __moth_collection_push_growable(collection, value) {
+    collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+    if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    const items = __moth_collection_items(collection);
+    if (items.length >= collection.fixedCapacity) {
+        return __moth_error_result("Fixed collection capacity exceeded", 102);
+    }
+    items.push(value);
+    return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+    if (!__moth_collection_is_valid(collection)) {
+        return __moth_error_result("Collection operation expects an ordered collection", 100);
+    }
+    if (!__moth_collection_index_is_valid(collection, index)) {
+        return __moth_error_result("Collection index out of bounds", 101);
+    }
+    const items = __moth_collection_items(collection);
+    const removed = items.splice(index, 1)[0];
+    return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+    const items = __moth_collection_items(collection);
+    return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

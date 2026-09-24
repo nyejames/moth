@@ -1,17 +1,20 @@
     This cheatsheet describes the final design for the language. The @../progress (progress matrix)
     is the authority for what the current Alpha compiler implements and which targets support it.
 
-    **Current support.** The Alpha compiler implements grouped `project`/`html` records,
-    direct and source `#Config of T` contracts, explicit `@project`, activity-based HTML
+    **Current support.** The Alpha compiler implements parenthesised grouped `project`/`html` records,
+    declaration-owned `#Config of T` inputs, explicit `@project`, activity-based HTML
     entries, reserved `page_*` metadata and `export:`.
 
-    **Accepted queued design.** The `$` general marker, `$config`, `$project`,
+    **Accepted queued design.** The `$` general marker, `$config` explicit-only prefixes, `$project`,
     `$html_builder`, root-only `$page`, explicit root purpose and capability-checked
     `io.set_title` are not yet available in Alpha.
 
     **Deferred.** `$feature`, `$layout`, `$export` migration, `$async:`, `$checked:`,
     `$test` and custom metadata remain future work. For more detailed breakdowns, see
     the @../ (Moth documentation).
+    The literal MON data format contract is documented separately at @../mon/#mon-format (MON format).
+    The Rust-only `moth::mon` codec is implemented and executable from Rust; it is not implemented Moth source or runtime behaviour: source `{=}` enforcement,
+    source Unicode escapes beyond the five below, contextual `::Variant` construction and `$mon` remain deferred.
 
 ## Rules to internalise first
 
@@ -24,8 +27,8 @@
 - `!` is the typed error path. `?` is the option path. `assert` is for invariants.
 - `@path` starts dependencies and file paths. Source dependencies omit extensions; file paths in value position keep them.
 - Names never shadow another visible name.
-- Accepted queued input contracts use `$config` before one typed `#` binding; ordinary constants still require initializers, while marked required non-optional inputs may omit one and marked optional inputs may resolve to absence.
-- A compile-time-known `Bool` can specialise an ordinary `if`; current `#Config of Bool` values and future `$config` values use that path. Neither can remove declarations or dependencies; structural selection waits for `$feature`.
+- Delivered inputs are declaration-owned `#Config of T`; a future `$config` prefix marks explicit-only contracts. Ordinary constants still require initializers, while marked required non-optional inputs may omit one and marked optional inputs may resolve to absence.
+- A compile-time-known `Bool` can specialise an ordinary `if`; delivered `#Config of Bool` values and future `$config` values use that path. Neither can remove declarations or dependencies; structural selection waits for `$feature`.
 - Source cannot inspect OS, architecture, backend or target identity.
 - General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.
 - Named monomorphic non-capturing function references remain design pending.
@@ -187,7 +190,7 @@ Naming conventions:
 - Traits use `ALL_CAPS`.
 - A visible name cannot be redeclared while it remains in scope.
 
-`Config` and its case-insensitive, leading-underscore keyword-shadow variants remain reserved by current `#Config` support. Identifier reclamation is pending until cutover to `$config`; accepted directive spellings do not reserve ordinary `config`, `Config`, `project` or `html_builder` names. The file `config.moth` and `@project` retain separate path and package semantics. There is no `import` keyword.
+`Config` and its case-insensitive, leading-underscore keyword-shadow variants remain reserved by delivered declaration-owned `#Config` support. Identifier reclamation is pending until the `$config` prefix lands; accepted directive spellings do not reserve ordinary `config`, `Config`, `project` or `html_builder` names. The file `config.moth` and `@project` retain separate path and package semantics. There is no `import` keyword.
 
 Symbolic binary operators and assignment require spaces on both sides:
 
@@ -211,11 +214,8 @@ Symbolic binary operators and assignment require spaces on both sides:
     message = [: Hello, [text].]
 ]
 
-Quoted text creates a read-only string slice. A template creates an owned string.
-Both use the semantic `String` type at typed boundaries. `Char` stores one Unicode scalar value.
-
 Quoted strings support only `\\`, `\"`, `\n`, `\r` and `\t`. Backticks are not raw source strings.
-In `$md` content, backticks are for inline code snippets.
+In `$md` content, backticks are for inline code snippets. The MON literal-data contract documents a separate `\u{H...}` escape for data text only; that spelling is not implemented source behaviour.
 
 `String + String` is invalid. Concatenate and interpolate through templates:
 
@@ -251,10 +251,10 @@ A normal constant:
 - must fully fold
 - cannot use a same-file forward reference
 
-Only an accepted queued `$config`-marked required, non-optional input may omit its
-initializer; an optional input may also omit one and resolves to absence. A `$config`
+Only a marked required, non-optional input may omit its
+initializer; an optional input may also omit one and resolves to absence. A marked
 input with an initializer uses it as the fallback; ordinary configuration-looking
-names are not implicit providers.
+names are not implicit providers. In delivered syntax the marker is a declaration-owned `#Config of T`; the future `$config` prefix marks explicit-only contracts.
 
 Visible dependency-bound constants are already folded and may be used.
 Cross-file constants in the same module follow the module's declaration dependency ordering.
@@ -429,7 +429,7 @@ Rules:
     custom = greet(name = "Rob", punctuation = "?")
 ]
 
-Parameters use `|...|`, the same list syntax as structs and const records. Context decides what the list becomes. No parameters use `||`. Omit `->` when there are no success values.
+Parameters use `|...|` to declare the list. Supplied call values and const records use shared parenthesised MON syntax instead. No parameters use `||`. Omit `->` when there are no success values.
 Defaults fold at compile time. Positional arguments precede named arguments, which may skip earlier defaults.
 Host functions and compiler-owned builtin members are positional-only.
 
@@ -702,7 +702,7 @@ Range loop:
     person.age += 1
 ]
 
-Structs use the same `|...|` parameters syntax as functions and const records. The list declares a nominal constructable type. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.
+Structs declare nominal types with `|...|` fields; construction and calls supply values with `(...)` routing. The list declares a nominal constructable type. Matching fields do not imply the same type or structural equality. Fields may have compile-time defaults. Constructors use normal argument routing.
 
 A receiver method is a top-level function whose first parameter is `this`:
 
@@ -737,8 +737,7 @@ Methods specialised to one concrete instance are invalid.
 
 ### Runtime anonymous records
 
-Runtime `|...|` records are deferred. Today a pipe list in a runtime receiving
-context reports a deferred-feature diagnostic. Compile-time `|...|` records are
+Runtime `(...)` records are deferred. A non-empty runtime record reports a deferred-feature diagnostic. Compile-time `(...)` records are
 the field-access-only const records in **Anonymous const records** below.
 
 
@@ -769,7 +768,7 @@ Pattern matching is the supported payload-access form:
     ;
 ]
 
-Direct payload field access with narrowing, nested payload patterns and recursive choices are design pending. Do not infer unrestricted `status.message` access or nested pattern syntax.
+Direct payload field access with narrowing, nested payload patterns and recursive choices are design pending. Do not infer unrestricted `status.message` access or nested pattern syntax. Contextual `::Variant` construction without an explicit nominal qualifier is not implemented source behaviour; the MON literal-data contract documents that spelling for data text only.
 
 Choice equality is available only when every possible payload type supports equality.
 
@@ -820,7 +819,7 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
 ]
 
 - `{Key = Value}` is a map type. `{key = value}` is a map literal.
-- Empty maps need an explicit map type.
+- Empty maps need an explicit map type. Source `{=}` empty-map enforcement is not implemented; the `{=}` spelling belongs to the documented MON literal-data contract only.
 - Maps preserve insertion order. Replacing a value does not move its entry.
 - Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
 - `get`, `set` and `remove` are fallible.
@@ -833,8 +832,8 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
 
 ### Anonymous const records
 
-`|...|` is parameters syntax. In a compile-time receiving context it becomes a
-const record: every parameter needs a value, and the list does not declare a
+Anonymous const records use the named-only parenthesised form of MON syntax:
+every entry needs a name and a value, and the record does not declare a
 constructable type.
 
 [codeblock, $code("moth"):
@@ -843,25 +842,31 @@ constructable type.
         height Int,
     |
 
-    size #= Size(8, 4)
+    size #= Size(width = 8, height = 4)
 
-    labels #= |
+    labels #= (
         first = "a",
         second = "b",
-    |
+    )
 
-    nested #= |
+    nested #= (
         size = size,
         first = labels.first,
-    |
+    )
+
+    window #= (
+        size = Size(width = 8, height = 4),
+        title = "Strategy",
+    )
 ]
 
-Do not nest one `|...|` list inside another. Declare a child struct or record
-first, then name it as a parameter value. Every parameter value must fold.
+Anonymous values nest directly inside another record. A named struct child still
+uses its explicit constructor. Every field value must fold.
 The complete record is not a runtime value: it cannot be passed, returned,
 stored in runtime data or used through receiver methods.
-
 A fully folded named struct constant may also act as a data-only const record.
+Const records are source values, not serialised MON documents: field values may be ordinary
+foldable expressions, while MON literal data accepts literals only and is owned by @../mon/#mon-format (MON format).
 
 ### Const templates
 
@@ -1366,31 +1371,33 @@ project and HTML settings use their documented defaults. A bare `$html_builder` 
 valid; authored empty `()` is invalid for directives. Multi-builder configuration
 waits for `$feature`.
 
-Only an explicit `$config` declaration creates an input contract. An ordinary
-`version #String = "1.0"` is a helper constant, and a project field named `version`
-does not satisfy a source input contract. Ordinary constants always have
+Only a declaration-owned `#Config of T` creates an input contract. An ordinary
+`version #String = "1.0"` is a helper constant, and fixed grouped-project fields retain
+their current provider and override policy for same-named source contracts. Declaration-owned
+input names remain distinct from `@project` fields. Ordinary constants always have
 initializers; only a marked required non-optional input may omit one, while a marked
-optional input may also omit one and resolves to absence. Source defaults
-remain one primitive literal or `none`, not a name, template, call, cast, operator,
-collection or record.
+optional input may also omit one and resolves to absence. Source defaults remain one primitive
+literal or `none`, not a name, template, call, cast, operator, collection or record.
+`$config`, `$project` and `$html_builder` remain queued general directives.
 
-**Current Alpha configuration until cutover:**
+**Current Alpha configuration:**
 
 [codeblock, $code("moth"):
-    project #= |
-        name = "moth_docs",
-        version #Config of String = "0.1.0",
-        entry_root = "src",
-    |
+    version #Config of String = "0.1.0"
 
-    html #= |
+    project #= (
+        name = "moth_docs",
+        version = version,
+        entry_root = "src",
+    )
+
+    html #= (
         dev_output = "dev",
         release_output = "release",
-    |
+    )
 ]
 
-Current direct and source input contracts still use `#Config of T`; they are not the
-accepted end-state provider model:
+Declaration-owned `#Config of T` contracts supply source inputs:
 
 [codeblock, $code("moth"):
     api_url #Config of String = "http://localhost:8080"
@@ -1449,7 +1456,7 @@ deferred. Assigned or returned templates stay ordinary `String` values.
 HTML application `build` and `dev` need a page somewhere under `entry_root`, while
 single-file HTML output requires `$page`. Fixed `$page` metadata is distinct from
 the queued `io.set_title` browser capability; the latter changes the live title
-without changing static metadata, routes or output files. Until the cutover, current
+without changing static metadata, routes or output files. Current
 Alpha pages retain reserved `page_title`, `page_head` and related declarations.
 
 
@@ -1521,7 +1528,7 @@ Do not infer forms for:
 - direct choice payload access/narrowing or nested payload patterns
 - lossy `Float <-> NumberN`, Number formatting helpers or broader Byte APIs
 - declared-region capacity, expression placement, extraction, adoption or declared-region transfer
-- broader anonymous-record storage
+- broader anonymous-record storage in runtime values, collections and maps (compile-time const-record nesting itself is delivered)
 - final builder-selection or build-script syntax
 
 Roadmaps and design drafts do not create accepted syntax.
@@ -1533,6 +1540,4 @@ Do not invent shadowing, macros, general closures/function values, exceptions, c
 Outside scope also includes target/platform conditional compilation, conditionally present imports,
 declarations or exports, builder-provided target identity flags and backend-specific source legality.
 
-Use choices for runtime heterogeneity, trait bounds for static reuse, `copy` for independent storage, typed error channels for expected failure and accepted reactive subscriptions for live template reads.
-
-Further detail: @../language-overview (language), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).
+Further detail: @../language-overview (language), @../mon/#mon-format (MON format, executable Rust-only codec; not implemented Moth source or runtime behaviour), @../memory (memory), @../templates (templates), @../resources (resources and file values), @../project-structure (projects), @../packages (packages), @../progress (progress) and @../design-scope (design scope).

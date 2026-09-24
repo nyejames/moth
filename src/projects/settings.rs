@@ -4,8 +4,9 @@
 //!       configuration structures shared across the compiler and build system.
 //! WHY: keeping these values in one module prevents magic literals from spreading through the
 //!      codebase and makes capacity tuning explicit.
-
-use crate::compiler_frontend::build_config::ConfigResolutionRecord;
+use crate::compiler_frontend::build_config::{
+    ConfigResolutionRecord, FoldedConfigProjectFieldDependency,
+};
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
@@ -58,7 +59,7 @@ pub const TOKEN_TO_DECLARATION_RATIO: usize = 20; // (Maybe) About 1/20 tokens f
 pub const TOKEN_TO_NODE_RATIO: usize = 10; // (Maybe) About 1/10 tokens to AstNode ratio
 pub const MINIMUM_LIKELY_DECLARATIONS: usize = 10; // (Maybe) How many symbols the smallest common Ast blocks will likely have
 
-/// Typed results of one validated `html #= |...|` builder section.
+/// Typed results of one validated `html #= (...)` builder section.
 ///
 /// WHAT: each html section field in its validated form. Fields the record omits stay `None`
 /// unless their schema declares a default, which then stands.
@@ -134,8 +135,11 @@ pub struct Config {
     /// Whether this config was loaded from an actual `config.moth` file. Synthetic single-file
     /// defaults must not become fixed project providers for source build-config contracts.
     pub(crate) project_config_loaded: bool,
-    /// Direct project `#Config` resolution records retained only until build-boundary projection.
-    /// Successful build results clear this transient bootstrap handoff.
+    /// Declaration-owned and grouped-project input-resolution dependencies retained only until
+    /// build-boundary provider projection.
+    pub(crate) project_field_config_dependencies: Vec<FoldedConfigProjectFieldDependency>,
+    /// Declaration-owned and grouped-project input-resolution records retained until build-boundary
+    /// provider projection.
     pub(crate) config_resolution_records: Vec<ConfigResolutionRecord>,
 }
 
@@ -153,6 +157,7 @@ impl Config {
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
+            project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }
     }
@@ -249,6 +254,7 @@ impl Default for Config {
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
+            project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }
     }

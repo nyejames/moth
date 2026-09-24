@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler still accepts grouped `project` and `html` records, direct `#Config` fields and open extra project metadata. Closed `$project` / `$html_builder` configuration, required `version` and earlier `$config` contracts are accepted queued design. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
+**Current support versus accepted design.** The Alpha compiler accepts parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. Closed `$project` / `$html_builder` configuration, the required `version` argument and `$config` prefixes remain accepted queued design. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths.
 
@@ -184,19 +184,21 @@ Unknown or inactive unsupported directives error. Multi-builder configuration wa
 
 ### Current grouped config
 
-Until the cutover, operational config still looks like:
+Operational config uses declaration-owned `#Config` inputs and parenthesised grouped records:
 
 [codeblock, $code("moth"):
-    project #= |
-        name = "moth_docs",
-        version = "0.1.0",
-        entry_root = "src",
-    |
+    version #Config of String = "0.1.0"
 
-    html #= |
+    project #= (
+        name = "moth_docs",
+        version = version,
+        entry_root = "src",
+    )
+
+    html #= (
         dev_output = "dev",
         release_output = "release",
-    |
+    )
 ]
 
 Retired flat keys remain rejected. Keep live `docs/config.moth` on this current path.

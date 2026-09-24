@@ -30,7 +30,7 @@ At closeout, delete this plan and remove its roadmap entry in the same commit.
 
 ## Hard prerequisites
 
-- build configuration values and project globals are delivered
+- build configuration values and project globals are delivered (i.e. the delivered MON declaration-owned `#Config` plus grouped `project`/`html` bootstrap, not the queued `$config`/`$project` directives)
 - the final TIR exact-view formatter pipeline is delivered and formatters see only text and opaque
   anchors
 - the current `$md` heading, inline-code and Moth-aware link paths are stable

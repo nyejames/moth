@@ -82,7 +82,10 @@ fn assert_bounded_bool(cursor: &AstCursor, index: usize, expected: bool) {
 /// Assert a declaration cursor exposes a bool literal with the expected payload at `index`.
 fn assert_declaration_bool(cursor: &DeclarationCursor<'_>, index: usize, expected: bool) {
     assert_eq!(
-        cursor.token_tag_at(index),
+        cursor
+            .canonical_cursor()
+            .parser_token_at(index)
+            .map(|token| token.tag()),
         Some(TokenTag::BOOL_LITERAL),
         "tag mismatch at index {index}"
     );
@@ -319,17 +322,17 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
         "the declaration cursor ends at the window, not at the source end"
     );
     assert!(
-        declaration.token_tag_at(0).is_none(),
+        declaration.canonical_cursor().parser_token_at(0).is_none(),
         "a declaration cursor must not read before its window"
     );
     assert_declaration_bool(&declaration, 1, true);
     assert_declaration_bool(&declaration, 2, false);
     assert!(
-        declaration.token_tag_at(3).is_none(),
+        declaration.canonical_cursor().parser_token_at(3).is_none(),
         "a declaration cursor must not read the token after its window"
     );
     assert!(
-        declaration.token_tag_at(4).is_none(),
+        declaration.canonical_cursor().parser_token_at(4).is_none(),
         "a declaration cursor must not reach the trailing source EOF"
     );
 
@@ -389,12 +392,12 @@ fn declaration_cursor_inherits_segmented_parser_window() {
     assert_eq!(declaration.position(), 1);
     assert_eq!(declaration.length, 2);
     assert!(
-        declaration.token_tag_at(0).is_none(),
+        declaration.canonical_cursor().parser_token_at(0).is_none(),
         "a segmented declaration cursor must not read before its dense window"
     );
     assert_declaration_bool(&declaration, 1, false);
     assert!(
-        declaration.token_tag_at(2).is_none(),
+        declaration.canonical_cursor().parser_token_at(2).is_none(),
         "a segmented declaration cursor must not read past its dense window"
     );
 }
@@ -417,7 +420,7 @@ fn declaration_cursor_respects_a_stricter_parent_limit() {
     assert_eq!(declaration.length, 2);
     assert_declaration_bool(&declaration, 1, true);
     assert!(
-        declaration.token_tag_at(2).is_none(),
+        declaration.canonical_cursor().parser_token_at(2).is_none(),
         "a declaration cursor must not read at or beyond an active parent limit"
     );
 

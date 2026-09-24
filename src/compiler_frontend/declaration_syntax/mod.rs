@@ -82,12 +82,6 @@ impl<'a> DeclarationCursor<'a> {
         &mut self.cursor
     }
 
-    pub(crate) fn token_tag_at(&self, index: usize) -> Option<TokenTag> {
-        if index < self.cursor.parser_window_start() || index >= self.length {
-            return None;
-        }
-        self.cursor.parser_token_at(index).map(TokenRef::tag)
-    }
     /// Read a test-only indexed symbol payload through the requester string-table domain.
     #[cfg(test)]
     pub(crate) fn token_string_id_at_in(

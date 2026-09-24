@@ -2,4 +2,8 @@ load || -> Int:
     return 1
 ;
 
-bad #= | x = load() |
+bad #= (
+    child = (
+        value = load(),
+    ),
+)

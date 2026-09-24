@@ -1,0 +1,49 @@
+A small MON document is one root record of literal values. This save record
+shows the accepted shape: named fields, a nested record, a map, an explicit
+`none` and ordinary string data.
+
+[codeblock, $code("text"):
+    format_version = 1,
+    title = "Strategy",
+    window = (width = 1280, height = 720),
+    scores = {"Priya" = 10, "Rob" = 12},
+    note = none,
+]
+
+The same record may carry explicit outer parentheses. A lone scalar,
+collection or choice is not a document: put it in a named root field.
+Encoding fills only exact missing field defaults and emits the completed
+record in schema order, including explicit `none` and values equal to
+defaults. See @#mon-format (MON format) for the complete literal-data
+reference.
+
+Strictness is the point. These inputs fail:
+
+[codeblock, $code("text"):
+    -- INVALID: MON never evaluates expressions, including foldable ones
+    width = 1280 + 0,
+
+    -- INVALID: a template is producer syntax, not a MON string literal
+    title = [: Strategy],
+
+    -- INVALID: missing comma between entries
+    title = "Strategy"
+    width = 1280,
+
+    -- INVALID: `{}` is a collection, never an empty map; use `{=}`
+    scores = {},
+
+    -- INVALID: duplicate keys are rejected, not merged
+    scores = {"Priya" = 10, "Priya" = 12},
+
+    -- INVALID: decimal spelling never converts to an Int target
+    width = 1280.0,
+
+    -- INVALID: unknown record fields fail, even with defaults nearby
+    titl = "Strategy",
+]
+
+Availability is Rust-only. The implemented Rust caller surface is public as
+`moth::mon`, re-exported from `src/lib.rs` over the crate-private
+`src/compiler_frontend/mon/` owner. Moth-native operations remain deferred
+separately, and compiled Moth programs have no runtime codec support.

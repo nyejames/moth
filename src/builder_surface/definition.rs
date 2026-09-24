@@ -110,7 +110,7 @@ impl BuilderSurface {
     }
 }
 
-/// The grouped `project #= |...|` record schema with compiler-owned fields only.
+/// The grouped `project #= (...)` record schema with compiler-owned fields only.
 ///
 /// WHAT: `name` is required; `entry_root` defaults to `src`; remaining compiler-owned
 ///       project fields stay optional. Additional authored metadata is preserved.

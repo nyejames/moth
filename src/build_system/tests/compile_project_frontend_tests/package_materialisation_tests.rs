@@ -11,7 +11,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     fs::create_dir_all(&src).expect("should create project entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -137,7 +137,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     fs::create_dir_all(&second_package).expect("should create second package");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -227,7 +227,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@broken run\nvalue = run()\n")
@@ -301,7 +301,7 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -360,7 +360,7 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -540,7 +540,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -624,11 +624,11 @@ fn imported_generic_materialisation_preserves_donor_identity_with_colliding_sour
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |
+        "project #= (
     name = \"docs\",
     entry_root = \"src\",
-|
-html #= ||\n",
+)
+html #= ()\n",
     )
     .expect("should write config");
     let package_source = format!(
@@ -826,7 +826,7 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
 
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -936,7 +936,7 @@ fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1114,7 +1114,7 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
     fs::create_dir_all(dir.join("provider")).expect("should create provider module");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1250,7 +1250,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     fs::create_dir_all(dir.join("generics")).expect("should create generic provider module");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1358,7 +1358,7 @@ fn source_package_warning_retained_by_frontend_outcome() {
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -1473,7 +1473,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
         project_root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1533,7 +1533,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
         project_root.join("config.moth"),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

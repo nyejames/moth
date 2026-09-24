@@ -40,13 +40,15 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
     InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidExpressionReason, InvalidFallibleHandlingReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
-use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::{
+    build_input_type_from_parsed, parsed_type_span,
+};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
 };
@@ -66,6 +68,7 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
     parse_expectation_for_type_id,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Body-local declaration parsing shares the AST body error lane.
 ///
@@ -73,40 +76,6 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 /// frozen file table. If that retained-table invariant fails, the error must reach module
 /// emission as `CompilerError`, not become an authored declaration diagnostic.
 type DeclarationResult<T> = Result<T, ExpressionParseError>;
-
-/// True when `|` at `pipe_index` opens a value record in the bounded declaration cursor view.
-///
-/// WHAT: classifies the statement-owned struct/record dispatch from canonical `TokenTag` facts.
-/// WHY: initializer substreams remain bounded views, so cursor-relative indexes and source spans
-/// stay tied to the same source-token owner.
-fn pipe_opens_value_record_at_cursor(
-    cursor: &DeclarationCursor,
-    pipe_index: usize,
-    compile_time: bool,
-) -> bool {
-    if compile_time {
-        return true;
-    }
-    let tag_at = |probe: usize| cursor.token_tag_at(probe);
-    let skip_newlines = |mut probe: usize| {
-        while matches!(tag_at(probe), Some(TokenTag::NEWLINE)) {
-            probe += 1;
-        }
-        probe
-    };
-    let mut probe = skip_newlines(pipe_index + 1);
-    if matches!(tag_at(probe), Some(TokenTag::TYPE_PARAMETER_BRACKET)) {
-        return false;
-    }
-    if !matches!(tag_at(probe), Some(TokenTag::SYMBOL)) {
-        return false;
-    }
-    probe = skip_newlines(probe + 1);
-    matches!(
-        tag_at(probe),
-        Some(TokenTag::ASSIGN) | Some(TokenTag::COMMA)
-    )
-}
 
 /// Returns `Some(capacity)` when the parsed type is a capacity-only shorthand `{N}`.
 ///
@@ -149,54 +118,6 @@ fn initializer_is_compile_time_constant(
             classify_template_from_effective_tir(template, &context.template_ir_store)
         })
         .map(|kind| kind.is_compile_time_value())
-}
-/// Classify config-qualified fields as deferred placeholders while preserving ordinary compile-time
-/// checking for every other field. The compiler config resolver validates and replaces these fields
-/// before the top-level constant is folded.
-fn initializer_is_compile_time_constant_with_config_placeholders(
-    initializer: &Expression,
-    context: &ScopeContext,
-) -> Result<bool, TemplateError> {
-    let ExpressionKind::AnonymousConstRecord { fields } = &initializer.kind else {
-        return initializer_is_compile_time_constant(initializer, context);
-    };
-
-    for field in fields {
-        if field.config_qualifier.is_some() {
-            continue;
-        }
-        if !initializer_is_compile_time_constant(&field.value, context)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-/// Reject config-qualified fields at the owning body-local record declaration.
-///
-/// This intentionally inspects only direct record fields. Nested expression walks are not a
-/// placement boundary: each declaration/record parser owns the metadata it parsed.
-fn reject_config_qualifiers_on_record_fields(
-    initializer: &Expression,
-    path_fork: &PathInternerFork,
-) -> Result<(), ExpressionParseError> {
-    let ExpressionKind::AnonymousConstRecord { fields } = &initializer.kind else {
-        return Ok(());
-    };
-
-    for field in fields {
-        if let Some(qualifier) = &field.config_qualifier {
-            let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
-                path_fork.component(field.id),
-                InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                qualifier.qualifier_span,
-            );
-            diagnostic.primary_span = qualifier.qualifier_span;
-            return Err(diagnostic.into());
-        }
-    }
-
-    Ok(())
 }
 
 /// Apply binding-level reactive identity after the initializer has been fully typed.
@@ -487,6 +408,18 @@ pub fn resolve_declaration_syntax(
         });
     let source_build_config_context = config_constant_context && has_source_build_config_contract;
     if let Some(qualifier) = &declaration_syntax.config_qualifier
+        && (config_resolution_context || source_build_config_context)
+        && build_input_type_from_parsed(&qualifier.type_annotation).is_none()
+    {
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+            path_fork.component(qualified_name),
+            InvalidConfigReason::ConfigQualifierUnsupportedType,
+            parsed_type_span(&qualifier.type_annotation),
+        );
+        diagnostic.primary_span = parsed_type_span(&qualifier.type_annotation);
+        return Err(diagnostic.into());
+    }
+    if let Some(qualifier) = &declaration_syntax.config_qualifier
         && !config_resolution_context
         && !source_build_config_context
     {
@@ -656,6 +589,24 @@ pub fn resolve_declaration_syntax(
             Some(context),
         )?
     };
+    // Declaration-boundary config bootstrap permits required and optional contracts to omit `=`.
+    // The config owner validates the contract and supplies a provider/default before the ordinary
+    // constant fold; do not force a second initializer parser or invent a placeholder value here.
+    if config_resolution_context
+        && declaration_syntax.config_qualifier.is_some()
+        && declaration_syntax.initializer_range.is_none()
+    {
+        return Ok(Declaration {
+            id: qualified_name,
+            value: Expression::no_value(
+                declaration_syntax.span,
+                DataType::Inferred,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
+            config_qualifier,
+        });
+    }
     if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
         let name = path_fork.component(qualified_name).ok_or_else(|| {
             CompilerError::compiler_error(
@@ -701,22 +652,9 @@ pub fn resolve_declaration_syntax(
     )?;
 
     let mut parsed_initializer = match initializer_stream.current_tag() {
-        // Struct Definition
-        //
-        // Compile-time `| name = expr |` and empty `#= | |` are const records. Ordinary
-        // empty `| |` and `| name Type |` stay with the struct shell grammar.
-        TokenTag::TYPE_PARAMETER_BRACKET
-            if !initializer_stream
-                .declaration_cursor()
-                .map(|cursor| {
-                    pipe_opens_value_record_at_cursor(
-                        &cursor,
-                        cursor.position(),
-                        declaration_syntax.binding_mode.is_compile_time(),
-                    )
-                })
-                .unwrap_or(false) =>
-        {
+        // A leading `|` opens a struct definition; parenthesized const records parse
+        // through the ordinary expression grammar below.
+        TokenTag::TYPE_PARAMETER_BRACKET => {
             // Struct field defaults must be compile-time foldable, so they are parsed
             // in a dedicated constant context.
             let constant_context = ScopeContext::new_constant(qualified_name, context);
@@ -838,7 +776,12 @@ pub fn resolve_declaration_syntax(
                 create_expression_with_trailing_newline_policy(input)?
             };
 
-            if let Some(declared_type_id) = declared_type_id {
+            if config_resolution_context && declaration_syntax.config_qualifier.is_some() {
+                // Config bootstrap validates the authored fallback itself. Do not let the
+                // declaration's explicit annotation coerce or reject the fallback first, because
+                // an explicit provider must not mask a malformed authored default.
+                expression
+            } else if let Some(declared_type_id) = declared_type_id {
                 // This is an explicit typed boundary: apply ordinary contextual coercions in
                 // one shared path.
                 coerce_expression_to_explicit_type_boundary(
@@ -853,16 +796,9 @@ pub fn resolve_declaration_syntax(
         }
     };
 
-    if !config_resolution_context {
-        reject_config_qualifiers_on_record_fields(&parsed_initializer, path_fork)?;
-    }
-
     // Body-local compile-time constants must fully fold after parsing and coercion.
-    let initializer_is_compile_time_constant = if context.shared.config_resolution.is_some() {
-        initializer_is_compile_time_constant_with_config_placeholders(&parsed_initializer, context)?
-    } else {
-        initializer_is_compile_time_constant(&parsed_initializer, context)?
-    };
+    let initializer_is_compile_time_constant =
+        initializer_is_compile_time_constant(&parsed_initializer, context)?;
 
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -891,21 +827,6 @@ pub fn resolve_declaration_syntax(
     }
 
     if initializer_stream.current_tag() != TokenTag::EOF {
-        if initializer_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET
-            && matches!(
-                parsed_initializer.kind,
-                ExpressionKind::AnonymousConstRecord { .. }
-            )
-        {
-            // Extra `|` after a complete record is the usual leftover from an
-            // inline nested `|...|` that the parser already closed.
-            return Err(CompilerDiagnostic::invalid_expression(
-                InvalidExpressionReason::NestedAnonymousConstRecord,
-                Some(initializer_stream.current_span()),
-            )
-            .into());
-        }
-
         let found = initializer_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {

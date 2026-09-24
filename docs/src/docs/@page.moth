@@ -46,6 +46,7 @@ page_head #= theme_head
     - @./resources (Resources and file values)
     - @./moth-templates (Moth template files)
     - @./markdown (Plain Markdown)
+    - @./mon (MON format)
     - @./design-scope (Design scope)
 
     ## Quick reference

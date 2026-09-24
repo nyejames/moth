@@ -1,0 +1,44 @@
+@mon-format content as mon_format
+
+@mon-format-basic content as mon_format_basic
+
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level
+
+page_title #= "MON format"
+page_description #= "The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / MON format
+
+    # MON format
+
+    MON means Moth Object Notation. **MON syntax** names Moth's shared
+    parenthesised argument and value-construction notation.
+    **The MON format** is the separate serialised-data profile with its own
+    supported values and serialisation rules.
+
+    Serialised MON is literal data only. A MON reader never evaluates Moth
+    expressions, including foldable ones. Availability is Rust-only: the
+    bounded decoder and deterministic document/nested-value writers are
+    implemented and public at `moth::mon`, re-exported from `src/lib.rs`, over
+    the crate-private `src/compiler_frontend/mon/` owner. Another Rust crate
+    can execute the service, but compiled Moth programs have no runtime codec
+    support. Moth-native operations, automatic schema extraction and the static
+    project builder remain deferred separately.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):mon-format]
+        [$insert("title"):MON format]
+        [$insert("advanced"):[mon_format]]
+
+        [mon_format_basic]
+    ]
+]

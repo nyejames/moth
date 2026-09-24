@@ -23,30 +23,29 @@ pub struct ConfigSchemaFieldId(pub(crate) usize);
 /// Whether a schema node accepts field names it does not itself declare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnknownFieldPolicy {
-    /// Undeclared field names are accepted and retained (open record, e.g. the grouped `project`).
+    /// Undeclared field names are accepted and retained (grouped-but-open record, e.g. the grouped `project`).
     Preserve,
     /// Undeclared field names are rejected (closed record, e.g. active builder sections).
     Reject,
 }
 
-/// Whether a direct field of the grouped `project` record may carry `#Config`.
+/// Whether a field of the grouped `project` record accepts declaration-owned input values.
 ///
-/// Structural fields that affect project identity or source discovery stay fixed-only. Builders
-/// opt ordinary metadata into the compiler-owned direct-project configuration resolution path.
+/// Structural fields that affect project identity or source discovery stay fixed-only. Fields
+/// marked configurable accept values folded from earlier explicitly typed top-level `#Config of T`
+/// declarations through the declaration-boundary resolution path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProjectFieldConfigPolicy {
     FixedOnly,
     Configurable,
 }
 
-/// Schema-derived direct-project qualifier policy passed to compiler config folding.
+/// Schema-derived grouped-project input policy passed to compiler config folding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFieldConfigPolicies {
     by_name: std::collections::BTreeMap<&'static str, ProjectFieldConfigPolicy>,
-    /// Policy applied to direct project fields that are not declared by the schema.
+    /// Policy applied to project record fields that are not declared by the schema.
     unknown_policy: ProjectFieldConfigPolicy,
-    /// Value shapes for every direct project field declared by the schema.
-    shapes: std::collections::BTreeMap<&'static str, ConfigFieldShape>,
 }
 
 impl Default for ProjectFieldConfigPolicies {
@@ -54,7 +53,6 @@ impl Default for ProjectFieldConfigPolicies {
         Self {
             by_name: std::collections::BTreeMap::new(),
             unknown_policy: ProjectFieldConfigPolicy::FixedOnly,
-            shapes: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -67,16 +65,8 @@ impl ProjectFieldConfigPolicies {
             .unwrap_or(self.unknown_policy)
     }
 
-    pub(crate) fn shape_for(&self, field_name: &str) -> Option<&ConfigFieldShape> {
-        self.shapes.get(field_name)
-    }
-
     pub(crate) fn insert(&mut self, field_name: &'static str, policy: ProjectFieldConfigPolicy) {
         self.by_name.insert(field_name, policy);
-    }
-
-    fn insert_shape(&mut self, field_name: &'static str, shape: ConfigFieldShape) {
-        self.shapes.insert(field_name, shape);
     }
 }
 
@@ -113,7 +103,7 @@ pub struct ConfigSchemaField {
     pub required: bool,
     /// Value used when an authored record omits this optional field.
     pub(crate) default: Option<PublicFoldedValue>,
-    /// Direct-project qualifier policy. Non-project section fields remain fixed-only in the
+    /// Grouped-project input policy. Non-project section fields remain fixed-only in the
     /// compiler config service regardless of this value.
     pub config_policy: ProjectFieldConfigPolicy,
 }
@@ -326,8 +316,8 @@ impl ConfigSchema {
         &self.fields[id.0]
     }
 
-    /// Snapshot the root field policy and shape for the compiler-owned direct-project qualifier
-    /// pass. Unknown direct project metadata remains configurable; the standalone default stays
+    /// Snapshot the root field policy for compiler-owned grouped-project dependency checks.
+    /// Unknown grouped-project metadata remains configurable; the standalone default stays
     /// conservative for callers that do not have the open builtin project schema.
     pub(crate) fn project_field_config_policies(&self) -> ProjectFieldConfigPolicies {
         let mut policies = ProjectFieldConfigPolicies {
@@ -337,7 +327,6 @@ impl ConfigSchema {
         for field_id in self.node(self.root).field_ids() {
             let field = self.field(*field_id);
             policies.insert(field.name, field.config_policy);
-            policies.insert_shape(field.name, field.shape.clone());
         }
         policies
     }
@@ -604,7 +593,7 @@ impl ConfigSchemaField {
         Self::leaf(name, ConfigFieldShape::Optional(Box::new(inner)))
     }
 
-    /// Allows `#Config of T` on this direct project field.
+    /// Allows a declaration-owned `#Config of T` value to supply this grouped-project field.
     pub fn configurable(mut self) -> Self {
         self.config_policy = ProjectFieldConfigPolicy::Configurable;
         self

@@ -12,12 +12,13 @@ use crate::compiler_frontend::ast::templates::template_head_parser::directive_ar
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -58,6 +59,50 @@ fn test_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
         0,
     )
     .with_source_file_scope(scope)
+}
+
+fn parse_optional_slot_target_for_test(
+    directive_name: StringId,
+    tokens: &mut AstCursor,
+    scope: PathId,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> DirectiveStyleTestResult<SlotKey> {
+    let context = test_context(scope, path_fork);
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    parse_optional_slot_target_argument(
+        directive_name,
+        tokens,
+        &context,
+        &mut type_interner,
+        string_table,
+        path_fork,
+    )
+    .map_err(directive_diagnostic)
+}
+
+fn parse_required_slot_name_for_test(
+    directive_name: StringId,
+    tokens: &mut AstCursor,
+    scope: PathId,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> DirectiveStyleTestResult<StringId> {
+    let context = test_context(scope, path_fork);
+    let mut type_environment = TypeEnvironment::new();
+    let mut compatibility_cache = TypeCompatibilityCache::new();
+    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    parse_required_slot_name_argument(
+        directive_name,
+        tokens,
+        &context,
+        &mut type_interner,
+        string_table,
+        path_fork,
+    )
+    .map_err(directive_diagnostic)
 }
 
 fn parse_optional_parenthesized_expression_for_test(
@@ -102,6 +147,36 @@ fn parse_required_parenthesized_expression_for_test(
         path_fork,
     )
     .map_err(directive_diagnostic)
+}
+
+fn parse_optional_expression_source(
+    source: &str,
+) -> DirectiveStyleTestResult<
+    Option<crate::compiler_frontend::ast::expressions::expression::Expression>,
+> {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens =
+        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let context = test_context(file_tokens.source_path, &path_fork);
+    let canonical_owner = file_tokens
+        .canonical_owner()
+        .expect("test token stream must expose canonical source tokens");
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    parse_optional_parenthesized_expression_for_test(
+        &mut cursor,
+        &context,
+        &mut string_table,
+        &mut path_fork,
+    )
 }
 
 // ------------------------------------------------------------------------
@@ -196,8 +271,13 @@ fn optional_slot_target_no_parens_returns_default() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert_eq!(result.unwrap(), SlotKey::Default);
 }
 
@@ -224,8 +304,13 @@ fn optional_slot_target_named_string() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(matches!(result.unwrap(), SlotKey::Named(_)));
 }
 
@@ -252,8 +337,13 @@ fn optional_slot_target_positive_positional() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert_eq!(result.unwrap(), SlotKey::Positional(1));
 }
 
@@ -280,11 +370,16 @@ fn optional_slot_target_zero_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
+        result.unwrap_err().payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidSlotTarget,
             ..
@@ -312,10 +407,14 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let diagnostic = directive_diagnostic(
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table)
-            .expect_err("a symbol is not a valid slot target"),
-    );
+    let diagnostic = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a symbol is not a valid slot target");
 
     let primary_span = diagnostic
         .primary_span
@@ -350,8 +449,13 @@ fn optional_slot_target_negative_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
 }
 
@@ -378,11 +482,16 @@ fn optional_slot_target_empty_parens_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
+        result.unwrap_err().payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
             ..
@@ -413,13 +522,18 @@ fn optional_slot_target_missing_close_paren_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result =
-        parse_optional_slot_target_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_optional_slot_target_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
-        DiagnosticPayload::ExpectedToken { expected, .. }
-            if expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS)
+        result.unwrap_err().payload,
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE)
     ));
 }
 
@@ -450,10 +564,16 @@ fn required_slot_name_missing_parens_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_required_slot_name_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
+        result.unwrap_err().payload,
         DiagnosticPayload::ExpectedToken { expected, .. }
             if expected == DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS)
     ));
@@ -482,7 +602,13 @@ fn required_slot_name_string_literal_ok() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_required_slot_name_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_ok());
 }
 
@@ -509,10 +635,16 @@ fn required_slot_name_positional_rejected() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_required_slot_name_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
+        result.unwrap_err().payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidInsertTarget,
             ..
@@ -543,10 +675,16 @@ fn required_slot_name_empty_parens_errors() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = parse_required_slot_name_argument(directive_name, &mut cursor, &mut string_table);
+    let result = parse_required_slot_name_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    );
     assert!(result.is_err());
     assert!(matches!(
-        directive_diagnostic(result.unwrap_err()).payload,
+        result.unwrap_err().payload,
         DiagnosticPayload::InvalidTemplateDirective {
             reason: crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::EmptyArguments,
             ..
@@ -600,12 +738,12 @@ fn optional_expression_no_parens_returns_none() {
 }
 
 #[test]
-fn optional_expression_with_parens_returns_some() {
+fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = directive_tokens(
-        "[$code(\"wrap\")]",
+        "[$children(\n\"wrap\"\n,)]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -629,6 +767,11 @@ fn optional_expression_with_parens_returns_some() {
         &mut path_fork,
     );
     assert!(matches!(result, Ok(Some(_))));
+    assert_eq!(
+        cursor.current_tag(),
+        TokenTag::TEMPLATE_CLOSE,
+        "shared directive parser must leave the cursor after its closing parenthesis",
+    );
 }
 
 #[test]
@@ -710,12 +853,9 @@ fn optional_expression_extra_comma_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = directive_tokens(
-        "[$children(\"a\", \"b\")]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
+    let source = "[$children(\"a\", \"b\")]";
+    let file_tokens =
+        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let context = test_context(file_tokens.source_path, &path_fork);
     let canonical_owner = file_tokens
         .canonical_owner()
@@ -740,6 +880,67 @@ fn optional_expression_extra_comma_errors() {
         diagnostic.payload,
         DiagnosticPayload::UnexpectedToken { found }
             if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
+    ));
+    let primary_span = diagnostic
+        .primary_span
+        .expect("extra-argument diagnostics should retain the offending comma span");
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!((range.start(), range.end()), (14, 15));
+    assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
+}
+
+#[test]
+fn optional_expression_named_argument_is_rejected() {
+    let diagnostic = parse_optional_expression_source("[$children(value = 1)]")
+        .expect_err("directive expressions must reject named arguments");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidCallShape {
+            reason: InvalidCallShapeReason::NamedArgumentsNotSupported,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn optional_expression_mutable_argument_is_rejected() {
+    let diagnostic = parse_optional_expression_source("[$children(~1)]")
+        .expect_err("directive expressions must reject mutable arguments");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidTemplateDirective {
+            reason:
+                crate::compiler_frontend::compiler_messages::InvalidTemplateDirectiveReason::InvalidArgument {
+                    detail: None,
+                },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn optional_expression_double_comma_errors() {
+    let diagnostic = parse_optional_expression_source("[$children(\"a\",,)]")
+        .expect_err("directive expressions must reject double commas");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from_static_tag(TokenTag::COMMA)
+    ));
+}
+
+#[test]
+fn optional_expression_missing_close_paren_errors() {
+    let diagnostic = parse_optional_expression_source("[$children(\"a\"]")
+        .expect_err("directive expressions must require a closing parenthesis");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE)
     ));
 }
 #[test]

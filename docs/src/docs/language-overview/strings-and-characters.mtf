@@ -23,6 +23,10 @@ Double quotes create escaped string slices. They support exactly these escapes:
 Every other escape is invalid. A backslash can't continue a quoted string
 across a physical newline.
 
+### MON string boundary
+
+Source quoted slices keep exactly the five escapes listed above; source widening is deferred. MON literal data uses its own bounded decoder, which additionally accepts `\u{H...}` with 1–6 ASCII hex digits; no source escape implementation is shared. This does not change source availability. MON accepts only quoted strings and characters; raw template syntax is not a MON string literal, while a folded or runtime-evaluated template result is an ordinary serialisable `String`. See @../mon/#mon-format (MON format).
+
 A quoted string slice is read-only content. It has no character or substring
 mutation surface and isn't concatenated with `+`. A slice may be read,
 compared, passed, returned, stored and inserted into templates. A mutable

@@ -23,9 +23,10 @@
 //! resolution phases that produce them.
 //!
 
+use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
-use crate::compiler_frontend::folded_value::FiniteFloat;
+use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
@@ -39,6 +40,7 @@ use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -650,7 +652,7 @@ impl BuildInputName {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BuildConfigValueLocation {
     /// A retained compiler source span: a contract declaration, its default literal or a
-    /// direct project field initializer.
+    /// grouped-project field initializer.
     Source(SourceSpan),
 
     /// An explicit command or programmatic input at one argument position.
@@ -681,7 +683,7 @@ impl BuildCommandLocation {
 /// How a resolved build-config value was produced.
 ///
 /// WHAT: the resolution-origin provenance later `#Config` resolution records next to a typed
-///       value and its location, covering both accepted resolution orders: direct project
+///       value and its location, covering both accepted resolution orders: fixed grouped-project
 ///       fields and project-wide source contracts.
 /// WHY: resolved values retain their origin so diagnostics can explain explicit inputs, builder
 ///       globals, authoritative fixed fields and folded defaults. Origin is provenance only;
@@ -694,7 +696,7 @@ pub(crate) enum BuildConfigValueOrigin {
     /// A compatible builder-provided primitive global.
     BuilderGlobal,
 
-    /// A fixed direct project field, which is authoritative for its name and blocks overrides.
+    /// A fixed grouped-project field, which is authoritative for its name and blocks overrides.
     FixedProjectField,
     /// The folded default of the declaration itself.
     DeclarationDefault,
@@ -771,19 +773,22 @@ fn fingerprint_feed_string(hash: &mut u64, value: &str) {
     fingerprint_feed_u64(hash, value.len() as u64);
     fingerprint_feed(hash, value.as_bytes());
 }
-
-/// Provenance retained for one resolved direct-project `#Config` field.
+/// Provenance retained for one declaration-owned bootstrap input.
+///
+/// The declaration name and any receiving project field remain separate identities. The input
+/// contract is published privately; a folded project-field dependency carries the receiving field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConfigResolutionRecord {
     pub(crate) field_name: StringId,
+    pub(crate) input_name: BuildInputName,
     pub(crate) contract: BuildInputType,
-    /// Whether the authored direct-project contract had no satisfiable value by default.
+    /// Whether the authored contract had no satisfiable value by default.
     ///
     /// This is retained separately from the selected value: explicit inputs and builder globals
     /// replace the authored default, but boundary compatibility still compares the original
     /// required/default contract facts with source declarations.
     pub(crate) required: bool,
-    /// The normalized authored default, if the direct-project contract declared one.
+    /// The normalized authored default, if the contract declared one.
     pub(crate) default: Option<PrimitiveBuildValue>,
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
@@ -792,17 +797,35 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 
+/// Folded value paired with the receiving project field at the compiler/build boundary.
+///
+/// The compiler service owns this join while field type identities, values and spans remain
+/// available. Build validation receives only these owned records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FoldedConfigProjectFieldDependency {
+    pub(crate) field_name: StringId,
+    pub(crate) input_names: Vec<BuildInputName>,
+    pub(crate) type_identity: CanonicalTypeIdentity,
+    pub(crate) value: PublicFoldedValue,
+    pub(crate) span: Option<SourceSpan>,
+}
+
 /// Compiler-owned inputs used while config constants are folded.
 ///
 /// The service owns resolution; this carrier only snapshots typed inputs, builder globals and the
-/// schema-derived direct-project policy. It deliberately contains no build `Config`, target or
+/// schema-derived project-field policy. It deliberately contains no build `Config`, target or
 /// platform identity.
-#[derive(Clone, Debug)]
 pub(crate) struct ConfigResolutionServices {
     explicit_inputs: BuildConfigInputSet,
     builder_globals: BuilderConfigGlobalSet,
     project_field_policies: crate::builder_surface::config_schema::ProjectFieldConfigPolicies,
     records: RefCell<Vec<ConfigResolutionRecord>>,
+    input_provenances: RefCell<
+        FxHashMap<
+            BuildInputName,
+            crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+        >,
+    >,
 }
 
 impl ConfigResolutionServices {
@@ -816,6 +839,7 @@ impl ConfigResolutionServices {
             builder_globals: builder_globals.clone(),
             project_field_policies,
             records: RefCell::new(Vec::new()),
+            input_provenances: RefCell::new(FxHashMap::default()),
         })
     }
 
@@ -830,12 +854,6 @@ impl ConfigResolutionServices {
     pub(crate) fn project_field_policy(&self, field_name: &str) -> ProjectFieldConfigPolicy {
         self.project_field_policies.policy_for(field_name)
     }
-    pub(crate) fn project_field_shape(
-        &self,
-        field_name: &str,
-    ) -> Option<&crate::builder_surface::config_schema::ConfigFieldShape> {
-        self.project_field_policies.shape_for(field_name)
-    }
 
     pub(crate) fn record(&self, record: ConfigResolutionRecord) {
         self.records.borrow_mut().push(record);
@@ -843,6 +861,41 @@ impl ConfigResolutionServices {
 
     pub(crate) fn take_records(&self) -> Vec<ConfigResolutionRecord> {
         std::mem::take(&mut *self.records.borrow_mut())
+    }
+
+    /// Seed the stable provenance owned by one declaration-owned config input.
+    ///
+    /// The folded `ConstValue` metadata carries each project field's provenance through the
+    /// ordinary fold, so this map is the only pre-fold dependency state the resolution
+    /// service retains.
+    pub(crate) fn record_input_provenance(
+        &self,
+        input_name: BuildInputName,
+        provenance: crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+    ) {
+        self.input_provenances
+            .borrow_mut()
+            .insert(input_name, provenance);
+    }
+
+    /// Recover every declaration-owned input represented in an aggregate folded provenance.
+    ///
+    /// Each retained input provenance is a subset of the folded field provenance when that input
+    /// contributed to the value. Sort the result because the provenance map is hash-backed.
+    pub(crate) fn input_names_for_provenance(
+        &self,
+        provenance: &crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance,
+    ) -> Vec<BuildInputName> {
+        let mut names = self
+            .input_provenances
+            .borrow()
+            .iter()
+            .filter(|(_, input_provenance)| input_provenance.is_subset_of(provenance))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
     }
 }
 
@@ -852,10 +905,10 @@ impl ConfigResolutionServices {
 
 /// One normalized contract fact supplied to the project-wide build-config barrier.
 ///
-/// Source shells and project fields enter the barrier through this one shape. The caller chooses
-/// whether a fact is a source contract, a fixed project field or a direct project `#Config` field
-/// by placing it in the corresponding resolver input slice; the fact itself never carries
-/// build-system or source-graph identity.
+/// Source shells, grouped-project fields and declaration-owned input contracts enter the barrier
+/// through this one shape. The caller chooses whether a fact is a source contract, a fixed
+/// project field or a declaration-owned input contract by placing it in the corresponding
+/// resolver input slice; the fact itself never carries build-system or source-graph identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BuildConfigContractFact {
     name: BuildInputName,
@@ -885,7 +938,7 @@ impl BuildConfigContractFact {
         }
     }
 
-    /// Attach the value already selected while a direct project contract folded.
+    /// Attach the value already selected while a declaration-owned config contract folded.
     ///
     /// The barrier still validates this fact against source contracts, but must not select a
     /// second value or reconstruct its provenance from the authored contract alone.
@@ -930,7 +983,7 @@ impl BuildConfigContractFact {
     }
 }
 
-/// Value/provenance already selected by the direct-project config folding owner.
+/// Value/provenance already selected by the config-folding owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ResolvedBuildConfigProvider {
     value: Option<PrimitiveBuildValue>,
@@ -1003,10 +1056,10 @@ pub(crate) enum BuildConfigResolutionError {
     MissingRequiredValue {
         contract: Box<BuildConfigContractFact>,
     },
-    /// A direct project contract reached the barrier without its folded provider payload.
+    /// A declaration-owned config contract reached the barrier without its folded provider payload.
     ///
-    /// This is an internal handoff invariant: direct project config selection belongs exclusively
-    /// to the config-folding service and must never fall back to boundary resolution.
+    /// This is an internal handoff invariant: config selection belongs exclusively to the
+    /// config-folding service and must never fall back to boundary resolution.
     DirectProjectProviderMissing {
         contract: Box<BuildConfigContractFact>,
     },
@@ -1174,9 +1227,9 @@ impl ResolvedBuildConfigValue {
 
 /// The deterministic resolved values for one project or package configuration boundary.
 ///
-/// The map contains every known source, fixed-project and direct-project contract name exactly
-/// once. Its key order is lower_snake_case lexical order, independent of the order in which the
-/// three fact slices were supplied.
+/// The map contains every known source, fixed-project and declaration-owned config contract name
+/// exactly once. Its key order is lower_snake_case lexical order, independent of the order in
+/// which the three fact slices were supplied.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ResolvedBuildConfigMap {
     entries: BTreeMap<BuildInputName, ResolvedBuildConfigValue>,
@@ -1203,8 +1256,9 @@ impl ResolvedBuildConfigMap {
 /// Borrowed indexes for one already-validated canonical configuration boundary.
 ///
 /// WHAT: retains the validated canonical value map and references to canonical source,
-///       fixed-project and direct-project facts without copying any fact payload. A transient
-///       check-only unit can then validate and resolve only its own source facts against this index.
+///       fixed-project and declaration-owned config facts without copying any fact payload. A
+///       transient check-only unit then validates and resolves only its own source facts against
+///       this index.
 /// WHY: check-only compilation must not clone the canonical contract vector or reselect its
 ///       providers and defaults for every transient unit. The canonical resolver already validated
 ///       these facts and values before the index is built; only transient facts and any resolution
@@ -1319,7 +1373,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
         let mut resolved = self.canonical_values.clone();
 
         // Finally resolve names introduced only by this transient source unit. Canonical names
-        // and direct-project names already retain their canonical result above.
+        // and declaration-owned config names already retain their canonical result above.
         for (name, source) in &transient_by_name {
             if self.source_by_name.contains_key(name)
                 || self.direct_project_by_name.contains_key(name)
@@ -1384,9 +1438,9 @@ fn collect_transient_source_facts<'a>(
 ///
 /// Fact slices are already selected by the build-system barrier. Source facts are checked in the
 /// supplied source order so the first conflicting declaration is stable; the resulting value map
-/// is always name ordered. Fixed project fields are authoritative, direct project contracts are
-/// resolved before source-only contracts, and unknown explicit inputs are checked only after all
-/// known facts have been validated and resolved.
+/// is always name ordered. Fixed project fields are authoritative, declaration-owned config
+/// contracts are resolved before source-only contracts, and unknown explicit inputs are checked
+/// only after all known facts have been validated and resolved.
 pub(crate) fn resolve_build_config_values(
     source_facts: &[BuildConfigContractFact],
     fixed_project_facts: &[BuildConfigContractFact],

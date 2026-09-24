@@ -1,5 +1,0 @@
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0023"]
-message_contains = ["parameter list"]

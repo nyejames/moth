@@ -8,7 +8,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper\n#[:entry]\n").expect("should write entry");
@@ -58,7 +58,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@reachable\n@leaf\n#[:entry]\n")
@@ -227,7 +227,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@intro\n@notes\n#[:entry]\n").expect("should write entry");
@@ -482,7 +482,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -527,7 +527,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
@@ -608,7 +608,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         fs::create_dir_all(feature.join("feature")).expect("should create nested provider folder");
         fs::write(
             root.join(settings::CONFIG_FILE_NAME),
-            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
         fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
@@ -685,7 +685,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -779,7 +779,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -840,7 +840,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -923,7 +923,7 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -984,7 +984,7 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The entry imports the same .js file twice under distinct local aliases, so the physical
@@ -1033,7 +1033,7 @@ fn directory_provider_dependency_rejects_cross_module_target() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1104,7 +1104,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The imported .js file does not exist on disk, so it is absent from the source tree index.
@@ -1182,7 +1182,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1257,7 +1257,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@site.moth"), "@markdown render\n#[:site]\n")
@@ -1298,7 +1298,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@HELPER\n#[:page]\n").expect("should write root");
@@ -1340,7 +1340,7 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@core/io input\n#[:page]\n").expect("should write root");
@@ -1376,7 +1376,7 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@./helper value\n#[:page]\n").expect("should write root");
@@ -1412,7 +1412,7 @@ fn direct_child_private_path_bypass_is_rejected() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child/private value\n#[:page]\n")
@@ -1451,7 +1451,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper\n@intro\n#[:entry]\n").expect("should write entry");
@@ -1526,7 +1526,7 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

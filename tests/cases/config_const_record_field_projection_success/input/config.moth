@@ -1,9 +1,9 @@
-defaults #= |
+defaults #= (
     entry_root = "src",
-|
+)
 
-project #= |
+project #= (
     name = "test_project",
     entry_root = defaults.entry_root,
-|
-html #= ||
+)
+html #= ()

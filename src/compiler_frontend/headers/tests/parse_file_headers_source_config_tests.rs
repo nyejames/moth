@@ -98,33 +98,28 @@ fn source_config_contracts_reject_invalid_name_type_and_default_during_preparati
 }
 
 #[test]
-fn source_config_contracts_reject_nested_and_runtime_qualifiers_before_ast() {
-    let cases = [
-        "settings #= | flag #Config of Bool = false |\n",
-        "load |input Bool| -> Bool:\n\
-             runtime #Config of Bool = true\n\
-             return input\n\
-         ;\n",
-    ];
+fn source_config_contracts_reject_runtime_qualifiers_before_ast() {
+    let source = "load |input Bool| -> Bool:\n\
+         runtime #Config of Bool = true\n\
+         return input\n\
+     ;\n";
 
-    for source in cases {
-        let error = match prepare_source_contract_syntax(source) {
-            Ok(_) => panic!("nested or runtime #Config must fail during header preparation"),
-            Err(error) => error,
-        };
-        let diagnostic = error
-            .into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("expected source placement diagnostic");
-        assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidConfig {
-                reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                ..
-            }
-        ));
-    }
+    let error = match prepare_source_contract_syntax(source) {
+        Ok(_) => panic!("runtime #Config must fail during header preparation"),
+        Err(error) => error,
+    };
+    let diagnostic = error
+        .into_diagnostics()
+        .into_iter()
+        .next()
+        .expect("expected source placement diagnostic");
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            ..
+        }
+    ));
 }
 
 #[test]

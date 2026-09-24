@@ -242,7 +242,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, anonymous const-record, external constant, config and diagnostics coverage.]
             [: Frontend]
-            [: Top-level compile-time constants such as [$html:<code>name #= value</code>] must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values. [$html:<code>|...|</code>] in a compile-time receiving context is an anonymous const record: every parameter needs a value, the list does not declare a constructable type and nested lists are declared first then named. Exported and imported folded records are supported.]
+            [: Top-level compile-time constants such as [$html:<code>name #= value</code>] must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values. Parenthesised anonymous const records use named-only [$html:<code>(name = value)</code>] entries: the empty record is permitted, every field needs an explicit value, fields declare no constructable type and inline nested anonymous, bound or explicitly constructed nominal children fold without declaring nested types. Whole records remain runtime-ineligible. Exported and imported folded records are supported.]
         ]
 
         [data:
@@ -504,9 +504,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Project config model]
             [: Supported]
-            [: Targeted grouped-project-record validation, recursive builder-section schemas, direct and source [$html:<code>#Config</code>] contracts, typed [$html:<code>--input</code>] inference for build/check/dev, ordinary [$html:<code>if</code>] static specialisation, immutable [$html:<code>@project</code>] binding, provenance and package-boundary isolation, repeated dev input retention and origin-independent semantic fingerprint construction, self-contained dependency-clause rejection and legacy flat-key rejection coverage.]
+            [: Targeted grouped-project-record validation, recursive builder-section schemas, declaration-owned [$html:<code>#Config of T</code>] contracts, typed [$html:<code>--input</code>] inference for build/check/dev, ordinary [$html:<code>if</code>] static specialisation, immutable [$html:<code>@project</code>] binding, provenance and package-boundary isolation, repeated dev input retention and origin-independent semantic fingerprint construction, self-contained dependency-clause rejection and legacy flat-key rejection coverage.]
             [: Frontend / build system]
-            [: The compiler accepts grouped config: one required open [$html:<code>project</code>] record plus active builder sections such as [$html:<code>html</code>]. Direct and source [$html:<code>#Config</code>] values resolve to ordinary folded constants, and explicit [$html:<code>@project</code>] exposes immutable project fields through the reserved synthetic interface. Typed [$html:<code>--input</code>] values are shared by build, check and dev; ordinary static [$html:<code>if</code>] consumes folded Bool values before HIR. Config values carry boundary-local provenance and origin-independent semantic fingerprints during frontend compilation. Retention, dependency-aware targeted invalidation and reuse are deferred to incremental and persistent artefact work. Accepted [$html:<code>$project</code>] / [$html:<code>$config</code>] configuration is queued separately below and is not current support.]
+            [: The compiler accepts grouped config: one required grouped [$html:<code>project #= (...)</code>] record plus active [$html:<code>html #= (...)</code>] builder sections; the project record preserves open metadata while the builder sections stay closed. Earlier explicitly typed top-level [$html:<code>#Config of T</code>] declarations resolve to ordinary folded constants, and explicit [$html:<code>@project</code>] exposes immutable project fields through the reserved synthetic interface. Typed [$html:<code>--input</code>] values are shared by build, check and dev; ordinary static [$html:<code>if</code>] consumes folded Bool values before HIR. Config values carry boundary-local provenance and origin-independent semantic fingerprints during frontend compilation. Retention, dependency-aware targeted invalidation and reuse are deferred to incremental and persistent artefact work. Accepted [$html:<code>$project</code>] / [$html:<code>$config</code>] configuration is queued separately below and is not current support.]
         ]
 
         [data:
@@ -692,9 +692,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: MON Rust codec]
-            [: Deferred]
-            [: None]
-            [: Accepted Rust-facing compiler-library tooling. Document encoding, nested-value encoding and strict schema-checked decoding will use literal data, owned results and bounded fail-fast errors. No implementation is claimed. This surface does not expose MON operations to compiled Moth programs.]
+            [: Partial]
+            [: Broad public API, focused codec and bounded hardening coverage]
+            [: The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.]
         ]
 
         [data:

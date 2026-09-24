@@ -1,8 +1,8 @@
-inner #= |
+inner #= (
     x = 3,
-|
+)
 
-labels #= |
+labels #= (
     first = "a",
     inner = inner,
-|
+)

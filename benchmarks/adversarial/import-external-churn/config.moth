@@ -1,8 +1,8 @@
-project #= |
+project #= (
     name = "import_external_churn",
     entry_root = "src",
-|
-html #= |
+)
+html #= (
     dev_output = "dev",
     release_output = "release",
-|
+)

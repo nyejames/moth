@@ -1,11 +1,10 @@
-//! AST direct-project configuration resolution.
+//! AST declaration-owned configuration resolution.
 //!
-//! WHAT: resolves declaration-owned `#Config of T` metadata on direct project fields and records
-//! the resulting build-input facts.
+//! WHAT: resolves declaration-owned `#Config of T` metadata and seeds one stable
+//!       `SyntheticInterfaceProvenance` input fact per declaration-owned input.
 //! WHY: configuration validation and primitive materialisation are a focused semantic phase,
-//! separate from the ordinary top-level constant session and its compile-time fold.
+//!      separate from the ordinary top-level constant session and its compile-time fold.
 
-use crate::builder_surface::config_schema::{ConfigFieldShape, ProjectFieldConfigPolicy};
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -36,8 +35,13 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-/// Resolve direct-project `#Config of T` field metadata before the ordinary const store fold.
-pub(super) fn resolve_direct_project_config_qualifiers(
+/// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
+///
+/// Top-level declarations are the bootstrap owner. The declaration-boundary path records the
+/// input contract and seeds the input's stable provenance. Folded `ConstValue` metadata
+/// carries that provenance into each receiving project field through the ordinary fold, so
+/// this pass records no pre-fold project-field dependency facts.
+pub(super) fn resolve_config_declaration(
     declaration: &mut Declaration,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -45,210 +49,178 @@ pub(super) fn resolve_direct_project_config_qualifiers(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    let declaration_name = path_fork.component(declaration.id);
     if let Some(qualifier) = declaration.config_qualifier.take() {
-        return Err(config_expression_error(
-            path_fork.component(declaration.id),
-            InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
-            qualifier.qualifier_span,
-        ));
-    }
+        let Some(declaration_name) = declaration_name else {
+            return Err(config_expression_error(
+                None,
+                InvalidConfigReason::ConfigContractNameInvalid,
+                qualifier.qualifier_span,
+            ));
+        };
+        let declaration_text = string_table.resolve(declaration_name).to_owned();
+        let input_name = BuildInputName::new(&declaration_text).map_err(|_| {
+            config_expression_error(
+                Some(declaration_name),
+                InvalidConfigReason::ConfigContractNameInvalid,
+                qualifier.qualifier_span,
+            )
+        })?;
+        let Some(contract) = build_input_type_from_parsed(&qualifier.type_annotation) else {
+            return Err(config_expression_error(
+                Some(declaration_name),
+                InvalidConfigReason::ConfigQualifierUnsupportedType,
+                parsed_type_span(&qualifier.type_annotation),
+            ));
+        };
+        let authored_default = normalize_config_default(
+            declaration_name,
+            &declaration.value,
+            qualifier.default_none,
+            contract,
+            scope_context,
+            type_interner.environment(),
+            string_table,
+        )?;
+        let (contract_required, contract_default) = match &authored_default {
+            AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
+            AuthoredConfigDefault::None { .. } => (false, None),
+            AuthoredConfigDefault::Value { value, .. } => (false, Some(value.clone())),
+        };
+        let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
+            Some((
+                entry.value(),
+                BuildConfigValueOrigin::ExplicitInput,
+                Some(entry.location().clone()),
+                build_config_input_argument_index(entry.location()),
+            ))
+        } else {
+            services
+                .builder_global(&input_name)
+                .map(|value| (value, BuildConfigValueOrigin::BuilderGlobal, None, None))
+        };
 
-    let is_project = path_fork
-        .component(declaration.id)
-        .is_some_and(|name| string_table.resolve(name) == "project");
-    let ExpressionKind::AnonymousConstRecord { fields } = &mut declaration.value.kind else {
-        return Ok(());
-    };
-
-    for field in fields {
-        let field_name = path_fork.component(field.id);
-        if let Some(qualifier) = field.config_qualifier.take() {
-            let Some(field_name) = field_name else {
-                return Err(config_expression_error(
-                    None,
-                    InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
+        if let Some((value, origin, value_location, argument_index)) = configured_value {
+            if !contract.accepts_primitive(value.primitive_type()) {
+                return Err(config_input_type_mismatch(
+                    Some(declaration_name),
+                    value.primitive_type().name(),
+                    contract,
                     qualifier.qualifier_span,
-                ));
-            };
-            if !is_project {
-                return Err(config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigQualifierInvalidProjectPlacement,
-                    qualifier.qualifier_span,
+                    argument_index,
+                    string_table,
                 ));
             }
-
-            let field_text = string_table.resolve(field_name).to_owned();
-            if services.project_field_policy(&field_text) != ProjectFieldConfigPolicy::Configurable
-            {
-                return Err(config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigQualifierFixedField,
-                    qualifier.qualifier_span,
-                ));
-            }
-            let Some(contract) = build_input_type_from_parsed(&qualifier.type_annotation) else {
-                return Err(config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigQualifierUnsupportedType,
-                    parsed_type_span(&qualifier.type_annotation),
-                ));
-            };
-            if let Some(shape) = services.project_field_shape(&field_text)
-                && !project_shape_accepts_contract(shape, contract)
-            {
-                let declared = string_table.intern(&config_type_name(contract));
-                let expected = string_table.intern(&shape.describe());
-                return Err(config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigQualifierSchemaTypeMismatch { declared, expected },
-                    qualifier.qualifier_span,
-                ));
-            }
-            let input_name = BuildInputName::new(&field_text).map_err(|_| {
-                config_expression_error(
-                    Some(field_name),
-                    InvalidConfigReason::ConfigContractNameInvalid,
-                    qualifier.qualifier_span,
-                )
-            })?;
-            let authored_default = normalize_config_default(
-                field_name,
-                &field.value,
-                qualifier.default_none,
+            declaration.value =
+                expression_for_build_value(value, contract, None, type_interner, string_table);
+            services.record(config_resolution_record(
+                declaration_name,
+                &declaration_text,
+                input_name.clone(),
                 contract,
-                scope_context,
-                type_interner.environment(),
-                string_table,
-            )?;
-            let qualifier_span = qualifier.qualifier_span;
-            let (contract_required, contract_default) = match &authored_default {
-                AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
-                AuthoredConfigDefault::None { .. } => (false, None),
-                AuthoredConfigDefault::Value { value, .. } => (false, Some(value.clone())),
-            };
-            let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
-                Some((
-                    entry.value(),
-                    BuildConfigValueOrigin::ExplicitInput,
-                    Some(entry.location().clone()),
-                    build_config_input_argument_index(entry.location()),
-                ))
-            } else {
-                services
-                    .builder_global(&input_name)
-                    .map(|value| (value, BuildConfigValueOrigin::BuilderGlobal, None, None))
-            };
-
-            if let Some((value, origin, value_location, argument_index)) = configured_value {
-                if !contract.accepts_primitive(value.primitive_type()) {
-                    return Err(config_input_type_mismatch(
-                        Some(field_name),
-                        value.primitive_type().name(),
+                contract_required,
+                contract_default.clone(),
+                Some(value.clone()),
+                origin,
+                qualifier.qualifier_span,
+                value_location,
+            ));
+        } else {
+            match authored_default {
+                AuthoredConfigDefault::Missing => {
+                    if !contract.is_optional() {
+                        return Err(config_expression_error(
+                            Some(declaration_name),
+                            InvalidConfigReason::MissingConfigInput,
+                            qualifier.qualifier_span,
+                        ));
+                    }
+                    let value_span = declaration.value.span;
+                    declaration.value = option_none_expression(contract, value_span, type_interner);
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
                         contract,
-                        qualifier_span,
-                        argument_index,
-                        string_table,
+                        contract_required,
+                        contract_default.clone(),
+                        None,
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        None,
                     ));
                 }
-                field.value =
-                    expression_for_build_value(value, contract, None, type_interner, string_table);
-                services.record(config_resolution_record(
-                    field_name,
-                    &field_text,
-                    contract,
-                    contract_required,
-                    contract_default.clone(),
-                    Some(value.clone()),
-                    origin,
-                    qualifier_span,
-                    value_location,
-                ));
-            } else {
-                match authored_default {
-                    AuthoredConfigDefault::Missing => {
-                        if !contract.is_optional() {
-                            return Err(config_expression_error(
-                                Some(field_name),
-                                InvalidConfigReason::MissingConfigInput,
-                                qualifier_span,
-                            ));
-                        }
-                        let value_span = field.value.span;
-                        field.value = option_none_expression(contract, value_span, type_interner);
-                        services.record(config_resolution_record(
-                            field_name,
-                            &field_text,
-                            contract,
-                            contract_required,
-                            contract_default.clone(),
-                            None,
-                            BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
-                            None,
-                        ));
+                AuthoredConfigDefault::None { span } => {
+                    if matches!(declaration.value.kind, ExpressionKind::NoValue) {
+                        declaration.value = option_none_expression(contract, span, type_interner);
                     }
-                    AuthoredConfigDefault::None { span } => {
-                        if matches!(field.value.kind, ExpressionKind::NoValue) {
-                            field.value = option_none_expression(contract, span, type_interner);
-                        }
-                        services.record(config_resolution_record(
-                            field_name,
-                            &field_text,
-                            contract,
-                            contract_required,
-                            contract_default.clone(),
-                            None,
-                            BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
-                            span.map(BuildConfigValueLocation::Source),
-                        ));
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
+                        contract,
+                        contract_required,
+                        contract_default.clone(),
+                        None,
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        span.map(BuildConfigValueLocation::Source),
+                    ));
+                }
+                AuthoredConfigDefault::Value {
+                    value,
+                    span,
+                    expression_is_optional,
+                } => {
+                    if contract.is_optional() && !expression_is_optional {
+                        let inner = std::mem::replace(
+                            &mut declaration.value,
+                            Expression::no_value(
+                                qualifier.qualifier_span,
+                                DataType::Inferred,
+                                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
+                            ),
+                        );
+                        declaration.value =
+                            expression_for_optional_default(inner, contract, type_interner);
                     }
-                    AuthoredConfigDefault::Value {
-                        value,
-                        span,
-                        expression_is_optional,
-                    } => {
-                        if contract.is_optional() && !expression_is_optional {
-                            let inner = std::mem::replace(
-                                &mut field.value,
-                                Expression::no_value(
-                                    qualifier_span,
-                                    DataType::Inferred,
-                                    crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                                ),
-                            );
-                            field.value =
-                                expression_for_optional_default(inner, contract, type_interner);
-                        }
-                        services.record(config_resolution_record(
-                            field_name,
-                            &field_text,
-                            contract,
-                            contract_required,
-                            contract_default,
-                            Some(value),
-                            BuildConfigValueOrigin::DeclarationDefault,
-                            qualifier_span,
-                            span.map(BuildConfigValueLocation::Source),
-                        ));
-                    }
+                    services.record(config_resolution_record(
+                        declaration_name,
+                        &declaration_text,
+                        input_name.clone(),
+                        contract,
+                        contract_required,
+                        contract_default,
+                        Some(value),
+                        BuildConfigValueOrigin::DeclarationDefault,
+                        qualifier.qualifier_span,
+                        span.map(BuildConfigValueLocation::Source),
+                    ));
                 }
             }
-            field.value.synthetic_interface_provenance =
-                field.value.synthetic_interface_provenance.union(
-                    &SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
-                        SyntheticInterfaceClass::ProjectContext,
-                        "project",
-                        field_text,
-                    )),
-                );
         }
+        declaration.value.synthetic_interface_provenance =
+            declaration.value.synthetic_interface_provenance.union(
+                &SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+                    SyntheticInterfaceClass::ProjectContext,
+                    "source-config",
+                    input_name.as_str(),
+                )),
+            );
+        services.record_input_provenance(
+            input_name,
+            declaration.value.synthetic_interface_provenance.clone(),
+        );
+        return Ok(());
     }
+
+    // Non-`#Config` declarations carry whatever provenance the ordinary parse already
+    // attached. The const-store fold propagates that provenance into folded field metadata,
+    // so no pre-fold dependency walk is needed here.
     Ok(())
 }
 
-/// A direct project's authored default after config-specific primitive validation.
+/// A source config declaration's authored default after primitive validation.
 enum AuthoredConfigDefault {
     Missing,
     None {
@@ -332,10 +304,14 @@ fn normalize_config_default(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "resolution record keeps field identity and text, input name and contract, required/default/value state, origin, and qualifier/value spans as separate inputs"
+)]
 fn config_resolution_record(
     field_name: StringId,
     field_text: &str,
+    input_name: BuildInputName,
     contract: BuildInputType,
     required: bool,
     default: Option<PrimitiveBuildValue>,
@@ -347,6 +323,7 @@ fn config_resolution_record(
     let fingerprint = build_config_fingerprint(field_text, contract, value.as_ref());
     ConfigResolutionRecord {
         field_name,
+        input_name,
         contract,
         required,
         default,
@@ -389,28 +366,6 @@ fn build_config_input_argument_index(location: &BuildConfigValueLocation) -> Opt
     match location {
         BuildConfigValueLocation::Command(location) => Some(location.argument_index()),
         BuildConfigValueLocation::Source(_) => None,
-    }
-}
-
-fn project_shape_accepts_contract(shape: &ConfigFieldShape, contract: BuildInputType) -> bool {
-    match shape {
-        ConfigFieldShape::Optional(inner) => project_shape_primitive(inner)
-            .is_some_and(|primitive| primitive == contract.primitive()),
-        _ => project_shape_primitive(shape)
-            .is_some_and(|primitive| primitive == contract.primitive() && !contract.is_optional()),
-    }
-}
-
-fn project_shape_primitive(shape: &ConfigFieldShape) -> Option<PrimitiveBuildInputType> {
-    match shape {
-        ConfigFieldShape::String => Some(PrimitiveBuildInputType::String),
-        ConfigFieldShape::Int => Some(PrimitiveBuildInputType::Int),
-        ConfigFieldShape::Float => Some(PrimitiveBuildInputType::Float),
-        ConfigFieldShape::Bool => Some(PrimitiveBuildInputType::Bool),
-        ConfigFieldShape::Char => Some(PrimitiveBuildInputType::Char),
-        ConfigFieldShape::Optional(_)
-        | ConfigFieldShape::Record(_)
-        | ConfigFieldShape::Collection(_) => None,
     }
 }
 
