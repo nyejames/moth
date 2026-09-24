@@ -29,7 +29,8 @@ It owns:
 - exact byte-based source spans
 - compact local and global span encodings
 - true logical-path interning
-- source-owned retained token storage
+- source-owned retained token storage, including the lossless retained numeric
+  text side store described under `Compact source-owned tokens`
 - compact token records and typed token side stores
 - compact diagnostic drafts, records, labels, facts and side stores
 - diagnostic schema declaration and validation
@@ -954,9 +955,28 @@ Rules:
 
 ### Numeric token side store
 
-Numeric token records retain only facts required by later semantic parsing and diagnostics. At
-minimum they preserve authored/normalised text identity, numeric kind and lexical validation facts.
-They do not widen every token. Counts and flags use fixed-width integer fields, never `usize`.
+`NumericLiteralStore` in `src/compiler_frontend/numeric_text/store.rs` is the
+one lexical owner for every authored number. It retains the facts later semantic
+parsing and diagnostics need and never widens the common token word:
+
+- the authored spelling, kept losslessly, with whole-number and decimal or
+  exponent spellings distinguishable until a destination is known
+- the numeric lexical kind and the validation facts the shared `numeric_text`
+  grammar produced
+- normalised digits, separator positions and exponent facts only where that
+  grammar already owns them; the store must not re-derive them
+
+Retained numeric text is cold source-local data. A token carries one dense
+one-based `NumericLiteralId` handle, and counts and flags use fixed-width integer
+fields, never `usize`.
+
+The store holds no materialised numeric value, destination type, `NumericProfile`
+or `i32`/`f64` intermediate. The compiler chooses the destination later, at the
+receiving boundary that owns materialisation, so no durable source, token,
+diagnostic or folded record stores a numeric width or precision. The store remaps
+at its owner boundary, freezes with ordinary prepared-source publication and
+drops with its `SourceTokens` owner; no later stage re-reads it to recover a
+number whose semantic value another stage already owns.
 
 ### Diagnostic token projection
 
@@ -1030,6 +1050,11 @@ pub struct DiagnosticCode(NonZeroU16);
 `DiagnosticCode` is an explicit internal numeric identity. It is assigned in the diagnostic schema
 and never derived from enum declaration order. Its descriptor supplies the external stable code such
 as `MOTH-RULE-0044`, category, title and default severity.
+
+The Moth language's runtime `Error.code` is a separate `U32` value with default
+`0`. It is a language value, never a `DiagnosticCode`, a compiler diagnostic
+code, or the Rust MON `MonErrorCode` enum, and its width or default never drives
+diagnostic storage or rendering.
 
 `code_and_flags` uses this fixed layout:
 
@@ -1470,13 +1495,20 @@ public operation and type names are defined by `docs/compiler-design-overview.md
 > `Rust-only MON service`.
 Compiler-retained numeric text remains owned by the numeric token side store.
 The MON reader borrows original token spelling from caller input and retains a
-bounded owned normalized string until the schema selects a destination. `Int`
-and `Float` materialize from its facts; exact `Integer` and `Decimal` values
-transfer the normalized buffer into the result. The normalized buffer's
-decoded-byte accounting is described below. Compiler diagnostic storage stays
-in the compact diagnostic architecture, and MON never becomes source
-compilation. The MON
-literal-data format itself is owned by `docs/src/docs/mon/mon-format.mtf`.
+bounded owned normalized string until the schema selects a destination. The
+accepted end state has the prepared schema record the numeric profile its
+`Int` and `Float` entries use, defaulting to the standard profile for a
+standalone Rust caller, and has the reader materialise every supported fixed
+width and `Byte` through the same shared numeric policies. Queued support: the
+delivered codec captures no profile, offers no fixed-width or `Byte` schema
+variant, limits a declared decimal scale to 0 through 18 and fixes live `Int`
+and `Float` entries at `Int32` and `Float64`. Exact decimal scale capacity
+covers 0 to 256 only in that accepted end state, so `Number`'s scales need no
+second parser and no value routes through a binary float in that design. The
+normalized buffer's decoded-byte accounting is described below. Compiler
+diagnostic storage stays in the compact diagnostic architecture, and MON never
+becomes source compilation. The MON literal-data format itself is owned by
+`docs/src/docs/mon/mon-format.mtf`.
 
 ### Caller-owned input snapshot and cursor lifetime
 
@@ -1532,11 +1564,20 @@ lossless numeric literal representation until the destination is known. The
 accepted lexical owner is `numeric_text` grammar, normalisation, separator and
 exponent validation with text materialisation; MON performs only the bounded
 literal normalisation, range and scale checks the codec needs and adds no second
-arithmetic runtime. Exact `Integer` and `Decimal` values retain their text
-without routing through `f64` or display formatting. `Float` materialisation
-follows the numeric authority and rejects non-finite source values and
-conversion results, emitting `-0.0` for negative zero and `0` for positive zero
-while decoding preserves the sign bit.
+arithmetic runtime. Compiler-retained numeric text stays in the source-owned
+numeric token side store, while MON's bounded normalised buffer is private to one
+call and never becomes a compiler token or source record. Exact `Integer` and
+`Decimal` values retain their text without routing through `f64` or display
+formatting. `Float` materialisation follows the numeric authority and rejects
+non-finite source values and conversion results, emitting `-0.0` for negative
+zero and `0` for positive zero while decoding preserves the sign bit.
+
+In the accepted end state, materialisation for a fixed width, `Byte`, `Int` or
+`Float` uses the schema's recorded profile and the same shared numeric policies
+the compiler uses, so a schema entry never invents a private conversion rule of
+its own. Whole-number and decimal or exponent categories stay strict: decimal or
+exponent spelling cannot satisfy an integer or `Byte` entry even when its value
+is integral.
 
 Numeric normalization storage is included in the logical `max_decoded_bytes`
 budget. The reader charges the unsigned token byte length before
@@ -1611,6 +1652,7 @@ when decoding, and field or element path where available.
   sizes, ownership and failure-lane contracts.
 - No later diagnostic storage work: compact diagnostic records, side stores and
   the failure lanes keep their owners and their deferred-work list.
+- No build profile, project configuration or compiler token store: in the accepted end state, MON schema preparation records its own numeric profile and reads no command, builder or source-owned numeric record; the delivered codec captures no profile.
 
 ## Failure architecture
 

@@ -34,4 +34,7 @@ Maps remember insertion order.
     count = scores.length
 ]
 
-Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
+Builtin keys are `String`, `Int`, `Bool`, `Char`, every fixed-width integer and
+`Byte`. Floats, `Number` and `NumberN` are not key types. Fixed-width and `Byte`
+keys are accepted end-state and remain queued. See @../progress (Progress) for
+current support.

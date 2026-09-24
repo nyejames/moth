@@ -32,11 +32,14 @@ page_head #= language_theme_head
     # Numbers
 
     Moth uses `Int` for signed whole numbers and `Float` for finite real-number
-    values. It avoids the large family of integer widths and implicit numeric
-    conversions found in many systems languages.
+    values. One compiler-selected numeric profile fixes their width and precision,
+    and the accepted design also includes fixed-width integers and binary floats,
+    `Byte` and the exact `Number` family. The numeric families have distinct
+    identities and local promotion rules; other conversions use explicit casts.
 
     Arithmetic checks overflow, division errors and non-finite results. Literal
     spelling and operator spacing also follow one exact grammar on every backend.
+    See @../progress (Progress) for current numeric support.
 ]
 
 #[section:

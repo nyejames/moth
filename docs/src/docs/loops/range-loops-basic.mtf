@@ -52,10 +52,18 @@ The direction comes from the bounds. You do not need a `reverse` keyword.
     ;
 ]
 
-Float ranges need an explicit step:
+Any range that uses `Float` needs an explicit step:
 
 [codeblock, $code("moth"):
     loop 0.0 to 1.0 by 0.1 |amount|:
         io.line([: [amount]])
     ;
 ]
+
+The value binding takes the range's numeric type, and the optional index binding
+is always `Int`.
+
+Fixed-width bounds and steps promote to a common type before the loop runs, and a
+fixed binary float range also needs an explicit step. Fixed-width ranges are
+accepted end-state and remain queued. See @../progress (Progress) for current
+support.

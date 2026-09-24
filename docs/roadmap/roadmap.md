@@ -11,7 +11,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [Numeric types and semantics](./plans/number_type_numeric_plan.md) - Ready next after delivered MON v1. Deliver fixed-width integers/floats, a compilation-wide numeric profile and runtime Byte first, then Number/NumberN and the final Error.code U32 migration. Reuse the MON codec and preserve ordinary Int/Float APIs.
+- [Numeric types and semantics](./plans/number_type_numeric_plan.md) - Deliver fixed-width integers/floats, a compilation-wide numeric profile and runtime Byte first, then Number/NumberN and the final Error.code U32 migration. Reuse the MON codec and preserve ordinary Int/Float APIs.
+  **ACTIVE on `numeric-type-expanding`.** Current slice: Phase 1, publishing the permanent numeric contracts in the existing canonical references. Blocker: the baseline `bench-scaling` generic-instantiation exponent exceeds its locked budget, so code-bearing checkpoints require a genuine fix rather than a budget increase.
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 

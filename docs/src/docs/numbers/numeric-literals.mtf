@@ -11,15 +11,15 @@ The source spelling of a number determines its natural type.
 ### Contract
 
 - A whole-number literal is naturally `Int`.
-- A decimal-point literal is naturally `Float`.
+- A decimal-point or exponent literal is naturally `Float`.
+- Value size never infers a narrow type. `1` is `Int`, never `U8` or `I8`.
 - Exponents use lowercase `e`.
 - Uppercase `E` is rejected.
 - Unary `+` is rejected.
 - A leading `-` must be attached to the literal or expression it negates.
 - `-1`, `-1e6` and `-count` are valid prefix forms.
 - `- count` is invalid.
-- Integer literals must fit the `Int` range.
-- Float literals must materialise to a finite `Float`.
+- No radix literals and no numeric suffixes are added to the grammar.
 
 [codeblock, $code("moth"):
     valid_literal = -42
@@ -33,6 +33,48 @@ The source spelling of a number determines its natural type.
 The invalid lines above demonstrate rejected syntax. They are not valid program
 forms.
 
+### Destination-aware materialisation
+
+A literal materialises directly in the numeric type of its immediate receiving
+boundary. The boundary never builds another type first.
+
+[codeblock, $code("moth"):
+    small U8 = 200
+    large U64 = 18_000_000_000
+    half F16 = 0.5
+    money Number2 = 12.34
+    raw Byte = 255
+]
+
+- A whole literal may initialise a binary float or the `Number` family.
+- Decimal or exponent spelling does not initialise a fixed integer, `Int` or `Byte` merely because its value is integral.
+- A negative value cannot initialise `U*` or `Byte`.
+- A signed minimum materialises from its signed spelling without first rejecting the positive magnitude.
+- An integer literal must fit its receiving type's range.
+- A decimal or exponent literal must be exactly representable at a receiving `Number` scale. `money Number2 = 1.239` is invalid rather than rounded.
+
+An immediate concrete numeric peer may type an otherwise untyped literal before
+operator promotion. When `channel` is a `U8` value, `channel + 1` types the
+literal `1` as `U8` and produces `U32`. The literal `300` cannot materialise as
+that `U8` peer, so that expression needs an explicitly widened operand.
+
+A receiving annotation does not retrospectively retag an operator's result.
+Already typed variables and constants keep their identities. Parentheses do not
+add a receiving boundary. Generic inference uses these same local rules and
+gains no distant conversion search.
+
+### Binary floats
+
+A binary float literal rounds directly to its destination using round-to-nearest,
+ties-to-even. Inexact values such as `0.1` are valid.
+
+- A materialisation whose rounded result is non-finite is rejected.
+- Subnormals and signed zero are preserved.
+- Rounding happens once, at the destination precision.
+
 ### MON data boundary
 
-Source literal rules above are unchanged. MON literal data reuses the same lexical spelling but retains lossless numeric text until the receiving schema is known: whole-number spelling and decimal/exponent spelling stay distinguishable, and `3.0` fails an `Int` target even when mathematically integral. That strict target conversion is Rust-only serialised-data documentation; source contextual typing is unchanged. Unavailable `Number`/`Byte` source and backend adapters remain deferred. See @../mon/#mon-format (MON format).
+MON literal data reuses the same lexical spelling but keeps whole-number and
+decimal or exponent categories lossless until the receiving schema is known. Its
+strict category conversion is documented with the MON format contract. See
+@../mon/#mon-format (MON format).

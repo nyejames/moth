@@ -49,6 +49,7 @@ or thorough reviews.
 | AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
 | File-value path expressions, graph-active file references, resource identity or structural resource-bearing strings | `Frontend stages > Stage 4: AST semantics > File values and resources` | `docs/src/docs/resources/file-paths.mtf`, `docs/src/docs/resources/file-values.mtf` and `docs/build-system-design.md` > `Resource linking and output placement` |
 | HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
+| Numeric typing, literals, promotion, casts or the compilation-wide `NumericProfile` | `Numeric model and profile` | The canonical numeric, cast and Error references selected by `docs/src/developer-docs/language/overview.mtf`, and `docs/build-system-design.md` > `Selected command and capability surface` for profile selection timing |
 | Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/developer-docs/memory-management/overview.mtf` |
 | Lifetime regions, escapes, retention, cleanup frontiers or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
 | Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/developer-docs/memory-management/retained-edge-counting/` and the backend memory route |
@@ -96,6 +97,9 @@ or thorough reviews.
 - MON decoding never enters the canonical module compilation service and never constructs AST, HIR, TIR, borrow facts or module artefacts.
 - The Rust-only MON service owns exactly one public root: `moth::mon`. `compiler_frontend` internals stay crate-private; no MON path exposes them.
 - MON decoded values are owned trees a caller can keep after releasing the input text. The public boundary has no borrowed document view and publishes no partial result on failure.
+- One compiler-owned `NumericProfile` fixes `Int` width and `Float` precision for a whole compilation boundary before command inputs or config are materialised. Source, directives and the command line never select it.
+- Numeric promotion, comparison, conversion and failure semantics are language-defined and target-independent. A target lowers them with native primitives without weakening or redefining them, and a lowerer never selects a different `Int` width or `Float` precision.
+- Semantic numeric type, scalar storage layout and computation carrier are separate facts. The compiler-owned memory planner and its `ValidatedMemoryPlan` retain every layout, strategy, cleanup and count decision.
 
 ## Compiler input and result boundary
 
@@ -149,6 +153,9 @@ A canonical module compilation receives:
 - graph-resolved provider identities and dependency-ordered provider interfaces
 - the namespace and capability surface selected for the project or package build
 - resolved build-configuration values and synthetic compile-time interfaces visible to the module
+- the compilation boundary's `NumericProfile`, the compiler-owned semantic option that fixes
+  `Int` width and `Float` precision for every numeric type the module materialises; it is not a
+  build profile, a builder-provided primitive global or a `#Config` contract
 - final lane source identities and a diagnostic identity context; a module input therefore
   carries no provisional identity
 
@@ -417,6 +424,8 @@ Cross-module interfaces use canonical type identities rather than donor-local `T
 - concrete generic nominal instances
 - generic parameters inside exported generic templates
 - binding-backed external package types
+- numeric builtins carrying width, signedness, binary precision or `Number` scale,
+  including the profile-selected `Int` and `Float` identities
 
 A consumer may intern compact local `TypeId` handles for dependency-bound canonical types. The local environment retains an origin map to canonical identity. Cross-module equality compares canonical identity, never rendered names or unrelated local handles.
 
@@ -453,6 +462,10 @@ Binding-backed packages are typed semantic interfaces rather than Moth modules. 
 
 WIT components enter through this binding-backed boundary. Discovery validates the supported WIT profile and projects it once into Moth canonical types and stable binding identities. Ordinary interface binding, AST and HIR do not carry WIT syntax. Link and backend planning retain only the closed WIT boundary classification needed for Canonical ABI lowering.
 
+Foreign numeric widths project to explicit Moth widths. WIT `s8` through `s64` and `u8` through `u64` become `I8` through `I64` and `U8` through `U64`, and `f32` and `f64` become `F32` and `F64`. They never become `Int` or `Float`, and `u8` is not automatically `Byte`. The baseline WIT surface has no `f16` primitive, so `F16` needs an explicit foreign conversion or bit-representation contract. A Moth-native signature declared with `Int` or `Float` remains that function: correcting a physical foreign carrier never rewrites a Core or Builder language signature.
+
+The builtin runtime `Error` type's public `code` field is `U32` with default `0`. Runtime error codes are Moth language values; they are not compiler `DiagnosticCode` identities, compiler diagnostic codes, process-local IDs, the Rust MON `MonErrorCode` enum or any other infrastructure code.
+
 A future component export is an optional WIT-compatible projection of a Moth package facade. It does not replace the facade's `PublicSemanticInterface` and Moth-only declarations remain available to Moth consumers.
 
 Source-owned wrapper types provide method-style APIs over external handles when needed.
@@ -461,13 +474,99 @@ Source-module namespace records remain shallow and field-access-only. They do no
 
 The bare `io` namespace is prelude policy for the Core IO package rather than a separate package category.
 
+## Numeric model and profile
+
+The canonical numeric references selected by
+`docs/src/developer-docs/language/overview.mtf` own user-visible syntax,
+operators, conversions and `Number` arithmetic. This section owns the
+compiler-side numeric identities, the compilation-wide profile and the layer
+ownership that consumes both.
+
+### Canonical numeric identities
+
+The complete numeric source surface is `Int`, `Float`, `I8`, `I16`, `I32`,
+`I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `Number`, `Number0`
+through `Number256` and `Byte`. Canonical numeric identity therefore carries
+width, signedness, binary precision or `Number` scale rather than a rendered
+name:
+
+- `Int` and `Float` keep distinct canonical identities. Neither is an alias for
+  an explicit-width type, even when the selected profile gives it the same
+  physical precision.
+- `Number0` is the accepted spelling alias for `Number`'s scale-zero identity.
+  `Number1` through `Number256` carry their scale as canonical identity. Reject
+  leading-zero scales and scales above 256.
+- `Byte` is nominally distinct from `U8`, `I8` and `Char`, and it is outside
+  numeric arithmetic.
+- A module-local `TypeId` still identifies a numeric type only inside its own
+  `TypeEnvironment`; cross-module equality compares canonical identity.
+
+### Compilation-wide numeric profile
+
+One compiler-owned `NumericProfile` selects the `Int` width and the `Float`
+precision independently from 32 or 64 bits. All four combinations are
+supported:
+
+| `Int` width \ `Float` precision | 32-bit | 64-bit |
+|---|---|---|
+| 32-bit | supported | supported (default) |
+| 64-bit | supported | supported |
+
+The default profile is `Int32` with `Float64`.
+
+The build system settles the profile with the selected builder, before explicit
+command inputs are materialised and before config compilation
+(`docs/build-system-design.md` > `Selected command and capability surface`).
+This delivery adds no source spelling, directive, `#Config` contract or
+command-line flag that selects it, and it is not a builder-provided primitive
+global. Lowerers consume the boundary profile instead of choosing one.
+
+The profile is fixed for a whole compilation boundary. It never varies by
+function, target partition or build-profile representation, and it applies to
+directly linked Moth modules, generated concrete functions, Core and Builder
+source packages and Moth-source dependencies alike. A source dependency
+compiles for that profile; an incompatible precompiled Moth artefact requires a
+matching build or rejection, never silent numeric adaptation. Foreign
+components remain separate value boundaries with explicit foreign types.
+
+A different profile may change `Int` overflow limits, `Float` rounding and
+folded results, so numeric materialisation, folding, diagnostics and ABI/layout
+facts are profile-dependent semantic inputs. The same profile must preserve
+behaviour across the JavaScript and Wasm backends. The profile threads through
+every compiler service that types numbers, including synthetic sources, config,
+direct templates and MON schema preparation, and it participates in the
+existing fingerprint and compatibility owners rather than a separate cache
+system.
+
+Numeric promotion, comparison, conversion and failure rules are language-defined
+and target-independent: the canonical references own their matrices, and the
+compiler applies them identically on every target. No target substitutes
+wrapping, saturating or arbitrary-precision behaviour for a required checked
+result, and a combination the references reject is a source diagnostic rather
+than a silent widening.
+
+### Layer ownership
+
+`Frontend stages > Stage 5: HIR and validation > Numeric ownership` owns the
+per-layer numeric responsibility list, and the canonical references own the
+user-visible matrices. This section adds only the facts those owners consume:
+canonical numeric identity comes from the local `TypeEnvironment`, `Int` width
+and `Float` precision come from the boundary `NumericProfile`, and no layer
+keeps a parallel width table or selects a numeric representation of its own.
+
+Queued support: the current compiler reaches only `Int` as `i32` and `Float` as
+`f64`, materialises literals eagerly through those types and does not yet thread
+a profile. The accepted end state above is queued implementation; current
+support and backend coverage remain `docs/src/docs/progress/@page.moth`'s
+responsibility.
+
 ## Public semantic interfaces
 
 A public interface contains only facts a semantic consumer may observe:
 
 - exported origin identities and export bindings
 - canonical exported type shapes
-- folded exported constants and const-template values, including stable resource origins and site-root pieces inside exported resource-bearing strings
+- folded exported constants and const-template values, including stable resource origins and site-root pieces inside exported resource-bearing strings, and canonical numeric values at their declared width, precision or scale
 - generic templates, bounds and required evidence
 - exported traits and reusable conformance evidence
 - receiver surfaces and visible methods
@@ -560,7 +659,10 @@ Covers executable body semantics and non-interface implementation facts that can
 Generated requests and link facts come from active specialised executable control flow. Project
 metadata, configuration dependence, public semantic facts and root metadata remain separate
 fingerprint inputs. Configuration dependencies use the existing fingerprint owners; they do not
-create a separate fingerprint family. Exported folded values or effect summaries may vary when they
+create a separate fingerprint family. The boundary `NumericProfile` participates the same way: it
+is an input to whichever fingerprint facts depend on numeric behaviour, folded numeric values or
+numeric ABI and layout, and it never introduces a parallel fingerprint family. Exported folded
+values or effect summaries may vary when they
 depend on configuration, with provenance retained, while structural public identity remains stable.
 Ordinary `#Config` inputs cannot create or remove declarations or exports. They may change active
 executable effects and derived link facts only. Future structural `$feature` selection needs
@@ -648,6 +750,10 @@ Each generated function artefact owns:
 - generated exported lifetime and effect summaries
 - generated link facts
 - implementation, runtime and compatibility fingerprints
+
+Generated materialisation consumes the compilation boundary's `NumericProfile`,
+so its compatibility facts include that profile and a generated artefact is
+reusable only under the same one.
 
 Generated HIR does not borrow the mutable local type environment of the requesting module and does not extend the declaring dependency artefact. Cross-module calls use stable targets.
 
@@ -809,7 +915,7 @@ finalization`. Standalone sources receive final IDs upfront.
 
 Build-system config bootstrap is the other sanctioned short compiler path. The compiler owns one named service that runs tokenization, synthetic-free declaration-shell preparation, interface binding for the single authored config source, local declaration ordering and AST semantic checking, then stops at folded AST values.
 
-It produces no HIR, borrow facts, link facts or public interface. The service returns typed folded directive-invocation facts and explicit input-contract results to the existing build and config application owners. Recognised-name record extraction is not the accepted architecture. Config-specific diagnostics, authored key and argument locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
+It produces no HIR, borrow facts, link facts or public interface. The service returns typed folded directive-invocation facts and explicit input-contract results to the existing build and config application owners. It consumes the compilation boundary's `NumericProfile`, so folded `Int` and `Float` config values already use the selected widths. Recognised-name record extraction is not the accepted architecture. Config-specific diagnostics, authored key and argument locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
 
 The config outcome also returns the original live source-local span builder, including on diagnosed
 paths. The build owner keeps it through config application and output validation, then installs its
@@ -924,6 +1030,39 @@ Boundary owners include:
 - compiler and binding-backed call contracts
 
 AST carries semantic `TypeId` values through fields, receiver lookup, calls, operators and compatibility checks.
+
+#### Numeric typing and literal materialisation
+
+AST consumes the compilation boundary's `NumericProfile` for every `Int` and
+`Float` it types; no stage below or beside it selects a different width or
+precision. Fixed-width types, `Byte` and `Number` scales are profile-independent.
+
+Numeric literals stay on the retained source-local spelling until a destination
+is known. Materialisation is destination-aware:
+
+- an unconstrained whole literal defaults to `Int`, and a decimal or exponent
+  literal defaults to `Float`
+- small values never infer a narrow fixed type such as `I8` or `U8` by size
+- a direct typed boundary materialises the literal in its requested numeric type,
+  so a `U64` literal above `Int32`'s range never needs an `Int` intermediate
+- whole literals may initialise binary floats, but decimal or exponent spelling
+  never initialises a fixed integer, `Int` or `Byte`
+- binary float literals round directly to their destination using
+  round-to-nearest, ties-to-even; inexact values are valid, a rounded non-finite
+  result is rejected and subnormals and signed zero are preserved
+- integer minima materialise with their sign without first rejecting the
+  positive magnitude, and negative values never initialise `U*` or `Byte`
+- `Number`'s exact decimal materialisation is its own scale rule rather than a
+  reuse of binary literal rounding
+
+An immediate concrete numeric peer may type an otherwise untyped literal before
+operator promotion, and a literal outside that peer's range is a diagnostic.
+Generic inference uses these same local rules and gains no distant conversion
+search. A receiving annotation does not retrospectively retag an operator's
+result, parentheses add no receiving boundary, and already typed values keep
+their identities. Literal materialisation never routes through a fixed
+`i32`/`f64` bottleneck, and it is not where operator promotion, comparison or
+cast eligibility is decided.
 
 #### Call-shaped syntax and assertion intrinsics
 
@@ -1342,6 +1481,8 @@ Numeric behaviour has one owner at each layer:
 - Compile-time and runtime operations round and fail at the same language-defined boundaries. `Number` rounds after every language-level operation result.
 - Numeric optimisation facts remain side tables and do not mutate HIR.
 - Target validation rejects unsupported reachable numeric domains before lowering.
+- Every numeric consumer takes `Int` width and `Float` precision from the boundary `NumericProfile`, and numeric domain facts derive from canonical type identity rather than a duplicated width table.
+- Scalar storage size, alignment and computation carriers are target facts separate from semantic identity; `Backend-facing compiler handoff > Numeric scalar storage and carriers` owns that boundary and the routed backend-lowering leaf owns the per-target numbers.
 - JS-only check elision remains in the JavaScript path until another backend needs a shared analysis owner.
 - Float and Number formatting use the common value-to-string boundary consumed by templates and runtime lowering.
 
@@ -1572,6 +1713,7 @@ Backend lowerers receive only explicit validated inputs:
 
 - module and generated-function HIR
 - paired local or generated-local type environments
+- the compilation boundary's `NumericProfile`
 - stable local, cross-module and binding-backed call targets
 - borrow facts
 - validated lifetime-region facts and exported lifetime summaries
@@ -1605,6 +1747,25 @@ Backend lowerers do not:
 A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.
 
 Numeric checks, cast failure, finite-Float validation, map behaviour, error propagation and reactive semantics are not weakened because a target provides a more permissive primitive.
+
+### Numeric scalar storage and carriers
+
+Semantic type, ordinary linear-memory storage and computation carrier are three
+separate facts. The compiler handoff owns that separation and the rule that
+carrier or storage width never changes semantic identity; it does not own the
+per-target numbers. The concrete scalar sizes, carriers, alignment and
+load/store behaviour for the ordinary Wasm layout are owned by
+`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
+> `Scalar storage and carriers`.
+
+Target metadata derived here creates no allocation family and moves no layout
+ownership: aggregate layout, allocation, cleanup, counts and ownership
+transitions remain with the `ValidatedMemoryPlan` owner described in
+`Lifetime-region and escape validation` > `Memory-strategy planning` and
+`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/`.
+Compact scalar storage never introduces a buffer source type, never gives
+`Byte` arithmetic, and keeps `Byte` nominally distinct from `U8`. Other targets
+provide their own physical layout policy.
 
 Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, resource output placement, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
 
@@ -1683,8 +1844,10 @@ whose correct name has a default. Maps provide the explicit dynamic-key surface.
 `{}` always parses as a collection and `{=}` always parses as a map; schema
 context never changes a container's kind, and map entries and collection items
 cannot mix. Maps preserve insertion order, reject duplicate keys under the
-receiving key contract and carry only `String`, `Int`, `Bool` or `Char` keys.
-Bare names are references and are invalid as MON map keys. String and Char remain
+receiving key contract and carry only the declared Moth map-key families:
+`String`, `Char`, `Bool`, `Int`, every fixed integer width and `Byte`. Binary
+floats, `Number` and its scales are never map keys. Bare names are references
+and are invalid as MON map keys. String and Char remain
 distinct keys and Bool is not a numeric key. A string-keyed map does not become a
 record.
 
@@ -1739,10 +1902,27 @@ ordinary Rust functions, as the checked-in coverage in `tests/mon_public_api.rs`
 demonstrates. Automatic derives, procedural macros, Serde traits, broad reflection
 and automatic extraction from Moth types are not part of this boundary.
 
-Public values are owned trees: `None`, `Bool`, `Char`, `String`, `Int(i32)`,
-`Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
+The accepted end state has schema preparation record the numeric profile its
+`Int` and `Float` entries materialise under. A standalone Rust caller defaults
+to the standard profile, `Int32` with `Float64`, and a caller that needs another
+profile states it at preparation. Explicit-width schema entries are
+profile-independent, and no command, builder, `config.moth` field or source
+spelling selects this profile. Queued support: the delivered codec captures no
+profile, so its live `Int` and `Float` entries are fixed at `Int32` and
+`Float64`; profile capture arrives with the accepted value-model extension
+below.
+
+The delivered public values are owned trees: `None`, `Bool`, `Char`, `String`,
+`Int(i32)`, `Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
 `Record(fields)`, `Collection(items)`, `Map(entries)` and
-`Choice { qualifier, variant, fields }`. Decoded values outlive and release the
+`Choice { qualifier, variant, fields }`. The accepted end state extends that
+model with an owned variant for every supported numeric width (`I8` through
+`I64`, `U8` through `U64` and `F16` through `F64`) and for `Byte`, and it widens
+the exact decimal scale capacity to 256 so `Number`'s scales need no second
+parser. `Int` and `Float` remain the profile-selected entries, so their
+representation carries the prepared schema's captured width and precision;
+explicit-width and `Byte` entries are profile-independent. Exact Rust
+variant names may change; the boundary may not. Decoded values outlive and release the
 input text without a caller-retained backing buffer; internal borrowing during
 parsing is allowed. The default public API has no borrowed document view and
 exposes no partially built result. Repeated shared source values encode at each
@@ -1772,12 +1952,14 @@ destination is known. Signed numeric literals are allowed without allowing
 general unary expressions.
 Strict conversion keeps its accepted policy: `Int` and exact `Integer` require
 whole-number spelling, so `3.0` and `1e3` reject an `Int` target even when
-mathematically integral; lowercase `e` is the only accepted exponent marker and
+mathematically integral; the same spelling rule governs a `Byte` target and the
+fixed integer widths; lowercase `e` is the only accepted exponent marker and
 range checks are strict; finite `Float` materialisation follows the numeric
 authority and rejects non-finite source values and conversion results, emitting
 `-0.0` for negative zero and `0` for positive zero while decoding preserves the
 sign bit; exact `Number` and `NumberN` mapping uses the destination's declared
-scale of 0 to 18 and rejects inexactly representable input such as `1.239`
+scale of 0 to 18 in the delivered codec, while the accepted end state widens the
+capacity to 256 and rejects inexactly representable input such as `1.239`
 against a scale-two target without rounding. Unsupported concrete compiler-type
 adapters fail explicitly rather than narrowing or converting through `Float`.
 MON performs only the bounded literal normalisation, range and scale checks the
@@ -1877,6 +2059,8 @@ Current locations are navigation aids rather than permanent architecture.
 - Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`,
   `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`,
   `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
+- Canonical numeric identity and the compiler-owned numeric-profile input:
+  `src/compiler_frontend/canonical_type_identity.rs`, `src/compiler_frontend/build_config.rs`
 - Binding-backed interfaces: `src/compiler_frontend/external_packages/`
 - AST, constants, generics, templates and TIR: `src/compiler_frontend/ast/`
 - Generic retained syntax and donor payload provenance:

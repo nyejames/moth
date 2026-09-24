@@ -58,15 +58,18 @@ shapes. The receiving schema enforces its element type. Heterogeneous text
 changes no Moth collection typing rule and adds no `Any` type to Moth.
 
 Maps preserve insertion order. Keys use the supported Moth map-key families:
-String, Int, Bool and Char. Bare names are references, not key shorthand, and
-are invalid as MON map keys. The schema checks the declared key and value
-types. Map entries and collection items cannot be mixed.
+`String`, `Bool`, `Char`, `Int`, the fixed-width integers `I8` through `U64`
+and `Byte`. Bare names are references, not key shorthand, and are invalid as
+MON map keys. The schema checks the declared key and value types. Map entries
+and collection items cannot be mixed.
 
 Duplicate keys are rejected rather than keeping the first or last value. Keys
-compare as decoded values under the receiving key contract, so different
-escape or numeric spellings cannot evade uniqueness. String and Char remain
-distinct, and Bool is not a numeric key. Record labels remain identifiers,
-while map keys are data: a string-keyed map does not become a record.
+compare as decoded values under the receiving key contract, so different escape
+or numeric spellings cannot evade uniqueness. A key of one declared type never
+matches another, so `Int`, `I32`, `I64` and `U64` stay distinct key families.
+String and Char remain distinct, and Bool is not a numeric key. Record labels
+remain identifiers, while map keys are data: a string-keyed map does not become
+a record.
 
 The empty forms never change kind:
 
@@ -117,21 +120,36 @@ infinity have no MON spelling.
 
 Conversion is strict about categories:
 
-- `Int` and exact `Integer` require whole-number spelling. Decimal data such
-  as `3.0` fails an Int target even when mathematically integral, and `1e3`
-  fails it too. Formatting cannot rewrite one category as the other.
-- Exact `Decimal` with a declared scale from 0 to 18 accepts whole, decimal
-  and exponent forms only when the value is exact after removing trailing
-  fractional zeroes and the effective scale is at most the declared scale. A
-  scale-two target accepts `1.2` but rejects `1.239` without rounding.
-- `Float` accepts all valid finite categories and rejects non-finite source
-  values and conversion results. Encoding round-trips the supported Float
-  value including signed zero: negative zero writes `-0.0` and positive zero
-  writes `0`.
+- `Int`, exact `Integer` and every fixed-width integer from `I8` to `U64`
+  require whole-number spelling. Decimal data such as `3.0` fails such a
+  target even when mathematically integral, and `1e3` fails it too. `Byte`
+  also requires whole-number spelling and accepts only `0` through `255`.
+  Formatting cannot rewrite one category as the other.
+- Exact `Decimal` data with a declared scale from `0` to `256` accepts whole,
+  decimal and exponent forms only when the value is exact after removing
+  trailing fractional zeroes and the effective scale is at most the declared
+  scale. A scale-two target accepts `1.2` but rejects `1.239` without
+  rounding. Exact decimal data is the materialisation path for `Number` and
+  `NumberN` schemas, and it rejects inexact values instead of rounding.
+- `Float` and the fixed binary floats `F16`, `F32` and `F64` accept all valid
+  finite categories and reject non-finite source values and conversion
+  results. A fixed binary float materialises with its binary rounding
+  contract, so an inexact value rounds instead of failing. Encoding
+  round-trips each supported typed value, including `F16`, `F32` and signed
+  zero: negative zero writes `-0.0` and positive zero writes `0`.
+
+`Int` and `Float` destinations are profile-dependent, and fixed-width schemas are
+profile-independent. The delivered public schema takes no profile input: it
+materialises `Int` at `Int32` and `Float` at `Float64` for standalone Rust
+callers, and limits a declared decimal scale to `0` through `18`. Schema
+preparation capturing the compilation's numeric profile, and the widened `0`
+through `256` scale capacity, are accepted end-state design and remain queued.
 
 Large integer and exact decimal data are retained and round-tripped without a
 second arithmetic runtime. Unsupported concrete adapters fail explicitly
-rather than narrowing or converting through Float.
+rather than narrowing or converting through Float. The added widths, `Byte`,
+profile capture and the widened scale range are accepted end-state design; see
+@../progress (Progress) for current support.
 
 ### Structs and choices
 

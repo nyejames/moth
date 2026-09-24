@@ -1,6 +1,23 @@
 `cast` performs an explicit conversion to a compiler-supported builtin target.
 
-The target comes from the immediate typed receiving boundary.
+The target comes from the immediate typed receiving boundary. Every numeric type
+spelling is a valid target where its source-target policy allows the pair.
+
+Moth adds no numeric conversion syntax. There is no parenthesised target, no
+target after the expression and no constructor-like conversion form.
+
+[codeblock, $code("moth"):
+    octet U8 = 42
+    count U64 = cast octet
+    half F16 = cast octet
+    raw Byte = cast octet
+    money Number2 = cast count
+]
+
+Each conversion above is infallible: `U8` fits `U64`, `Byte` and the `F16`
+finite range, and a whole number scales exactly into `Number2`. The fixed-width,
+`Byte` and `Number` targets are accepted end-state and remain queued; see
+@../progress (Progress) for current support.
 
 [codeblock, $code("moth"):
     parse_count |text String| -> Int, Error!:
@@ -42,6 +59,10 @@ These scalar conversion forms are invalid:
     String(value)
     Char(value)
 ]
+
+Every numeric type name follows the same rule. `U8(value)`, `U64(value)`,
+`F16(value)`, `Byte(value)` and `Number2(value)` are a type name applied to an
+argument, never a conversion.
 
 `Error(...)` remains a real builtin constructor:
 

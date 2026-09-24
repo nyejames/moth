@@ -1,11 +1,22 @@
 Runtime numeric operations are checked.
 
+### Checked results
+
+Every operation checks its semantic result type, not the operands' storage
+widths. A `U8` and `U8` sum is a `U32` value and needs no 8-bit mask. `U32`
+operations still need overflow checks even where a backend uses a wider carrier.
+A narrow store is permitted only after a source-level range proof or a check.
+
+### Failures
+
 Failures include:
 
 - integer overflow
-- division or modulo by zero
+- division or remainder by zero
 - invalid integer exponents
-- non-finite `Float` results
+- non-finite binary float results
+- a `Number` operation with a zero divisor
+- a compound assignment whose promoted result cannot convert back to the left-hand type
 
 ### Failure mode
 
@@ -23,17 +34,41 @@ checked numeric failures use that error channel.
 ]
 
 Custom fallible channels, non-fallible functions and entry-selected top-level
-runtime code use trap mode for checked numeric failure.
+runtime code use trap mode for checked numeric failure. Custom error channels
+gain no implicit adapter.
 
 Numeric operators remain ordinary source expressions. The compiler lowers
 their failure path. They are not source-visible `Error!` values that can be
 handled in the middle of an arbitrary expression.
+
+### Conversion failure is separate
+
+A cast failure is a conversion failure, not an operand's numeric failure.
+`cast`, `cast!` and `cast ... catch` handle conversion failure only and never
+catch an operand's numeric failure. See @../casts/#fallible-casts (Fallible
+casts).
 
 ### Compile-time failures
 
 A statically known numeric failure is a compile-time diagnostic.
 
 This remains true inside a function with builtin `Error!`.
+
+Statically rejected numeric forms are also diagnostics. They include unary minus
+on a typed `U*` value, a fixed integer operation with no common type, `//` on a
+binary float or a positive-scale `Number`, and a literal that cannot materialise
+at its receiving type. See @./#operators (Operators) and @./#numeric-literals
+(Numeric literals).
+
+### Optimisation
+
+A compiler proof, such as a proven range or a proven narrowing, can remove a
+runtime check or fold an operation. It never changes source validity, failure
+order or `Number` rounding, and effectful operands still evaluate.
+
+Constant folding follows these same operator results and failure rules, so a
+folded program observes the same value or the same diagnostic as the runtime
+path.
 
 ### Related behaviour
 

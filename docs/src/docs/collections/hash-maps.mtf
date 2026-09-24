@@ -18,20 +18,22 @@ Hash maps form insertion-ordered key/value groups.
 
 ### MON data boundary
 
-Source maps keep their implemented behaviour: `{}` with an explicit or immediate contextual map type is the empty map, and a bare identifier in key position is a variable reference. MON data uses a distinct explicit form: `{=}` is always an empty map and `{}` is always an empty collection, and schema context never changes a container's kind. MON map keys use the same `String`, `Int`, `Bool` and `Char` families with insertion order preserved; bare names are invalid keys and duplicate keys fail. That contract is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format).
+Source maps keep their implemented behaviour: `{}` with an explicit or immediate contextual map type is the empty map, and a bare identifier in key position is a variable reference. MON data uses a distinct explicit form: `{=}` is always an empty map and `{}` is always an empty collection, and schema context never changes a container's kind. MON map keys use the same scalar families, including every fixed-width integer and `Byte`, and follow the schema's declared key type. Insertion order is preserved, bare names are invalid keys and duplicate keys fail. That contract is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format).
 
 ### Key contract
 
-Builtin map keys are permanently limited to:
+Builtin map keys are limited to the scalar key families:
 
 - `String`
-- `Int`
 - `Bool`
 - `Char`
+- `Int` and the fixed-width integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`
+- `Byte`, which compares and hashes as an unsigned octet rather than a number
 
 Invalid key families include:
 
-- `Float`
+- `Float` and the fixed binary floats `F16`, `F32` and `F64`
+- `Number`, `Number0` and `Number1` through `Number256`
 - structs
 - choices
 - collections
@@ -41,12 +43,26 @@ Invalid key families include:
 - external opaque types
 - generic parameters
 
+A map declares one key type and every entry uses it. A contextual key literal
+materialises in that declared type, so a `{U8 = Int}` map accepts `{5 = 1}`. A
+typed key never crosses a nominal or width boundary, so an `Int` key is not an
+`I32` key and an `I64` key is not a `U64` key, even when two of those types
+share a physical width.
+
+Equality, hashing and MON duplicate detection all follow the declared key
+contract, so keys of different declared types never collide.
+
 The builtin map surface does not expose user-defined `HASHABLE`, custom
 hashers or custom comparers.
 
 Every `String` key uses content equality and content hashing. Quoted and
 template-produced strings follow the same key rule because construction origin
 does not create a second string category.
+
+Fixed-width integer key comparison is exact over each family's complete range,
+including `I64` and `U64`, and `Byte` keys order as unsigned octets without
+numeric arithmetic. These key families are accepted end-state design;
+@../progress (Progress) records current implementation and backend support.
 
 ### Storage and order
 

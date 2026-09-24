@@ -22,7 +22,9 @@ Each trait requires one receiver method:
 - These traits resolve without dependency clauses.
 - They cannot be redeclared, imported, exported, aliased or shadowed.
 - They cannot be used as values.
-- The compiler registers builtin evidence for the builtin cast table.
+- The compiler registers builtin evidence for the builtin cast table, including the new fixed-width numeric types, `Byte` and the `Number` family.
+- Source-authored evidence remains the six target families above, so `Int` and `Float` keep their source-authorable traits.
+- No source-authorable cast trait is defined for the new fixed-width numeric types, `Byte` or the `Number` family, so those targets come from compiler-owned builtin policy alone.
 - Same-file nominal source types and aligned generic constructors may provide evidence.
 - Source method implementations use lowercase `this` and the concrete receiver type.
 - Explicit conformance is required.

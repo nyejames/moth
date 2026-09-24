@@ -14,3 +14,23 @@ An `Int` can be used where a `Float` is expected:
 
 A `Float` never silently becomes an `Int`. That conversion can lose
 information, so it needs an explicit cast.
+
+### The wider numeric family
+
+The accepted design also includes fixed-width integers (`I8`, `I16`, `I32`,
+`I64`, `U8`, `U16`, `U32`, `U64`), fixed-precision binary floats (`F16`, `F32`,
+`F64`), the one-byte octet type `Byte` and the exact `Number` family (`Number`,
+`Number0` and `Number1` through `Number256`).
+
+`Int` and `Float` stay separate types. Neither is a shorthand for a fixed-width
+type, even when the selected width matches, because one compiler-owned numeric
+profile chooses the `Int` width and the `Float` precision independently. The
+default profile is `Int32` with `Float64`.
+
+`Byte` is not a number. It holds one octet, compares as an unsigned byte value
+and needs an explicit conversion to `U8` before any arithmetic. A `{Byte}` is an
+ordinary collection rather than a special buffer or text type.
+
+**Current versus accepted.** The Alpha compiler implements `Int` and `Float`.
+The fixed widths, `Byte` and the `Number` family are accepted end-state and
+remain queued. See @../progress (Progress) for current support.

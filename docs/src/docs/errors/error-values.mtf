@@ -3,21 +3,31 @@
 Its public fields:
 
 - `message String`
-- `code Int = 0`
+- `code U32 = 0`
 
 [codeblock, $code("moth"):
     missing = Error("Missing value")
     coded = Error(message = "Missing value", code = 200)
+    large = Error("Quota exceeded", code = 3_000_000_000)
 ]
 
 ### Contract
 
 - `message` carries the human-readable explanation.
-- `code` carries a stable integer code and defaults to `0`.
+- `code` carries a stable unsigned code and defaults to `0`.
+- Codes above the signed 32-bit maximum are ordinary valid values, up to the maximum of `U32`.
+- A negative code or a code above the maximum of `U32` fails at the ordinary typed boundary. A negative literal is a compile-time diagnostic, and an `Int` variable needs an explicit fallible conversion.
+- `code` is a runtime error code, not a compiler diagnostic code.
 - Positional construction follows field order.
 - Named construction follows normal constructor argument rules.
 - `Error` is reserved by the language.
 - `ErrorKind`, `ErrorLocation` and `StackFrame` remain ordinary user-available names.
+
+Changing `code` to `U32` leaves `message`, the constructor field order and error
+channel identity unchanged. Codes flow through construction, propagation,
+recovery and host glue as `U32` values. The Alpha compiler still exposes
+`code Int`; the `U32` field is accepted end-state design. @../progress
+(Progress) tracks overall compiler and backend support.
 
 `Error!` in a function signature marks an error return channel. It does not
 create a panic path and it is not a separate ordinary value type.

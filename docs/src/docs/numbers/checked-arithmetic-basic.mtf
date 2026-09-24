@@ -3,7 +3,7 @@ floating-point values.
 
 These operations can fail:
 
-- overflowing an `Int`
+- overflowing an integer type
 - dividing by zero
 - using an invalid integer exponent
 - producing `NaN` or infinity
@@ -21,3 +21,7 @@ Outside that kind of function, an unexpected runtime numeric failure stops the
 current program path.
 
 A failure the compiler can prove in advance is reported during compilation.
+
+Each operation checks its own result type rather than the storage width of its
+operands. Fixed-width arithmetic follows the same rules and remains queued with
+the fixed-width types. See @../progress (Progress) for current support.

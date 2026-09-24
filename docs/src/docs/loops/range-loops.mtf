@@ -36,13 +36,21 @@ A range loop generates numeric values directly from its loop header.
 - There is no `reverse` keyword.
 - When start and end are equal, an exclusive range has no iterations and an inclusive range has one.
 
+Range operands are `Int`, `Float` or fixed-width numeric values: the fixed
+integers `I8` through `U64` and the fixed binary floats `F16`, `F32` and `F64`.
+`Byte`, `Number` and `NumberN` have no range domain. Operand identity and
+promotion follow @../numbers (Numbers).
+
 ### Step
 
-- Without `by`, integer ranges use a step magnitude of `1`.
+- Without `by`, `Int` and fixed-width integer ranges use a step magnitude of `1`.
 - `by` supplies a magnitude. The compiler applies the direction implied by the bounds.
 - A literal zero step is rejected during compilation.
 - A non-literal step is checked before the first iteration. A value of zero fails at runtime.
-- Any range using `Float` requires an explicit `by` step.
+- Any range using `Float` or a fixed binary float requires an explicit `by` step.
+- Fixed-width operands promote by the ordinary numeric rules. Fixed integers use the integer promotion common type and fixed binary floats use the float common type.
+- Typed `Int` or `Float` operands do not implicitly mix with fixed-width operands.
+- An omitted start or step value is a contextual literal in the selected range domain.
 - Start, end and step expressions must have numeric types.
 
 [codeblock, $code("moth"):
@@ -62,8 +70,11 @@ The loop keeps those evaluated values for the complete iteration.
 
 Bindings are optional.
 
-The first binding receives the current range value. It has type `Float` when
-any range operand is `Float`. Otherwise it has type `Int`.
+The first binding receives the current range value. Its type is the selected
+range domain, which is the promoted common type of the bounds and any step.
+
+- An `Int` or `Float` range keeps its existing behaviour: the binding is `Float` when the range uses `Float` and `Int` when every operand is `Int`.
+- A fixed-width range binds the promoted fixed type. `U8` bounds with a `U16` step bind `U32`, and two `F16` operands bind `F32`.
 
 The optional second binding receives the zero-based iteration index and always
 has type `Int`.
@@ -75,4 +86,15 @@ Bindings use the same one-or-two-name `|...|` rules as collection loops.
 Runtime range counter updates use checked numeric operations. Their failures
 follow the numeric failure mode of the enclosing function or entry-selected `start` code.
 
+`by` stays a magnitude in every domain. A descending unsigned range subtracts
+that magnitude with checked arithmetic, because unary minus is invalid on every
+`U*` type.
+
+Termination happens at the last valid endpoint. The loop never needs a counter
+value outside the selected domain, so an inclusive range ending at a type's
+maximum and a descending range reaching zero both complete normally.
+
 Const range loops diagnose statically known counter failures while folding.
+
+Fixed-width range domains are accepted end-state design; @../progress (Progress)
+records current implementation and backend support.

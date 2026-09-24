@@ -18,3 +18,19 @@ the required method and declaring explicit conformance.
 Now a `Label` can be cast to `String` at a typed destination.
 
 This stays explicit. Matching method names alone do not create cast support.
+
+### Numeric evidence
+
+Builtin numeric conversions are decided by the static source and target types,
+not by values the compiler happens to know. An integer conversion is exact when
+the whole source range fits the destination, and fallible otherwise. `Byte` and
+`U8` convert in both directions without failing.
+
+Binary conversions may lose precision by design. Integer-to-float and
+binary-float precision narrowing round to nearest, ties to even, and
+float-to-integer conversion truncates toward zero and then checks the target
+range. Narrowing a binary float fails only when the rounded result is not
+finite, so precision loss alone is not a failure.
+
+Evidence for the fixed-width, `Byte` and `Number` pairs is accepted end-state and
+remains queued. See @../progress (Progress) for current support.

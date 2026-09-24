@@ -326,44 +326,71 @@ Ordinary local aliases and `get()` borrows are never counted, and no REC mechani
 
 ## Numbers and operators
 
-Current numeric types:
+Accepted numeric types:
 
-- `Int`: signed 32-bit integer
-- `Float`: finite IEEE-754 `f64`. `NaN` and infinities are invalid
+- `Int`: whole number whose width comes from the numeric profile
+- `Float`: finite binary floating-point value whose precision comes from the numeric profile. `NaN` and infinities are invalid
+- `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`: fixed-width integers
+- `F16`, `F32`, `F64`: fixed-precision binary floats
+- `Number`, `Number0`, `Number1` through `Number256`: arbitrary-precision exact values
+- `Byte`: one-byte octet value outside numeric arithmetic
 
 [codeblock, $code("moth"):
     count Int = 42
     ratio Float = 0.5
+    small U8 = 200
+    half F16 = 0.5
 ]
 
-Whole literals naturally infer `Int`. Decimal literals infer `Float`. Exponents use lowercase `e`. Uppercase `E`, unary `+` and spaced negation such as `- count` are invalid.
+One compiler-owned numeric profile selects `Int` width and `Float` precision independently from 32 or 64 bits, and is fixed for the whole build. The default is `Int32` with `Float64`. `Int` and `Float` keep distinct identities: neither is an alias for a fixed-width type, even at the same width. The Alpha compiler implements `Int` and `Float` at the default profile; the fixed widths, `Byte` and the `Number` family are accepted end-state and remain queued. See @../progress (progress matrix) for current support.
 
-### Number and Byte
+Whole literals naturally infer `Int`, and decimal or exponent literals infer `Float`. A typed destination materialises a literal directly in its own type, and an immediate typed operand may type an otherwise untyped literal before promotion. Whole literals may initialise binary floats, while decimal spelling never initialises a fixed integer, `Int` or `Byte` merely because its value is whole. Small values never infer a narrow type by size, and negative values cannot initialise a `U*` type or `Byte`. Exponents use lowercase `e`. Uppercase `E`, unary `+` and spaced negation such as `- count` are invalid.
 
-- `Number` and `Number0`: arbitrary-precision scale-zero integers
-- `Number1` through `Number256`: fixed-scale arbitrary-precision decimals
-- `Byte`: unsigned `0..255` scaffold. Broader runtime semantics remain unsettled
+### Byte
+
+- `Byte` is a one-byte octet value with equality and unsigned-octet ordering
+- Whole literals from `0` to `255` materialise in a `Byte` destination
+- `Byte` and `U8` convert explicitly in both directions, infallibly
+- `Byte` has no arithmetic, unary minus, numeric promotion or range-loop domain
+- `{Byte}` is an ordinary collection. Compact storage creates no buffer, binary or text-encoding API
+
+[codeblock, $code("moth"):
+    raw Byte = 255
+]
+
+### Number and NumberN
+
+- `Number` is an arbitrary-precision integer at scale zero, and `Number0` is its accepted spelling alias
+- `Number1` through `Number256` are arbitrary-precision scaled integers holding `coefficient / 10^scale`
+- Scale is part of the type identity. Leading-zero scales such as `Number01` and scales above `256` are invalid
+- Same-scale `+` and `-` are exact. Multiplication computes exactly and then rounds to the result scale; positive-scale division and exponentiation round half to even at each operation result
+- Positive-scale values use `/` and `%`, while scale zero uses `//` and `%`. Scale-zero `/` and positive-scale `//` are invalid
+- `NumberN` combines or compares with the same scale or an integer, and every fixed integer scales in exactly. Different `Number` scales need an explicit conversion
+- `NumberN ^ Int` requires a non-negative exponent, and an exponent is never silently converted to `Number`
+- Binary floats and `Byte` never mix with `Number` implicitly
 
 [codeblock, $code("moth"):
     large Number = 1000000000000000000000
     price Number2 = 12.50
-    byte Byte = 255
 ]
 
-A receiving `NumberN` context requires an exact literal. `price Number2 = 1.239` is invalid rather than rounded.
+A receiving `NumberN` context requires an exact literal. `price Number2 = 1.239` is invalid rather than rounded. A `Number` is an immutable exact value, not a source-visible `BigInt`, and formats without exponent notation or negative zero.
 
 Arithmetic rules:
 
 - `Int / Int -> Float`, while `Int // Int -> Int`
 - mixed `Int` and `Float` arithmetic produces `Float`
-- `NumberN` combines with the same scale or `Int`. Different scales need `cast`
-- `NumberN` and `Float` do not mix
-- positive-scale `NumberN` uses `/` and `%`. Scale zero uses `//` and `%`
-- `NumberN ^ Int` requires a non-negative exponent
-- positive-scale multiply, divide and exponentiation round half to even per operation
+- typed `Int` and `Float` values do not implicitly mix with fixed-width values, and fixed-width values require an explicit conversion to mix with each other
+- fixed integer `+`, `-`, `*`, `//`, `%` and `^` first select a common type from the complete operand ranges. Same signedness takes the wider width with a minimum of 32 bits; mixed signedness takes the smallest signed type, at least 32 bits, holding both ranges. `I64 + U64` and `I32 + U64` have no common type and are diagnostics
+- fixed integer `/` converts both operands to `F64` and produces `F64` in every profile
+- comparisons between any two fixed integer types are exact, including `I64` and `U64`
+- unary minus on any `U*` value is a compile error; convert to a signed type first
+- fixed binary float arithmetic uses the wider operand precision with a minimum of `F32`, and `//` is unavailable on binary floats
+- `Byte` takes part in no arithmetic
+- compound assignment computes in the promoted domain and then performs a checked conversion back to the left-hand type
 - `^` is right-associative
 
-Numeric operations are checked. Statically known failure is a diagnostic.
+Numeric operations are checked against the operation's own result type, not the storage width of its operands. Statically known failure is a diagnostic.
 Supported runtime failure enters builtin `Error!` only when that is the function's final error slot. Otherwise it traps.
 
 Precedence: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`.
@@ -410,10 +437,11 @@ Rules:
 - `cast!` requires the enclosing function's final error slot to be builtin `Error!`.
 - `cast ... catch` handles only cast failure.
 - `cast! ... catch` is invalid.
-- Same-type casts are invalid.
+- Builtin numeric evidence is decided by the static source and target types, not by values the compiler happens to know. An integer-to-integer conversion is infallible when the complete source range fits the target range, and fallible otherwise. Float-to-integer conversion is always fallible.
+- Binary-float evidence follows precision and range rather than integer range fitting alone. Integer-to-`F32` or `F64` is infallible and may round. Integer-to-`F16` is fallible unless the complete source range fits the `F16` finite range. Converting to a greater binary-float precision is infallible, while converting to a narrower one is fallible. Same-type casts are invalid.
 - Generic inference does not look through `cast`.
 - Scalar conversion constructors such as `Int(value)` and `String(value)` are invalid.
-- `NumberN` scale widening is exact and infallible. Narrowing is exact-or-fail and never rounds.
+- Integer-to-`Number` conversion and `NumberN` scale widening are exact and infallible. Scale narrowing and `Number`-to-integer conversion are exact-or-fail and never round.
 - `Float <-> NumberN` has no accepted helper name or lossy conversion policy yet. Do not invent one.
 - Numeric text casts consume the whole string and reject surrounding whitespace, uppercase `E`, `NaN` and infinity spellings.
 - Same-file nominal types may provide compiler-owned cast evidence for supported builtin targets. Users cannot create new cast target families.
@@ -527,7 +555,7 @@ A fallible function has one final `!` return slot:
     ;
 ]
 
-Builtin `Error` exposes `message String` and `code Int = 0`. A constant may store a reusable value. Runtime construction may use dynamic text.
+Builtin `Error` exposes `message String` and `code U32 = 0`. Codes are unsigned: `0` through `4294967295`. Negative codes and values above that range are rejected, and an `Int` variable needs an explicit conversion. A constant may store a reusable value. Runtime construction may use dynamic text. The Alpha compiler still exposes `code Int`; the `U32` field is accepted end-state, so see @../progress (progress matrix) for current support.
 
 [codeblock, $code("moth"):
     load_page |id String| -> String, Error!:
@@ -686,7 +714,8 @@ Range loop:
 - `loop to n` starts at `0`.
 - Direction follows the bounds. `by` supplies a positive magnitude.
 - A literal zero step is a diagnostic. A dynamic zero step fails before the first iteration.
-- Any range using `Float` requires an explicit `by`.
+- Any range using `Float` or a fixed binary float requires an explicit `by`.
+- Fixed-width bounds and steps use normal integer or float promotion, and the value binding takes the promoted range domain while the iteration index stays `Int`. Fixed-width range domains are queued with the fixed-width types.
 - Start, end and explicit step expressions are evaluated once from left to right.
 - `break` and `continue` target the nearest ordinary loop.
 
@@ -821,7 +850,7 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
 - `{Key = Value}` is a map type. `{key = value}` is a map literal.
 - Empty maps need an explicit map type. Source `{=}` empty-map enforcement is not implemented; the `{=}` spelling belongs to the documented MON literal-data contract only.
 - Maps preserve insertion order. Replacing a value does not move its entry.
-- Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
+- Builtin keys are `String`, `Int`, `Bool`, `Char`, every fixed-width integer and `Byte`. Each map has one declared key type. Floats, `Number` and `NumberN` are not key types. Fixed-width and `Byte` keys are queued with the numeric types.
 - `get`, `set` and `remove` are fallible.
 - `contains`, read-only `length` and `clear` are infallible.
 - `get` returns shared access to the stored value. The map cannot mutate while that alias remains live.
@@ -1526,7 +1555,7 @@ Do not infer forms for:
 - `$async:` and `$checked:` block semantics, async/coroutine/channel implementation and suspension
 - reactive paths, derived values, events/effects, `$bind` or component messages
 - direct choice payload access/narrowing or nested payload patterns
-- lossy `Float <-> NumberN`, Number formatting helpers or broader Byte APIs
+- lossy `Float <-> NumberN` helpers, Number formatting helpers or speculative byte buffer and text-encoding APIs
 - declared-region capacity, expression placement, extraction, adoption or declared-region transfer
 - broader anonymous-record storage in runtime values, collections and maps (compile-time const-record nesting itself is delivered)
 - final builder-selection or build-script syntax

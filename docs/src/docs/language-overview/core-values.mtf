@@ -13,12 +13,24 @@ or state it explicitly.
 
 - `true` and `false` are `Bool` values.
 - Whole-number literals are naturally `Int`.
-- Decimal-point literals are naturally `Float`.
+- Decimal-point and exponent literals are naturally `Float`.
+- A direct typed boundary materialises a numeric literal in that type, so explicit-width and exact literals need no intermediate `Int` or `Float`.
 - Single-quoted literals create `Char` values.
 - Quoted slices and string templates use the `String` type.
 - `none` requires an optional `T?` receiving context.
 
-The Numbers documentation owns exact numeric grammar and arithmetic behaviour.
+### Numeric types
+
+- `Int` and `Float` are the signed integer and binary float selected by the compiler's numeric profile. The default profile selects `Int32` and `Float64`.
+- Fixed-width spellings are the integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`, and the binary floats `F16`, `F32` and `F64`.
+- `Byte` is a one-byte octet value with equality and unsigned-octet ordering. It takes no part in numeric arithmetic.
+- `Number` is an arbitrary-precision integer at scale zero, `Number1` through `Number256` are arbitrary-precision scaled integers, and `Number0` is another spelling of `Number`'s scale-zero identity.
+- `Int` and `Float` keep their own identities even when their selected width matches an explicit-width type.
+
+The Numbers documentation owns the complete type family, exact numeric grammar,
+literal inference, operators and conversions. Current implementation and
+backend support are recorded by @../progress (Progress).
+
 The Strings and characters section owns the implemented string source forms.
 Options are documented with Errors and options.
 

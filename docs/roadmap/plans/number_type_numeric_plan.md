@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: ready next, after delivered MON syntax and Rust tooling v1.
-- Current slice: implementation not started.
-- Blockers: none from MON. Refresh the activation tree before implementation.
-- Next action: record the baseline in local working notes and start Phase 0.
+- Status: active on numeric-type-expanding.
+- Current slice: Phase 2, canonical types, profile and materialisation.
+- Blockers: baseline `bench-scaling` generic-instantiation exponent exceeds its locked budget; code-bearing checkpoints require a genuine fix, not a budget increase.
+- Next action: start Phase 2 HIR-reaching canonical semantics.
 
 ## Goal and delivery order
 
@@ -473,12 +473,12 @@ Exit: current owner map, baseline evidence and an exact contract-to-test map.
 
 ### Phase 1: Publish permanent contracts
 
-- [ ] Publish the accepted type, profile, literal, operator, cast, Byte, map/range,
+- [x] Publish the accepted type, profile, literal, operator, cast, Byte, map/range,
   Number and Error.code contracts in the existing canonical references.
-- [ ] Update compiler/build/data-layout authorities for profile-dependent semantic
+- [x] Update compiler/build/data-layout authorities for profile-dependent semantic
   inputs, physical scalar metadata and MON numeric ownership. Mark queued support
   honestly. Keep HIR, lifetime and physical-plan responsibilities unchanged.
-- [ ] Update paired teaching pages only where affected. Preserve useful Int/Float
+- [x] Update paired teaching pages only where affected. Preserve useful Int/Float
   examples. Rebuild docs and complete the documentation-only gate.
 
 Exit: implementation and downstream plans can cite permanent authorities rather

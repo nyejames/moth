@@ -1,11 +1,17 @@
-An `Error` carries a message and an optional numeric code.
+An `Error` carries a message and an unsigned numeric code.
 
 [codeblock, $code("moth"):
     missing = Error("Missing value")
     coded = Error("Missing value", 200)
 ]
 
-The code defaults to `0`.
+The code defaults to `0` and accepts `0` through `4294967295`. A negative code is
+rejected, and an `Int` variable needs an explicit conversion.
 
 Use the message to explain the failure. Use the code when a stable category is
 useful to callers or tools.
+
+**Current versus accepted.** The accepted `Error.code` is `U32`. The Alpha
+compiler still exposes `code Int`, so a negative code is currently accepted and
+codes above `2147483647` are currently rejected. See @../progress (Progress) for
+current support.

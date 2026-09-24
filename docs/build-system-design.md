@@ -70,6 +70,7 @@ refactors or thorough reviews.
 - Builders assign every reachable resource use one semantic URL context. No builder scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover resources.
 - Ordinary `#Config` values and static `if` may specialise executable behaviour, but they cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology. Future `$feature` is a separate pre-graph structural-selection contract.
 - Source semantics remain target and platform agnostic.
+- One compilation boundary has one compiler-owned `NumericProfile`. The build profile never changes it, and no source, directive or command-line input selects it.
 - Builders and backend capability metadata map stable source semantics to target-specific artefacts.
 - Builders must not expose target identity through `#Config`.
 - A statically decided Bool `if` is specialised by Stage 4 before HIR and downstream executable analysis.
@@ -86,6 +87,16 @@ The command selects:
 - active tooling overlays such as `check`
 - explicit build inputs
 - target intent and command-specific options
+
+The active build profile and the boundary `NumericProfile` are separate inputs.
+The build profile selects analysis effort, instrumentation and physical
+representation policy. The `NumericProfile` is a compiler semantic input that
+fixes `Int` width and `Float` precision for the whole compilation boundary. The
+selected builder settles it before explicit command inputs are materialised and
+before config compilation; it is not a build profile, a builder-provided
+primitive global or a `#Config` contract, and this delivery adds no source,
+directive or command-line spelling that selects it. `docs/compiler-design-overview.md`
+> `Numeric model and profile` owns its accepted values and threading.
 
 The current CLI selects the HTML builder implicitly. Final builder-selection syntax and a possible Moth-native build script system remain deferred.
 
@@ -235,6 +246,9 @@ Accepted contract types are:
 - `Char`
 - optional forms of those types
 
+`Int` and `Float` contracts use the boundary `NumericProfile`'s widths. The
+profile itself is never a contract, global or project field.
+
 `#Config of T` is compiler-owned declaration metadata. It is not a type constructor, source dependency clause or wrapper type. The semantic type of a marked binding remains the declared `T`.
 
 Delivered declaration-owned `#Config` contracts keep input names distinct from project metadata. Fixed grouped-project fields retain the current authoritative provider and override-blocking policy for same-named source contracts, while dependency-bearing configurable fields retain their input handoff. The future `$config` directive is the explicit-only provider model and removes that fixed-field tier.
@@ -267,7 +281,8 @@ immediately, before any project or source contract is discovered:
 If a value starts with a quote, it must be a complete valid quoted literal. A malformed quoted
 literal is a command-input diagnostic, not a String fallback. The shared `numeric_text` grammar and
 materialisation helpers own numeric validation; whole-number overflow and invalid or non-finite
-Float materialisation are rejected.
+Float materialisation are rejected. Command-input `Int` and `Float` values materialise under the
+boundary `NumericProfile`, which is already settled before the parser types them.
 
 Bare `none` is String text. Optional absence comes from omission and contract/default resolution. A
 concrete `T` input may satisfy a matching `T?` contract as a present value. No other coercion occurs;
@@ -427,7 +442,7 @@ Every normal module selected into the current command's semantic graph has its r
 The command and bootstrap flow is:
 
 ```text
-select command, artefact builder, build profile and tooling overlays
+select command, artefact builder, build profile, boundary NumericProfile and tooling overlays
 -> parse explicit command inputs into typed primitives
 -> construct the compiler and builder capability surface
 -> compile config through the named compiler service
@@ -441,6 +456,10 @@ select command, artefact builder, build profile and tooling overlays
 -> perform link, target and memory planning
 -> lower validated physical variants and emit owned outputs
 ```
+
+The boundary `NumericProfile` is settled with the builder selection, so it
+already applies to command-input typing and config compilation. Every later step
+consumes the same profile, and no stage may reselect it.
 
 Config remains one self-contained source with no runtime or dependency graph. Its compiler service resolves helpers, input contracts and directive arguments before build-owned settings application. Source contracts resolve only after graph discovery and before module AST semantics.
 
@@ -886,7 +905,7 @@ Each dependency owns:
 
 A dependency never sees the consuming project's `@project`.
 
-Dependencies compile against the active target builder's frontend capability surface. Compatibility records the Core and Builder capability interfaces actually used rather than only a builder class name.
+Dependencies compile against the active target builder's frontend capability surface. Compatibility records the Core and Builder capability interfaces actually used rather than only a builder class name. A dependency package also compiles under the consuming boundary's `NumericProfile`; its compatibility facts include that profile, and an incompatible precompiled Moth artefact is rejected or rebuilt rather than silently adapted numerically.
 
 Consumers use the dependency package facade and immutable package artefacts.
 
@@ -919,7 +938,7 @@ A dependency resolves its contracts from its own config, defaults and compatible
 
 ### Core and Builder source package graphs
 
-Source-backed Core and Builder packages compile as separate immutable package graphs. Their private implementation does not join the consuming project graph.
+Source-backed Core and Builder packages compile as separate immutable package graphs. Their private implementation does not join the consuming project graph. They compile under the `NumericProfile` of the compilation boundary that requires them, and a Moth-native signature declared with `Int` or `Float` stays that function rather than becoming a fixed-width foreign carrier.
 
 They do not receive the consuming project's `@project`.
 
@@ -1086,14 +1105,16 @@ executable from another Rust crate with the Moth dependency and ordinary Rust
 data conversion code, but compiled Moth programs have no runtime codec support.
 
 The caller supplies complete MON text and an explicit prepared schema; the
-service returns an owned `String` or an owned schema-checked value. The public
-surface carries owned values and prepared schemas only; `compiler_frontend`
-internals stay private and there is no public Resource value. The service
-performs no project discovery, no source indexing, no module imports, no schema
-auto-discovery, no command, no source-kind registration, no builder registration,
-no filesystem IO, no output writes and no backend path or lowering. It defines
-no CLI command, no `build`/`dev`/`check` surface and no runtime opcode callable
-from compiled Moth programs.
+service returns an owned `String` or an owned schema-checked value. The codec's
+numeric profile is a Rust schema-preparation input rather than a builder,
+command or config choice; standalone Rust callers default to the standard
+profile. The public surface carries owned values and prepared schemas only;
+`compiler_frontend` internals stay private and there is no public Resource
+value. The service performs no project discovery, no source indexing, no module
+imports, no schema auto-discovery, no command, no source-kind registration, no
+builder registration, no filesystem IO, no output writes and no backend path or
+lowering. It defines no CLI command, no `build`/`dev`/`check` surface and no
+runtime opcode callable from compiled Moth programs.
 
 A `.mon` file is data, not a compilable Moth source kind. It never enters the
 canonical source index, a semantic source set, a dependency clause or a
@@ -1240,7 +1261,7 @@ entry/package roots
 -> collector-free artefact verification when required
 ```
 
-Everything up to and including backend-neutral memory requirements is target-independent and shared. Everything from candidate physical-variant scope onwards is per target/profile variant.
+Everything up to and including backend-neutral memory requirements is target-independent and shared. Everything from candidate physical-variant scope onwards is per target/profile variant. The boundary `NumericProfile` is not one of those per-variant differences: it is fixed once for the compilation boundary, so every physical variant of an entry lowers the same `Int` width and `Float` precision. Build profile, target and physical representation may vary per variant.
 
 `check` performs every step through `ValidatedMemoryPlan` and stops before lowering.
 
@@ -1273,6 +1294,7 @@ The final conceptual physical-variant key contains:
 - selected concrete function set
 - target assignment
 - build profile
+- the boundary `NumericProfile`
 - ABI identity
 - layout identity
 - runtime capability requirements
@@ -1333,7 +1355,7 @@ Each backend declares whether it supports collector-free release lowering. This 
 - A backend advertising full memory control must lower every accepted topology in a release build without a tracing or reachability collector.
 - Debug and development profiles may deliberately use a garbage-collected representation for simpler lowering, faster compilation and instrumentation.
 - GC-native backends may use their host collector on any profile.
-- Every profile and backend runs semantically equivalent mandatory borrow and lifetime-topology validation and accepts exactly the same source.
+- Every profile and backend runs semantically equivalent mandatory borrow and lifetime-topology validation and accepts exactly the same source with respect to access and lifetime topology. The compiler-owned `NumericProfile` is a separate, boundary-wide semantic input rather than a build profile or backend choice; it may change `Int` overflow limits, `Float` rounding and folded results without changing those memory guarantees.
 
 A project builder may verify after reachability and memory planning that a produced artefact contains no tracing runtime, and report that as an artefact property. Verification reports a fact about the emitted artefact; it never changes source legality or observable behaviour.
 
@@ -1624,7 +1646,9 @@ Entries relink or regenerate when a linked input changes, including:
 
 Config-value dependencies participate in the existing public-interface, implementation,
 dormant-root, runtime-dependency and compatibility fingerprints. Static branch selection does not
-create a separate fingerprint family. Changing a Bool configuration value may change active
+create a separate fingerprint family. The boundary `NumericProfile` participates through those same
+owners wherever numeric behaviour, folded numeric values or numeric ABI and layout are covered.
+Changing a Bool configuration value may change active
 implementation, effect, link or root facts, but it does not change source graph or declaration
 identity. Dependency artefacts include their own configuration namespace and provenance.
 
@@ -1655,6 +1679,7 @@ A serialised module, package or generated artefact is reusable only when compati
 - required Core capability-interface fingerprints
 - required Builder capability-interface fingerprints
 - target-independent frontend feature configuration
+- the boundary `NumericProfile`
 - embedded ABI or layout policy
 - generated request identity where applicable
 

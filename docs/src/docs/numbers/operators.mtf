@@ -14,16 +14,108 @@ Moth keeps equality and logical operators readable.
 
 ### Arithmetic results
 
+The convenience family for `Int` and `Float` is unchanged.
+
 - `Int`, `Int` with `+`, `-`, `*`, `%`, `^`, `//` produces `Int`
 - `Int`, `Int` with `/` produces `Float`
 - `Float`, `Float` with `+`, `-`, `*`, `/`, `%`, `^` produces `Float`
 - mixed `Int` and `Float` with `+`, `-`, `*`, `/`, `%`, `^` produces `Float`
 
-`//` is integer division and is valid only for two `Int` operands.
+The implicit `Int` to `Float` conversion remains and rounds at the selected
+`Float` precision. There is no implicit `Float` to `Int` conversion.
+
+Typed `Int` and `Float` values do not implicitly mix with fixed-width values.
+Fixed integers do not implicitly mix with fixed binary floats; within each
+family, the operator rules below select a common result domain. The same
+cross-family restriction applies to comparisons, except the existing `Int` and
+`Float` comparison relationship. `Byte` has no arithmetic operators.
+
+### Fixed integer arithmetic
+
+For `+`, `-`, `*`, `//`, `%` and `^`, fixed integer operands first select one
+common type from their complete ranges. The selection ignores known values and
+the receiving context.
+
+- Same signedness selects the wider operand width, with a minimum of 32 bits.
+- Mixed signedness selects the smallest signed type, at least 32 bits, that represents every value of both input types.
+- No available common type is a source diagnostic.
+
+[codeblock, $code("text"):
+    U8 + U8 -> U32             I8 + I16 -> I32
+    U8 + U16 -> U32            I16 + U16 -> I32
+    U32 + U64 -> U64           I32 + U32 -> I64
+    I32 + I64 -> I64           I64 + U32 -> I64
+    I64 + U64 -> invalid       I32 + U64 -> invalid
+]
+
+There is no unsigned reinterpretation and no implicit arbitrary-precision
+fallback.
+
+Compatible fixed integer `/` operands use the same common-integer eligibility
+rule, then convert to `F64` and divide. `/` produces `F64` in every profile.
+
+`//` is integer division on the common integer type. It truncates toward zero.
+`%` follows the dividend's sign. `^` is exponentiation, not XOR.
+
+- A signed minimum divided by `-1` overflows its result type.
+- Its remainder by `-1` is zero and does not inherit the division overflow check.
+- Zero divisors and invalid integer exponents are checked. See @./#checked-arithmetic (Checked arithmetic).
+
+### Unary minus
+
+Unary minus on a typed `U*` value is a compilation error, including `U8` and a
+known zero. Cast to a signed type first. There is no automatic signed promotion
+for unary minus.
+
+Signed narrow integers use the corresponding `I32` arithmetic domain. `I32`,
+`I64` and `Int` negation checks its own result limits.
+
+### Fixed binary float arithmetic
+
+Fixed binary float arithmetic uses the wider operand precision with a minimum of
+`F32`.
+
+- `F16` with `F16` produces `F32`
+- `F16` with `F32` produces `F32`
+- `F32` with `F32` produces `F32`
+- any `F64` operand produces `F64`
+
+`//` is unavailable on binary floats. Unary negation uses the same minimum
+`F32` precision.
+
+`Float` keeps its profile-selected type. It does not implicitly mix with `F16`,
+`F32` or `F64`.
+
+Every semantic operation rounds its result. All binary float values are finite,
+so an operation that would produce a non-finite result fails. Comparisons use
+numeric values and treat positive and negative zero as equal.
+
+### Number arithmetic
+
+- Same-scale `+` and `-` are exact.
+- Multiplication computes the exact product and rounds to the result scale using half-even.
+- Positive-scale `/` checks for a zero divisor and rounds to the result scale. Scale-zero `/` is invalid.
+- Scale-zero `//` truncates toward zero and `%` is the integer remainder.
+- Positive-scale `//` is invalid. Positive-scale `%` is a decimal remainder at that scale.
+- Unary minus is exact.
+- `NumberN ^ Int` takes a non-negative exponent and rounds half-even where needed. The exponent is an `Int`, never a silently converted `Number`.
+
+Rounding happens at every language operation result, not only at assignment or
+final formatting.
+
+Ordinary mixed `Number` arithmetic and comparison can scale `Int` and every
+fixed integer exactly into the `Number` operand's scale. Different `Number`
+scales require an explicit conversion. Binary floats and `Byte` never
+participate implicitly. Fixed integer arithmetic never falls back to `Number` on
+overflow.
 
 ### Comparisons
 
+- Any two fixed integer types compare exactly, including `I64` and `U64`. No arithmetic common type is needed and no value converts through a binary float or a subtraction. Negative versus unsigned ordering keeps its true order and every 64-bit value compares exactly.
+- Fixed binary floats compare by numeric value.
 - `Int` and `Float` support equality and ordering, including mixed numeric comparisons.
+- `Byte` supports equality and unsigned-octet ordering with another `Byte` only.
+- `Number` compares with another `Number` at the same scale, with `Int` and with fixed integers through the exact mixed rule above.
 - `Char` supports equality and ordering.
 - `Bool` supports equality only.
 - `String` supports `is` and `is not`. It does not support ordering operators.
@@ -32,6 +124,17 @@ Moth keeps equality and logical operators readable.
 `+` is a numeric operator only. Source string concatenation uses templates. See
 @../language-overview/#strings-and-characters (Strings and characters) for the
 canonical concatenation form.
+
+### Compound assignment
+
+`+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` compute in the normal promoted
+domain of the operator, then perform a checked conversion to the left-hand type.
+This is the deliberate receiving-context exception that allows a typed value to
+narrow.
+
+- The place and the right operand are evaluated once.
+- The store happens only after the arithmetic and the conversion both succeed.
+- `/=` on an integer operand uses the `/` result, so it converts the `Float` result back to the left-hand type through the specified float-to-integer conversion. Use `//=` for integer division.
 
 ### Precedence and associativity
 

@@ -1,21 +1,119 @@
-Moth has two core numeric types.
+Moth has one closed family of numeric types plus a nominal octet type.
 
-### `Int`
+### `Int` and `Float`
 
-`Int` is a signed 32-bit integer.
+`Int` is Moth's ordinary signed integer type. `Float` is Moth's ordinary finite
+binary float type.
 
-Its range is:
+They are distinct semantic identities. `Int` is not an alias for `I32` or
+`I64`, and `Float` is not an alias for `F32` or `F64`, even when the selected
+profile gives them the same physical precision.
+
+One compiler-owned numeric profile selects the two widths independently.
 
 [codeblock, $code("text"):
-    -2147483648 through 2147483647
+    Int width    Float precision
+    32-bit       32-bit
+    32-bit       64-bit          (default)
+    64-bit       32-bit
+    64-bit       64-bit
 ]
 
-### `Float`
+An `Int` value has the range of its selected width.
 
-`Float` is a finite `f64`.
+[codeblock, $code("text"):
+    Int width    Range
+    32-bit       -2147483648 through 2147483647
+    64-bit       -9223372036854775808 through 9223372036854775807
+]
 
-`NaN`, positive infinity and negative infinity are not valid Moth `Float`
-values. Boundaries that can introduce a non-finite result must reject it.
+All four combinations are valid. The builder supplies the profile before
+command input materialises and before configuration compiles. No source,
+directive or command line syntax selects it.
+
+The profile is fixed for a whole compilation. It applies to directly linked
+Moth modules, generated functions, Core and Builder source packages and
+Moth-source dependencies. It never varies by function, target partition or
+debug and release representation. Source dependencies compile for that profile.
+An incompatible precompiled Moth artefact is rebuilt or rejected, never
+silently adapted. Foreign components remain separate value boundaries with
+explicit foreign types.
+
+A profile can change `Int` overflow limits, `Float` rounding and folded results.
+The same profile preserves behaviour across JavaScript and Wasm.
+
+### Fixed-width numeric types
+
+[codeblock, $code("text"):
+    signed integers:    I8, I16, I32, I64
+    unsigned integers:  U8, U16, U32, U64
+    binary floats:      F16, F32, F64
+]
+
+Each fixed integer type names its width and signedness exactly.
+
+[codeblock, $code("text"):
+    Type   Range
+    I8     -128 through 127
+    I16    -32768 through 32767
+    I32    -2147483648 through 2147483647
+    I64    -9223372036854775808 through 9223372036854775807
+    U8     0 through 255
+    U16    0 through 65535
+    U32    0 through 4294967295
+    U64    0 through 18446744073709551615
+]
+
+`F16`, `F32` and `F64` are IEEE-754 binary16, binary32 and binary64 values.
+
+`Float`, `F16`, `F32` and `F64` are finite. `NaN`, positive infinity and
+negative infinity are not valid Moth values. A boundary that could introduce a
+non-finite result rejects it.
+
+Fixed integers can promote with other fixed integers inside operators; fixed
+binary floats can promote with other fixed binary floats. Neither family
+implicitly mixes with `Int` or `Float`, and fixed integers do not implicitly
+mix with fixed binary floats. See Promotion and @./#operators (Operators).
+
+### `Byte`
+
+`Byte` is a one-byte octet value. It is nominally distinct from `U8`, `I8` and
+`Char`.
+
+[codeblock, $code("moth"):
+    raw Byte = 255
+]
+
+- `Byte` values support equality and unsigned-octet ordering.
+- A contextual whole-number literal from `0` through `255` initialises a `Byte`. A negative value cannot.
+- `Byte` takes no part in arithmetic, unary minus or numeric promotion, and it has no range-loop domain.
+- Explicit `Byte` and `U8` conversion is infallible in both directions. Other numeric `Byte` conversions compose through `U8`.
+- `{Byte}` remains an ordinary collection. Compact physical storage does not create a buffer source type or a binary text encoding.
+
+### `Number` and `NumberN`
+
+`Number` is an arbitrary-precision integer at scale zero. `Number0` is the
+accepted spelling alias for that same scale-zero identity. `Number1` through
+`Number256` are arbitrary-precision scaled integers representing
+`coefficient / 10^scale`.
+
+Scale is part of the semantic identity. `Number2` and `Number4` are different
+types, even for a value with no fractional digits. Leading-zero scales such as
+`Number01` and scales above 256 are rejected.
+
+[codeblock, $code("moth"):
+    large Number = 1000000000000000000000
+    money Number2 = 12.34
+]
+
+- Whole literals materialise exactly at any scale.
+- A decimal or exponent literal must be exactly representable at the receiving scale, including exact integrality at scale zero. `money Number2 = 1.239` is invalid rather than rounded.
+- Integer-to-`Number` conversion and scale widening are exact and infallible. Scale narrowing and `Number`-to-integer conversion are exact or fail.
+- Binary floats and `Byte` never participate in `Number` arithmetic implicitly.
+- Canonical `Number` text trims fractional trailing zeroes, never uses exponent notation or negative zero and always writes a leading zero before a fractional value.
+
+`Number` is an immutable value. It is not a source-visible `BigInt` and it adds
+no numeric trait or overload system.
 
 ### Promotion
 
@@ -26,13 +124,35 @@ values. Boundaries that can introduce a non-finite result must reject it.
     ratio Float = count
 ]
 
-Mixed `Int` and `Float` arithmetic produces `Float`.
+Mixed `Int` and `Float` arithmetic produces `Float`. The conversion rounds at
+the selected `Float` precision.
 
 There is no implicit `Float -> Int` conversion. Use a fallible explicit cast at
 an `Int` target.
 
+Typed `Int` and `Float` values do not implicitly mix with fixed-width values.
+Fixed integers and fixed binary floats also require an explicit conversion to
+mix with each other. Compatible fixed integer `/` operands first select their
+common integer type, then divide as `F64`. `Byte` never participates in numeric
+promotion.
+
+Widening between fixed integer operands inside an operator is operator
+promotion, not a general receiving conversion. It never narrows, and it never
+makes an already typed value convertible at an arbitrary receiving boundary. An
+implicit receiving boundary never narrows an already typed numeric value.
+
 `Bool` and `Char` are not numeric types.
+
+### Implementation status
+
+This reference owns the accepted contract for the complete numeric family.
+@../progress (Progress) owns current compiler and backend support. The Alpha
+compiler implements the default profile's `Int` and `Float` only. It does not
+execute the fixed-width, `Byte` or `Number` families yet.
 
 ### MON data boundary
 
-Source promotion and cast rules above are unchanged. MON numeric text keeps whole-number versus decimal/exponent categories lossless until conversion, then converts strictly per the receiving schema: `Int` requires whole-number spelling, finite `Float` materialisation rejects non-finite values, and exact decimal targets accept only exactly representable values at their declared scale without rounding. Large integer and exact decimal data are retained before the later Moth numeric runtime exists; unsupported concrete-type adapters fail explicitly rather than narrowing through `Float`. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
+MON literal data reuses the source numeric spelling but keeps whole-number and
+decimal or exponent categories lossless until the receiving schema is known.
+Its conversion rules, profile handling and scale limits belong to the MON format
+contract. See @../mon/#mon-format (MON format).

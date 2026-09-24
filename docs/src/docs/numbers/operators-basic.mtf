@@ -33,3 +33,20 @@ Use templates to join text:
 
 Templates handle all string joining and interpolation. `+` is for numbers
 only.
+
+### Typed widths
+
+`Int` and `Float` are the ordinary arithmetic types. Fixed-width values do not
+mix with them or with each other silently. A fixed-width operator first promotes
+both operands to a common type chosen from their complete ranges, and some pairs,
+such as `I64` and `U64`, have no common type and are rejected. Fixed integer `/`
+produces `F64`, while `//` stays integer division.
+
+Unary minus is invalid on every `U*` value, including a known zero. Convert to a
+signed type first. `Byte` takes part in no arithmetic at all.
+
+A compound assignment such as `+=` computes in the promoted type and then checks
+that the result fits the left-hand type.
+
+Fixed-width arithmetic is accepted end-state and remains queued. See
+@../progress (Progress) for current support.

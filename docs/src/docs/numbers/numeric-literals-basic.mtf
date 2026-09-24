@@ -1,10 +1,10 @@
-Whole numbers are `Int` values:
+A whole number with no typed destination is an `Int` value:
 
 [codeblock, $code("moth"):
     score = 42
 ]
 
-Numbers with a decimal point are `Float` values:
+A number with a decimal point is a `Float` value:
 
 [codeblock, $code("moth"):
     progress = 0.5
@@ -25,3 +25,24 @@ Keep a minus sign attached to the value:
 ]
 
 `1E6`, `+1` and `- count` are not valid numeric forms.
+
+### Typed destinations
+
+A literal takes its type from the type it is received into, so explicit-width
+and exact values need no intermediate `Int` or `Float`:
+
+[codeblock, $code("moth"):
+    small U8 = 200
+    large U64 = 18_000_000_000
+    half F16 = 0.5
+    raw Byte = 255
+]
+
+Whole literals can also initialise binary floats. Decimal or exponent spelling
+never initialises a fixed integer, `Int` or `Byte` merely because its value is
+whole, and a literal that does not fit its destination is rejected. Small values
+never infer a narrow type by size.
+
+**Current versus accepted.** The Alpha compiler still types literals as `Int` or
+`Float`. The fixed-width, `Byte` and `Number` destinations are accepted end-state
+and remain queued. See @../progress (Progress) for current support.

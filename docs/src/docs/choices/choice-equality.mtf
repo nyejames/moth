@@ -26,13 +26,19 @@ operators.
 
 ### Supported payload equality
 
-- `Int`
-- `Float`
+- `Int` and `Float`
+- the fixed-width integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`
+- the binary floats `F16`, `F32` and `F64`
+- `Byte`, compared as an unsigned octet
 - `Bool`
 - `Char`
 - `String`
+- `Number` and `Number1` through `Number256`, compared as exact values
 - choices whose payloads all support equality
 - options whose inner type supports equality
+
+Numeric payload equality follows the numeric comparison rules in
+@../numbers (Numbers).
 
 The rule applies after generic choice parameters are replaced by concrete type
 arguments.

@@ -1,6 +1,10 @@
-Compiler-owned static traits prove cast availability.
+Compiler-owned static traits prove cast availability. The compiler also
+registers builtin evidence for the builtin cast table.
 
-Every builtin target has one infallible trait and one fallible trait.
+### Trait table
+
+Each source-authored evidence family has one infallible trait and one fallible
+trait.
 
 - `Int`: `CASTABLE_TO_INT` requires `to_int |This| -> Int`; `TRY_CASTABLE_TO_INT` requires `try_to_int |This| -> Int, Error!`
 - `Float`: `CASTABLE_TO_FLOAT` requires `to_float |This| -> Float`; `TRY_CASTABLE_TO_FLOAT` requires `try_to_float |This| -> Float, Error!`
@@ -14,7 +18,13 @@ uses an ordinary lowercase `this` receiver of the concrete type.
 
 ### Builtin evidence
 
-The compiler registers evidence for the supported builtin source-target table.
+The compiler registers evidence for the supported builtin source-target table,
+including the fixed-width integers, binary floats, `Byte` and the `Number`
+family.
+
+- Evidence comes from the complete source and target types. A folded value, a proven range or an optimiser fact never changes the evidence class.
+- A proven-safe fallible cast can fold or lose its runtime check. It cannot make plain `cast` legal for that type pair.
+- The evidence class is fixed before HIR and backend lowering.
 
 ### Source-authored evidence
 
@@ -47,6 +57,7 @@ It must provide the required receiver method and declare explicit conformance.
 - Matching method shape alone is not evidence. Explicit conformance is required.
 - Same-file nominal source types may provide explicit evidence.
 - Aligned generic nominal constructors may provide evidence for their concrete instances.
+- Source-authored evidence remains the six families above. The fixed-width numeric types, `Byte` and the `Number` family carry compiler-owned builtin evidence, and Moth defines no source-authorable cast trait family for them.
 - Infallible and fallible trait pairs for the same target are incompatible through compiler-owned `must not` metadata.
 - Evidence is resolved before HIR and backend lowering.
 
