@@ -17,9 +17,9 @@ No source-language semantics change.
 ```text
 STATUS: queued, design approved
 CURRENT_SLICE: Phase 0 - refresh HIR owners, baseline performance and freeze boundary
-ROADMAP_POSITION: immediately after the First-party Core and Builder package programme entry and before Wiring V1
-ACTIVATION: the package programme's already-accepted current checkpoint is sufficient; do not wait for later package expansion that is itself blocked on Wiring and native result slots
-BLOCKERS: earlier serial roadmap work through the activation checkpoint must be merged; Wiring V1 and native result slots must not start first
+ROADMAP_POSITION: after unified numeric semantics and before Wiring V1
+ACTIVATION: consume delivered MON v1 and the numeric checkpoint; the package programme remains active in parallel and its future expansion is not a prerequisite
+BLOCKERS: earlier serial numeric work must be merged; Wiring V1 and native result slots must not start first
 NEXT_ACTION: activate from current main, inventory every HIR expression/place owner and consumer, record the performance baseline and freeze the exact store contract before changing representation
 ```
 
@@ -31,14 +31,14 @@ The intended serial order is:
 
 ```text
 MON syntax / MON Rust tooling
-    -> accepted current First-party Core and Builder checkpoint
+    -> unified numeric types and semantics
     -> HIR dense storage and capacity foundations
     -> Wiring V1
     -> native result slots and Core constant evaluation
     -> later dependent compiler work
 ```
 
-The living Core and Builder programme does not need to finish all future package expansion before this plan activates. Its later work already depends on Wiring and native result slots; treating that future work as a prerequisite here would create a cycle.
+The living Core and Builder programme remains active in parallel. It does not need to finish all future package expansion before this plan activates. Its later work already depends on Wiring and native result slots; treating that future work as a prerequisite here would create a cycle.
 
 This plan intentionally lands before Wiring and native result slots. Both later plans should build directly on the dense HIR representation rather than first extending the recursive representation and then being migrated.
 
@@ -49,7 +49,7 @@ This decision supersedes the existing roadmap statement that all HIR compaction 
 Re-read the current owners at activation rather than treating paths or Rust shapes below as frozen:
 
 * `AGENTS.md`
-* `docs/compiler-design-overview.md`, especially the architectural invariants and Stage 5 HIR sections
+* `docs/compiler-design-overview.md`, especially the architectural invariants, numeric ownership and Stage 5 HIR sections
 * `docs/src/developer-docs/style-guide/style-guide.mtf`
 * `docs/src/developer-docs/style-guide/testing.mtf`
 * `docs/src/developer-docs/style-guide/validation.mtf`
@@ -61,9 +61,25 @@ Re-read the current owners at activation rather than treating paths or Rust shap
 * borrow checking and Boracle HIR consumers
 * JavaScript and Wasm HIR lowering
 * generated-function/materialisation consumers
-* queued Wiring and native-result-slot plans before their implementation begins
+* queued Wiring and native-result-slot work boundaries before their implementation begins
 
 `docs/compiler-data-layout-design.md` remains the authority for its source, token and diagnostic domains. Do not broaden that document into a second general HIR architecture authority.
+
+### Numeric checkpoint input
+
+The activation tree already carries fixed I*/U*/F* types, Byte, Number scales,
+profile-selected Int/Float and U32 Error.code. Preserve their canonical type
+identity, constant payloads, numeric domain/operator/failure metadata and explicit
+conversion boundaries. Update store-aware visitors and ID-keyed numeric side
+tables together. A storage migration must not restore IntAdd/FloatAdd-only
+classifiers, eager i32/f64 literal payload assumptions or backend-specific
+interpretation of canonical numeric types.
+
+Source semantic width, physical scalar layout and Wasm carrier are distinct.
+Compacting a HIR record does not narrow its literal value or choose a new numeric
+profile. Preserve U64 extremes, F16/F32 precision, signed zero and exact Number
+coefficients/scales. Arbitrary-precision value payload storage follows its value
+owner rather than being mistaken for a recursive child-expression graph.
 
 ## Locked design decisions
 
@@ -346,6 +362,7 @@ This plan does not:
 * change borrow-checker legality or Boracle precision
 * compact general borrow facts
 * redesign TIR or const evaluation
+* redesign numeric typing, cast evidence, rounding or the numeric profile
 * add incremental compilation or a persistent HIR cache
 * define a serialization format
 * introduce pointer relocation, relative native pointers or mmap-backed live Rust values
@@ -359,16 +376,17 @@ Every implementation phase ends with the mandatory gate. A phase is a coherent c
 
 ### Phase 0 - activation, owner inventory and baseline
 
-* [ ] Activate from current `main` after the accepted preceding roadmap checkpoint and before Wiring V1 begins.
+* [ ] Activate from current `main` after unified numeric semantics and before Wiring V1 begins. Keep the package programme's parallel work separate.
 * [ ] Record the active revision, worktree state, validation baseline and non-recording benchmark baseline.
 * [ ] Inventory every durable HIR owner of expressions and recursive places, including expressions, statements, terminators, patterns, remapping, validation, display, rewrites, generated functions, borrow/Boracle consumers and both backends.
+* [ ] Include delivered numeric/Byte/Number constant payloads, conversion/failure statements, range proofs and U32 Error.code in the producer/consumer inventory.
 * [ ] Search for every `HirExpression`, `Box<HirExpression>`, `Vec<HirExpression>` and recursive `HirPlace` storage site. Classify temporary lowering locals separately from durable IR ownership.
 * [ ] Reconfirm how generated-function publication and current ID remapping affect the structural freeze point.
 * [ ] Freeze the exact store and typed-range map against the active tree. Preserve the decisions above while allowing names and the number of side stores to simplify.
 * [ ] Add only the instrumentation required to establish actual expression/list/projection counts and allocation-growth pressure.
 * [ ] Publish the concise general dense-IR invariant in `docs/compiler-design-overview.md`, without prematurely documenting the migration as complete.
 
-Exit: every producer, consumer, variable payload and freeze boundary is known; baseline evidence exists; no planned structure depends on an obsolete post-result-slot assumption.
+Exit: every producer, consumer, variable payload and freeze boundary is known; baseline evidence exists; no planned structure depends on an obsolete pre-numeric or post-result-slot assumption.
 
 Mandatory closeout: architecture/design review, focused instrumentation review, normal validation and non-recording benchmark check.
 
@@ -381,6 +399,7 @@ Mandatory closeout: architecture/design review, focused instrumentation review, 
 * [ ] Flatten `HirPlace` into a root local plus ordered field/index projections, with index expressions referenced by ID.
 * [ ] Migrate statements, terminators, patterns and all other durable expression carriers in the same representation cutover.
 * [ ] Preserve evaluation order, source spans, type IDs, regions, value kinds and exact existing HIR semantics.
+* [ ] Preserve numeric failure/conversion ordering and update ID-keyed proof side tables without changing the numeric profile or recomputing source meaning.
 * [ ] Convert recursive expression rewrites and visitors to store-aware traversal. Do not retain a compatibility tree or reconstruct temporary trees for downstream consumers.
 * [ ] Migrate HIR validation, display/remapping, public/compiler handoffs, borrow checking, Boracle inputs and JavaScript/Wasm lowering to the store API.
 * [ ] Seed the new builder from the existing capacity estimate where a suitable estimate already exists. Let missing side-store estimates grow normally until Phase 2 tunes them.
@@ -417,6 +436,7 @@ Mandatory closeout: capacity/retained-memory audit, focused HIR tests, full vali
 * [ ] Update the native-result-slot/Core const-eval plan so its HIR call/result examples and Phase 2 migration assume `HirValueId`/range storage. Preserve its approved result semantics unchanged.
 * [ ] Replace the roadmap's old profiling-only HIR-compaction note with the delivered architecture status while keeping whole-AST and broader borrow-fact compaction profiling-gated.
 * [ ] Update benchmark evidence, progress documentation and implementation navigation where the delivered representation changes them.
+* [ ] Run the existing numeric parity corpus across all profiles, including large fixed integers, F16/F32 rounding, Byte, Number scale boundaries and U32 error codes. Keep Number's Wasm target restriction intact.
 * [ ] Run final correctness, architecture and style reviews.
 * [ ] Remove this ordinary implementation plan and its roadmap entry in the completion commit after durable rationale has moved into canonical documentation.
 
@@ -455,6 +475,7 @@ The plan is complete only when all of these are true:
 * Incorrect capacity guesses cannot change compiler semantics.
 * HIR validation, borrow checking, Boracle and current backends consume the new representation directly.
 * Existing source semantics, evaluation order, diagnostics and emitted behaviour are preserved.
+* Fixed/profile-selected numerics, Byte, Number and U32 Error.code retain their type identity, payload and failure/rounding boundaries through the representation change.
 * No repeatable accepted compile-time regression remains.
 * AST representation is unchanged except for mechanical HIR-lowering API adaptation.
 * The general dense-IR rule exists once in canonical compiler architecture documentation and repeated generic explanations have been compressed where safe.

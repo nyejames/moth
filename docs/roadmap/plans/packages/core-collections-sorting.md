@@ -48,9 +48,12 @@ roadmap entry.
 - named and default argument routing has one shared AST owner
 - collection mutation, borrow validation and retained-edge summaries are stable
 - Core package capability identities and fingerprints are deterministic
+- unified numeric types, runtime Byte and profile-compatible scalar comparison/layout are delivered
 
-The plan does not block on runtime `Byte`, every `NumberN` target or a public ordering trait. Its
-required initial runtime surface is `Int`, finite `Float` and `Char` on HTML-JS and HTML-Wasm.
+The required initial runtime surface is Int, finite Float, every fixed I*/U*/F*
+type, Byte and Char on HTML-JS and HTML-Wasm. Their ordering is already owned by
+the numeric/Char authorities. This plan does not wait for a Wasm Number runtime
+or a public ordering trait and does not redesign numeric semantics.
 
 ## Required authorities
 
@@ -79,7 +82,7 @@ Read these from the active worktree before implementation:
 
 ## Current implementation snapshot
 
-Refresh this snapshot during Phase 0. At the queued revision:
+Refresh this pre-numeric/mixed-backend snapshot during Phase 0 rather than treating it as the required activation state:
 
 - collection members are compiler-owned operations resolved by the AST
 - the surface contains `get`, `set`, growable `push`, fixed `push`, `remove` and `length`
@@ -87,7 +90,7 @@ Refresh this snapshot during Phase 0. At the queued revision:
 - JavaScript uses arrays for growable collections and branded wrappers for fixed collections
 - HTML-Wasm collection lowering is deferred
 - compiler-owned builtin member arguments are positional-only
-- `Int`, finite `Float` and `Char` have natural ordering
+- `Int`, finite `Float` and `Char` have natural ordering in that snapshot, with fixed numerics and Byte delivered before activation
 - `String` and `Bool` do not have natural ordering
 - sortable collections are documented as deferred
 - retained-edge analysis describes stored values by their direct obligations
@@ -209,13 +212,23 @@ Target validation separately decides whether the selected backend supports that 
 
 Required initial eligible types are:
 
-- `Int`
-- finite `Float`
-- `Char`
+- Int and finite Float under the selected NumericProfile
+- I8/I16/I32/I64 and U8/U16/U32/U64
+- finite F16/F32/F64
+- Byte, ordered by unsigned octet value
+- Char
 - transparent aliases of those types
 
-An already-delivered `NumberN` or `Byte` may join the same classification only when its canonical
-natural ordering exists before Phase 2. This plan must not invent that ordering as a backend detail.
+Number/NumberN may join the same classification when their canonical natural
+ordering and the selected target's comparison are delivered. Wasm Number support
+remains a separate runtime prerequisite. Byte is already required, not a deferred
+numeric scaffold. Ordering does not give Byte arithmetic or bitwise operations.
+
+Comparisons must preserve signedness and all 64-bit values. Use ordered
+comparisons rather than subtraction, which can overflow or lose precision.
+Positive and negative float zero compare equal. Stable sorting preserves their
+relative order and moves their existing values without rerounding them. Sorting
+F16 storage through an f32 carrier does not change the element type or stride.
 
 Initial ineligible types include `Bool`, `String`, structs, choices, options, collections, maps,
 external opaque types and unconstrained generic parameters.
@@ -239,7 +252,7 @@ Compile-time facts include:
 - growable or fixed collection shape
 - fixed capacity where present
 - requested stability and memory policy
-- target and profile capabilities
+- target and profile capabilities, including the already-fixed numeric profile
 
 Runtime observations include logical length, natural runs, duplicate frequency, partition balance and
 merge wins. The implementation may adapt to those observations without adding `mostly_sorted`,
@@ -317,7 +330,9 @@ add the smallest focused sort representation.
 ## Helper identity and reuse
 
 A selected helper key includes target, element layout, natural-order kind, stability implementation,
-selected memory implementation and collection representation when layout differs.
+selected memory implementation and collection representation when layout differs. Profile-selected
+Int/Float comparison and layout compatibility are part of those delivered inputs, not a new
+per-sort numeric choice.
 
 The raw source request and selected implementation are separate facts. When v1 maps both memory
 policies to one helper, generated artefacts reuse it. Do not duplicate identical JS or Wasm helpers
@@ -335,6 +350,11 @@ across call sites. A host native sort may be used only after conformance tests p
 order and stability contract and benchmark evidence shows it is better. Source semantics must not
 depend on an engine-specific algorithm or undocumented memory use.
 
+Reuse exact Number/BigInt-backed fixed-integer comparisons from the numeric
+implementation. A host comparator result is an ordering result, not a potentially
+overflowing Moth subtraction or a BigInt coerced through Number. Keep Byte order
+unsigned and keep float values at their existing semantic precision.
+
 ## Wasm contract
 
 Use the final mixed-backend architecture. Preferred implementation order is:
@@ -351,6 +371,10 @@ move facts, import page runtime memory and use the runtime allocator only for pl
 scratch. Stable scratch is released on every normal exit. Allocation exhaustion follows the existing
 trap policy. The emitted binary is validated and helper requirements participate in reachability and
 physical variant fingerprints.
+
+Use delivered one/two/four/eight-byte scalar strides and the correct signed or
+unsigned comparisons. F16 and Byte remain compact in collection and scratch
+storage. A wider computation carrier is not permission to widen an element slot.
 
 An embedded helper cannot own separate memory, assume a private heap, bypass the
 `ValidatedMemoryPlan` or reinterpret collection handles.
@@ -396,6 +420,7 @@ promise restoration of the original order.
 - no general package algorithm framework
 - no direct user dependency on the private Core host surface
 - no independent Wasm memory or allocator for Core helpers
+- no numeric promotion, cast, bitwise or Byte API redesign
 
 # Implementation rules
 
@@ -430,7 +455,7 @@ Re-anchor the plan after mixed JavaScript and Wasm work lands.
 - [ ] Inventory final collection layouts, builtin parsing, AST, HIR, borrow facts, retained-edge
   summaries, link facts, target validation and helper emission.
 - [ ] Inventory compiler-owned choice identity and default folding for `SortMemory`.
-- [ ] Inventory natural scalar comparison classification on both targets.
+- [ ] Inventory natural scalar comparison classification on both targets, including fixed widths, Byte and profile-selected Int/Float.
 - [ ] Inventory `@core/collections` registration, tests and benchmarks.
 - [ ] Search for stale whole-module Wasm, private-memory or target-rejected collection paths.
 - [ ] Choose the smallest single HIR representation that retains the complete sort policy.
@@ -488,7 +513,7 @@ Create one complete backend-neutral sort operation and its analysis facts.
 ## Work
 
 - [ ] Add one target-independent natural-order query over semantic `TypeId`.
-- [ ] Reuse numeric and Char comparison semantics and normalise transparent aliases.
+- [ ] Reuse delivered numeric, Byte and Char comparison semantics and normalise transparent aliases.
 - [ ] Admit required scalar types and reject unsupported types with one typed diagnostic family.
 - [ ] Reject unconstrained generic elements without adding an ordering trait.
 - [ ] Carry collection shape, element type, order and source policy in typed AST.
@@ -505,6 +530,7 @@ Create one complete backend-neutral sort operation and its analysis facts.
 ## Coverage
 
 - [ ] Eligible scalars and transparent aliases
+- [ ] Signed/unsigned extremes, every fixed precision, Byte ordering and all Int/Float profiles
 - [ ] Grouped ineligible type families and generic parameter rejection
 - [ ] Policy preserved from AST to HIR with no runtime policy value
 - [ ] Live element borrow conflict and last-use release
@@ -560,9 +586,9 @@ Run the source contract through HTML-JS with explicit Moth ordering and reachabl
 - [ ] Lower normalised policies to stable or unstable JavaScript helpers before runtime.
 - [ ] Reuse one helper when both memory policies select the same implementation.
 - [ ] Sort growable arrays and fixed wrapper item arrays without changing wrapper state.
-- [ ] Implement explicit `Int`, finite `Float` and `Char` comparison.
-- [ ] Use delivered Number or Byte comparison only when semantically classified and target-supported.
-- [ ] Emit no default JavaScript lexicographic sort.
+- [ ] Implement explicit Int/Float, fixed I*/U*/F*, Byte and Char comparison through the shared semantic classification.
+- [ ] Use delivered Number comparison only when semantically classified and target-supported. Keep its Wasm runtime gate separate.
+- [ ] Emit no default JavaScript lexicographic sort and no subtraction-based numeric comparator.
 - [ ] Emit helpers only when reachable and share them across call sites.
 - [ ] Remove the replaced JavaScript target rejection.
 
@@ -571,7 +597,8 @@ Run the source contract through HTML-JS with explicit Moth ordering and reachabl
 - [ ] One primary Moth case covering defaults and both overrides
 - [ ] Exact output for random, sorted, reverse and duplicate-heavy input
 - [ ] Fixed and growable runtime output
-- [ ] Explicit scalar ordering rather than host coercion
+- [ ] Explicit scalar ordering rather than host coercion, including BigInt-backed extrema
+- [ ] Positive/negative zero stability without value rerounding
 - [ ] Helper presence, absence and deduplication
 - [ ] No one-off algorithm body per call site
 
@@ -586,7 +613,7 @@ Run the same contract through HTML-Wasm using final collection layouts and share
 - [ ] Choose the accepted Wasm implementation route in Phase 0 preference order.
 - [ ] Generate or link helpers by element layout, order and selected algorithm.
 - [ ] Operate on logical occupied elements for both collection shapes.
-- [ ] Use layout-aware load, store, swap and temporary move operations.
+- [ ] Use layout-aware load, store, swap and temporary move operations, preserving narrow/F16/Byte strides.
 - [ ] Use page runtime memory and allocator for stable scratch.
 - [ ] Release scratch on every normal exit and keep unstable sorting free of proportional scratch.
 - [ ] Preserve retained-edge and cleanup obligations while handles move.
@@ -599,7 +626,8 @@ Run the same contract through HTML-Wasm using final collection layouts and share
 - [ ] Run the primary source under HTML and HTML-Wasm
 - [ ] Cross-backend parity for non-equal ordering
 - [ ] Stable tagged-key backend tests
-- [ ] Fixed and growable layouts
+- [ ] Fixed and growable layouts, including one/two/four/eight-byte scalar elements
+- [ ] U32/U64 upper-half ordering and signed integer extrema
 - [ ] Stable scratch allocation and normal cleanup
 - [ ] Unstable no-proportional-scratch evidence
 - [ ] Helper reuse, variant separation, imports and one shared memory
@@ -689,7 +717,8 @@ The work is complete when:
 - natural-order eligibility has one target-independent compiler owner
 - v1 adds no comparator, key, ordering trait or String order
 - stable and unstable implementations meet their correctness and worst-case contracts
-- HTML-JS and HTML-Wasm lower supported reachable sorts
+- HTML-JS and HTML-Wasm lower supported reachable sorts for Int/Float, fixed numerics, Byte and Char
+- narrow scalar storage, exact 64-bit ordering and the numeric profile survive helper selection
 - borrow and lifetime systems model sorting as an exclusive permutation
 - helper reachability and deduplication are explicit
 - documentation and progress report actual support

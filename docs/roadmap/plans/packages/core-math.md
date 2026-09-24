@@ -16,13 +16,10 @@ an explicit dependency clause.
 ### Current-state capsule
 
 ```text
-STATUS: activated early for existing-ABI work; the accepted scalar expansion is delivered
+STATUS: the accepted scalar expansion is delivered; package programme remains active in parallel
 CURRENT_SLICE: none - the expansion, its published numerical contract and its coverage are complete
-BLOCKERS: compile-time folding waits for the Core const-eval prerequisite; the package lane remains
-paused under the roadmap order until MON syntax, MON Rust tooling, Wiring V1 and native
-result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeout
-`4cfd9d492` is accepted.
-NEXT_ACTION: none required; a Wasm lowering set and const-eval folding are the next candidates, each needing its own accepted contract
+BLOCKERS: compile-time folding waits for Core const evaluation and its accepted Math precision contract
+NEXT_ACTION: coordinate the numeric-profile migration through shared compiler/binding owners; a Wasm Math lowering set remains a separate contract-gated candidate
 ```
 
 Math was activated ahead of `@core/random`, `@core/time` and the queued `@core/text` v1 slice because
@@ -40,13 +37,33 @@ implementation-relevant facts are:
   `sqrt`, `cbrt`, `abs`, `floor`, `ceil`, `round`, `trunc`, `sinh`, `cosh`, `tanh`, `asinh`,
   `acosh`, `atanh` are unary; `atan2(y, x)`, `pow(base, exponent)`, `hypot(x, y)`, `min(a, b)`,
   `max(a, b)` are binary; `clamp(x, min, max)` is ternary.
-- Every parameter and result is ABI `F64`, Moth `Float`, positional-only, shared access, fresh
-  result. No function declares an error channel.
+- In the pre-profile implementation every parameter and result is ABI `F64`, Moth `Float`, positional-only, shared access and fresh result. No function declares an error channel.
 - `PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` are compile-time `Float` constants that fold into
   expressions and produce no runtime lookup.
 - Each function lowers to one `ExternalJsLowering::InlineExpression` over the host `Math` object;
   `clamp` lowers to `Math.min(Math.max(x, min), max)`. No Math runtime helper module exists.
 - No function has a Wasm lowering, so HTML-Wasm rejects any reachable Math call before lowering.
+
+### Numeric checkpoint handoff
+
+The numeric migration preserves the package's deliberate Float API. It separates
+that language signature from a fixed F64 foreign ABI rather than changing every
+Math call to accept F64. Float precision comes from the one compilation-wide
+NumericProfile, shared by folding, JS and any later Wasm implementation. Binary
+conversion and finite validation stay in the shared numeric boundary. Constants
+materialise directly at the selected Float precision and their exact expectations
+must be profile-aware, not fixed f64 spellings.
+
+Fixed I*/U*/F* and Number support does not automatically add Math overloads or
+change `round`'s package-specific tie rule to the numeric cast's ties-to-even rule.
+Number retains its own exact scale semantics. Keep package-specific accuracy,
+domain and signed-zero guarantees in the Math reference. Reconcile boundary
+rounding there before enabling Float32, while retaining explicitly documented
+approximation limits rather than promising correctly rounded transcendentals.
+
+Numeric failures reuse the delivered `Error.code U32` representation and existing
+code values. Add no Math-only error carrier or signed-code compatibility path.
+Wasm scalar arithmetic support alone does not implement Math's host functions.
 
 ## Implementation notes
 
@@ -78,7 +95,7 @@ numerical contract, not a transliteration of the JS expressions.
 ### Constant evaluation boundary
 
 Math folding waits for the shared Core const-eval prerequisite **and** for an accepted compile-time
-contract covering precision and numeric failure. An eligible scalar signature alone does not settle
+contract covering profile-selected precision and numeric failure. An eligible scalar signature alone does not settle
 that contract. Add no Math-local interpreter, callback registry, package-name dispatch or
 placeholder evaluator metadata.
 
@@ -180,8 +197,7 @@ Every other approximating sample is a bounded comparison.
 
 - A Wasm lowering set, with an accepted numerical contract rather than a JS transliteration.
 - Compile-time folding once the Core const-eval prerequisite and a precision contract exist.
-- Interaction with the queued fixed-scale `Number`/`NumberN` family. A Float-only Math slice neither
-  implements that plan nor inherits its rounding rule.
+- Profile-aware constants, rounding and finite-boundary coverage during the shared numeric migration. Fixed-width and Number types do not implicitly extend this Float-only API or replace its function-specific rounding rules.
 - `ExternalConstantDef::data_type` is registered but never read by production code, so a constant's
   declared ABI type is unenforced: mutating `PI`'s type survives the whole suite. Either the field
   gains a consumer in the constant path or it should go; the owner is the external-package registry,
@@ -192,7 +208,7 @@ Every other approximating sample is a bounded comparison.
 - unit conversions such as degrees and radians helpers, once an angle-unit contract exists
 - statistics over collection-valued inputs, after collection-valued binding signatures land
 - vector and matrix surfaces, which are a separate package design rather than Math growth
-- integer-oriented math, which belongs with the numeric plan's integer contracts
+- integer-oriented math, which consumes the delivered numeric integer contracts without redesigning promotion or failure rules
 
 ## Previous blockers and rejected approaches
 
@@ -225,6 +241,12 @@ result the contract leaves to target-defined accuracy uses a justified error bou
 deterministic pass or fail; exact rendered output is reserved for the three groups listed above.
 Every function needs at least one sample that no plausible mis-registration survives, which means a
 fixed point such as `asinh(0)` or `cosh(0)` is never the only sample for its function.
+
+When adapting these owners to NumericProfile, exercise Float32 and Float64
+constants/results and preserve exact versus approximate assertions deliberately.
+Bounds themselves must be representable at the selected precision. Test shared
+finite-boundary recovery with U32 error codes without changing Math signatures.
+Current evidence below predates that migration and does not claim profile coverage.
 
 Historical slice validation record (not current-state evidence): the expansion could not close the
 mandatory `just validate` gate at that checkpoint. After that branch merged the published

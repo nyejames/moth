@@ -17,12 +17,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: paused by the user after the `@core/math` and `@core/time` batch
-CURRENT_SLICE: none - `@core/math` and `@core/time` are delivered, each with its accepted contract published in the canonical reference before implementation
-BLOCKERS: package development remains paused under the roadmap order until MON syntax, MON Rust
-tooling, Wiring V1 and native result-slot/Core const-eval checkpoints are merged; data-layout Phase 3 closeout `4cfd9d492` is accepted.
-NEXT_ACTION: remain paused; begin the next package slice only from a main branch containing those
-roadmap prerequisites, then rerun the complete package gate.
+STATUS: active in parallel under the main roadmap
+CURRENT_SLICE: select the next eligible package slice from the tracker; delivered Math and Time work remains complete
+BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI changes require coordination with the serial numeric checkpoint
+NEXT_ACTION: refresh current main and the intended package's living plan, then run the complete package gate for an eligible isolated slice
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -31,20 +29,23 @@ phase starts. Do not pin a moving programme to a baseline commit in this file.
 The pre-checkpoint hardening slice for the five shipped `@core/text` functions is delivered:
 exact-output coverage for the existing behaviour and an allocation-free `length` scan. It added no
 package API, no result-slot or const-eval capability and no new compiler surface. The programme's
-own Phase 2 (`@core/text` v1) has not started, and the checkpoint order below is unchanged.
+own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites remain unchanged.
 
 ## Roadmap position and lifecycle
 
-The foundation and documentation baseline is merged into main. Phase 1 and the Phase 0
-implementation are delivered there. Data-layout Phase 3 implementation and diagnostic provenance
-are complete at `6309adf6d`, with R5 closeout accepted at `4cfd9d492`; the package lane remains
-paused under the serial roadmap order for MON syntax, MON Rust tooling, Wiring V1 and native
-result slots/Core const evaluation. The roadmap previously allowed isolated package work fitting the existing external ABI to run alongside data-layout Phases 2 and 3; that permission
-is spent and this is the one current schedule.
-Integrating at the accepted Phase 2 continuation checkpoint (`c17672bb5`, diagnostic correction
-plus validation-lane stabilization) is a synchronisation event only: it does not reopen the package
-pause or permit a new slice. Slices needing result slots or Core const evaluation still wait for the
-corresponding roadmap checkpoint.
+The main roadmap makes this programme active in parallel. That scheduling state
+supersedes the earlier programme-wide pause recorded during MON and data-layout
+integration. MON syntax and Rust tooling v1 are now delivered. Unified numeric
+semantics is the next serial compiler checkpoint, followed by HIR storage,
+Wiring and native result slots/Core constant evaluation.
+
+Parallel status does not remove a package's own capability gate. Text v1 and any
+slice requiring result slots or Core folding still wait for those deliveries.
+Numeric-sensitive slices coordinate with the shared numeric and binding owners
+rather than independently extending legacy i32/f64-only representations. A sync
+adopts a completed shared shape directly and runs the complete package gate.
+Historical checkpoint and validation records below do not establish the current
+branch state or reinstate a programme-wide pause.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -63,11 +64,10 @@ Files in this directory are a deliberate exception to the normal short-lived pla
 Read these from the active worktree before changing package code:
 
 - `AGENTS.md`
-- `docs/compiler-design-overview.md`, especially binding-backed symbols, HIR call targets, link facts
-  and target-contract validation
+- `docs/compiler-design-overview.md`, especially binding-backed symbols, numeric ownership, HIR call targets, link facts and target-contract validation
 - `docs/build-system-design.md`, especially selected builder capabilities, package classification,
-  Core and Builder package availability and external JavaScript emission
-- `docs/src/docs/packages/`
+  Core and Builder package availability, numeric-profile compatibility and external JavaScript emission
+- `docs/src/docs/packages/` and the canonical numeric/cast/Error references
 - `docs/src/docs/progress/@page.moth`
 - `docs/src/docs/progress/packages-and-builders/@page.moth`
 - `docs/src/developer-docs/style-guide/style-guide.mtf`
@@ -77,19 +77,18 @@ Read these from the active worktree before changing package code:
 - `docs/roadmap/roadmap.md`
 - `index.md` as a locator only
 
-Read `docs/roadmap/plans/package-dependency-declarations-and-manager-foundations-plan.md` only to
-preserve its ownership boundary. This programme must not implement its declaration, alias, resolver
-or dependency-package graph work.
+Preserve the package dependency declaration, alias, resolver and separate graph
+boundaries in the build authority. This programme does not implement the later
+package-manager work.
 
 The accepted collection sorting plan lives at
 `docs/roadmap/plans/packages/core-collections-sorting.md`. Treat that plan as the specialised
 implementation companion for sorting and do not reconstruct its contract from this umbrella.
 
 The compiler-owned native result-slot and Core constant-evaluation checkpoint is a hard prerequisite
-before the first Text implementation phase. Its planning-branch description currently lives at
-`docs/roadmap/plans/native-result-slots-and-core-const-eval.md`. That ordinary plan is expected to be
-retired after implementation. Package work consumes the merged compiler capability and its canonical
-documentation rather than preserving transient shapes from the plan file.
+before the first Text implementation phase. Package work consumes the merged
+compiler capability and its canonical documentation rather than preserving
+transient shapes from a short-lived plan file.
 
 ## Scope
 
@@ -117,7 +116,7 @@ This programme does not own:
 - package acquisition, registries, fetching, version solving, lockfiles or publishing
 - transitive dependency policy
 - generic binding-backed functions as a general feature
-- a broad external ABI redesign
+- the shared numeric type/profile or external ABI migration
 - Wasm or native implementation of every package
 - async, task or event-loop language design
 - exhaustive copies of JavaScript or Web Platform APIs
@@ -175,6 +174,37 @@ domains, fallibility and other observable rules still need one portable contract
 
 `@web/*` packages may expose genuine Web Platform concepts. They should still present a curated Moth
 surface rather than mechanically clone every JavaScript method.
+
+### Numeric checkpoint coordination
+
+Int and Float remain deliberate Moth API types, distinct from I*/U*/F*. Keep
+ordinary counts, indices and Float-oriented functions unless their own accepted
+contract needs fixed precision. The shared numeric migration separates language
+signatures from fixed foreign ABI carriers. Replacing `ExternalAbiType::I32 ->
+Int` and `F64 -> Float` must not accidentally change every Core API to I32/F64.
+
+One NumericProfile is selected before input/config typing and is shared by the
+directly linked Moth graph and JS/Wasm partitions. Package constants, Core
+folding and runtime conversion consume that profile. Validate both Float
+precisions and both Int widths through the existing numeric owners rather than
+adding package-local rounding, range or overflow rules.
+
+The fixed type family and runtime Byte land before Number/NumberN in the same
+serial checkpoint. Number retains exact scale semantics and initially has
+HTML-JS runtime support only. Wasm scalar support does not imply a Number runtime,
+completed collection runtime or a lowering for every Core host function.
+
+Error.code changes to U32 at the end of that checkpoint. Preserve existing code
+values and messages while adopting the shared constructor/helper representation.
+Test codes above I32::MAX and explicit conversion from Int variables where those
+paths cross package interfaces. This does not change Rust diagnostic identifiers
+or the MON Rust error-code enum.
+
+A parallel package slice touching these shared owners coordinates its boundary
+and adopts the completed migration. It does not create a temporary cast adapter,
+private numeric evaluator or signed-error compatibility lane. Byte operations
+beyond the accepted primitive are not designed here. A Core package for bitwise
+or byte operations remains undecided rather than an implied programme commitment.
 
 ### Final shape or defer
 
@@ -280,14 +310,14 @@ Use one dedicated long-lived worktree for this programme.
 At the start of each package and after every major package phase:
 
 1. inspect current `main`
-2. inspect the active diagnostics branch while it remains unmerged
+2. inspect active shared numeric/ABI and diagnostics branches where their work affects the package
 3. sync a published stable checkpoint when it changes shared shapes relevant to package work
 4. resolve the migration before more package code is added
 5. run the complete phase gate after the sync
 
 Do not sync midway through a bounded phase unless the phase is blocked.
 
-While diagnostics and source-data-layout work is active, prefer changes in:
+While shared numeric, diagnostics and source-data-layout work is active, prefer changes in:
 
 - `src/builder_surface/core_packages/`
 - `src/backends/js/package_bindings/`
@@ -297,13 +327,15 @@ While diagnostics and source-data-layout work is active, prefer changes in:
 - focused tests under `tests/cases/`
 - package documentation and the package progress matrix
 
-Small additive wiring through existing extension points is allowed.
+Small additive wiring through existing extension points is allowed. Shared
+numeric/binding migrations still need coordination even when their registration
+callers are inside one of these directories.
 
-Avoid changing:
+Avoid independently changing:
 
 - shared diagnostic payloads, descriptors, rendering or storage
 - source and path identity ownership
-- the general external-package representation
+- the general external-package representation or numeric type/profile policy
 - HIR call representation
 - frontend stage ownership
 - build graph construction
@@ -360,6 +392,7 @@ Every code-bearing phase ends with all of the following.
 - compare implementation with canonical package docs and the active package plan
 - verify fallibility, access, alias and return contracts
 - verify Core semantics do not inherit accidental JavaScript behaviour
+- verify numeric profile, fixed-width conversions and U32 runtime errors use shared owners after the numeric checkpoint
 - verify target validation rejects unsupported reachable use before lowering
 - verify package availability and prelude policy did not drift
 - verify every changed public contract has one clear primary test owner
@@ -436,8 +469,8 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Implementation merged; package lane paused behind the serial compiler-cleanup, MON, Wiring and native result-slot/Core const-eval checkpoints | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
-| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core const evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
+| 0 | Package foundations | this plan | Implementation merged. Programme active in parallel, with per-slice capability and shared-owner coordination gates | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core constant evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
@@ -445,7 +478,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
 | 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
-| 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve the accepted stable-by-default `sort` contract and implement it only after its mixed-backend prerequisites |
+| 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
 | 8 | `@core/json` | `core-json.md` | Accepted package, TODO: design when activated | Design and implement a useful JSON v1 without reflection, generic derivation or a representation Moth cannot express correctly |
 | 9 | Programme review | this plan | Deferred | Audit useful completeness, choose whether another candidate deserves a package design and leave the tracker coherent |
 
@@ -462,6 +495,10 @@ Reuse the compiler-owned Rust Text evaluator infrastructure delivered by the pre
 Eligible deterministic operations gain Rust const-eval parity as they are added. Fallible `char_at`
 and `slice` keep Error semantics even though the initial evaluator cannot fold error channels.
 
+Text indices/counts remain Int under the selected numeric profile. Host string
+length limits and offset conversions remain separately checked. Fixed-width
+support does not change these public signatures to U32 or I32.
+
 Collection-valued `split`, `join`, `lines` and character surfaces wait for a final collection-valued
 binding route. Unicode case conversion, case folding, normalization and grapheme APIs wait for pinned
 Moth-owned Unicode data rather than host Unicode versions.
@@ -470,13 +507,15 @@ Moth-owned Unicode data rather than host Unicode versions.
 
 Keep bounds and result-domain semantics portable. Decide seeded or reproducible generation only in
 the package design checkpoint. Backend-local algorithms remain permitted until sequence identity is
-explicitly promised.
+explicitly promised. A deliberate Int/Float API follows the selected profile,
+while any fixed-width API needs its own explicit signature and range contract.
 
 #### `@core/math`
 
 Start with an inventory because the package is already broad. Add common omissions, not specialised
-numeric subfields. Coordinate with the accepted numeric redesign and avoid freezing legacy numeric
-shapes into new APIs.
+numeric subfields. Consume the shared numeric profile and preserve deliberate
+Float signatures. Package-specific `round` and approximation rules remain in the
+Math reference rather than inheriting cast or Number rounding semantics.
 
 #### `@core/time`
 
@@ -484,11 +523,20 @@ Keep monotonic time, elapsed durations and UTC timestamps distinct. JavaScript `
 implementation source, not a semantic authority. Civil dates, time zones and locale-sensitive
 formatting need their own careful design before implementation.
 
+Opaque Duration/TimeMark/Timestamp representations remain package-owned contracts.
+A host f64 used internally is not automatically Moth Float and must not change
+precision when Float's numeric profile changes. Wider integer support alone does
+not accept a nanosecond representation or silently alter the existing time ABI.
+
 #### `@web/canvas`
 
 A broad package slice is intentional. Prefer coherent workflows over a mechanical Web API mirror.
 Exercise mutable opaque handles, error recovery, runtime asset reachability, image and pixel data,
 templates and long-running visual programs.
+
+Pixel and binary-data designs distinguish numeric U8 channels from Byte octets.
+Their shared one-byte storage does not make them interchangeable. This is not
+permission to add bitwise syntax or settle a Core byte API here.
 
 Update `@html` wrappers only where source-owned methods or helper composition clearly improve Moth
 usage.
@@ -512,7 +560,9 @@ contract and link it from the collection plan.
 
 Review non-sorting gaps against collection, borrow and memory-management authorities. Operations such
 as whole-domain clear may carry lifetime and retained-edge meaning, so package convenience must not
-outrun those contracts.
+outrun those contracts. Consume fixed integer/Byte map-key eligibility, numeric
+ordering and compact scalar strides through their shared owners. Keep Int indices
+and lengths rather than introducing an unrelated API migration.
 
 #### `@core/json`
 
@@ -522,7 +572,9 @@ yet.
 The package design must decide parsing, serialization, value inspection, object and array access,
 construction, number handling, ordering and error semantics. It must not assume reflection, automatic
 struct conversion or generic derivation. Defer any operation whose final Moth value shape cannot be
-represented.
+represented. Account explicitly for U64/I64 values, binary floating precision and
+exact Number scales. Do not assume a JavaScript Number conversion preserves every
+Moth numeric value or that MON's public representation is automatically the JSON API.
 
 ## Candidate capability domains
 
@@ -532,7 +584,7 @@ commitments.
 Likely Core candidates:
 
 - structured data formats beyond the accepted JSON work
-- portable text and binary encoding after the `Byte` design is usable
+- portable text and binary encoding after its own API design. Delivered Byte is a primitive prerequisite, not an accepted encoding/bitwise package surface
 - URL and URI parsing and construction
 - richer text pattern search, with regular expressions considered only after semantics are chosen
 - networking and HTTP after async, task and host-capability design
@@ -643,7 +695,7 @@ runtime glue is emitted from those owned sources, and both routes reach the repo
 review. A green guard result therefore proves lexical module-loading cleanliness, and host-driven
 loading is a named manual review boundary.
 
-Historical Phase 0 package validation snapshot (checkpoint-specific; not current-state evidence):
+Historical Phase 0 package validation snapshot (checkpoint-specific, not current-state evidence):
 Phase 0's mandatory `just validate` gate was open on the warning-denied native Clippy lane. At that
 snapshot, `cargo test --workspace --quiet -- --format terse` passed 5,986 tests;
 `just test-feature-matrix` passed all 8/8 standard lanes; `just feature-lane-check` reported zero
@@ -662,10 +714,9 @@ The remaining Clippy findings were warning-denied unused imports, variables and 
 merged compiler/test tree, and the broad formatter check reported inherited unformatted files.
 These were upstream shared-tree validation blockers rather than package API or runtime failures.
 The package implementation did not alter diagnostic payloads, source/path ownership, HIR call
-representation or build-graph construction. This snapshot predates the accepted Phase 2
-continuation synchronization recorded in the capsule above; it does not establish current branch
-validation. The programme remains paused, and the current open exceptions are recorded in the
-data-layout plan's current-state capsule.
+representation or build-graph construction. This snapshot predates the accepted
+Phase 2 continuation synchronisation and later MON integration. It establishes
+neither current validation results nor the programme's current parallel schedule.
 
 ### Phase 1 - activate the living package workflow
 
@@ -686,8 +737,7 @@ The compiler-owned native result-slot and Core constant-evaluation work is a cap
 programme-wide pause. It gates the `@core/text` v1 slice and any other package slice that needs
 truthful result slots or compile-time Core evaluation. Package work on the existing external ABI,
 including hardening and current-surface expansion of an already registered package, is not gated by
-this checkpoint and proceeded while that work landed. It is nonetheless stopped right now by the
-user's pause recorded in the capsule, which is a scheduling decision rather than a capability one.
+this checkpoint. Coordinate shared numeric/ABI changes through the policy above.
 The checkpoint must provide:
 
 - truthful zero/one/many result slots through AST/HIR/backend-neutral analysis
@@ -696,11 +746,10 @@ The checkpoint must provide:
 - JS/Rust semantic parity tests and runtime-helper elimination for folded calls
 
 Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
-owners directly and remove any planning assumptions made obsolete by the implementation. This
-checkpoint alone would pause package work only while the shared result representation is actually
-changing under it; the user's current scheduling pause continues through the ordered MON syntax,
-MON Rust tooling, Wiring V1 and native result-slot/Core const-eval checkpoints. The accepted Phase 2 data-layout continuation checkpoint synchronises the branch and
-does not reopen that pause.
+owners directly and remove any planning assumptions made obsolete by the implementation.
+The main roadmap's active parallel status permits other eligible package slices.
+It does not authorise competing edits while a shared result or numeric
+representation is actively being replaced.
 
 ### Phase 2 - `@core/text` current v1 slice
 
@@ -805,7 +854,7 @@ Stop the current package phase and request review when:
 - the public API would be shaped by a temporary JavaScript or ABI limitation
 - implementation needs a third-party dependency
 - a Core contract would expose backend-specific behaviour that was not deliberately accepted
-- work requires generic binding-backed functions or a broad ABI redesign
+- work requires generic binding-backed functions or an independent shared numeric/ABI redesign
 - work crosses into unstable diagnostic payload or source-layout representation
 - a compatibility wrapper would preserve a shared type already replaced upstream
 - source clauses begin acquiring packages

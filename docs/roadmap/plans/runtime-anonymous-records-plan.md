@@ -4,7 +4,7 @@
 
 - Status: queued. The canonical and Basic runtime references are published.
 - Current slice: implementation not started.
-- Blockers: shared MON syntax with nested const records is delivered (consume it; do not reconstruct a predecessor record parser); accepted numeric semantics and the required ordinary-struct validation paths must be delivered.
+- Blockers: shared MON syntax and Rust tooling are delivered. Unified numeric semantics and the required ordinary-struct validation paths must be delivered.
 - Next action: establish the activation tree and complete Phase 0.
 
 ## Purpose and prerequisites
@@ -13,7 +13,7 @@ Enable named-only parenthesised MON construction in runtime receiving contexts. 
 
 Reuse the shared argument parser, type environment, struct construction, field access, copy, borrow and lifetime owners. This work introduces no structural typing, anonymous-specific runtime IR or MON serialisation implementation.
 
-Run after shared MON syntax and number/numeric semantics, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
+Run after shared MON syntax and unified numeric semantics, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
 
 Required capabilities:
 
@@ -22,7 +22,7 @@ Required capabilities:
 - ordinary nominal identity, resolved field types and field lookup in `TypeEnvironment`
 - ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
 - public-surface rejection of hidden runtime identities
-- accepted numeric type identity, including the delivered `Number` family
+- canonical Int/Float identities with the compilation-wide NumericProfile, fixed I*/U*/F* types, non-numeric Byte and the Number family
 
 Use the activation tree's current APIs. Reuse delivered MON parsing rather than reconstructing a predecessor record parser.
 
@@ -30,7 +30,7 @@ Use the activation tree's current APIs. Reuse delivered MON parsing rather than 
 
 Read `AGENTS.md`, the full style guide, the language cheatsheet, both compiler/build architecture references and the complete testing guide. Follow the validation guide for each final gate.
 
-Read `docs/src/developer-docs/language/overview.mtf`, `docs/src/docs/language-overview/mon-syntax.mtf`, `docs/src/docs/structs/anonymous-records.mtf` and the routed const-record, struct, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
+Read `docs/src/developer-docs/language/overview.mtf`, `docs/src/docs/language-overview/mon-syntax.mtf`, `docs/src/docs/structs/anonymous-records.mtf` and the routed const-record, struct, numeric, cast, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
 
 The accepted runtime contract is already published in `docs/src/docs/structs/anonymous-records.mtf`, with a Basic companion and a section on the Structs page. Those references own semantics and explicitly label runtime support as deferred. Contract publication is complete, not a task to repeat. The progress matrices continue to report actual support.
 
@@ -45,6 +45,7 @@ Use the canonical runtime reference for construction, hidden identity, recursive
 - Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
 - Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
 - Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
+- Numeric leaves retain their canonical semantic type. Extracting a U8 field yields U8, while arithmetic may separately promote it to U32. An i32 carrier does not widen the field's semantic type or physical storage. Int/Float fields retain their profile-selected contract and Byte gains no arithmetic from being stored in a record.
 
 The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.
 
@@ -63,6 +64,8 @@ Use ordinary field lookup without repeated shape scans. Diagnostics identify the
 
 Borrow validation and lifetime topology apply to the actual retained graph. Inline nesting creates no escape exemption, copy-on-construction rule, new region or backend-specific legality. Explicit deep copy preserves internal alias topology under the existing copy contract. Backend lowering consumes validated ordinary struct facts.
 
+Scalar size/alignment/stride facts come from the numeric and physical-layout owners. This plan does not define a hidden-record ABI, duplicate numeric checks or implement Number on Wasm. A supported scalar inside an unsupported aggregate still needs the normal target diagnostic. Number-containing runtime records retain Number's Wasm restriction until its separate runtime exists.
+
 ## Implementation phases
 
 Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review. Commit accepted phases separately. Keep diagnostics and status truthful while backend support is incomplete.
@@ -73,7 +76,7 @@ Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review.
 2. Read the shared MON owner and existing const-record deferral boundary, ordinary nominal registration, HIR struct paths and recursive escape validators.
 3. Read the published runtime reference and confirm the current owner map. Identify remaining architecture, cheatsheet and status edits without rewriting the source contract or claiming runtime support.
 4. Select the existing source-site/body identities that implement the key above, including nested sites and concrete materialisations. Record the mapping locally. Inventory every prohibited boundary and its current recursive validation owner.
-5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR.
+5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR. Include fixed-width, Byte, profile-selected and Number leaves in that inventory.
 
 Exit: one identity rule, one shared parse path and explicit recursive boundary coverage.
 
@@ -100,7 +103,7 @@ Exit: anonymous syntax produces no anonymous-specific HIR/backend representation
 
 1. Validate supported targets through ordinary struct lowering. Assert an explicit target/deferred rejection where a required ordinary capability is unavailable, rather than claiming executable parity from frontend-only tests.
 2. Add or consolidate end-to-end cases for nested output, mutation/copy, existing-child aliasing, duplicate inner labels, distinct-site mismatch and each materially different prohibited boundary.
-3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite.
+3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite. Exercise fixed-width/Byte leaves and preserve scalar type identity through projection and mutation.
 4. Update support notices in the published structs references and teaching page, then reconcile the cheatsheet, compiler/build authorities, Design Scope, progress matrices, comments and queued consumers. Preserve the precise local-composition boundary. Shared grammar remains with the delivered MON owner.
 5. Remove obsolete deferral paths, fixtures and temporary construction helpers. Rebuild generated docs.
 
@@ -121,8 +124,10 @@ Tests should prove:
 - retained aliases constrain nested mutation under ordinary borrow rules
 - prohibited wrappers do not hide an anonymous identity from escape checks
 - ordinary extracted leaves retain their normal permitted uses
+- fixed integer/float and Byte field identity survives construction, projection and mutation without carrier-based retyping or implicit narrowing
+- Int/Float examples still work under their selected profile and Number leaves keep exact scale semantics
 - compile-time records remain compile-time-only and named nominal construction stays explicit
-- supported backend execution agrees with ordinary struct semantics, while unsupported targets reject explicitly
+- supported backend execution agrees with ordinary struct semantics, while unsupported aggregate or Number targets reject explicitly
 
 Use one primary owner per contract, structured diagnostic reasons/spans and observable results. Unit coverage is reserved for hidden identity, type-graph and handoff invariants that output cannot expose. Keep tests out of production implementation files.
 

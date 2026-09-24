@@ -4,7 +4,7 @@
 
 - Status: queued, with the design interview accepted.
 - Current slice: not started.
-- Blockers: the permanent directive references must be published and obsolete reactive `$` syntax must be removed before this plan activates.
+- Blockers: permanent directive references, the compilation-wide numeric profile and removal of obsolete reactive `$` syntax must be delivered before activation.
 - Next action: establish the rebased activation baseline and start Phase 0.
 
 Intended location: `docs/roadmap/plans/general-directives-and-project-config-plan.md`.
@@ -22,7 +22,7 @@ Implementation names and internal Rust layouts may follow the activation tree. S
 Read `AGENTS.md`, the complete codebase style guide and the language cheatsheet. Read both `docs/compiler-design-overview.md` and `docs/build-system-design.md` in full for this cross-stage change. Also read:
 
 - `docs/compiler-data-layout-design.md` for retained syntax, source identities, spans and diagnostic storage.
-- `docs/src/developer-docs/language/overview.mtf` and its relevant canonical unsuffixed references.
+- `docs/src/developer-docs/language/overview.mtf` and its relevant canonical unsuffixed references, including numeric profile, literal and cast rules.
 - `docs/src/docs/directives/directives.mtf`, published before activation.
 - `docs/src/docs/project-structure/project-config.mtf`, `build-inputs.mtf` and `entry-config.mtf`.
 - `docs/src/docs/functions/calls-and-access.mtf`, `parameters-and-defaults.mtf` and the constants references.
@@ -137,7 +137,9 @@ Only a single explicitly typed top-level compile-time binding is eligible. Rejec
 
 Source-level placement includes top-level declaration items in normal files and module roots wherever an ordinary compile-time constant is legal. The existing `export:` block remains a declaration grouping until its later migration, so an otherwise legal `$config` constant there uses ordinary visibility rules. Support and facade declarations keep their existing package-isolation and public-surface restrictions. A purpose directive is unnecessary for compile-time declarations.
 
-The initial type domain stays `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. Retain the early, explicit primitive annotation requirement rather than adding alias resolution, inferred types, `Number`, collections or user-defined records to input contracts. A later numeric/API change needs its own accepted contract.
+The input-contract domain stays `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. Fixed I*/U*/F* types, Byte and Number/NumberN are deliberately excluded even after numeric support lands. Retain early explicit primitive annotations rather than adding alias resolution, inferred types, collections or user-defined records to input contracts.
+
+NumericProfile is selected before typed command inputs and config compilation. Both bootstrap and source contracts use that same Int range and Float precision through the delivered numeric materialisation owner. Default Int32/Float64 behaviour remains. Neither `$config`, `$project` nor `$html_builder` selects or exposes the profile, and the directive migration adds no profile CLI syntax. Profile compatibility remains separate from the boundary-local input namespace.
 
 ### Bootstrap versus source defaults
 
@@ -176,7 +178,7 @@ Selected-source contracts resolve in this order:
 
 Remove the fixed-project-field provider tier and its override-blocking semantics. Remove automatic input supply by predefined `$project` fields, even when names happen to match. An explicit input without a bootstrap or selected-source contract is unknown, even if it matches a project metadata field. Diagnose unknown inputs only after the selected source-contract inventory is available.
 
-Preserve the current typed `--input name=value` conversion rules, including lower_snake_case names, splitting at the first `=`, exact Bool/numeric/quoted Char/quoted String recognition, String fallback, malformed-quote rejection and exact type matching. Bare `none` remains String text. A present `T` may satisfy `T?`, but `Int` does not silently satisfy `Float`. Programmatic input uses the same carrier and conversion policy.
+Preserve typed `--input name=value` conversion rules, including lower_snake_case names, splitting at the first `=`, exact Bool/numeric/quoted Char/quoted String recognition, String fallback, malformed-quote rejection and exact type matching. Numeric input materialises under the already-selected profile, not hard-coded i32/f64 limits. Bare `none` remains String text. A present `T` may satisfy `T?`, but `Int` does not silently satisfy `Float`. Programmatic input uses the same carrier and conversion policy.
 
 Each project/package boundary owns its own namespace. Consumer input does not satisfy dependency contracts implicitly. Keep provenance and stable effective-value fingerprints with the existing owners. Resolution origin and source location are diagnostic provenance, not semantic fingerprint inputs.
 
@@ -201,7 +203,7 @@ The parameter order is the following order for positional calls:
 | `license` | `String?` | `none` | Yes. |
 | `template_const_loop_iteration_limit` | `Int` | The existing compiler-owned default limit | No. |
 
-Retain existing field-domain and output/source-path validation. In particular, project name validation and the requirement that a directory project's entry root be strictly beneath its project root remain intact. Preserve the current numeric limit policy through its one owner rather than copying a magic number into multiple signatures.
+Retain existing field-domain and output/source-path validation. In particular, project name validation and the requirement that a directory project's entry root be strictly beneath its project root remain intact. Preserve the numeric limit policy through its one owner rather than copying a magic number into multiple signatures. The loop-limit API remains Int, while its compiler resource bound is a separate check from the selected Int range.
 
 `version` has no declaration default. `"0.1.0"` belongs to the starter `$config` example, not to `$project`'s signature. A literal version is valid when the author wants a fixed version. A configurable version must come from an earlier explicit `$config` declaration. Missing version is diagnosed even when an unused input contract named `version` exists.
 
@@ -247,7 +249,8 @@ Synthetic single-file operations without authored `config.moth` keep their expli
 Preserve one compiler-owned config service and one canonical module service:
 
 ```text
-Command selects capabilities and types explicit inputs
+Command selects capabilities and the compilation-wide NumericProfile
+-> materialise explicit inputs using that profile
 -> compiler config service prepares the one config source once
 -> config constants and explicit input contracts are resolved/folded in source order
 -> shared directive call validation produces folded argument facts
@@ -255,7 +258,7 @@ Command selects capabilities and types explicit inputs
 -> publish predefined @project fields and bootstrap input results separately
 -> Stage 0 constructs the project/provider graph
 -> collect and validate selected source input contracts
--> canonical module compilation consumes resolved inputs
+-> canonical module compilation consumes resolved inputs and the same profile
 ```
 
 A config source is not a module and produces no `start`, HIR, borrow facts or runtime output. A root metadata invocation later uses ordinary module AST visibility, not this isolated config service.
@@ -335,6 +338,7 @@ Extend or consolidate these owners. Do not add a broad `utils` module or a trait
 
 - [ ] Read the routed authorities and inspect the rebased source, status and concurrent-work boundaries.
 - [ ] Confirm obsolete reactive `$` syntax is gone and the delivered MON shared list parsing plus declaration-owned `#Config`/grouped bootstrap are the starting state. Preserve Wiring semantics and native-result-slot work already delivered.
+- [ ] Verify the numeric profile is already selected before input/config typing. Preserve the delivered materialisation and compatibility owners rather than recreating i32/f64-only rules.
 - [ ] Inventory registry, argument, config, scaffold and test owners. Record required removals and the existing page path that stays active.
 - [ ] Run the activation baseline gate. Record real failures rather than treating historical results as current.
 
@@ -350,7 +354,7 @@ Extend or consolidate these owners. Do not add a broad `utils` module or a trait
 ### Phase 2: Explicit `$config` contracts
 
 - [ ] Replace the delivered declaration-owned `#Config` inputs with a `$config` prefix on ordinary explicitly typed compile-time declarations.
-- [ ] Preserve primitive/default normalisation and implement the exact attachment/placement rules.
+- [ ] Preserve profile-aware primitive/default normalisation and implement the exact attachment/placement rules. Keep the restricted input type domain.
 - [ ] Make bootstrap contracts independent of `$project` metadata. Remove fixed-field input supply.
 - [ ] Keep same-name compatibility, resolution precedence, package isolation and source-only input validation.
 - [ ] Preserve input-dependence facts through helpers for fixed-only receiving fields.
@@ -394,6 +398,7 @@ Use manifest-backed language/project cases for public behaviour, subsystem-local
 | Registry safety | Core override, duplicate builder names, wrong context, unknown directive and known deferred directive. |
 | `$config` syntax | Required/present/absent input forms, explicit primitive type, invalid modifier targets, missing target, duplicate modifiers and invalid argument forms. |
 | Defaults | Source literal-only rejection, bootstrap earlier folded helpers, forward-reference failure, optional absence normalisation and no type inference from overrides. |
+| Numeric profile | All four Int/Float width combinations, Int64 input above i32 range, Float32 rounding/finite checks, matching bootstrap/source normalisation and rejection of fixed-width/Byte/Number input contracts. |
 | Input resolution | CLI/global/default order, bootstrap/source matching, conflicting defaults despite override, unknown input after source inventory and package-boundary isolation. |
 | Metadata separation | `$project(version = "1.0")` does not provide or block source input `version`. An explicit same-name `$config` does. Renamed argument slots do not rename contracts. |
 | Required version | Missing version fails even if a version contract exists. Literal version works. Earlier `$config` version works. `none` fails for required String version. |

@@ -11,17 +11,19 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
+- [Numeric types and semantics](./plans/number_type_numeric_plan.md) - Ready next after delivered MON v1. Deliver fixed-width integers/floats, a compilation-wide numeric profile and runtime Byte first, then Number/NumberN and the final Error.code U32 migration. Reuse the MON codec and preserve ordinary Int/Float APIs.
+
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
 
-- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after the MON syntax and MON Rust tooling checkpoints and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after delivered MON syntax/Rust tooling and the numeric checkpoint, and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
 
 - [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
 
 - [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes.
 
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted MON syntax and MON Rust tooling checkpoints, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted MON syntax/Rust tooling, unified numeric semantics, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
 
 - [Automatic Markdown heading section links](./plans/automatic-markdown-section-links-plan.md)
 
@@ -37,13 +39,11 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 
-- [Number and numeric semantics](./plans/number_type_numeric_plan.md)
-
-- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and numeric semantics. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Number. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
 
-- TODO plan: Struct layout directives. Define compiler-owned $layout contracts, permitted field types, alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
+- TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
 
@@ -57,7 +57,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Reuse the Rust codec for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Reuse the Rust codec and its expanded numeric schemas for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
 
 - [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
 
@@ -95,7 +95,8 @@ literal reading, or introduce explicit serialisation traits or a second schema
 language. Compiler-owned `$mon` convenience is accepted direction, but its exact
 invocation syntax is not defined. Source typing, automatic schema extraction,
 backend operations and builder commands are not delivered by the Rust-only v1
-delivery.
+delivery. Consume the numeric checkpoint's fixed-width, profile-aware and exact
+Number schema support without reimplementing numeric materialisation.
 
 Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
 a collection even at a map receiving context, and `::Variant(...)` uses a known
@@ -175,7 +176,7 @@ The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources 
 
 Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()` and exposes no bound flags. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
 
-No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes from its generator and reducer slices, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
+No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
 
 ## Genuinely deferred items
 
@@ -209,7 +210,8 @@ Wiring replaces Reactivity V1. The queued foundation removes reactive bindings, 
 
 ## Hash map follow-ups
 
-After the current scalar-keyed builtin map surface:
+After the scalar-keyed builtin map surface, including fixed integer and Byte keys
+from the numeric checkpoint:
 
 - Wasm runtime and lowering for the existing scalar-keyed builtin map
 - possible read-only map iteration only if it does not introduce `HASHABLE`, custom equality, custom hashers, mutable entry APIs or user-defined key semantics
@@ -224,7 +226,7 @@ After fixed collection type constraints:
 
 Separately deferred:
 
-- HTML-Wasm collection lowering, owned by the [HTML mixed JavaScript and Wasm backend plan](./plans/html_project_backend_wasm_final_implementation_plan.md). Future collection lowering must preserve infallible growable push and fallible fixed push.
+- HTML-Wasm collection lowering, owned by the [HTML mixed JavaScript and Wasm backend plan](./plans/html_project_backend_wasm_final_implementation_plan.md). Future collection lowering must preserve infallible growable push, fallible fixed push and delivered compact numeric/Byte scalar strides. Scalar storage support does not imply completed aggregate allocation or collection runtime support.
 
 ## Trait ecosystem follow-ups
 
@@ -246,7 +248,7 @@ After the first `@core/time` JavaScript slice:
 - async timers, sleep and intervals after async and task design exists
 - browser animation-frame integration in a web-specific package rather than `@core/time`
 - Wasm and native lowerings
-- higher-precision or nanosecond timestamp representation if wider numeric ABI work lands
+- higher-precision or nanosecond timestamp representation only after its own package contract is accepted. Fixed-width numeric support alone does not change Duration or Timestamp representation
 
 ## Deferred package-system follow-ups
 

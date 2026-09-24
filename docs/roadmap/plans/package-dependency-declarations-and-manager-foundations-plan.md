@@ -28,12 +28,11 @@ Remote registries, fetching, version solving, publishing and package-manager pol
 ACTIVE_PLAN: docs/roadmap/plans/package-dependency-declarations-and-manager-foundations-plan.md
 STATUS: queued-design - implementation blocked until declaration and resolver design is accepted
 CURRENT_SLICE: Design Phase 0 - audit project dependency availability and package boundary inputs
-LAST_GOOD_COMMIT: none until the design checkpoint and first implementation slice are accepted
 IMPLEMENTATION_SCOPE: project dependency declarations, aliases, resolver/catalog handoff and separate dependency package graphs
 SUPERSEDED_DECISION: the former `import @package` config preamble is not accepted and must not be implemented
 ```
 
-Keep this block concise. Git history is the implementation record.
+Keep this block concise. Git history is the implementation record. Establish the baseline in local working notes when this plan activates.
 
 ## Roadmap position
 
@@ -45,10 +44,12 @@ Do not infer activation from the presence of this file.
 
 - canonical project/package graph and immutable artefact architecture
 - dependency-clause and path-syntax migration
-- grouped project config, meaning the delivered parenthesised `project #= (...)`/`html #= (...)` bootstrap kept through the MON cutover, and recursive schema support
-- delivered typed build configuration values, meaning the declaration-owned `#Config` bootstrap rather than queued `$config` directives or field-embedded metadata, immutable `@project` and project-boundary isolation
+- delivered project configuration and typed build-input contracts from the activation tree, with immutable `@project`, recursive schemas and package-boundary isolation
+- unified numeric type identity, early NumericProfile selection and profile-compatible compiler/package inputs
 - stable package, module, public-interface and capability fingerprints
 - completed HTML mixed-target backend boundary where required by package compatibility policy
+
+Consume the configuration spelling and owners delivered by earlier serial work. Do not restore the pre-directive grouped bootstrap or a second input parser because an older implementation used `#Config`.
 
 ## Required authorities
 
@@ -56,8 +57,7 @@ Do not infer activation from the presence of this file.
 - delivered build configuration values and project-boundary isolation
 - `docs/build-system-design.md`
 - `docs/src/developer-docs/language/overview.mtf`
-- canonical package and project-configuration references
-- dependency-clause and path-syntax plan
+- canonical package, project-configuration and numeric references
 - progress matrix and roadmap
 - style, testing and validation guides
 
@@ -76,7 +76,7 @@ That proposal is superseded.
 
 Reasons:
 
-- source `import` is removed by the dependency-clause plan
+- source `import` is removed by the dependency-clause migration
 - `import` becomes an ordinary identifier
 - project dependency declaration and source-file binding have different ownership
 - parser implementation must not choose project manifest policy
@@ -94,7 +94,7 @@ Do not resurrect the removed source `import` grammar under a config-only excepti
 
 ## Locked ownership decisions
 
-`#Config` declares a typed build value. It does not declare, acquire, alias or conditionally enable a package dependency.
+A build-input contract declares a typed build value. It does not declare, acquire, alias or conditionally enable a package dependency.
 
 ### Project dependency declarations
 
@@ -150,6 +150,29 @@ Each dependency compiles as a separate package boundary with its own:
 
 A dependency never sees the consuming project's `@project` or unqualified build inputs.
 
+### Numeric profile and ABI compatibility
+
+The directly linked Moth graph shares one NumericProfile, selected before input
+materialisation and config compilation. Separate package input namespaces do not
+permit separate Int widths or Float precisions. Source dependencies compile for
+the selected profile. A precompiled dependency must match that profile or be
+rebuilt/rejected, never adapted silently at an import. This matters even when
+its exported types are explicit-width because private arithmetic and folded
+constants may use Int/Float.
+
+Preserve the distinct canonical identities of Int/Float, fixed I*/U*/F* types,
+Byte and Number scales through facade projection, generated requests and reuse.
+Include the profile in semantic artefact compatibility and the existing ABI,
+layout and physical-variant inputs. Error.code uses the delivered U32 contract,
+not a package-local signed-code adapter. Preserve source aliases independently
+of all these facts.
+
+Foreign WIT/components retain explicit foreign widths and separate value
+conversion contracts. They do not inherit Moth's profile or replace the semantic
+interface of a Moth-source dependency. F16 and Byte need explicit foreign mapping
+contracts. Package compatibility does not authorise a WIT loader, new numeric
+conversions or a Wasm Number runtime in this plan.
+
 ## Accepted preliminary rules
 
 - only direct dependencies are visible to project source
@@ -178,7 +201,7 @@ Before implementation, decide and document:
 8. lockfile identity, reproducibility and offline policy
 9. local path, Git and registry override policy
 10. alias collisions across package, child-module, support and synthetic namespaces
-11. capability compatibility across builders and targets
+11. capability compatibility across builders and targets, consuming the fixed numeric profile contract rather than redefining it
 12. security, provenance and dependency-count policy
 13. package-manager command boundaries
 14. persistent artefact and package-cache compatibility
@@ -194,7 +217,7 @@ Before design acceptance, only read-only audits and architecture-neutral cleanup
 - keep `PackageOrigin::Dependency` orthogonal to source or binding backing
 - ensure package boundary IDs never leak into project semantic identity
 - make package graph inputs explicit and deterministic
-- preserve immutable facade and capability fingerprint contracts
+- preserve immutable facade, numeric-profile and capability fingerprint contracts
 - keep package output-prefix encoding injective over full stable package identity
 - add no user syntax, resolver fallback, filesystem convention or placeholder registry
 
@@ -234,7 +257,7 @@ The resolver/catalog boundary owns:
 
 - declaration to canonical package resolution
 - source versus precompiled package input
-- compatibility and capability facts
+- compatibility and capability facts, including the already-selected numeric profile
 - package dependency metadata
 - structured missing, duplicate and incompatible package failures
 - future version and lockfile integration
@@ -272,7 +295,8 @@ Compiler and build orchestration consume resolved records only.
 - inventory config bootstrap, package identity, package registries, separate graphs, facades, fingerprints and capabilities
 - trace one hypothetical dependency from declaration through resolver, graph compilation, provider binding, generated sidecars and linking
 - trace alias ownership separately from canonical package identity
-- inspect package output-prefix requirements from the resource plan
+- inspect package output-prefix requirements from the resource authority
+- verify where the selected numeric profile reaches source compilation and precompiled compatibility checks
 - record every unresolved ownership question
 - produce no implementation code
 
@@ -293,7 +317,7 @@ Mandatory review: no parser or config implementation before acceptance.
 
 - define resolver/catalog input and result classes
 - define source and precompiled package descriptors
-- define compatibility and capability facts
+- define compatibility and capability facts using the delivered numeric profile and canonical scalar identities
 - define the first supported resolution source
 - define future lockfile and package-manager ownership without implementing it
 - decide local development dependency policy
@@ -325,6 +349,7 @@ Mandatory review: implementation remains blocked until Phases 1 and 2 are accept
 
 - resolve each declaration exactly once
 - diagnose missing, duplicate, incompatible and unsupported packages before project source compilation
+- reject precompiled numeric-profile mismatches or select a matching source rebuild without implicit numeric adapters
 - perform no undeclared filesystem probing
 - keep package acquisition outside compiler semantics
 - retain resolved package identity beneath local aliases
@@ -335,10 +360,11 @@ Review gate: declaration, resolution and compilation must have separate owners.
 
 - compile dependencies in deterministic dependency order
 - give each package its own config, inputs, source index, graph, generated worklist and private `@project`
+- pass the same numeric profile to every directly linked Moth compilation service before numeric inputs or constants materialise
 - publish only immutable facade artefacts to consumers
 - preserve capability, interface and compatibility fingerprints
 - reject public or reachable executable dependence on private package project context
-- preserve package resource origins and output-prefix identity when the resource plan is complete
+- preserve package resource origins and output-prefix identity when resource support is complete
 
 ### Phase 7 - register aliases for project source
 
@@ -371,6 +397,10 @@ Review gate: declaration, resolution and compilation must have separate owners.
 - no resolver fallback path is probed
 - source and precompiled descriptors share one consumer boundary
 - package output identity does not depend on consumer alias
+- source packages share all four supported numeric-profile combinations with their consumer
+- an incompatible precompiled profile is rejected even when only private implementation arithmetic uses Int/Float
+- exported fixed widths, Byte, Number scale and U32 Error.code preserve canonical identity beneath aliases
+- foreign WIT projections remain distinct from Moth-native package interfaces
 
 ## Stop conditions
 
@@ -383,7 +413,7 @@ Stop and request review when:
 - resolver code starts probing fallback filesystem locations
 - package acquisition enters compiler semantics
 - one package boundary needs the consumer's project globals
-- compatibility policy requires backend-specific parser behavior
+- compatibility policy requires backend-specific parser behavior or implicit numeric-profile adapters
 - an implementation phase crosses more than two unlisted stage boundaries
 
 ## Validation
