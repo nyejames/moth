@@ -1,0 +1,5 @@
+@helper readings
+
+values = readings()
+
+[:fixed width cross module return]

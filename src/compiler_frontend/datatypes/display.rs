@@ -88,6 +88,7 @@ fn display_definition(
             super::ids::BuiltinTypeKey::Char => "Char".to_owned(),
             super::ids::BuiltinTypeKey::Range => "Range".to_owned(),
             super::ids::BuiltinTypeKey::None => "None".to_owned(),
+            super::ids::BuiltinTypeKey::FixedScalar(scalar) => scalar.name().to_owned(),
         },
         TypeDefinition::Struct(struct_def) => {
             let name = path_name(struct_def.path, path_table, table, "<anonymous struct>");

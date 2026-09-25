@@ -327,12 +327,7 @@ pub(crate) fn parse_symbol_statement(
 
             // A type keyword after an existing symbol means the user is trying to
             // redeclare it with an explicit type, which is a shadowing error.
-            Some(TokenTag::DATATYPE_INT)
-            | Some(TokenTag::DATATYPE_FLOAT)
-            | Some(TokenTag::DATATYPE_BOOL)
-            | Some(TokenTag::DATATYPE_STRING)
-            | Some(TokenTag::DATATYPE_CHAR)
-            | Some(TokenTag::MUTABLE) => {
+            Some(tag) if tag.is_builtin_scalar_type_name() || tag == TokenTag::MUTABLE => {
                 let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
                     existing_reference.value.span,

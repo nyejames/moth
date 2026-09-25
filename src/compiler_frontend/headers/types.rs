@@ -952,6 +952,7 @@ fn rebind_parsed_type_ref_source_identity(type_ref: &mut ParsedTypeRef, file_id:
         | ParsedTypeRef::BuiltinFloat { span }
         | ParsedTypeRef::BuiltinString { span }
         | ParsedTypeRef::BuiltinChar { span }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
         | ParsedTypeRef::This { span } => rebind_source_span(span, file_id),
 
         ParsedTypeRef::Applied {
@@ -2319,6 +2320,7 @@ fn validate_parsed_type_ref(
         | ParsedTypeRef::BuiltinFloat { span }
         | ParsedTypeRef::BuiltinString { span }
         | ParsedTypeRef::BuiltinChar { span }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
         | ParsedTypeRef::This { span } => {
             validate_source_span(*span, file_id, "parsed type")?;
         }

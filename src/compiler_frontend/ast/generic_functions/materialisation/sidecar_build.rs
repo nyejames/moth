@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
+    CanonicalTypeIdentity, builtin_type_id_for_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -786,20 +786,17 @@ fn requester_type_id_for_canonical_identity(
         return Ok(type_id);
     }
     match identity {
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool) => Ok(builtin_type_ids::BOOL),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int) => Ok(builtin_type_ids::INT),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Float) => Ok(builtin_type_ids::FLOAT),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Decimal) => {
-            Ok(builtin_type_ids::DECIMAL)
+        CanonicalTypeIdentity::Builtin(builtin) => {
+            match builtin_type_id_for_canonical_builtin(*builtin) {
+                Some(type_id) => Ok(type_id),
+                // `Error` is a source-declared nominal, so a generated sidecar must inherit its
+                // requester-local handle instead of inventing one.
+                None => Err(CompilerError::compiler_error(
+                    "Generated evidence target has no requester-local canonical type handle",
+                )),
+            }
         }
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String) => {
-            Ok(builtin_type_ids::STRING)
-        }
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Char) => Ok(builtin_type_ids::CHAR),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Range) => Ok(builtin_type_ids::RANGE),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::None) => Ok(builtin_type_ids::NONE),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)
-        | CanonicalTypeIdentity::ModulePrivateNominal(_)
+        CanonicalTypeIdentity::ModulePrivateNominal(_)
         | CanonicalTypeIdentity::ExternalOpaque(_)
         | CanonicalTypeIdentity::Collection { .. }
         | CanonicalTypeIdentity::OrderedMap { .. }

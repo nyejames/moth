@@ -9,13 +9,13 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTraitIdentity, CanonicalTypeIdentity,
-    CanonicalTypeProjectionContext, ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity,
-    GenericDeclarationOrigin, project_type_id_to_canonical_identity,
+    CanonicalTraitIdentity, CanonicalTypeIdentity, CanonicalTypeProjectionContext,
+    ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, GenericDeclarationOrigin,
+    builtin_type_id_for_canonical_builtin, canonical_builtin_for_key,
+    project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition, TypeDefinition,
@@ -24,8 +24,7 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
-    BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
-    TypeId,
+    BuiltinTypeConstructor, GenericParameterId, NominalTypeId, TypeConstructor, TypeId,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -655,7 +654,7 @@ impl ModuleMaterialisationPreparation {
                     )
                 }),
             TypeDefinition::Builtin(builtin) => Ok(MaterialisationTypeBlueprint::Canonical(
-                CanonicalTypeIdentity::Builtin(canonical_builtin_type(builtin.key)),
+                CanonicalTypeIdentity::Builtin(canonical_builtin_for_key(builtin.key)),
             )),
             TypeDefinition::Struct(_) | TypeDefinition::Choice(_) => {
                 self.type_environment
@@ -794,18 +793,6 @@ impl ModuleMaterialisationPreparation {
         }
     }
 }
-fn canonical_builtin_type(key: BuiltinTypeKey) -> CanonicalBuiltinType {
-    match key {
-        BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
-        BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
-        BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
-        BuiltinTypeKey::Decimal => CanonicalBuiltinType::Decimal,
-        BuiltinTypeKey::String => CanonicalBuiltinType::String,
-        BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
-        BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
-        BuiltinTypeKey::None => CanonicalBuiltinType::None,
-    }
-}
 
 fn materialisation_type_arity_error(shape: &str, expected: usize, actual: usize) -> CompilerError {
     CompilerError::compiler_error(format!(
@@ -826,21 +813,20 @@ pub(super) fn intern_generated_canonical_type(
     }
 
     let type_id = match identity {
-        CanonicalTypeIdentity::Builtin(builtin) => match builtin {
-            CanonicalBuiltinType::Bool => builtin_type_ids::BOOL,
-            CanonicalBuiltinType::Int => builtin_type_ids::INT,
-            CanonicalBuiltinType::Float => builtin_type_ids::FLOAT,
-            CanonicalBuiltinType::Decimal => builtin_type_ids::DECIMAL,
-            CanonicalBuiltinType::String => builtin_type_ids::STRING,
-            CanonicalBuiltinType::Char => builtin_type_ids::CHAR,
-            CanonicalBuiltinType::Range => builtin_type_ids::RANGE,
-            CanonicalBuiltinType::None => builtin_type_ids::NONE,
-            CanonicalBuiltinType::Error => type_environment
-                .type_id_for_canonical_identity(identity)
-                .ok_or_else(|| CompilerError::compiler_error(
-                    "Generated canonical Error type has no declaring-context builtin declaration",
-                ))?,
-        },
+        CanonicalTypeIdentity::Builtin(builtin) => {
+            match builtin_type_id_for_canonical_builtin(*builtin) {
+                Some(type_id) => type_id,
+                // `Error` is a source-declared nominal, so its `TypeId` must come from the
+                // declaring environment rather than the seeded builtin layout.
+                None => type_environment
+                    .type_id_for_canonical_identity(identity)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated canonical Error type has no declaring-context builtin declaration",
+                        )
+                    })?,
+            }
+        }
         CanonicalTypeIdentity::Option(inner) => {
             let inner = intern_generated_canonical_type(
                 inner,
@@ -916,9 +902,11 @@ pub(super) fn intern_generated_canonical_type(
         CanonicalTypeIdentity::ExternalOpaque(external) => {
             let (external_type_id, _) = external_registry
                 .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
-                .ok_or_else(|| CompilerError::compiler_error(
-                    "Generated canonical external type is absent from the binding registry",
-                ))?;
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated canonical external type is absent from the binding registry",
+                    )
+                })?;
             type_environment.intern_external(external_type_id)
         }
         CanonicalTypeIdentity::GenericInstance { base, arguments } => {
@@ -951,11 +939,11 @@ pub(super) fn intern_generated_canonical_type(
                     path_fork,
                 )?);
             }
-            type_environment.intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
+            type_environment
+                .intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
         }
         CanonicalTypeIdentity::ModulePrivateGenericInstance { base, arguments } => {
-            let base_identity =
-                CanonicalTypeIdentity::ModulePrivateNominal(base.clone());
+            let base_identity = CanonicalTypeIdentity::ModulePrivateNominal(base.clone());
             let base_type_id = intern_generated_canonical_type(
                 &base_identity,
                 type_environment,
@@ -984,7 +972,8 @@ pub(super) fn intern_generated_canonical_type(
                     path_fork,
                 )?);
             }
-            type_environment.intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
+            type_environment
+                .intern_generic_instance(nominal_id, interned_arguments.into_boxed_slice())
         }
         CanonicalTypeIdentity::GenericParameter(_) => {
             return Err(CompilerError::compiler_error(

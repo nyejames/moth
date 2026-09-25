@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::{
 };
 use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
+    CanonicalBuiltinType, CanonicalTypeIdentity, builtin_type_id_for_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;

@@ -36,6 +36,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidGenericInstantiationReason,
     InvalidTypeAnnotationReason, NameNamespace, NamespaceTypeValueMisuseKind,
 };
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType,
 };
@@ -526,12 +527,15 @@ fn visible_declaration_by_name<'a>(
 
 /// Builtin scalar type names that may still appear as named placeholders.
 fn builtin_named_type(type_name: StringId, string_table: &StringTable) -> Option<DataType> {
-    match string_table.resolve(type_name) {
-        "Int" => Some(DataType::Int),
-        "Float" => Some(DataType::Float),
-        "Bool" => Some(DataType::Bool),
-        "String" => Some(DataType::StringSlice),
-        "Char" => Some(DataType::Char),
-        _ => None,
-    }
+    let resolved = string_table.resolve(type_name);
+    let data_type = match resolved {
+        "Int" => DataType::Int,
+        "Float" => DataType::Float,
+        "Bool" => DataType::Bool,
+        "String" => DataType::StringSlice,
+        "Char" => DataType::Char,
+        // Fixed-scalar spellings resolve through their single spelling owner.
+        _ => DataType::FixedScalar(FixedScalar::from_name(resolved)?),
+    };
+    Some(data_type)
 }

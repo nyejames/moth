@@ -8,6 +8,8 @@
 //  Compact Type Identifiers
 // -----------------------------------------------------------
 
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+
 /// Dense module-local type identifier.
 ///
 /// Valid only with the `TypeEnvironment` that created it.
@@ -26,7 +28,7 @@ pub struct TypeId(pub u32);
 /// WARNING: if `TypeEnvironment::new()` changes its builtin seeding order,
 /// these constants must be updated to match.
 pub mod builtin_type_ids {
-    use super::TypeId;
+    use super::{FixedScalar, TypeId};
 
     pub const BOOL: TypeId = TypeId(0);
     pub const INT: TypeId = TypeId(1);
@@ -38,6 +40,19 @@ pub mod builtin_type_ids {
     pub const CHAR: TypeId = TypeId(5);
     pub const RANGE: TypeId = TypeId(6);
     pub const NONE: TypeId = TypeId(7);
+
+    /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `None`.
+    const FIRST_FIXED_SCALAR: u32 = 8;
+
+    /// Deterministic `TypeId` for one fixed-width builtin scalar.
+    ///
+    /// WHAT: mirrors the `FixedScalar::ALL` seeding sequence `TypeEnvironment::new` inserts
+    ///       immediately after `None`.
+    /// WHY: builtin identities are stable facts shared by parser, bridge and projection code, so
+    ///      they come from this one mapping rather than a per-call-site arithmetic offset.
+    pub const fn fixed_scalar(scalar: FixedScalar) -> TypeId {
+        TypeId(FIRST_FIXED_SCALAR + scalar as u32)
+    }
 }
 
 /// Dense identifier for a nominal struct or choice definition.
@@ -58,7 +73,9 @@ pub struct GenericParameterListId(pub u32);
 
 /// Keys for builtin scalar types.
 ///
-/// These are seeded once when `TypeEnvironment` is created.
+/// These are seeded once when `TypeEnvironment` is created. `FixedScalar` identities carry their
+/// own width, signedness or octet meaning, so `Int` and `Float` never alias a fixed width that
+/// happens to match the active `NumericProfile`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinTypeKey {
     Bool,
@@ -71,6 +88,7 @@ pub enum BuiltinTypeKey {
     Char,
     Range,
     None,
+    FixedScalar(FixedScalar),
 }
 
 /// A type constructor paired with its arguments.

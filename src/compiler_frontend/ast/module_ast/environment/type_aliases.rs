@@ -291,6 +291,7 @@ fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
         | ParsedTypeRef::This { span, .. }
         | ParsedTypeRef::Collection { span, .. }
         | ParsedTypeRef::Map { span, .. }

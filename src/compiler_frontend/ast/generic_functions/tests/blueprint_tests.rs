@@ -6,6 +6,7 @@
 //! replace source-owned spans when equivalent nominal blueprints are merged.
 
 use super::*;
+use crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 

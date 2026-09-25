@@ -12,9 +12,14 @@ use crate::backends::external_package_validation::BackendTarget;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind, UnsupportedBackendFeatureReason,
 };
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
+    StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
-use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
@@ -33,6 +38,7 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -238,7 +244,7 @@ fn wasm_feature_validation_rejects_reachable_generic_values_with_or_without_span
             vec![block(
                 BlockId(0),
                 vec![],
-                HirTerminator::Return(generic_expression(0, generic_type, span)),
+                HirTerminator::Return(typed_expression(0, generic_type, span)),
             )],
         );
         let diagnostic = wasm_feature_validation_diagnostic(
@@ -283,7 +289,7 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::Return(generic_expression(1, generic_type, None)),
+                HirTerminator::Return(typed_expression(1, generic_type, None)),
             ),
         ],
     );
@@ -303,6 +309,231 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
         result.is_ok(),
         "Wasm validation should ignore generic runtime values in unreachable helpers"
     );
+}
+
+#[test]
+fn backend_feature_validation_rejects_fixed_width_scalars_through_type_structure() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    // `{U16}?` reaches a fixed-width scalar through option and collection structure.
+    let entries =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U16), None);
+    let optional_entries = type_environment.intern_option(entries);
+    let spanful = Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::source_start(),
+    ));
+
+    for span in [spanful, None] {
+        let module = module_returning_expression(optional_entries, span);
+
+        for target in [BackendTarget::Wasm, BackendTarget::Js] {
+            let diagnostic = feature_validation_diagnostic(
+                &module,
+                &type_environment,
+                &mut string_table,
+                target,
+                "both targets should reject a reachable optional collection of fixed-width values",
+            );
+
+            assert_unsupported_feature_for_target(
+                &diagnostic,
+                &mut string_table,
+                target,
+                UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+            );
+            assert_eq!(
+                diagnostic.primary_span, span,
+                "fixed-width rejection should preserve optional source provenance"
+            );
+        }
+    }
+}
+
+#[test]
+fn backend_feature_validation_rejects_fixed_width_scalars_in_nominal_members() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+
+    // A struct field and a choice payload each reach a fixed-width scalar through their member type.
+    let ledger_entries =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I64), None);
+    let (_, ledger_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([FieldDefinition {
+            name: PathId::ROOT,
+            type_id: ledger_entries,
+            span: None,
+        }]),
+        generic_parameters: None,
+        const_record: false,
+    });
+
+    let sample_value =
+        type_environment.intern_option(builtin_type_ids::fixed_scalar(FixedScalar::F32));
+    let (_, reading_type) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        variants: Box::new([ChoiceVariantDefinition {
+            name: string_table.intern("Sample"),
+            tag: 0,
+            payload: ChoiceVariantPayloadDefinition::Record {
+                fields: Box::new([FieldDefinition {
+                    name: PathId::ROOT,
+                    type_id: sample_value,
+                    span: None,
+                }]),
+            },
+            span: None,
+        }]),
+        generic_parameters: None,
+    });
+
+    for member_type in [ledger_type, reading_type] {
+        let module = module_returning_expression(member_type, None);
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "a reachable nominal value whose member type carries a fixed-width scalar must be rejected",
+        );
+
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+        );
+    }
+}
+
+#[test]
+fn backend_feature_validation_rejects_fixed_width_return_type_without_an_expression() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let values =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+
+    // Generated or synthetic HIR can declare a fixed-width return type with no reachable
+    // expression of that type. The signature still fails and the diagnostic stays spanless.
+    let module = hir_module(
+        FunctionId(0),
+        vec![function_with_signature(
+            FunctionId(0),
+            BlockId(0),
+            vec![],
+            values,
+        )],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+
+    let diagnostic = feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        BackendTarget::Wasm,
+        "a reachable return type carrying a fixed-width scalar must be rejected",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+    assert_eq!(
+        diagnostic.primary_span, None,
+        "a signature-only occurrence has no expression span to report"
+    );
+}
+
+#[test]
+fn backend_feature_validation_reports_fixed_width_before_generic_runtime_values() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    // `Box of U8` is both a generic runtime value and a value carrying a fixed-width scalar.
+    let box_of_u8 = type_environment.intern_generic_instance(
+        NominalTypeId(0),
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::U8)].into_boxed_slice(),
+    );
+    let module = module_returning_expression(box_of_u8, None);
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "a Box of U8 must report the fixed-width scalar reason before the generic runtime reason",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+}
+
+#[test]
+fn backend_feature_validation_ignores_unreachable_fixed_width_scalars() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let values =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U8), None);
+
+    // The private helper mentions fixed-width values in its parameter, its local and its return
+    // type, but nothing reaches it from the start function.
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function_with_signature(FunctionId(1), BlockId(1), vec![LocalId(0)], values),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block_with_locals(
+                BlockId(1),
+                vec![HirLocal {
+                    id: LocalId(0),
+                    ty: builtin_type_ids::fixed_scalar(FixedScalar::Byte),
+                    mutable: false,
+                    region: RegionId(0),
+                    span: None,
+                }],
+                vec![],
+                HirTerminator::Return(unit_expression(1)),
+            ),
+        ],
+    );
+
+    let reachability = test_reachability(&module);
+    assert_eq!(
+        reachability.backend_selection().functions().len(),
+        1,
+        "the helper must stay outside the reachable selection"
+    );
+
+    for target in [BackendTarget::Wasm, BackendTarget::Js] {
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target,
+                type_environment: Some(&type_environment),
+            },
+            &mut string_table,
+        );
+
+        assert!(
+            result.is_ok(),
+            "{target:?} should ignore fixed-width values in unreachable helpers"
+        );
+    }
 }
 
 #[test]
@@ -447,12 +678,28 @@ fn wasm_feature_validation_diagnostic(
     string_table: &mut StringTable,
     expectation: &str,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
+    feature_validation_diagnostic(
+        module,
+        type_environment,
+        string_table,
+        BackendTarget::Wasm,
+        expectation,
+    )
+}
+
+fn feature_validation_diagnostic(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    string_table: &mut StringTable,
+    target: BackendTarget,
+    expectation: &str,
+) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     let reachability = test_reachability(module);
     let error = validate_hir_backend_feature_support(
         BackendFeatureValidationInput {
             hir: module,
             reachability: &reachability,
-            target: BackendTarget::Wasm,
+            target,
             type_environment: Some(type_environment),
         },
         string_table,
@@ -599,19 +846,37 @@ fn hir_module(
 }
 
 fn function(id: FunctionId, entry: BlockId) -> HirFunction {
+    function_with_signature(id, entry, vec![], builtin_type_ids::NONE)
+}
+
+fn function_with_signature(
+    id: FunctionId,
+    entry: BlockId,
+    params: Vec<LocalId>,
+    return_type: TypeId,
+) -> HirFunction {
     HirFunction {
         id,
         entry,
-        params: vec![],
-        return_type: builtin_type_ids::NONE,
+        params,
+        return_type,
     }
 }
 
 fn block(id: BlockId, statements: Vec<HirStatement>, terminator: HirTerminator) -> HirBlock {
+    block_with_locals(id, vec![], statements, terminator)
+}
+
+fn block_with_locals(
+    id: BlockId,
+    locals: Vec<HirLocal>,
+    statements: Vec<HirStatement>,
+    terminator: HirTerminator,
+) -> HirBlock {
     HirBlock {
         id,
         region: RegionId(0),
-        locals: vec![],
+        locals,
         statements,
         terminator,
     }
@@ -683,7 +948,8 @@ fn float_statement(
     }
 }
 
-fn generic_expression(id: u32, ty: TypeId, span: Option<SourceSpan>) -> HirExpression {
+/// Builds a value expression carrying the semantic type a gate has to classify.
+fn typed_expression(id: u32, ty: TypeId, span: Option<SourceSpan>) -> HirExpression {
     HirExpression {
         id: HirValueId(id),
         kind: HirExpressionKind::TupleConstruct { elements: vec![] },
@@ -692,6 +958,19 @@ fn generic_expression(id: u32, ty: TypeId, span: Option<SourceSpan>) -> HirExpre
         region: RegionId(0),
         span,
     }
+}
+
+/// Builds a module whose reachable start function returns one expression of `ty`.
+fn module_returning_expression(ty: TypeId, span: Option<SourceSpan>) -> HirModule {
+    hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::Return(typed_expression(0, ty, span)),
+        )],
+    )
 }
 
 fn unit_expression(id: u32) -> HirExpression {

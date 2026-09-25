@@ -1,0 +1,7 @@
+missing_reading || -> U16?:
+    return none
+;
+
+probe = missing_reading()
+
+[:fixed width option none]

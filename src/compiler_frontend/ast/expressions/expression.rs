@@ -365,6 +365,7 @@ pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
         DataType::Decimal => builtin_type_ids::DECIMAL,
         DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
+        DataType::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
         DataType::Range => builtin_type_ids::RANGE,
         DataType::None | DataType::Inferred => builtin_type_ids::NONE,
         DataType::Struct { type_id, .. } | DataType::Choices { type_id, .. } => *type_id,

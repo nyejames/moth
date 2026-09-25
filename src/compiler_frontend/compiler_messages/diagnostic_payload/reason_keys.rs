@@ -836,6 +836,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::FloatFormatting => "unsupported_backend_feature.float_formatting",
     &UnsupportedBackendFeatureReason::FloatBoundaryValidation => "unsupported_backend_feature.float_boundary_validation",
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",
+    &UnsupportedBackendFeatureReason::FixedWidthScalarValues => "unsupported_backend_feature.fixed_width_scalar_values",
     &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",

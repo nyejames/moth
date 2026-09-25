@@ -1,0 +1,7 @@
+readings || -> {U8}:
+    return {}
+;
+
+values = readings()
+
+[:fixed width collection return]

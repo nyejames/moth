@@ -4,6 +4,7 @@
 //! WHY: declaration parsing, dependency parsing, and runtime-body validation have separate owners; this
 //! module only answers which branch the per-file parser should try next.
 
+use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::line_scanning::find_top_level_fat_arrow_on_line_in_scanned_tokens;
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRef, TokenTag};
@@ -41,14 +42,8 @@ pub(super) fn classify_tagged_item(
         return HeaderFileItem::StartBodyToken;
     }
 
-    if (current_tag == TokenTag::DATATYPE_INT
-        || current_tag == TokenTag::DATATYPE_FLOAT
-        || current_tag == TokenTag::DATATYPE_BOOL
-        || current_tag == TokenTag::DATATYPE_STRING
-        || current_tag == TokenTag::DATATYPE_CHAR)
-        && at_statement_boundary
-    {
-        if let Some(type_name) = builtin_conformance_target_name_for_tag(current_tag)
+    if current_tag.is_builtin_scalar_type_name() && at_statement_boundary {
+        if let Some(type_name) = builtin_scalar_type_name_for_tag(current_tag)
             && follower_tag == Some(TokenTag::MUST)
         {
             return HeaderFileItem::BuiltinTypeConformanceTarget(type_name);
@@ -149,17 +144,6 @@ pub(super) fn statement_boundary_at_source(canonical: &SourceTokens, current_ind
     };
     let tag = previous_token.tag();
     tag == TokenTag::MODULE_START || tag == TokenTag::NEWLINE || tag == TokenTag::END
-}
-
-fn builtin_conformance_target_name_for_tag(tag: TokenTag) -> Option<&'static str> {
-    match tag {
-        _ if tag == TokenTag::DATATYPE_INT => Some("Int"),
-        _ if tag == TokenTag::DATATYPE_FLOAT => Some("Float"),
-        _ if tag == TokenTag::DATATYPE_BOOL => Some("Bool"),
-        _ if tag == TokenTag::DATATYPE_STRING => Some("String"),
-        _ if tag == TokenTag::DATATYPE_CHAR => Some("Char"),
-        _ => None,
-    }
 }
 
 /// Classification of the token following a top-level symbol name.

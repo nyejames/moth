@@ -51,6 +51,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
@@ -536,20 +537,10 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenTag::DATATYPE_INT
-        | TokenTag::DATATYPE_FLOAT
-        | TokenTag::DATATYPE_BOOL
-        | TokenTag::DATATYPE_STRING
-        | TokenTag::DATATYPE_CHAR => {
+        tag if tag.is_builtin_scalar_type_name() => {
             if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-                let cast_name = match token {
-                    TokenTag::DATATYPE_INT => Some(string_table.intern("Int")),
-                    TokenTag::DATATYPE_FLOAT => Some(string_table.intern("Float")),
-                    TokenTag::DATATYPE_BOOL => Some(string_table.intern("Bool")),
-                    TokenTag::DATATYPE_STRING => Some(string_table.intern("String")),
-                    TokenTag::DATATYPE_CHAR => Some(string_table.intern("Char")),
-                    _ => None,
-                };
+                let cast_name = builtin_scalar_type_name_for_tag(token)
+                    .map(|spelling| string_table.intern(spelling));
                 return Err(CompilerDiagnostic::invalid_builtin_call(
                     InvalidBuiltinCallReason::ScalarConstructorRemoved,
                     cast_name,

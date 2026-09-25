@@ -243,6 +243,23 @@ macro_rules! token_schema {
                 })
             }
 
+            /// Whether this tag is a builtin scalar type spelling in source.
+            ///
+            /// WHAT: the schema-owned fact behind type-position checks for `Int`, `Float`, `Bool`,
+            ///      `String`, `Char` and every explicit-width spelling (`I8`..`F64`, `Byte`).
+            /// WHY: every type-position parser must accept the same builtin scalar spelling set,
+            ///      so the set is derived from the taxonomy class here instead of being repeated
+            ///      tag by tag at each call site. `None`, `True` and `False` share the builtin-type
+            ///      class but are not scalar type names, so they are excluded.
+            pub(crate) fn is_builtin_scalar_type_name(self) -> bool {
+                self.schema()
+                    .is_some_and(|schema| schema.has_class(TOKEN_CLASS_BUILTIN_TYPE))
+                    && !matches!(
+                        self,
+                        Self::DATATYPE_NONE | Self::DATATYPE_TRUE | Self::DATATYPE_FALSE
+                    )
+            }
+
             /// Whether this tag counts toward the stats symbol bucket.
             ///
             /// WHAT: the schema-owned fact behind `TokenStats::symbols`.
@@ -961,6 +978,126 @@ token_schema! {
         None
     ),
     (Yield, YIELD, 94, "`yield`", Static, 0, TOKEN_CLASS_KEYWORD, None),
+    (
+        DatatypeI8,
+        DATATYPE_I8,
+        95,
+        "`I8`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeI16,
+        DATATYPE_I16,
+        96,
+        "`I16`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeI32,
+        DATATYPE_I32,
+        97,
+        "`I32`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeI64,
+        DATATYPE_I64,
+        98,
+        "`I64`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeU8,
+        DATATYPE_U8,
+        99,
+        "`U8`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeU16,
+        DATATYPE_U16,
+        100,
+        "`U16`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeU32,
+        DATATYPE_U32,
+        101,
+        "`U32`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeU64,
+        DATATYPE_U64,
+        102,
+        "`U64`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeF16,
+        DATATYPE_F16,
+        103,
+        "`F16`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeF32,
+        DATATYPE_F32,
+        104,
+        "`F32`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeF64,
+        DATATYPE_F64,
+        105,
+        "`F64`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeByte,
+        DATATYPE_BYTE,
+        106,
+        "`Byte`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
 }
 
 impl TokenShape {

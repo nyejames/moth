@@ -19,6 +19,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use super::definitions::TypeDefinition;
 use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
+use super::fixed_scalar::FixedScalar;
 use super::generic_identity_bridge::display_generic_instantiation_key;
 use super::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType, GenericInstantiationKey,
@@ -84,6 +85,11 @@ pub enum DataType {
     Decimal,
     StringSlice, // UTF-8 read-only string slice
     Char,
+    /// Explicit-width builtin scalar or the `Byte` octet type.
+    ///
+    /// These are nominally distinct from `Int`/`Float` even when a profile width matches, and
+    /// `Byte` is distinct from `U8`, `I8` and `Char`.
+    FixedScalar(FixedScalar),
 
     // Reserved or not-yet-wired variants kept for planned language work.
     #[allow(dead_code)] // Planned: explicit parameter/record type surfaces.
@@ -282,6 +288,7 @@ impl DataType {
             DataType::Bool => "Bool".to_string(),
             DataType::StringSlice => "String".to_string(),
             DataType::Char => "Char".to_string(),
+            DataType::FixedScalar(scalar) => scalar.name().to_string(),
             DataType::Float => "Float".to_string(),
             DataType::Int => "Int".to_string(),
             DataType::Decimal => "Decimal".to_string(),
@@ -507,6 +514,7 @@ impl PartialEq for DataType {
             (DataType::False, DataType::False) => true,
             (DataType::StringSlice, DataType::StringSlice) => true,
             (DataType::Char, DataType::Char) => true,
+            (DataType::FixedScalar(left), DataType::FixedScalar(right)) => left == right,
             (DataType::Float, DataType::Float) => true,
             (DataType::Int, DataType::Int) => true,
             (DataType::Decimal, DataType::Decimal) => true,
@@ -646,6 +654,7 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
             ids::BuiltinTypeKey::String => DataType::StringSlice,
             ids::BuiltinTypeKey::Char => DataType::Char,
             ids::BuiltinTypeKey::Range => DataType::Range,
+            ids::BuiltinTypeKey::FixedScalar(scalar) => DataType::FixedScalar(scalar),
             ids::BuiltinTypeKey::None => DataType::None,
         },
         Some(TypeDefinition::Struct(def)) => DataType::Struct {

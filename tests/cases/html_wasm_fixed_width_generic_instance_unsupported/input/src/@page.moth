@@ -1,0 +1,7 @@
+Box type T = |
+    value T,
+|
+
+boxes {Box of Byte} = {}
+
+[:fixed width generic instance]

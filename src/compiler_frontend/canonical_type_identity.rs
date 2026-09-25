@@ -25,9 +25,10 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
-    TypeId,
+    TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolPath;
@@ -182,6 +183,11 @@ pub(crate) enum CanonicalBuiltinType {
     Range,
     None,
     Error,
+    /// Explicit-width builtin scalar or the `Byte` octet type.
+    ///
+    /// Distinct from `Int`/`Float`: a fixed width is part of the identity, so a matching
+    /// `NumericProfile` width never unifies the two.
+    FixedScalar(FixedScalar),
 }
 
 /// Binding-backed opaque external type identity.
@@ -633,9 +639,9 @@ pub(crate) fn project_type_id_to_canonical_identity(
     })?;
 
     match definition {
-        TypeDefinition::Builtin(builtin) => {
-            Ok(CanonicalTypeIdentity::Builtin(project_builtin(builtin.key)))
-        }
+        TypeDefinition::Builtin(builtin) => Ok(CanonicalTypeIdentity::Builtin(
+            canonical_builtin_for_key(builtin.key),
+        )),
         TypeDefinition::Struct(def) => {
             let origin = context
                 .nominal_origins
@@ -715,7 +721,11 @@ pub(crate) fn project_type_id_to_canonical_identity(
 }
 
 /// Maps a builtin scalar key to its canonical builtin identity.
-fn project_builtin(key: BuiltinTypeKey) -> CanonicalBuiltinType {
+///
+/// WHAT: the single owner of `BuiltinTypeKey -> CanonicalBuiltinType`.
+/// WHY: generated blueprints, sidecar publication and import projection all need this mapping and
+///      must agree, so they call this function instead of keeping private copies.
+pub(crate) fn canonical_builtin_for_key(key: BuiltinTypeKey) -> CanonicalBuiltinType {
     match key {
         BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
         BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
@@ -725,7 +735,35 @@ fn project_builtin(key: BuiltinTypeKey) -> CanonicalBuiltinType {
         BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
         BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
         BuiltinTypeKey::None => CanonicalBuiltinType::None,
+        BuiltinTypeKey::FixedScalar(scalar) => CanonicalBuiltinType::FixedScalar(scalar),
     }
+}
+
+/// Maps a seeded canonical builtin identity to its deterministic module-local `TypeId`.
+///
+/// WHAT: the single owner of `CanonicalBuiltinType -> builtin TypeId` for the identities seeded
+///       by `TypeEnvironment::new`.
+/// WHY: canonical identity crosses module boundaries, but generated blueprints, sidecar
+///      publication and import projection each have to name the consumer-local `TypeId` again.
+///      One table keeps those four sites from drifting apart.
+///
+/// Returns `None` for `Error`, which is a source-declared nominal materialised by a real
+/// compilation, so its `TypeId` must come from the declaring environment.
+pub(crate) fn builtin_type_id_for_canonical_builtin(
+    builtin: CanonicalBuiltinType,
+) -> Option<TypeId> {
+    Some(match builtin {
+        CanonicalBuiltinType::Bool => builtin_type_ids::BOOL,
+        CanonicalBuiltinType::Int => builtin_type_ids::INT,
+        CanonicalBuiltinType::Float => builtin_type_ids::FLOAT,
+        CanonicalBuiltinType::Decimal => builtin_type_ids::DECIMAL,
+        CanonicalBuiltinType::String => builtin_type_ids::STRING,
+        CanonicalBuiltinType::Char => builtin_type_ids::CHAR,
+        CanonicalBuiltinType::Range => builtin_type_ids::RANGE,
+        CanonicalBuiltinType::None => builtin_type_ids::NONE,
+        CanonicalBuiltinType::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(scalar),
+        CanonicalBuiltinType::Error => return None,
+    })
 }
 
 /// Projects a constructed type, validating exact arity for each builtin constructor.

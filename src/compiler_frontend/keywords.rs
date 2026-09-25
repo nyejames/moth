@@ -10,11 +10,11 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Keywords that may not be shadowed by identifiers after case folding and
 /// stripping leading underscores.
-pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 36] = [
+pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 48] = [
     "export", "if", "return", "yield", "else", "checked", "async", "cast", "as", "copy", "type",
     "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue", "is", "not",
     "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool", "char", "assert",
-    "config",
+    "config", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "byte",
 ];
 
 /// Neutral presentation class for an exact Moth source word.
@@ -121,6 +121,18 @@ pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
         "None" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_NONE)),
         "True" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_TRUE)),
         "False" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FALSE)),
+        "I8" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I8)),
+        "I16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I16)),
+        "I32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I32)),
+        "I64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I64)),
+        "U8" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U8)),
+        "U16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U16)),
+        "U32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U32)),
+        "U64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U64)),
+        "F16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F16)),
+        "F32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F32)),
+        "F64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F64)),
+        "Byte" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BYTE)),
         _ => None,
     }
 }

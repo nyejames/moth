@@ -191,6 +191,13 @@ fn parse_type_atom(
 ) -> TypeParseResult<ParsedTypeRef> {
     let span = current_source_span(token_stream);
 
+    // Explicit-width builtin scalars and `Byte` are keyword spellings with one token tag each,
+    // so they reuse the builtin-scalar branch instead of growing one parser arm per type.
+    if let Some(scalar) = fixed_scalar_for_builtin_type_tag(token_stream.current_tag()) {
+        token_stream.advance();
+        return Ok(ParsedTypeRef::BuiltinFixedScalar { scalar, span });
+    }
+
     match token_stream.current_tag() {
         TokenTag::DATATYPE_INT => {
             token_stream.advance();
@@ -940,12 +947,8 @@ fn collection_type_slice_can_start_type(
     };
 
     let can_start = match first_tag {
-        TokenTag::DATATYPE_INT
-        | TokenTag::DATATYPE_FLOAT
-        | TokenTag::DATATYPE_BOOL
-        | TokenTag::DATATYPE_STRING
-        | TokenTag::DATATYPE_CHAR
-        | TokenTag::OPEN_CURLY => true,
+        tag if tag.is_builtin_scalar_type_name() => true,
+        TokenTag::OPEN_CURLY => true,
 
         TokenTag::TRAIT_THIS => matches!(context, TypeAnnotationContext::TraitRequirement),
 

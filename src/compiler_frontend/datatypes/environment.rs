@@ -29,6 +29,7 @@ use super::definitions::{
     FieldDefinition, FunctionParameterDefinition, FunctionTypeDefinition,
     GenericInstanceDefinition, GenericParameterDefinition, StructTypeDefinition, TypeDefinition,
 };
+use super::fixed_scalar::FixedScalar;
 use super::generic_bindings::{BindingConflict, GenericTypeBindings};
 use super::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
@@ -37,7 +38,7 @@ use super::generic_parameters::TypeParameterId;
 use super::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, ConstructedTypeKey, FunctionTypeKey,
     GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
-    TypeId,
+    TypeId, builtin_type_ids,
 };
 use super::queries::TypeKind;
 use super::{BuiltinScalarReceiver, ReceiverKey};
@@ -311,6 +312,19 @@ impl TypeEnvironment {
         let char_id = env.insert_builtin(BuiltinTypeKey::Char);
         let range_id = env.insert_builtin(BuiltinTypeKey::Range);
         let none_id = env.insert_builtin(BuiltinTypeKey::None);
+
+        // Explicit-width scalars are profile-independent identities, so they are seeded once
+        // with the other builtins. Seeding happens after `None` to keep the pre-existing builtin
+        // `TypeId` layout stable; `builtin_type_ids::fixed_scalar` mirrors this sequence and the
+        // invariant check below fails loudly if the two ever drift apart.
+        for scalar in FixedScalar::ALL {
+            let fixed_scalar_id = env.insert_builtin(BuiltinTypeKey::FixedScalar(scalar));
+            debug_assert_eq!(
+                fixed_scalar_id,
+                builtin_type_ids::fixed_scalar(scalar),
+                "fixed scalar seeding order must match builtin_type_ids::fixed_scalar"
+            );
+        }
 
         env.builtins = BuiltinTypes {
             bool: bool_id,
@@ -1732,7 +1746,10 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Char => {
                     Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char))
                 }
-                BuiltinTypeKey::Decimal | BuiltinTypeKey::Range | BuiltinTypeKey::None => None,
+                BuiltinTypeKey::Decimal
+                | BuiltinTypeKey::Range
+                | BuiltinTypeKey::FixedScalar(_)
+                | BuiltinTypeKey::None => None,
             },
 
             TypeDefinition::Struct(definition) => Some(ReceiverKey::Struct(definition.path)),
@@ -1786,6 +1803,9 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Range => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Range))
                 }
+                BuiltinTypeKey::FixedScalar(scalar) => Some(TypeIdentityKey::Builtin(
+                    BridgeBuiltinTypeKey::FixedScalar(scalar),
+                )),
                 BuiltinTypeKey::None => None,
             },
             TypeDefinition::Struct(def) => Some(TypeIdentityKey::Nominal(def.path)),

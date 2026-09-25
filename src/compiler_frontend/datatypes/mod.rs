@@ -8,6 +8,7 @@
 //! - `ids.rs` — compact type identifiers and canonical keys.
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
+//! - `fixed_scalar.rs` — the explicit-width builtin scalar identities (`I8`..`F64`, `Byte`).
 //! - `parsed.rs` — parsed type syntax before resolution (no semantic identity).
 //! - `display.rs` — type name rendering through `StringTable`.
 //! - `queries.rs` — semantic fact queries over `TypeId + TypeEnvironment`.
@@ -25,6 +26,7 @@ pub mod definitions;
 pub mod display;
 pub mod environment;
 pub mod fallible_carrier;
+pub(crate) mod fixed_scalar;
 pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;

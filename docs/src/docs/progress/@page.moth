@@ -812,9 +812,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Rich numeric redesign]
-            [: Deferred]
-            [: Current numeric coverage is tracked in the core arithmetic and Float rows.]
-            [: The accepted Number and fixed-scale NumberN family, Byte scaffold and conservative numeric check elision remain deferred. Byte runtime support and lossy Float/Number helpers remain later accepted work.]
+            [: Partial]
+            [: Targeted target-gate coverage for reachable fixed-width integer, fixed binary float and [$html:<code>Byte</code>] values through collections, options, struct and choice members, generic instances, cross-module signatures and unreachable helpers, on both HTML-JS and HTML-Wasm.]
+            [: Fixed-width integer/float and [$html:<code>Byte</code>] spellings are recognised by the frontend as canonical types, and both HTML-JS and HTML-Wasm reject reachable values with a structured unsupported-backend diagnostic until their lowerings land. The accepted Number and fixed-scale NumberN family and conservative numeric check elision remain deferred. [$html:<code>Byte</code>] runtime support and lossy Float/Number helpers remain later accepted work.]
         ]
     ]
 ]

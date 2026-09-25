@@ -10,6 +10,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
 
 /// Backend-agnostic classification of a HIR type.
@@ -23,6 +24,13 @@ pub enum HirTypeClass {
     Char,
     Int,
     Float,
+    /// Explicit-width builtin scalar or the `Byte` octet type.
+    ///
+    /// WHAT: keeps the fixed-width identity visible to backends instead of erasing it into
+    ///       `Int`/`Float`, which are profile-dependent and never alias a matching width.
+    /// WHY: ABI and layout decisions must be able to distinguish `U8` from `Int`, and `Byte`
+    ///      from `U8`, so classification carries the scalar rather than a coarse numeric class.
+    FixedScalar(FixedScalar),
     Function,
     HeapAllocated,
 }
@@ -53,6 +61,7 @@ pub fn classify_hir_type(
             BuiltinTypeKey::Decimal => HirTypeClass::HeapAllocated,
             BuiltinTypeKey::Char => HirTypeClass::Char,
             BuiltinTypeKey::None => HirTypeClass::Unit,
+            BuiltinTypeKey::FixedScalar(scalar) => HirTypeClass::FixedScalar(scalar),
             BuiltinTypeKey::String | BuiltinTypeKey::Range => HirTypeClass::HeapAllocated,
         }),
 

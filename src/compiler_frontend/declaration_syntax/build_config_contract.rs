@@ -238,6 +238,7 @@ pub(crate) fn parsed_type_span(parsed: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
         | ParsedTypeRef::This { span, .. }
         | ParsedTypeRef::Optional { span, .. }
         | ParsedTypeRef::Collection { span, .. }

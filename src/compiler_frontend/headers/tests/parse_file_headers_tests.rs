@@ -1104,6 +1104,9 @@ fn collect_parsed_type_anchor_snapshots(
             };
             push_parsed_type_anchor(*span, expected_text.to_owned(), snapshots);
         }
+        ParsedTypeRef::BuiltinFixedScalar { scalar, span } => {
+            push_parsed_type_anchor(*span, scalar.name().to_owned(), snapshots);
+        }
         ParsedTypeRef::Collection {
             element,
             span,

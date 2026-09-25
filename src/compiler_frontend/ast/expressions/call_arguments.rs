@@ -1048,18 +1048,11 @@ fn starts_simple_value_with_attached_type(token_stream: &AstCursor) -> bool {
             | TokenTag::BOOL_LITERAL
             | TokenTag::CHAR_LITERAL
             | TokenTag::NONE_LITERAL
-    ) && matches!(
-        type_tag,
-        TokenTag::DATATYPE_INT
-            | TokenTag::DATATYPE_FLOAT
-            | TokenTag::DATATYPE_BOOL
-            | TokenTag::DATATYPE_STRING
-            | TokenTag::DATATYPE_CHAR
-            | TokenTag::DATATYPE_NONE
-    ) && matches!(
-        boundary_tag,
-        TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS | TokenTag::NEWLINE
-    )
+    ) && (type_tag.is_builtin_scalar_type_name() || type_tag == TokenTag::DATATYPE_NONE)
+        && matches!(
+            boundary_tag,
+            TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS | TokenTag::NEWLINE
+        )
 }
 
 #[cfg(test)]

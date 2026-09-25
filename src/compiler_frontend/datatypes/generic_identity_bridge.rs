@@ -9,7 +9,8 @@
 use super::DataType;
 use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
-use super::ids::TypeId;
+use super::fixed_scalar::FixedScalar;
+use super::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork, PathTable,
@@ -46,6 +47,7 @@ pub enum BuiltinTypeKey {
     String,
     Char,
     Range,
+    FixedScalar(FixedScalar),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -175,6 +177,7 @@ fn display_type_identity_key_with_resolver<R: PathNameResolver>(
             BuiltinTypeKey::String => "String".to_owned(),
             BuiltinTypeKey::Char => "Char".to_owned(),
             BuiltinTypeKey::Range => "Range".to_owned(),
+            BuiltinTypeKey::FixedScalar(scalar) => scalar.name().to_owned(),
         },
         TypeIdentityKey::Nominal(path) => path_reader
             .component(*path)
@@ -240,6 +243,9 @@ pub fn data_type_to_type_identity_key(data_type: &DataType) -> Option<TypeIdenti
         DataType::StringSlice => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::String)),
         DataType::Char => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Char)),
         DataType::Range => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Range)),
+        DataType::FixedScalar(scalar) => Some(TypeIdentityKey::Builtin(
+            BuiltinTypeKey::FixedScalar(*scalar),
+        )),
         DataType::Struct {
             nominal_path,
             generic_instance_key: None,
@@ -339,6 +345,9 @@ pub(crate) fn type_identity_key_to_type_id(
             BuiltinTypeKey::String => type_environment.builtins().string,
             BuiltinTypeKey::Char => type_environment.builtins().char,
             BuiltinTypeKey::Range => type_environment.builtins().range,
+            // Fixed scalars are seeded with the other builtins, so their deterministic
+            // `TypeId` needs no declaration-site lookup.
+            BuiltinTypeKey::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
         }),
         TypeIdentityKey::Nominal(path) => type_environment
             .nominal_id_for_path(path)

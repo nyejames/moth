@@ -213,6 +213,9 @@ fn receiver_method_receiver_name(
         ParsedTypeRef::BuiltinBool { .. } => Some(string_table.intern("Bool")),
         ParsedTypeRef::BuiltinString { .. } => Some(string_table.intern("String")),
         ParsedTypeRef::BuiltinChar { .. } => Some(string_table.intern("Char")),
+        ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => {
+            Some(string_table.intern(scalar.name()))
+        }
         _ => None,
     }
 }

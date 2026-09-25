@@ -358,6 +358,12 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
 // Distinguishing expression starts from statement keywords or terminators lets us report
 // TooManyReturnValues instead of the misleading TooFewReturnValues.
 fn is_expression_start_tag(tag: TokenTag) -> bool {
+    // Explicit-width scalars and `Byte` open a type-annotation expression attempt, matching the
+    // builtin scalar spellings below.
+    if tag.is_builtin_scalar_type_name() {
+        return true;
+    }
+
     matches!(
         tag,
         TokenTag::SYMBOL
@@ -370,11 +376,6 @@ fn is_expression_start_tag(tag: TokenTag) -> bool {
             | TokenTag::OPEN_CURLY
             | TokenTag::OPEN_PARENTHESIS
             | TokenTag::TEMPLATE_HEAD
-            | TokenTag::DATATYPE_INT
-            | TokenTag::DATATYPE_FLOAT
-            | TokenTag::DATATYPE_BOOL
-            | TokenTag::DATATYPE_STRING
-            | TokenTag::DATATYPE_CHAR
             | TokenTag::SUBTRACT
             | TokenTag::COPY
             | TokenTag::MUTABLE

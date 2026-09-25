@@ -300,6 +300,29 @@ fn bool_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
 }
 
 #[test]
+fn fixed_scalar_constructors_are_rejected_with_removed_scalar_constructor_diagnostic() {
+    // Explicit-width type names are type spellings, not conversion functions, so they must take
+    // the same path as `Int(...)`/`Float(...)` instead of becoming an unknown-symbol call.
+    for source in [
+        "value = U8(200)\n",
+        "value = I64(200)\n",
+        "value = Byte(200)\n",
+    ] {
+        let diagnostic = parse_single_file_ast_diagnostic(source);
+        assert!(
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidBuiltinCall {
+                    reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
+                    ..
+                }
+            ),
+            "expected ScalarConstructorRemoved for {source:?}"
+        );
+    }
+}
+
+#[test]
 fn logical_operator_rejects_option_operands_with_precise_found_type() {
     assert_unsupported_operator(
         "maybe String? = none\nvalue = maybe or true\n",

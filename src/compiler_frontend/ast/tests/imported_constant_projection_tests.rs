@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRootTable,
 };
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
+    CanonicalBuiltinType, CanonicalTypeIdentity, builtin_type_id_for_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
@@ -144,26 +144,13 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
     ) -> Result<TypeId, CompilerError> {
         match identity {
             CanonicalTypeIdentity::Builtin(builtin) => {
-                let type_id = match builtin {
-                    CanonicalBuiltinType::Bool => builtin_type_ids::BOOL,
-                    CanonicalBuiltinType::Int => builtin_type_ids::INT,
-                    CanonicalBuiltinType::Float => builtin_type_ids::FLOAT,
-                    CanonicalBuiltinType::Decimal => builtin_type_ids::DECIMAL,
-                    CanonicalBuiltinType::String => builtin_type_ids::STRING,
-                    CanonicalBuiltinType::Char => builtin_type_ids::CHAR,
-                    CanonicalBuiltinType::Range => builtin_type_ids::RANGE,
-                    CanonicalBuiltinType::None => builtin_type_ids::NONE,
-
-                    // The Error builtin is seeded by real module compilation, which this fixture
-                    // never runs, so there is no consumer-local handle to return.
-                    CanonicalBuiltinType::Error => {
-                        return Err(CompilerError::compiler_error(
-                            "record projection test materialiser has no consumer-local Error builtin",
-                        ));
-                    }
-                };
-
-                Ok(type_id)
+                // The `Error` builtin is seeded by real module compilation, which this fixture
+                // never runs, so there is no consumer-local handle to return.
+                builtin_type_id_for_canonical_builtin(*builtin).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "record projection test materialiser has no consumer-local Error builtin",
+                    )
+                })
             }
 
             // The marker interns to this fixture environment's one compile-time-only TypeId.

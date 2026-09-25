@@ -821,6 +821,7 @@ impl<'a> HirDisplayContext<'a> {
                 BuiltinTypeKey::String => "String".to_owned(),
                 BuiltinTypeKey::Range => "Range".to_owned(),
                 BuiltinTypeKey::None => "()".to_owned(),
+                BuiltinTypeKey::FixedScalar(scalar) => scalar.name().to_owned(),
             },
             TypeDefinition::Struct(StructTypeDefinition { path, .. }) => self.path_label(*path),
             TypeDefinition::Choice(ChoiceTypeDefinition { path, .. }) => {

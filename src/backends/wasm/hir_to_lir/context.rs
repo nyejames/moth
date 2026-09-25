@@ -11,6 +11,7 @@ use crate::backends::wasm::request::WasmBackendRequest;
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::{HirTypeClass, classify_hir_type};
@@ -177,8 +178,11 @@ impl<'a, 'b> WasmFunctionLoweringContext<'a, 'b> {
 
 /// Canonical HIR type -> Wasm ABI type mapping used by all lowering stages.
 ///
-/// Note: `WasmAbiType::F32` is a valid LIR variant but no HIR type currently maps to it.
-/// Lowering never produces F32; the emission paths that handle it exist for future use.
+/// The carriers are the Wasm value types that can hold each scalar without loss: 8/16/32-bit
+/// integers and `Byte` ride in I32, 64-bit integers in I64, 16/32-bit floats in F32, and 64-bit
+/// floats in F64. A fixed scalar only reaches lowering through an unreachable or otherwise
+/// unexecuted helper body, so this mapping exists to keep the ABI table total rather than to
+/// define the numeric operations later phases will add.
 pub(crate) fn lower_type_to_abi(
     context: &WasmLirLoweringContext<'_>,
     type_id: TypeId,
@@ -190,6 +194,18 @@ pub(crate) fn lower_type_to_abi(
         HirTypeClass::Bool | HirTypeClass::Char => WasmAbiType::I32,
         HirTypeClass::Int => WasmAbiType::I64,
         HirTypeClass::Float => WasmAbiType::F64,
+        HirTypeClass::FixedScalar(scalar) => match scalar {
+            FixedScalar::I8
+            | FixedScalar::I16
+            | FixedScalar::I32
+            | FixedScalar::U8
+            | FixedScalar::U16
+            | FixedScalar::U32
+            | FixedScalar::Byte => WasmAbiType::I32,
+            FixedScalar::I64 | FixedScalar::U64 => WasmAbiType::I64,
+            FixedScalar::F16 | FixedScalar::F32 => WasmAbiType::F32,
+            FixedScalar::F64 => WasmAbiType::F64,
+        },
         HirTypeClass::Function | HirTypeClass::HeapAllocated => WasmAbiType::Handle,
     }
 }

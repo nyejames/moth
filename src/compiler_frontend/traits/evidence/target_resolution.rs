@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
@@ -184,10 +185,11 @@ pub(super) fn resolve_conformance_target(
 }
 
 fn is_builtin_scalar_target(name: StringId, string_table: &StringTable) -> bool {
-    matches!(
-        string_table.resolve(name),
-        "Int" | "Float" | "Bool" | "String" | "Char"
-    )
+    let resolved = string_table.resolve(name);
+    matches!(resolved, "Int" | "Float" | "Bool" | "String" | "Char")
+        // Explicit-width spellings and `Byte` are builtin scalar targets too, so user-authored
+        // conformance on them is rejected through the same builtin-target diagnostic.
+        || FixedScalar::from_name(resolved).is_some()
 }
 
 pub(super) fn resolve_trait_reference(

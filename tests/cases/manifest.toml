@@ -12697,3 +12697,51 @@ path = "project_globals_public_reexport_rejected"
 tags = ["integration", "configuration", "dependencies", "facade"]
 contract = "language.configuration.project_globals_public_reexport_rejected"
 role = "boundary"
+
+[[case]]
+id = "html_wasm_fixed_width_collection_return_unsupported"
+path = "html_wasm_fixed_width_collection_return_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.target_gate.fixed_width_collection_return_rejected"
+role = "backend"
+[[case]]
+id = "html_wasm_fixed_width_option_none_unsupported"
+path = "html_wasm_fixed_width_option_none_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.target_gate.fixed_width_option_none_rejected"
+role = "backend"
+
+[[case]]
+id = "html_wasm_fixed_width_struct_field_unsupported"
+path = "html_wasm_fixed_width_struct_field_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.target_gate.fixed_width_struct_field_rejected"
+role = "backend"
+
+[[case]]
+id = "html_wasm_fixed_width_choice_payload_unsupported"
+path = "html_wasm_fixed_width_choice_payload_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.target_gate.fixed_width_choice_payload_rejected"
+role = "backend"
+
+[[case]]
+id = "html_wasm_fixed_width_generic_instance_unsupported"
+path = "html_wasm_fixed_width_generic_instance_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "generics"]
+contract = "backend.target_gate.fixed_width_generic_instance_rejected"
+role = "backend"
+
+[[case]]
+id = "html_wasm_fixed_width_cross_module_return_unsupported"
+path = "html_wasm_fixed_width_cross_module_return_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "dependencies"]
+contract = "backend.target_gate.fixed_width_cross_module_return_rejected"
+role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_value"
+path = "html_wasm_unreachable_fixed_width_value"
+tags = ["integration", "numeric", "html-wasm", "reachability"]
+contract = "backend.target_gate.unreachable_fixed_width_value_ignored"
+role = "backend"

@@ -76,6 +76,7 @@ fn parsed_type_ref_span(source_ref: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
         | ParsedTypeRef::This { span, .. }
         | ParsedTypeRef::Collection { span, .. }
         | ParsedTypeRef::Map { span, .. }
@@ -349,6 +350,9 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
         DataType::StringSlice => Some(type_environment.builtins().string),
         DataType::Char => Some(type_environment.builtins().char),
         DataType::Range => Some(type_environment.builtins().range),
+        // Fixed scalars are seeded with the other builtins, so their deterministic `TypeId`
+        // needs no declaration-site lookup.
+        DataType::FixedScalar(scalar) => Some(builtin_type_ids::fixed_scalar(*scalar)),
         DataType::None => Some(type_environment.builtins().none),
         DataType::Template => Some(type_environment.builtins().string),
         DataType::True | DataType::False => Some(type_environment.builtins().bool),
