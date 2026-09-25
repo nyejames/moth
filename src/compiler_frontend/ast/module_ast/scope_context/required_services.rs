@@ -47,6 +47,7 @@ impl ScopeContext {
         TirFoldContext {
             string_table,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
+            numeric_profile: self.shared.numeric_profile,
             bindings: Vec::new(),
         }
     }

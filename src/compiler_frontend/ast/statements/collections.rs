@@ -221,6 +221,7 @@ fn parse_collection_literal(
                     parsed_item,
                     *expected_item_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -302,7 +303,7 @@ fn parse_collection_literal(
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum KnownMapKey {
     String(StringId),
-    Int(i32),
+    Int(i64),
     Bool(bool),
     Char(char),
 }
@@ -593,6 +594,7 @@ fn parse_map_literal(
                     parsed_key,
                     key_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -600,6 +602,7 @@ fn parse_map_literal(
                     parsed_value,
                     value_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -722,6 +725,7 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 key_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -729,6 +733,7 @@ fn parse_inferred_curly_literal(
                 first_value,
                 value_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -829,6 +834,7 @@ fn parse_inferred_curly_literal(
                             parsed_key,
                             key_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -836,6 +842,7 @@ fn parse_inferred_curly_literal(
                             parsed_value,
                             value_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -889,6 +896,7 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 element_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -955,6 +963,7 @@ fn parse_inferred_curly_literal(
                             parsed_item,
                             element_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 

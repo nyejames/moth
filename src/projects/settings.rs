@@ -10,6 +10,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
@@ -165,9 +166,11 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the template loop ceiling crosses the boundary.
-    pub(crate) fn frontend_options(&self) -> FrontendOptions {
+    ///      translation, so only the template loop ceiling and the caller's boundary numeric
+    ///      profile cross the boundary; the profile is selected by the builder, not by config.
+    pub(crate) fn frontend_options(&self, numeric_profile: NumericProfile) -> FrontendOptions {
         FrontendOptions {
+            numeric_profile,
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
         }
     }

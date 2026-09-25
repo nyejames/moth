@@ -71,6 +71,7 @@ pub(super) fn parse_builtin_method_args_typed(
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
+            float_precision: context.numeric_profile.float_precision,
         },
     )?)
 }

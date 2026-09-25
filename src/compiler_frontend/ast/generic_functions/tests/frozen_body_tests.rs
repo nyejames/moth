@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, render_payload,
 };
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -1998,6 +1999,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
+                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
@@ -2215,6 +2217,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
+                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
@@ -2306,6 +2309,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
+                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
@@ -2478,6 +2482,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
+                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,

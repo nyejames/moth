@@ -251,7 +251,7 @@ mod tests {
         ProjectGlobalsFieldInput::new(
             name,
             CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-            PublicFoldedValue::Int(line),
+            PublicFoldedValue::Int(i64::from(line)),
             span(line),
             BuildConfigFingerprint(fingerprint),
             SyntheticInterfaceProvenance::single(member),

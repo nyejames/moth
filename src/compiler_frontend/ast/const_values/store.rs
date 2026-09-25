@@ -176,7 +176,7 @@ pub(crate) enum ConstStringPiece {
 /// Payload variants stored in the module-local value graph.
 #[derive(Clone, Debug)]
 pub(crate) enum ConstValuePayload {
-    Int(i32),
+    Int(i64),
     Float(f64),
     Bool(bool),
     Char(char),
@@ -213,7 +213,7 @@ pub(crate) struct ConstValue {
 /// The store owns recursion.  Consumers only map this already traversed shape to their own
 /// boundary vocabulary, so they cannot independently walk and reinterpret AST expressions.
 pub(crate) enum ConstValueVisit<'a, T> {
-    Int(i32),
+    Int(i64),
     Float(f64),
     Bool(bool),
     Char(char),

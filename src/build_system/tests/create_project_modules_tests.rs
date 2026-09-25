@@ -35,6 +35,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -433,6 +434,7 @@ fn parse_project_config_for_test(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -459,6 +461,7 @@ fn parse_project_config_for_test_with_html_keys(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -483,6 +486,7 @@ fn parse_project_config_for_test_with_packages(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface,
         build_config_inputs: &build_config_inputs,

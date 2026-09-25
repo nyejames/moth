@@ -4,6 +4,7 @@
 //! WHY: keeping one explicit request object preserves stage separation and makes option growth
 //! predictable as HTML/Wasm integration and richer Wasm features are added.
 use crate::backends::structural_string::StructuralStringUrlMap;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
@@ -31,6 +32,11 @@ pub(crate) struct WasmBackendRequest {
     /// Builder-rendered text for structural strings in this physical output variant.
     pub(crate) structural_string_urls: Option<Arc<StructuralStringUrlMap>>,
     pub function_emission_policy: WasmFunctionEmissionPolicy,
+    /// Compiler-owned numeric widths for this compilation boundary.
+    ///
+    /// WHY: the backend's temporary numeric lowering gate must see the boundary profile, and
+    /// later fixed-numeric lowering reads its widths from here.
+    pub numeric_profile: NumericProfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

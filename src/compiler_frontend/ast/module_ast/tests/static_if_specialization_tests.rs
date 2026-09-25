@@ -3,6 +3,7 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::IfBranchMetadata;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -125,6 +126,7 @@ fn inactive_static_branch_drops_nested_provenance() {
         &ConstValueStore::default(),
         Rc::new(RefCell::new(TemplateIrStore::new())),
         &mut string_table,
+        NumericProfile::STANDARD,
     )
     .expect("static literal conditions should specialize");
 

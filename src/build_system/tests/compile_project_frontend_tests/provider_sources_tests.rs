@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 #[derive(Debug)]
 struct DummyJsImportProvider {
     calls: Arc<AtomicUsize>,
@@ -498,7 +499,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
         !module.link_facts.external_import_candidates.is_empty(),
         "module link facts should retain provider candidates independently of entry reachability"
     );
-    let project_compilation = ProjectCompilation::from_frontend(modules)
+    let project_compilation = ProjectCompilation::from_frontend(modules, NumericProfile::STANDARD)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -593,7 +594,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
             .any(|import| import.package_id == canvas_package_id),
         "module link facts should retain the available @web/canvas runtime candidate"
     );
-    let project_compilation = ProjectCompilation::from_frontend(modules)
+    let project_compilation = ProjectCompilation::from_frontend(modules, NumericProfile::STANDARD)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -643,9 +644,11 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     .expect("provider-backed import should compile");
 
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let project_compilation =
-        crate::build_system::build::ProjectCompilation::from_frontend(modules)
-            .expect("compiled modules should assemble entries");
+    let project_compilation = crate::build_system::build::ProjectCompilation::from_frontend(
+        modules,
+        NumericProfile::STANDARD,
+    )
+    .expect("compiled modules should assemble entries");
     let project = builder
         .build_backend(
             project_compilation,
@@ -709,9 +712,11 @@ fn linked_module_js_lowering_is_observed_separately() {
     )
     .expect("provider-backed import should compile");
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let project_compilation =
-        crate::build_system::build::ProjectCompilation::from_frontend(modules)
-            .expect("compiled modules should assemble entries");
+    let project_compilation = crate::build_system::build::ProjectCompilation::from_frontend(
+        modules,
+        NumericProfile::STANDARD,
+    )
+    .expect("compiled modules should assemble entries");
     let project = builder
         .build_backend(
             project_compilation,
@@ -1009,6 +1014,7 @@ fn directory_project_rejects_missing_entry_root() {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = crate::build_system::project_config::ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,

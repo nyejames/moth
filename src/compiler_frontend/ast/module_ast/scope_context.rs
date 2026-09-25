@@ -51,6 +51,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
@@ -399,6 +400,11 @@ pub struct ScopeShared {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// The compilation boundary's `Int` width and `Float` precision for this scope chain.
+    ///
+    /// WHY: literal materialisation, constant folding, casts and template folding read the scope
+    ///      context, so the boundary profile travels on it rather than being re-derived per site.
+    pub(crate) numeric_profile: NumericProfile,
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
@@ -677,6 +683,10 @@ impl ScopeContext {
     /// The TIR store is a required input, not a scratch default: every production
     /// context must share the one module-level store allocated by
     /// `AstPhaseContext::from_build_context`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "root construction keeps kind, scope, declarations, external registry, expected results, frame capacity, the shared TIR store and the required boundary numeric profile as separate inputs"
+    )]
     pub(crate) fn new(
         kind: ContextKind,
         scope: PathId,
@@ -685,6 +695,7 @@ impl ScopeContext {
         expected_result_type_ids: Vec<TypeId>,
         scope_frame_capacity: usize,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
+        numeric_profile: NumericProfile,
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
@@ -696,6 +707,10 @@ impl ScopeContext {
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
             build_profile: FrontendBuildProfile::Dev,
+            // No silent width default: every production context receives the boundary
+            // profile from its `AstPhaseContext` module view, so a non-STANDARD boundary
+            // cannot silently re-fold as STANDARD.
+            numeric_profile,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,

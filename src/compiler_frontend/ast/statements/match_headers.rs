@@ -344,8 +344,13 @@ fn parse_match_pattern_header(
                 .into());
             }
 
-            let pattern =
-                parse_option_pattern(token_stream, inner_type_id, string_table, type_environment)?;
+            let pattern = parse_option_pattern(
+                token_stream,
+                inner_type_id,
+                match_context.numeric_profile,
+                string_table,
+                type_environment,
+            )?;
             let pattern_span = pattern.span();
 
             let (arm_scope, pattern) = if let MatchPattern::OptionPresentCapture {
@@ -375,6 +380,7 @@ fn parse_match_pattern_header(
             let pattern = parse_non_choice_pattern(
                 token_stream,
                 scrutinee.type_id,
+                match_context.numeric_profile,
                 string_table,
                 type_environment,
             )?;

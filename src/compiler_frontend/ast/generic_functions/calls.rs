@@ -163,6 +163,7 @@ fn parse_generic_function_call(
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
+            float_precision: context.numeric_profile.float_precision,
         },
     )
     .map_err(ExpressionParseError::from)?;
@@ -264,6 +265,7 @@ fn validate_generic_function_template_call(
         string_table,
         type_interner.environment(),
         path_fork,
+        context.numeric_profile.float_precision,
     )
     .map_err(ExpressionParseError::from)?;
 

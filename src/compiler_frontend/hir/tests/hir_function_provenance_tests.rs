@@ -28,7 +28,7 @@ fn provenance_member(interface: &str, member_name: &str) -> SyntheticInterfaceMe
     )
 }
 
-fn int_with_provenance(value: i32, provenance: SyntheticInterfaceProvenance) -> Expression {
+fn int_with_provenance(value: i64, provenance: SyntheticInterfaceProvenance) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(provenance)
 }

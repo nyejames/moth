@@ -1,3 +1,4 @@
+use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
@@ -13,6 +14,10 @@ use crate::backends::wasm::tests::lowering::test_support::{
     string_expression, unit_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
+use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
@@ -1164,6 +1169,7 @@ fn synthesizes_export_wrappers_with_stable_names() {
         external_package_registry: Default::default(),
         structural_string_urls: None,
         function_emission_policy: Default::default(),
+        numeric_profile: NumericProfile::STANDARD,
     };
 
     let result = lower_hir_to_wasm_lir(
@@ -1264,6 +1270,90 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
             .msg
             .contains("missing stable export name for FunctionId(0)")
     );
+}
+
+#[test]
+fn rejects_every_non_standard_numeric_profile_and_lowers_standard() {
+    // WHAT: a non-standard boundary profile fails at the Wasm lowering entry, before any lowering.
+    // WHY: fixed-width numeric lowering arrives with the numeric plan's Phase 5, which removes
+    //      this gate; until then the backend must not lower numbers under the default widths.
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+
+    let start_block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(int_expression(500, 123, types.int, RegionId(0))),
+    };
+    let start_function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.int,
+    };
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
+
+    lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("the standard numeric profile should still lower");
+
+    // Every profile except Int32/Float64 must fail, so a gate that only compared one
+    // dimension cannot lower the remaining non-standard combinations under default widths.
+    for profile in [
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let error = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect_err("a non-standard numeric profile must be rejected at the Wasm lowering entry");
+        let error = error
+            .infrastructure_error()
+            .expect("Wasm lowering failure should be wrapped for rendering");
+
+        assert_eq!(
+            error.error_type,
+            ErrorType::Backend(BackendErrorType::LirTransformation),
+            "{profile} must be rejected as a LIR transformation failure"
+        );
+    }
 }
 
 #[test]

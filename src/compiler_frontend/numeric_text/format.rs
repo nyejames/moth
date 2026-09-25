@@ -1,14 +1,15 @@
 //! Moth finite `Float` formatting contract.
 //!
-//! WHAT: converts a finite `f64` value into the shortest round-trippable decimal
-//!       string defined by the Moth language contract.
+//! WHAT: converts a finite `Float` value (carried as `f64`) into the shortest round-trippable decimal
+//!       string defined by the Moth language contract, at the caller's `FloatPrecision`.
 //! WHY: AST constant folding, builtin casts, and compile-time template
 //!      interpolation must all agree on Float stringification without relying on
 //!      Rust, JavaScript, or host-native formatting quirks.
 //!
 //! Contract:
-//! - finite `f64` only;
-//! - shortest round-trippable decimal;
+//! - finite values only;
+//! - shortest round-trippable decimal at the selected precision (`f32` shortest text
+//!   under `Bits32`, `f64` shortest text under `Bits64`);
 //! - exponent form when `abs(value) >= 1e21` or `0 < abs(value) < 1e-6`;
 //! - lowercase `e`;
 //! - positive exponents include `+`;
@@ -16,6 +17,8 @@
 //! - omit trailing `.0`.
 
 use std::fmt;
+
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 
 /// Threshold above which Moth always uses exponent notation.
 const EXPONENT_THRESHOLD_HIGH: f64 = 1e21;
@@ -44,11 +47,21 @@ impl fmt::Display for FloatFormatError {
 
 impl std::error::Error for FloatFormatError {}
 
-/// Format a finite `f64` according to the Moth Float contract.
+/// Format a finite `Float` at one precision according to the Moth Float contract.
+///
+/// WHAT: under `Bits32` formats the shortest `f32` representation (the `f64` carrier must
+///       already hold an `f32`-exact value); under `Bits64` formats the shortest `f64`
+///       representation. The existing re-thresholding and exponent formatting apply to both.
+/// WHY: the compilation boundary's `Float` precision owns the stringification, so
+///      `Float32` values such as `f64::from(0.1f32)` format as `"0.1"` rather than the
+///      long `f64` expansion of that carrier.
 ///
 /// Returns [`FloatFormatError::NonFiniteFloat`] for `NaN` or infinities.
 /// All finite values, including `-0.0`, produce a deterministic decimal string.
-pub fn format_finite_float(value: f64) -> Result<String, FloatFormatError> {
+pub fn format_finite_float(
+    value: f64,
+    precision: FloatPrecision,
+) -> Result<String, FloatFormatError> {
     if !value.is_finite() {
         return Err(FloatFormatError::NonFiniteFloat);
     }
@@ -60,14 +73,20 @@ pub fn format_finite_float(value: f64) -> Result<String, FloatFormatError> {
     }
 
     let mut buffer = ryu::Buffer::new();
-    let ryu_output = buffer.format_finite(value);
+    let ryu_output = match precision {
+        FloatPrecision::Bits64 => buffer.format_finite(value).to_owned(),
+        // The carrier is documented to hold an f32-exact value under Bits32, so this
+        // narrowing cast is a representation change, not a second rounding of the
+        // source text: materialisation already rounded directly into `f32`.
+        FloatPrecision::Bits32 => buffer.format_finite(value as f32).to_owned(),
+    };
 
     // Ryū returns the shortest round-trippable decimal, but its exponent
     // thresholds and sign rules differ from Moth's. Parse its output into
     // an exact integer-mantissa / decimal-exponent form so we can re-render it
     // with the correct thresholds and decorations.
     let (is_negative, mantissa_digits, fractional_digit_count, scientific_exponent) =
-        parse_ryu_output(ryu_output)?;
+        parse_ryu_output(&ryu_output)?;
 
     let decimal_exponent = scientific_exponent - fractional_digit_count;
     let digits = trim_leading_zeros(&mantissa_digits);
@@ -91,7 +110,6 @@ pub fn format_finite_float(value: f64) -> Result<String, FloatFormatError> {
         Ok(formatted)
     }
 }
-
 /// Splits a Ryū output string into sign, digit string, fractional digit count,
 /// and scientific exponent.
 ///

@@ -2809,7 +2809,7 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     }
 }
 
-fn hir_int_expression(id: u32, value: i32, region: RegionId) -> HirExpression {
+fn hir_int_expression(id: u32, value: i64, region: RegionId) -> HirExpression {
     HirExpression {
         id: HirValueId(id),
         kind: HirExpressionKind::Int(value),

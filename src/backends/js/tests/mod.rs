@@ -15,6 +15,7 @@ mod expressions;
 mod host;
 mod inline_expressions;
 mod map_statements;
+mod numeric_profile;
 mod numeric_statements;
 mod prelude;
 mod reactivity;

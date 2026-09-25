@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -115,12 +116,14 @@ pub(crate) fn collect_and_strip_comment_templates(
     ast_nodes: &mut [AstNode],
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
+    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     doc_fragments::collect_and_strip_comment_templates(
         ast_nodes,
         string_table,
         template_const_loop_iteration_limit,
+        numeric_profile,
         template_ir_store,
     )
 }

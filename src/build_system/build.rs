@@ -36,6 +36,7 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
@@ -181,6 +182,13 @@ pub struct ProjectCompilation {
     all_generated_function_names: Arc<Vec<String>>,
     /// Build-only physical resource inputs discovered by Stage 0.
     pub(crate) resource_inputs: ResourceInputRegistry,
+    /// The boundary numeric profile settled at bootstrap for this compilation.
+    ///
+    /// WHAT: the one `Int` width and `Float` precision every compiler service of this
+    ///      build types numbers under, carried from `BuildBootstrap` into the backend.
+    /// WHY: backends must lower the settled profile instead of re-asking the builder,
+    ///      so the success-only assembly retains it beside the frontend artefacts.
+    numeric_profile: NumericProfile,
 }
 
 /// Failure produced while proving a success-only project assembly.
@@ -247,8 +255,14 @@ static EMPTY_GENERATED_NAMES: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| Arc::new(std::collections::HashMap::new()));
 
 impl ProjectCompilation {
+    /// Assemble the success-only project compilation from a completed frontend outcome.
+    ///
+    /// WHY: the boundary numeric profile is a settled bootstrap input rather than a frontend
+    ///      result, so the caller that owns it passes it here instead of this assembly
+    ///      re-selecting a default that the backend would then lower.
     pub(crate) fn from_frontend(
         frontend: ProjectFrontendCompilation,
+        numeric_profile: NumericProfile,
     ) -> Result<Self, ProjectAssemblyError> {
         let ProjectFrontendCompilation {
             project,
@@ -257,13 +271,14 @@ impl ProjectCompilation {
             transient_batches: _,
             project_source_database: _,
         } = frontend;
-        Self::from_successful_boundaries(project, source_packages, resource_inputs)
+        Self::from_successful_boundaries(project, source_packages, resource_inputs, numeric_profile)
     }
 
     pub(crate) fn from_successful_boundaries(
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
+        numeric_profile: NumericProfile,
     ) -> Result<Self, ProjectAssemblyError> {
         project.require_all_successful()?;
         resource_inputs.validate()?;
@@ -559,7 +574,18 @@ impl ProjectCompilation {
             package_generated_function_names,
             all_generated_function_names,
             resource_inputs,
+            numeric_profile,
         })
+    }
+
+    /// The boundary numeric profile settled at bootstrap for this compilation.
+    ///
+    /// WHAT: exposes the profile retained beside the frontend artefacts so backends
+    ///      lower the settled value.
+    /// WHY: reading it here keeps the lowering gates on one settled value instead of
+    ///      re-asking the builder per module.
+    pub(crate) fn numeric_profile(&self) -> NumericProfile {
+        self.numeric_profile
     }
 
     /// Iterate every successful module view in deterministic order.
@@ -1500,6 +1526,17 @@ pub trait BackendBuilder {
     /// tokenization/template parsing.
     fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec>;
 
+    /// Builder-selected numeric widths for one compilation boundary.
+    ///
+    /// WHAT: the `NumericProfile` every compiler service in this build types numbers under.
+    /// WHY: the selected builder settles `Int` width and `Float` precision before command inputs
+    ///      are materialised and before config compilation; it is not a build profile, a builder
+    ///      global or a `#Config` contract, and no source, directive or command-line spelling
+    ///      selects it.
+    fn numeric_profile(&self) -> NumericProfile {
+        NumericProfile::STANDARD
+    }
+
     /// Builder-provided surface.
     ///
     /// WHAT: returns the complete builder surface this builder exposes, including
@@ -1522,10 +1559,21 @@ impl ProjectBuilder {
     pub fn new(backend: Box<dyn BackendBuilder + Send>) -> Self {
         Self { backend }
     }
+
+    /// The selected builder's numeric profile for this compilation boundary.
+    pub fn numeric_profile(&self) -> NumericProfile {
+        self.backend.numeric_profile()
+    }
 }
 
 pub(crate) struct BuildBootstrap {
     pub(crate) config: Config,
+    /// The selected builder's boundary numeric profile, settled before config compilation.
+    ///
+    /// WHAT: the one `Int` width and `Float` precision every compiler service of this build uses.
+    /// WHY: the builder selects it once at bootstrap; config compilation, module compilation and
+    ///      the later lowering gates all read this same value instead of re-asking the builder.
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
     pub(crate) frontend_surface: BuilderSurface,
@@ -1740,6 +1788,7 @@ pub fn build_project(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
+        numeric_profile,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
@@ -1750,6 +1799,7 @@ pub fn build_project(
     let frontend_compilation = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
+        numeric_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -1776,14 +1826,15 @@ pub fn build_project(
             })?;
         return Err(messages);
     }
-    let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
-        Ok(project_compilation) => project_compilation,
-        Err(error) => {
-            let mut messages = error.into_messages(&mut string_table);
-            attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages);
-        }
-    };
+    let project_compilation =
+        match ProjectCompilation::from_frontend(frontend_compilation, numeric_profile) {
+            Ok(project_compilation) => project_compilation,
+            Err(error) => {
+                let mut messages = error.into_messages(&mut string_table);
+                attach_source_database(&mut messages, project_source_files.as_ref());
+                return Err(messages);
+            }
+        };
     let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
 
     // --------------------------------------------
@@ -1884,6 +1935,10 @@ pub(crate) fn bootstrap_project_build(
 
     let mut config = Config::new(entry_path);
 
+    // The selected builder settles the boundary numeric profile before config.moth is compiled, so
+    // every later compiler service in this build reads one value.
+    let numeric_profile = project_builder.numeric_profile();
+
     let mut project_source_files = config.entry_dir.is_dir().then(SourceDatabase::empty);
 
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
@@ -1909,6 +1964,7 @@ pub(crate) fn bootstrap_project_build(
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs,
+        numeric_profile,
     };
     let validated_directory_output_settings = match load_project_config(
         &mut config,
@@ -1935,6 +1991,7 @@ pub(crate) fn bootstrap_project_build(
 
     Ok(BuildBootstrap {
         config,
+        numeric_profile,
         style_directives,
         string_table,
         frontend_surface,

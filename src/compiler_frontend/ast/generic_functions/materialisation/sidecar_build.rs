@@ -307,6 +307,7 @@ impl ModuleMaterialisationPreparation {
             entry_dir: self.entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile: self.build_profile,
+            numeric_profile: self.numeric_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

@@ -3,6 +3,7 @@
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::string::fold_expression_kind_to_string;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -10,14 +11,22 @@ use crate::compiler_frontend::value_mode::ValueMode;
 #[test]
 fn int_folds_to_string() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Int(42), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Int(42),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result.as_deref(), Some("42"));
 }
 
 #[test]
 fn float_folds_to_string() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Float(3.125), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Float(3.125),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     let Some(s) = result else {
         panic!("expected text for Float");
     };
@@ -27,35 +36,55 @@ fn float_folds_to_string() {
 #[test]
 fn float_one_folds_without_trailing_decimal() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Float(1.0), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Float(1.0),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result, Some("1".to_string()));
 }
 
 #[test]
 fn float_small_value_uses_moth_exponent_form() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Float(0.0000001), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Float(0.0000001),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result, Some("1e-7".to_string()));
 }
 
 #[test]
 fn float_large_value_uses_signed_exponent() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Float(1e21), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Float(1e21),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result, Some("1e+21".to_string()));
 }
 
 #[test]
 fn bool_folds_to_string() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Bool(true), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Bool(true),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result.as_deref(), Some("true"));
 }
 
 #[test]
 fn char_folds_to_text() {
     let table = StringTable::new();
-    let result = fold_expression_kind_to_string(&ExpressionKind::Char('x'), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Char('x'),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result, Some("x".to_string()));
 }
 
@@ -63,7 +92,11 @@ fn char_folds_to_text() {
 fn string_slice_folds_to_text() {
     let mut table = StringTable::new();
     let id = table.intern("hello");
-    let result = fold_expression_kind_to_string(&ExpressionKind::StringSlice(id), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::StringSlice(id),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert_eq!(result.as_deref(), Some("hello"));
 }
 
@@ -73,7 +106,11 @@ fn coerced_scalar_delegates_to_inner_value() {
     let inner_value = Expression::int(42, None, ValueMode::ImmutableOwned);
     let expression = Expression::coerced(inner_value, builtin_type_ids::STRING);
 
-    let result = fold_expression_kind_to_string(&expression.kind, &table);
+    let result = fold_expression_kind_to_string(
+        &expression.kind,
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
 
     assert_eq!(result, Some("42".to_string()));
 }
@@ -81,8 +118,11 @@ fn coerced_scalar_delegates_to_inner_value() {
 #[test]
 fn non_renderable_expression_kind_returns_none() {
     let table = StringTable::new();
-    let result =
-        fold_expression_kind_to_string(&ExpressionKind::Runtime(ExpressionRpn::empty()), &table);
+    let result = fold_expression_kind_to_string(
+        &ExpressionKind::Runtime(ExpressionRpn::empty()),
+        &table,
+        NumericProfile::STANDARD.float_precision,
+    );
     assert!(result.is_none());
 }
 

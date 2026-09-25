@@ -42,6 +42,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -117,6 +118,11 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// The declaring module's boundary `Int` width and `Float` precision.
+    ///
+    /// WHAT: retained with every other declaring-module fact so a materialised body reuses the
+    ///       boundary's numeric widths instead of selecting its own.
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 }
@@ -146,6 +152,7 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     pub(crate) string_table: &'a StringTable,
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 }
@@ -1396,6 +1403,7 @@ impl ModuleMaterialisationPreparation {
             frozen_identity_handle,
             module_resources,
             string_table,
+            numeric_profile,
             template_const_loop_iteration_limit,
             capacity_estimate,
         } = input;
@@ -1442,6 +1450,7 @@ impl ModuleMaterialisationPreparation {
             external_package_registry: Arc::clone(&lookups.external_package_registry),
             style_directives: lookups.style_directives.clone(),
             build_profile: lookups.build_profile,
+            numeric_profile,
             template_const_loop_iteration_limit,
             capacity_estimate,
         })

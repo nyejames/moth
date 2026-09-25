@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -44,10 +45,16 @@ impl StaticIfCandidate {
         const_values: &ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
+        numeric_profile: NumericProfile,
     ) -> Result<Self, TemplateNormalizationError> {
         let mut ast = authored_ast.to_vec();
-        let specialization =
-            StaticIfSpecialization::run(&mut ast, const_values, template_ir_store, string_table)?;
+        let specialization = StaticIfSpecialization::run(
+            &mut ast,
+            const_values,
+            template_ir_store,
+            string_table,
+            numeric_profile,
+        )?;
 
         Ok(Self {
             ast,
@@ -109,9 +116,15 @@ impl StaticIfSpecialization {
         const_values: &ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
+        numeric_profile: NumericProfile,
     ) -> Result<Self, TemplateNormalizationError> {
         let module_environment = module_const_environment(const_values);
-        let resolver = ConstValueResolver::new(string_table, const_values, template_ir_store);
+        let resolver = ConstValueResolver::new(
+            string_table,
+            const_values,
+            template_ir_store,
+            numeric_profile,
+        );
         let mut specializer = StaticIfSpecializer {
             resolver,
             inactive_generic_requests: Vec::new(),

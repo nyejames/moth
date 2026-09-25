@@ -20,6 +20,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
@@ -46,22 +47,83 @@ const BUILD_FLAGS: &[&str] = &["--release", "--html-wasm"];
 /// The error text used when an `--input` flag carries no `name=value` argument.
 const MISSING_COMMAND_INPUT_VALUE: &str = "Missing value for --input.";
 
-/// Parse one shared `--input name=value` value argument and insert its typed entry.
+/// One `--input name=value` argument whose value is not yet materialised.
+///
+/// WHAT: the validated input name, the raw authored value text and the zero-based position of the
+///       `--input` argument that carried them.
+/// WHY:  a command value's primitive type and value depend on the numeric profile of the selected
+///       builder, and the builder is only known once the command starts. The argument shape and
+///       name are still validated and stored while parsing, so a malformed argument is rejected
+///       before any compilation work begins, and the raw value keeps the authored spelling that
+///       materialisation and diagnostics report.
+#[derive(Debug, PartialEq, Eq)]
+struct CommandInputArgument {
+    name: BuildInputName,
+    value: String,
+    /// Zero-based position of the carrying `--input` argument, reported by duplicate diagnostics.
+    argument_index: usize,
+}
+
+/// Materialise every parsed `--input` argument into the typed input set one command compiles with.
+///
+/// WHAT: the one deferred materialisation path build, check and dev share. Each value is inferred
+///       under the selected builder's numeric profile exactly as the immediate command inference
+///       does, entries keep their argument order, and a repeated name is rejected deterministically
+///       while the earlier entry keeps its place.
+/// WHY:  the numeric profile belongs to the selected builder, so the profile-dependent part of
+///       command inference happens once here rather than duplicated inside each command arm, and
+///       the user-facing failure text stays identical to the parse-time rejection it replaces.
+fn materialise_command_inputs(
+    arguments: &[CommandInputArgument],
+    numeric_profile: NumericProfile,
+) -> Result<BuildConfigInputSet, String> {
+    let mut inputs = BuildConfigInputSet::new();
+
+    for argument in arguments {
+        let value = PrimitiveBuildValue::from_command_text(&argument.value, numeric_profile)
+            .map_err(|error| match error {
+                BuildInputValueError::Infrastructure(error) => {
+                    format!(
+                        "Failed to process --input '{}': {}.",
+                        argument.name.as_str(),
+                        error.msg
+                    )
+                }
+                error => format!(
+                    "Invalid value for --input '{}': {error}.",
+                    argument.name.as_str()
+                ),
+            })?;
+
+        let entry = BuildConfigInputEntry::new(
+            argument.name.clone(),
+            value,
+            BuildConfigValueLocation::Command(BuildCommandLocation::new(argument.argument_index)),
+        );
+
+        if let Err(duplicate) = inputs.insert(entry) {
+            return Err(command_input_duplicate_message(&duplicate));
+        }
+    }
+
+    Ok(inputs)
+}
+
+/// Parse one shared `--input name=value` value argument and retain it for materialisation.
 ///
 /// WHAT: the one input parser build, check and dev share. It rejects a missing or flag-shaped
 ///       value argument, splits the argument at the first `=` so every later `=` stays inside
-///       the value, validates the lower_snake_case name, and infers the primitive value
-///       immediately through the compiler-owned carrier without consulting any project or
-///       source contract. The inserted entry carries the zero-based position of the `--input`
-///       argument, and a repeated name is rejected deterministically while the earlier entry
-///       keeps its place.
+///       the value, and validates the lower_snake_case name. The retained argument carries the
+///       raw value text and the zero-based position of the `--input` argument.
 /// WHY:  all three commands must share one parser and one typed carrier — no command owns a
 ///       second conversion or defaulting path, and unknown input names stay in the set for the
-///       later selected-contract validation phases.
+///       later selected-contract validation phases. The value's primitive type is decided by the
+///       selected builder's numeric profile, so it materialises in
+///       [`materialise_command_inputs`] once the command owns that builder.
 fn parse_command_input_argument(
     value_argument: Option<&String>,
     argument_index: usize,
-    inputs: &mut BuildConfigInputSet,
+    arguments: &mut Vec<CommandInputArgument>,
 ) -> Result<(), String> {
     let Some(value_argument) = value_argument.filter(|argument| !argument.starts_with("--")) else {
         return Err(String::from(MISSING_COMMAND_INPUT_VALUE));
@@ -76,23 +138,12 @@ fn parse_command_input_argument(
     let name = BuildInputName::new(name_text).map_err(|_| {
         format!("Invalid --input name '{name_text}': input names must be lower_snake_case.")
     })?;
-    let value =
-        PrimitiveBuildValue::from_command_text(value_text).map_err(|error| match error {
-            BuildInputValueError::Infrastructure(error) => {
-                format!("Failed to process --input '{name_text}': {}.", error.msg)
-            }
-            error => format!("Invalid value for --input '{name_text}': {error}."),
-        })?;
 
-    let entry = BuildConfigInputEntry::new(
+    arguments.push(CommandInputArgument {
         name,
-        value,
-        BuildConfigValueLocation::Command(BuildCommandLocation::new(argument_index)),
-    );
-
-    if let Err(duplicate) = inputs.insert(entry) {
-        return Err(command_input_duplicate_message(&duplicate));
-    }
+        value: value_text.to_owned(),
+        argument_index,
+    });
 
     Ok(())
 }
@@ -126,13 +177,13 @@ enum Command {
     Build {
         path: String,
         flags: Vec<Flag>,
-        inputs: BuildConfigInputSet,
+        inputs: Vec<CommandInputArgument>,
     }, // Builds a file or project
 
     Check {
         path: String,
         terse: bool,
-        inputs: BuildConfigInputSet,
+        inputs: Vec<CommandInputArgument>,
     }, // Runs frontend-only compilation without writing artefacts
 
     #[cfg(feature = "boracle")]
@@ -148,6 +199,7 @@ enum Command {
         path: String,
         options: DevServerOptions,
         flags: Vec<Flag>,
+        inputs: Vec<CommandInputArgument>,
     },
 
     Help,
@@ -200,11 +252,35 @@ pub fn start_cli() -> process::ExitCode {
                 }
 
                 Command::Build { path, flags, inputs } => {
-                    run_build_command(&path, &flags, &inputs)
+                    let project_builder =
+                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                        Ok(inputs) => {
+                            run_build_command(&project_builder, &path, &flags, &inputs)
+                        }
+                        Err(message) => {
+                            say!(message);
+                            print_help();
+                            CommandStatus::Failure
+                        }
+                    }
                 }
 
                 Command::Check { path, terse, inputs } => {
-                    check::run_check(&path, CheckOptions { terse, inputs })
+                    let project_builder =
+                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                        Ok(inputs) => check::run_check(
+                            &path,
+                            CheckOptions { terse, inputs },
+                            &project_builder,
+                        ),
+                        Err(message) => {
+                            say!(message);
+                            print_help();
+                            CommandStatus::Failure
+                        }
+                    }
                 }
 
                 #[cfg(feature = "boracle")]
@@ -225,16 +301,32 @@ pub fn start_cli() -> process::ExitCode {
 
                 Command::Dev {
                     path,
-                    options,
+                    mut options,
                     flags,
+                    inputs,
                 } => {
-                    say!("\nStarting dev server...");
                     let project_builder =
                         build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-                    match dev_server::run_dev_server(project_builder, &path, &flags, options) {
-                        Ok(_) => CommandStatus::Success,
-                        Err(messages) => {
-                            print_compiler_messages(messages);
+                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                        Ok(inputs) => {
+                            say!("\nStarting dev server...");
+                            options.inputs = inputs;
+                            match dev_server::run_dev_server(
+                                project_builder,
+                                &path,
+                                &flags,
+                                options,
+                            ) {
+                                Ok(_) => CommandStatus::Success,
+                                Err(messages) => {
+                                    print_compiler_messages(messages);
+                                    CommandStatus::Failure
+                                }
+                            }
+                        }
+                        Err(message) => {
+                            say!(message);
+                            print_help();
                             CommandStatus::Failure
                         }
                     }
@@ -287,18 +379,27 @@ enum BuildCommandOutcome {
 }
 
 fn run_build_command(
+    project_builder: &build::ProjectBuilder,
     path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
 ) -> CommandStatus {
-    run_build_command_with_output_plan(path, flags, build_config_inputs, create_build_output_plan)
+    run_build_command_with_output_plan(
+        project_builder,
+        path,
+        flags,
+        build_config_inputs,
+        create_build_output_plan,
+    )
 }
 
 /// Run a build command with one command-total lifecycle and one output-plan decision.
 ///
 /// The injected plan builder keeps the command's terminal timing point shared
-/// between ordinary output planning and focused failure-path tests.
+/// between ordinary output planning and focused failure-path tests. The selected builder arrives
+/// from the command arm because it owns the numeric profile the parsed inputs materialised under.
 fn run_build_command_with_output_plan(
+    project_builder: &build::ProjectBuilder,
     path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -306,9 +407,8 @@ fn run_build_command_with_output_plan(
 ) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let start = Instant::now();
-    let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let outcome = build_command_outcome(
-        &project_builder,
+        project_builder,
         path,
         flags,
         build_config_inputs,
@@ -472,6 +572,7 @@ fn render_build_outcome(
 ///       production.
 #[cfg(all(test, feature = "timers"))]
 fn run_build_command_with_output_plan_for_tests(
+    project_builder: &build::ProjectBuilder,
     path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
@@ -479,9 +580,8 @@ fn run_build_command_with_output_plan_for_tests(
     duration: Duration,
     renderer: impl FnOnce(&BuildCommandOutcome, Duration),
 ) -> (CommandStatus, Option<(usize, usize)>) {
-    let project_builder = build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let outcome = build_command_outcome(
-        &project_builder,
+        project_builder,
         path,
         flags,
         build_config_inputs,
@@ -633,7 +733,7 @@ fn parse_new_command(args: &[String]) -> Result<Command, String> {
 fn parse_build_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut flags = Vec::new();
-    let mut inputs = BuildConfigInputSet::new();
+    let mut inputs = Vec::new();
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -790,7 +890,7 @@ fn parse_tests_command(args: &[String]) -> Result<Command, String> {
 fn parse_check_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut terse = false;
-    let mut inputs = BuildConfigInputSet::new();
+    let mut inputs = Vec::new();
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -904,6 +1004,7 @@ fn parse_dev_command(args: &[String]) -> Result<Command, String> {
     let mut path = String::new();
     let mut options = DevServerOptions::default();
     let mut flags = Vec::new();
+    let mut inputs = Vec::new();
     let mut index = 1usize;
 
     while let Some(arg) = args.get(index) {
@@ -966,7 +1067,7 @@ fn parse_dev_command(args: &[String]) -> Result<Command, String> {
                 index += 1;
             }
             "--input" => {
-                parse_command_input_argument(args.get(index + 1), index, &mut options.inputs)?;
+                parse_command_input_argument(args.get(index + 1), index, &mut inputs)?;
                 index += 2;
             }
             _ if arg.starts_with("--") => {
@@ -991,6 +1092,7 @@ fn parse_dev_command(args: &[String]) -> Result<Command, String> {
         path,
         options,
         flags,
+        inputs,
     })
 }
 

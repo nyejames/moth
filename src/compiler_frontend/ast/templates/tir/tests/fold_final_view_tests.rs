@@ -20,7 +20,8 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopControlKind,
+    TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -45,8 +46,12 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidTemplateStructureReason,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -66,16 +71,27 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+    build_test_fold_context_with_profile(string_table, NumericProfile::STANDARD)
+}
+
+fn build_test_fold_context_with_profile<'a>(
+    string_table: &'a mut StringTable,
+    numeric_profile: NumericProfile,
+) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit:
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile,
         bindings: vec![],
     }
 }
 
-fn int_expression(value: i32) -> Expression {
+fn int_expression(value: i64) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)
+}
+fn float_expression(value: f64) -> Expression {
+    Expression::float(value, None, ValueMode::ImmutableOwned)
 }
 
 fn bool_expression(value: bool) -> Expression {
@@ -150,6 +166,27 @@ fn fold_final_view_fixture(
         )));
     }
     // Existing final-view text assertions do not own semantic provenance.
+    let TemplateFoldResult { emission, .. } =
+        fold_prepared_template(&prepared, view, &mut fold_context)?;
+    Ok(emission)
+}
+
+fn fold_final_view_fixture_with_profile(
+    fixture: &FinalViewFoldFixture,
+    string_table: &mut StringTable,
+    phase: TemplateTirPhase,
+    numeric_profile: NumericProfile,
+) -> Result<TemplateEmission, TemplateError> {
+    let store = fixture.store.borrow();
+    let view = TirView::new(&store, fixture.template_id, phase, fixture.context)
+        .expect("test view should construct");
+    let mut fold_context = build_test_fold_context_with_profile(string_table, numeric_profile);
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
+        return Err(TemplateError::Infrastructure(Box::new(
+            CompilerError::compiler_error("test view was not foldable"),
+        )));
+    }
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view, &mut fold_context)?;
     Ok(emission)
@@ -812,8 +849,8 @@ fn final_view_fold_false_branch_selects_fallback() {
 fn build_range_loop_template(
     _string_table: &mut StringTable,
     store: &mut TemplateIrStore,
-    start: i32,
-    end: i32,
+    start: i64,
+    end: i64,
     body_root: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId,
     aggregate_wrapper: Option<crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId>,
 ) -> crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId {
@@ -832,6 +869,36 @@ fn build_range_loop_template(
     };
     let root = builder.push_loop_node(header, body_root, aggregate_wrapper, None);
 
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::empty(),
+        None,
+    )
+}
+
+fn build_float_range_loop_template(
+    store: &mut TemplateIrStore,
+    start: f64,
+    end: f64,
+    step: f64,
+    body_root: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId,
+) -> crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId {
+    let mut builder = TemplateIrBuilder::new(store);
+    let header = TemplateLoopHeader::Range {
+        bindings: Box::new(LoopBindings {
+            item: None,
+            index: None,
+        }),
+        range: Box::new(RangeLoopSpec {
+            start: float_expression(start),
+            end: float_expression(end),
+            step: Some(float_expression(step)),
+            end_kind: RangeEndKind::Exclusive,
+        }),
+    };
+    let root = builder.push_loop_node(header, body_root, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -1049,6 +1116,251 @@ fn final_view_fold_loop_preserves_output_before_break_and_continue() {
         emission_to_string(continue_emission, &string_table),
         "...",
         "output before [continue] should be preserved each iteration"
+    );
+}
+
+// -------------------------
+//  Range cursor precision
+// -------------------------
+
+/// Collects float counters from a range cursor at the given boundary precision.
+///
+/// WHAT: drives `ConstRangeCursor` directly so precision behavior is pinned without
+///       template rendering in the way.
+/// WHY: Float32 stepping must round every accumulation like a Bits32 literal; this
+///      helper is the single place these tests advance a cursor to completion.
+fn collect_float_counters(
+    start: Expression,
+    end: Expression,
+    step: Option<Expression>,
+    float_precision: FloatPrecision,
+) -> Vec<f64> {
+    let range = RangeLoopSpec {
+        start,
+        end,
+        end_kind: RangeEndKind::Exclusive,
+        step,
+    };
+    let mut cursor = ConstRangeCursor::new(
+        &range,
+        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+        float_precision,
+    )
+    .expect("range cursor should construct");
+    let mut counters = Vec::new();
+    while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
+        match counter {
+            ConstRangeIterationValue::Float(value) => counters.push(value),
+            ConstRangeIterationValue::Int(value) => {
+                panic!("expected a float counter, got int {value}")
+            }
+        }
+    }
+    counters
+}
+
+#[test]
+fn range_cursor_rounds_float32_step_accumulation() {
+    let counters = collect_float_counters(
+        float_expression(0.0),
+        float_expression(1.0),
+        Some(float_expression(0.1)),
+        FloatPrecision::Bits32,
+    );
+
+    assert_eq!(
+        counters.len(),
+        10,
+        "Float32 0.0 to 1.0 by 0.1 should still take ten const iterations"
+    );
+    assert_eq!(
+        counters[3],
+        f64::from(0.1_f32 + 0.1_f32 + 0.1_f32),
+        "Float32 counters must accumulate with f32 rounding, not f64 drift"
+    );
+}
+
+#[test]
+fn range_cursor_rejects_non_progressing_float32_mixed_range() {
+    // 16777217 widens to 16777216 at Float32 precision, where a step of 1.0
+    // cannot advance, so construction itself reports the non-progressing range.
+    let range = RangeLoopSpec {
+        start: int_expression(16_777_217),
+        end: float_expression(16_777_218.5),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(float_expression(1.0)),
+    };
+    let error = match ConstRangeCursor::new(
+        &range,
+        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+        FloatPrecision::Bits32,
+    ) {
+        Ok(_) => panic!("a Float32 step that cannot advance must stall"),
+        Err(error) => error,
+    };
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("a stalled Float32 range must stay on the source diagnostic lane");
+    };
+    match &diagnostic.payload {
+        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
+            *reason,
+            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+            "a stalled Float32 range must report non-progressing bounds"
+        ),
+        payload => panic!("expected invalid template structure payload, found {payload:?}"),
+    }
+}
+
+#[test]
+fn range_cursor_keeps_standard_float64_step_accumulation() {
+    let counters = collect_float_counters(
+        float_expression(0.0),
+        float_expression(1.0),
+        Some(float_expression(0.1)),
+        FloatPrecision::Bits64,
+    );
+
+    assert_eq!(
+        counters.len(),
+        11,
+        "STANDARD Float64 0.0 to 1.0 by 0.1 keeps eleven const iterations"
+    );
+    assert_eq!(
+        counters[3],
+        0.1 + 0.1 + 0.1,
+        "STANDARD counters must keep f64 accumulation unchanged"
+    );
+}
+
+#[test]
+fn final_view_fold_float_range_loop_follows_the_fold_context_precision() {
+    let float32_profile = NumericProfile {
+        float_precision: FloatPrecision::Bits32,
+        ..NumericProfile::STANDARD
+    };
+
+    // Float32 accumulation through the production `fold_tir_loop` path reaches
+    // 1.0 in ten const iterations; an f64-ignoring cursor would emit eleven dots.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let narrow_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let dot_text = string_table.intern(".");
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
+    });
+    let narrow_emission = fold_final_view_fixture_with_profile(
+        &narrow_fixture,
+        &mut string_table,
+        TemplateTirPhase::Composed,
+        float32_profile,
+    )
+    .expect("Float32 range loop should fold through the TIR fold");
+    assert_eq!(
+        emission_to_string(narrow_emission, &string_table),
+        "..........",
+        "Float32 0.0 to 1.0 by 0.1 must fold to ten iterations through the TIR fold"
+    );
+
+    // The same loop under STANDARD keeps eleven f64 iterations; a fold context
+    // stuck at Bits32 would emit ten dots here instead.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let standard_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let dot_text = string_table.intern(".");
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
+    });
+    let standard_emission = fold_final_view_fixture_with_profile(
+        &standard_fixture,
+        &mut string_table,
+        TemplateTirPhase::Composed,
+        NumericProfile::STANDARD,
+    )
+    .expect("STANDARD range loop should fold through the TIR fold");
+    assert_eq!(
+        emission_to_string(standard_emission, &string_table),
+        "...........",
+        "STANDARD 0.0 to 1.0 by 0.1 must keep eleven f64 iterations through the TIR fold"
+    );
+}
+
+#[test]
+fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
+    let float32_profile = NumericProfile {
+        float_precision: FloatPrecision::Bits32,
+        ..NumericProfile::STANDARD
+    };
+    // Carrier as Float32 materialisation leaves it: the f32 value widened to f64.
+    let carrier = f64::from(0.1f32);
+
+    // The reducer formats at the fold context precision, so the Float32 fold
+    // renders the shortest f32 text instead of the long f64 expansion.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let narrow_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let float_node = builder.push_dynamic_expression_node(
+            float_expression(carrier),
+            TemplateSegmentOrigin::Body,
+            None,
+            None,
+        );
+        builder.finish_template(
+            float_node,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            None,
+        )
+    });
+    let narrow_emission = fold_final_view_fixture_with_profile(
+        &narrow_fixture,
+        &mut string_table,
+        TemplateTirPhase::Composed,
+        float32_profile,
+    )
+    .expect("Float32 interpolation should fold through the TIR fold");
+    assert_eq!(
+        emission_to_string(narrow_emission, &string_table),
+        "0.1",
+        "a Float32 0.1 must render its shortest f32 text through the TIR fold"
+    );
+
+    // The same carrier under STANDARD must not collapse to f32 text; a reducer
+    // ignoring the profile precision would render "0.1" here as well.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let standard_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let float_node = builder.push_dynamic_expression_node(
+            float_expression(carrier),
+            TemplateSegmentOrigin::Body,
+            None,
+            None,
+        );
+        builder.finish_template(
+            float_node,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            None,
+        )
+    });
+    let standard_emission = fold_final_view_fixture_with_profile(
+        &standard_fixture,
+        &mut string_table,
+        TemplateTirPhase::Composed,
+        NumericProfile::STANDARD,
+    )
+    .expect("STANDARD interpolation should fold through the TIR fold");
+    assert_ne!(
+        emission_to_string(standard_emission, &string_table),
+        "0.1",
+        "the same carrier under STANDARD must keep its f64 expansion"
     );
 }
 

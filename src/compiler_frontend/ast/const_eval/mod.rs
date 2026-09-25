@@ -48,6 +48,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -183,6 +184,7 @@ impl From<TemplateError> for ConstantFoldError {
 pub fn constant_fold(
     output_stack: Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
+    numeric_profile: NumericProfile,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
@@ -226,7 +228,9 @@ pub fn constant_fold(
                 .pop()
                 .expect("unary operator should have one operand after the stack-length guard");
 
-            if let Some(folded) = fold_unary_operator(operator, &operand, string_table, *span)? {
+            if let Some(folded) =
+                fold_unary_operator(operator, &operand, string_table, *span, numeric_profile)?
+            {
                 stack.push(folded);
             } else {
                 // Keep unary operators as runtime RPN when the operand cannot fold.
@@ -259,7 +263,7 @@ pub fn constant_fold(
             }
         };
 
-        match lhs_expr.evaluate_operator(rhs_expr, operator, string_table)? {
+        match lhs_expr.evaluate_operator(rhs_expr, operator, string_table, numeric_profile)? {
             OperatorFoldOutcome::Folded(result) => {
                 stack.push(ExpressionRpnItem::Operand(result));
             }
@@ -295,12 +299,12 @@ pub fn constant_fold(
         Ok(ConstantFoldOutcome::NotConstant(stack))
     }
 }
-
 fn fold_unary_operator(
     op: &Operator,
     operand: &ExpressionRpnItem,
     string_table: &mut StringTable,
     operator_span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
 ) -> Result<Option<ExpressionRpnItem>, ConstantFoldError> {
     let ExpressionRpnItem::Operand(expression) = operand else {
         return Ok(None);
@@ -316,11 +320,15 @@ fn fold_unary_operator(
                 integer_overflow_error(op, string_table, operator_span)?;
                 return Ok(None);
             };
+            if !numeric_profile.int_width.contains(negated) {
+                integer_overflow_error(op, string_table, operator_span)?;
+                return Ok(None);
+            }
             Expression::int(negated, expression.span, expression.value_mode.to_owned())
         }
 
         (Operator::Negate, ExpressionKind::Float(value)) => Expression::float(
-            match checked_float_result(-value, op, string_table, operator_span)? {
+            match checked_float_result(-value, op, string_table, operator_span, numeric_profile)? {
                 ExpressionKind::Float(value) => value,
                 _ => return Ok(None),
             },
@@ -347,6 +355,7 @@ pub fn fold_compile_time_expression(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
+    numeric_profile: NumericProfile,
 ) -> Result<Expression, ConstantFoldError> {
     match &expression.kind {
         ExpressionKind::Cast(cast) => {
@@ -355,6 +364,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
             )?;
             fold_resolved_cast(
                 expression,
@@ -363,6 +373,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
                 None,
             )
         }
@@ -374,6 +385,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
             )?;
 
             match &folded_value.kind {
@@ -417,6 +429,7 @@ pub fn fold_compile_time_expression(
                     template_ir_store,
                     string_table,
                     constant_context,
+                    numeric_profile,
                 )?;
 
                 fold_resolved_cast(
@@ -426,6 +439,7 @@ pub fn fold_compile_time_expression(
                     template_ir_store,
                     string_table,
                     constant_context,
+                    numeric_profile,
                     Some(body),
                 )
             }
@@ -447,6 +461,10 @@ pub fn fold_compile_time_expression(
 ///      compile time.
 /// WHY: keeping this logic in the AST const-eval owner means HIR lowering only sees
 ///      runtime casts that could not be folded away.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "cast folding keeps the original and folded expressions, the resolved cast, the TIR store, mutable string state, const context, boundary numeric profile and recovery body as separate inputs"
+)]
 fn fold_resolved_cast(
     original_expression: &Expression,
     cast: &ResolvedCastExpression,
@@ -454,6 +472,7 @@ fn fold_resolved_cast(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
+    numeric_profile: NumericProfile,
     recovery_handler_body: Option<&[AstNode]>,
 ) -> Result<Expression, ConstantFoldError> {
     match &cast.evidence {
@@ -484,7 +503,7 @@ fn fold_resolved_cast(
                     Err(diagnostic) => return Err(ConstantFoldError::Diagnostic(diagnostic)),
                 };
 
-            match apply_builtin_cast_policy(*policy, &source_literal) {
+            match apply_builtin_cast_policy(*policy, &source_literal, numeric_profile) {
                 Ok(folded_literal) => {
                     let Some(mut folded_expression) = builtin_cast_expression_from_literal(
                         &folded_literal,
@@ -521,6 +540,7 @@ fn fold_resolved_cast(
                             original_expression.span,
                             template_ir_store,
                             string_table,
+                            numeric_profile,
                         )?
                     {
                         let recovery_provenance = folded_source
@@ -581,6 +601,10 @@ fn fold_resolved_cast(
 ///      cast.
 /// WHY: keeping this small and local to the AST const-eval owner means HIR lowering does not need to
 ///      interpret general catch handler bodies at compile time.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "recovery folding keeps the handler body, target/result types, wrap flag, span, TIR store, mutable string state and boundary numeric profile as separate inputs"
+)]
 fn fold_cast_recovery_handler(
     handler_body: &[AstNode],
     target_type_id: TypeId,
@@ -589,6 +613,7 @@ fn fold_cast_recovery_handler(
     diagnostic_span: Option<SourceSpan>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
+    numeric_profile: NumericProfile,
 ) -> Result<Option<Expression>, ConstantFoldError> {
     let Some(handler_expression) = extract_single_produced_value(handler_body) else {
         return Err(CompilerDiagnostic::invalid_cast(
@@ -600,8 +625,13 @@ fn fold_cast_recovery_handler(
         .into());
     };
 
-    let folded_handler =
-        fold_compile_time_expression(handler_expression, template_ir_store, string_table, true)?;
+    let folded_handler = fold_compile_time_expression(
+        handler_expression,
+        template_ir_store,
+        string_table,
+        true,
+        numeric_profile,
+    )?;
 
     let handler_is_compile_time_constant = folded_handler
         .const_value_kind_with_template_classifier(&mut |template| {
@@ -755,29 +785,56 @@ fn checked_float_result(
     op: &Operator,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
 ) -> Result<ExpressionKind, ConstantFoldError> {
-    if value.is_finite() {
-        Ok(ExpressionKind::Float(value))
+    // Float results round once at the boundary precision before the finiteness
+    // check, so Bits32 folds agree with Bits32 literal rounding.
+    let rounded = numeric_profile.float_precision.round(value);
+    if rounded.is_finite() {
+        Ok(ExpressionKind::Float(rounded))
     } else {
         float_non_finite_error(op, string_table, span)
     }
 }
 
 fn checked_int_binary_result(
-    lhs: i32,
-    rhs: i32,
+    lhs: i64,
+    rhs: i64,
     op: &Operator,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
 ) -> Result<ExpressionKind, ConstantFoldError> {
     let checked = match op {
         Operator::Add => lhs.checked_add(rhs),
         Operator::Subtract => lhs.checked_sub(rhs),
         Operator::Multiply => lhs.checked_mul(rhs),
         Operator::IntDivide => lhs.checked_div(rhs),
+        // Remainder by -1 is zero at every width; `checked_rem` reports the
+        // signed-minimum case as overflow only because the paired quotient overflows.
+        Operator::Modulus if rhs == -1 => Some(0),
         Operator::Modulus => lhs.checked_rem(rhs),
-        // Non-negative exponents are guaranteed by the caller; `rhs` is already validated as i32.
-        Operator::Exponent => lhs.checked_pow(rhs as u32),
+        Operator::Exponent => {
+            // The caller rejects negative exponents. Fold trivial bases directly so an
+            // oversized exponent still yields the exact result when |base| < 2
+            // (0^n = 0 for n > 0, 0^0 = 1, 1^n = 1, (-1)^n = +/-1 by parity);
+            // only |base| >= 2 reports IntegerOverflow when the exponent cannot
+            // narrow to u32.
+            if lhs == 0 {
+                Some(if rhs == 0 { 1 } else { 0 })
+            } else if lhs == 1 {
+                Some(1)
+            } else if lhs == -1 {
+                Some(if rhs % 2 == 0 { 1 } else { -1 })
+            } else {
+                // The remaining conversion is a checked narrowing so oversized
+                // exponents report overflow, not wrap.
+                let Ok(exponent) = u32::try_from(rhs) else {
+                    return integer_overflow_error(op, string_table, span);
+                };
+                lhs.checked_pow(exponent)
+            }
+        }
         _ => {
             return Err(CompilerError::compiler_error(format!(
                 "Checked integer folding does not support '{}'",
@@ -788,8 +845,10 @@ fn checked_int_binary_result(
     };
 
     match checked {
-        Some(value) => Ok(ExpressionKind::Int(value)),
-        None => integer_overflow_error(op, string_table, span),
+        // Checked i64 arithmetic can still leave the boundary width (for
+        // example under Int32); the width owns the final validity check.
+        Some(value) if numeric_profile.int_width.contains(value) => Ok(ExpressionKind::Int(value)),
+        _ => integer_overflow_error(op, string_table, span),
     }
 }
 
@@ -837,37 +896,67 @@ impl Expression {
         rhs: &Expression,
         op: &Operator,
         string_table: &mut StringTable,
+        numeric_profile: NumericProfile,
     ) -> Result<OperatorFoldOutcome, ConstantFoldError> {
+        let precision = numeric_profile.float_precision;
         let kind: ExpressionKind = match (&self.kind, &rhs.kind) {
             // Float operations: Moth `Float` is finite f64. Require finite results and
             // report divide/modulo-by-zero explicitly instead of relying on NaN/Inf classification.
             (ExpressionKind::Float(lhs_val), ExpressionKind::Float(rhs_val)) => match op {
-                Operator::Add => {
-                    checked_float_result(lhs_val + rhs_val, op, string_table, self.span)?
-                }
-                Operator::Subtract => {
-                    checked_float_result(lhs_val - rhs_val, op, string_table, self.span)?
-                }
-                Operator::Multiply => {
-                    checked_float_result(lhs_val * rhs_val, op, string_table, self.span)?
-                }
+                Operator::Add => checked_float_result(
+                    lhs_val + rhs_val,
+                    op,
+                    string_table,
+                    self.span,
+                    numeric_profile,
+                )?,
+                Operator::Subtract => checked_float_result(
+                    lhs_val - rhs_val,
+                    op,
+                    string_table,
+                    self.span,
+                    numeric_profile,
+                )?,
+                Operator::Multiply => checked_float_result(
+                    lhs_val * rhs_val,
+                    op,
+                    string_table,
+                    self.span,
+                    numeric_profile,
+                )?,
                 Operator::Divide => {
                     if *rhs_val == 0.0 {
                         divide_by_zero_error(string_table, self.span)?
                     } else {
-                        checked_float_result(lhs_val / rhs_val, op, string_table, self.span)?
+                        checked_float_result(
+                            lhs_val / rhs_val,
+                            op,
+                            string_table,
+                            self.span,
+                            numeric_profile,
+                        )?
                     }
                 }
                 Operator::Modulus => {
                     if *rhs_val == 0.0 {
                         divide_by_zero_error(string_table, self.span)?
                     } else {
-                        checked_float_result(lhs_val % rhs_val, op, string_table, self.span)?
+                        checked_float_result(
+                            lhs_val % rhs_val,
+                            op,
+                            string_table,
+                            self.span,
+                            numeric_profile,
+                        )?
                     }
                 }
-                Operator::Exponent => {
-                    checked_float_result(lhs_val.powf(*rhs_val), op, string_table, self.span)?
-                }
+                Operator::Exponent => checked_float_result(
+                    lhs_val.powf(*rhs_val),
+                    op,
+                    string_table,
+                    self.span,
+                    numeric_profile,
+                )?,
 
                 // Logical operations with float operands
                 Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
@@ -881,21 +970,29 @@ impl Expression {
                 _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
             },
 
-            // Integer operations use checked i32 arithmetic so compile-time folding stays
-            // equivalent to the Alpha runtime `Int` contract.
+            // Integer operations use checked i64 arithmetic plus the boundary width
+            // so compile-time folding stays equivalent to the runtime `Int` contract.
             (ExpressionKind::Int(lhs_val), ExpressionKind::Int(rhs_val)) => match op {
                 Operator::Add | Operator::Subtract | Operator::Multiply => {
-                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
+                    checked_int_binary_result(
+                        *lhs_val,
+                        *rhs_val,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?
                 }
                 Operator::Divide => {
                     if *rhs_val == 0 {
                         divide_by_zero_error(string_table, self.span)?
                     } else {
                         checked_float_result(
-                            f64::from(*lhs_val) / f64::from(*rhs_val),
+                            precision.round_int(*lhs_val) / precision.round_int(*rhs_val),
                             op,
                             string_table,
                             self.span,
+                            numeric_profile,
                         )?
                     }
                 }
@@ -903,14 +1000,28 @@ impl Expression {
                     if *rhs_val == 0 {
                         divide_by_zero_error(string_table, self.span)?
                     } else {
-                        checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
+                        checked_int_binary_result(
+                            *lhs_val,
+                            *rhs_val,
+                            op,
+                            string_table,
+                            self.span,
+                            numeric_profile,
+                        )?
                     }
                 }
                 Operator::Modulus => {
                     if *rhs_val == 0 {
                         divide_by_zero_error(string_table, self.span)?
                     } else {
-                        checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
+                        checked_int_binary_result(
+                            *lhs_val,
+                            *rhs_val,
+                            op,
+                            string_table,
+                            self.span,
+                            numeric_profile,
+                        )?
                     }
                 }
                 Operator::Exponent => {
@@ -922,7 +1033,14 @@ impl Expression {
                             self.span,
                         ));
                     }
-                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
+                    checked_int_binary_result(
+                        *lhs_val,
+                        *rhs_val,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?
                 }
                 Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
                 Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
@@ -946,37 +1064,65 @@ impl Expression {
                 _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
             },
 
-            // Mixed Int/Float operations promote the i32 operand to Float, then require a finite
-            // f64 result.
+            // Mixed Int/Float operations promote the Int operand at the boundary
+            // precision, then round once and require a finite result.
             (ExpressionKind::Int(lhs_val), ExpressionKind::Float(rhs_val)) => {
-                let lhs = f64::from(*lhs_val);
+                let lhs = precision.round_int(*lhs_val);
                 match op {
-                    Operator::Add => {
-                        checked_float_result(lhs + rhs_val, op, string_table, self.span)?
-                    }
-                    Operator::Subtract => {
-                        checked_float_result(lhs - rhs_val, op, string_table, self.span)?
-                    }
-                    Operator::Multiply => {
-                        checked_float_result(lhs * rhs_val, op, string_table, self.span)?
-                    }
+                    Operator::Add => checked_float_result(
+                        lhs + rhs_val,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
+                    Operator::Subtract => checked_float_result(
+                        lhs - rhs_val,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
+                    Operator::Multiply => checked_float_result(
+                        lhs * rhs_val,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
                     Operator::Divide => {
                         if *rhs_val == 0.0 {
                             divide_by_zero_error(string_table, self.span)?
                         } else {
-                            checked_float_result(lhs / rhs_val, op, string_table, self.span)?
+                            checked_float_result(
+                                lhs / rhs_val,
+                                op,
+                                string_table,
+                                self.span,
+                                numeric_profile,
+                            )?
                         }
                     }
                     Operator::Modulus => {
                         if *rhs_val == 0.0 {
                             divide_by_zero_error(string_table, self.span)?
                         } else {
-                            checked_float_result(lhs % rhs_val, op, string_table, self.span)?
+                            checked_float_result(
+                                lhs % rhs_val,
+                                op,
+                                string_table,
+                                self.span,
+                                numeric_profile,
+                            )?
                         }
                     }
-                    Operator::Exponent => {
-                        checked_float_result(lhs.powf(*rhs_val), op, string_table, self.span)?
-                    }
+                    Operator::Exponent => checked_float_result(
+                        lhs.powf(*rhs_val),
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
                     Operator::Equality => ExpressionKind::Bool(lhs == *rhs_val),
                     Operator::NotEqual => ExpressionKind::Bool(lhs != *rhs_val),
                     Operator::GreaterThan => ExpressionKind::Bool(lhs > *rhs_val),
@@ -989,34 +1135,62 @@ impl Expression {
             }
 
             (ExpressionKind::Float(lhs_val), ExpressionKind::Int(rhs_val)) => {
-                let rhs = f64::from(*rhs_val);
+                let rhs = precision.round_int(*rhs_val);
                 match op {
-                    Operator::Add => {
-                        checked_float_result(lhs_val + rhs, op, string_table, self.span)?
-                    }
-                    Operator::Subtract => {
-                        checked_float_result(lhs_val - rhs, op, string_table, self.span)?
-                    }
-                    Operator::Multiply => {
-                        checked_float_result(lhs_val * rhs, op, string_table, self.span)?
-                    }
+                    Operator::Add => checked_float_result(
+                        lhs_val + rhs,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
+                    Operator::Subtract => checked_float_result(
+                        lhs_val - rhs,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
+                    Operator::Multiply => checked_float_result(
+                        lhs_val * rhs,
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
                     Operator::Divide => {
                         if *rhs_val == 0 {
                             divide_by_zero_error(string_table, self.span)?
                         } else {
-                            checked_float_result(lhs_val / rhs, op, string_table, self.span)?
+                            checked_float_result(
+                                lhs_val / rhs,
+                                op,
+                                string_table,
+                                self.span,
+                                numeric_profile,
+                            )?
                         }
                     }
                     Operator::Modulus => {
                         if *rhs_val == 0 {
                             divide_by_zero_error(string_table, self.span)?
                         } else {
-                            checked_float_result(lhs_val % rhs, op, string_table, self.span)?
+                            checked_float_result(
+                                lhs_val % rhs,
+                                op,
+                                string_table,
+                                self.span,
+                                numeric_profile,
+                            )?
                         }
                     }
-                    Operator::Exponent => {
-                        checked_float_result(lhs_val.powf(rhs), op, string_table, self.span)?
-                    }
+                    Operator::Exponent => checked_float_result(
+                        lhs_val.powf(rhs),
+                        op,
+                        string_table,
+                        self.span,
+                        numeric_profile,
+                    )?,
                     Operator::Equality => ExpressionKind::Bool(*lhs_val == rhs),
                     Operator::NotEqual => ExpressionKind::Bool(*lhs_val != rhs),
                     Operator::GreaterThan => ExpressionKind::Bool(*lhs_val > rhs),

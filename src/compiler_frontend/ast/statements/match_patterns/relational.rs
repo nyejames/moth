@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -28,6 +29,7 @@ type RelationalPatternResult<T> = Result<T, ExpressionParseError>;
 pub(super) fn parse_relational_pattern(
     token_stream: &mut AstCursor,
     subject_type_id: TypeId,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> RelationalPatternResult<MatchPattern> {
@@ -52,6 +54,7 @@ pub(super) fn parse_relational_pattern(
     let value = parse_literal_pattern(
         token_stream,
         subject_type_id,
+        numeric_profile,
         string_table,
         type_environment,
     )?;

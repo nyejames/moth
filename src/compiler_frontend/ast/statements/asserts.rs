@@ -99,6 +99,7 @@ pub(crate) fn parse_assert_statement(
                 type_environment: type_check_context.type_environment,
                 path_fork,
                 compatibility_cache: type_check_context.compatibility_cache,
+                float_precision: context.numeric_profile.float_precision,
             },
         )?
     };

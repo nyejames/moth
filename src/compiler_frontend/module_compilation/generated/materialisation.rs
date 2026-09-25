@@ -235,6 +235,7 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
+                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -254,6 +255,7 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
+                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,

@@ -290,6 +290,7 @@ impl GenericTemplateArtefact {
             external_package_registry,
             style_directives,
             build_profile,
+            numeric_profile,
             template_const_loop_iteration_limit,
             #[cfg(feature = "timers")]
             timing_context,
@@ -321,6 +322,7 @@ impl GenericTemplateArtefact {
             entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile,
+            numeric_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

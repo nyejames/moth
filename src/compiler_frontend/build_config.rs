@@ -13,8 +13,15 @@
 //!
 //! Command-input value inference lives here so build, check and dev share one immediate
 //! primitive-inference path. [`PrimitiveBuildValue::from_command_text`] composes the ordinary
-//! Moth literal grammar and the shared `numeric_text` materialisation helpers — it never
-//! consults a project or source contract and never re-implements a literal grammar.
+//! Moth literal grammar and the shared `numeric_text` materialisation helpers under one boundary
+//! [`NumericProfile`] — it never consults a project or source contract and never re-implements a
+//! literal grammar.
+//!
+//! [`PrimitiveBuildValue::checked_for_numeric_profile`] is the one acceptance rule for numeric
+//! values: `Int` fits the profile's width and `Float` stays finite after rounding to the profile's
+//! precision. Values authored before a profile was known (source-config defaults and programmatic
+//! typed inputs) pass through it wherever they resolve, while command inputs are materialised at
+//! the profile in the first place.
 //!
 //! Exclusions: no `--input` argument parser or `#Config` grammar lives here. Command layers
 //! split each argument at the first `=`, validate names and insert the resulting entries.
@@ -26,10 +33,11 @@
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
-    parse_numeric_text_to_f64, parse_numeric_text_to_i32,
+    parse_numeric_text_to_float, parse_numeric_text_to_int,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -245,7 +253,7 @@ impl BuildConfigInputEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PrimitiveBuildValue {
     String(String),
-    Int(i32),
+    Int(i64),
     Float(FiniteFloat),
     Bool(bool),
     Char(char),
@@ -258,22 +266,60 @@ impl PrimitiveBuildValue {
         Ok(Self::Float(FiniteFloat::new(value)?))
     }
 
-    /// Infer one typed primitive value from raw command-input text.
+    /// Return this value when it satisfies one boundary numeric profile.
+    ///
+    /// WHAT: the one acceptance rule for a numeric value: `Int` must fit the profile's `Int`
+    ///       width, and `Float` is rounded to the profile's precision and must stay finite.
+    /// WHY:  command inputs materialise at the profile and source-authored defaults materialise
+    ///       when the boundary fact is built, but programmatic typed inputs enter resolution from
+    ///       carriers built before a profile was known. Every resolved value therefore passes this
+    ///       rule here rather than each entry point re-deriving a width or precision check.
+    pub(crate) fn checked_for_numeric_profile(
+        self,
+        numeric_profile: NumericProfile,
+    ) -> Result<Self, NumericProfileViolation> {
+        match self {
+            Self::Int(value) if !numeric_profile.int_width.contains(value) => {
+                Err(NumericProfileViolation::IntOutOfRange { value })
+            }
+            Self::Float(value) => {
+                let rounded = numeric_profile.float_precision.round(value.value());
+                if !rounded.is_finite() {
+                    return Err(NumericProfileViolation::NonFiniteFloat {
+                        value: value.value(),
+                    });
+                }
+
+                // The rounded value is finite by the check above, so the carrier cannot reject it.
+                Ok(Self::Float(
+                    FiniteFloat::new(rounded).expect("rounded finite Float satisfies the carrier"),
+                ))
+            }
+            other => Ok(other),
+        }
+    }
+
+    /// Infer one typed primitive value from raw command-input text under one numeric profile.
     ///
     /// WHAT: the one immediate inference path every command variant shares. Exact lowercase
     ///       `true`/`false` infers Bool; a complete valid signed whole-number literal infers
-    ///       Int; a complete valid decimal-point or exponent literal infers Float; a
-    ///       single-quote-leading value must be one complete ordinary Moth Char literal; a
-    ///       double-quote-leading value must be one complete ordinary Moth String literal; and
-    ///       every other value — including the empty value, bare `none`, `+1`, `NaN`,
-    ///       `Infinity`, backtick text and malformed numeric-looking text — falls back to
-    ///       String with its exact authored remainder preserved.
+    ///       Int at the profile's width; a complete valid decimal-point or exponent literal
+    ///       infers Float at the profile's precision; a single-quote-leading value must be one
+    ///       complete ordinary Moth Char literal; a double-quote-leading value must be one
+    ///       complete ordinary Moth String literal; and every other value — including the empty
+    ///       value, bare `none`, `+1`, `NaN`, `Infinity`, backtick text and malformed
+    ///       numeric-looking text — falls back to String with its exact authored remainder
+    ///       preserved.
     /// WHY:  a command value's primitive type is decided immediately from the authored text,
-    ///       never by waiting for a project or source contract. Numeric materialisation and
-    ///       quoted literal parsing compose the compiler's existing `numeric_text` and ordinary
-    ///       literal-grammar owners, so no second grammar exists, and whole-number Int
+    ///       never by waiting for a project or source contract, and the selected builder has
+    ///       already settled the profile the command will compile under. Numeric materialisation
+    ///       and quoted literal parsing compose the compiler's existing `numeric_text` and
+    ///       ordinary literal-grammar owners, so no second grammar exists, and whole-number Int
     ///       overflow and non-finite Float results are diagnostics rather than fallbacks.
-    pub(crate) fn from_command_text(value: &str) -> Result<Self, BuildInputValueError> {
+    pub(crate) fn from_command_text(
+        value: &str,
+        numeric_profile: NumericProfile,
+    ) -> Result<Self, BuildInputValueError> {
         if value == "true" {
             return Ok(Self::Bool(true));
         }
@@ -281,7 +327,7 @@ impl PrimitiveBuildValue {
             return Ok(Self::Bool(false));
         }
 
-        match parse_numeric_text_to_i32(value) {
+        match parse_numeric_text_to_int(value, numeric_profile.int_width) {
             Ok(materialised) => return Ok(Self::Int(materialised)),
             Err(NumberLiteralErrorReason::OutsideIntRange) => {
                 return Err(BuildInputValueError::IntOutOfRange {
@@ -291,7 +337,7 @@ impl PrimitiveBuildValue {
             Err(_) => {}
         }
 
-        match parse_numeric_text_to_f64(value) {
+        match parse_numeric_text_to_float(value, numeric_profile.float_precision) {
             Ok(materialised) => {
                 return Self::float(materialised).map_err(|_| {
                     BuildInputValueError::NonFiniteFloat {
@@ -388,6 +434,40 @@ impl fmt::Display for BuildInputValueError {
                 formatter,
                 "value '{text}' is not a complete Moth String literal ({reason})"
             ),
+        }
+    }
+}
+
+/// Why one typed numeric value does not satisfy a boundary numeric profile.
+///
+/// WHAT: a whole-number value outside the profile's `Int` width, or a value that is not finite
+///       after rounding to the profile's `Float` precision.
+/// WHY:  every resolution lane reports a refused profile value through the existing
+///       number-literal diagnostic, so this carrier keeps the raw refused value and lets each lane
+///       render its own reason code and value text without duplicating the acceptance rule.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum NumericProfileViolation {
+    IntOutOfRange { value: i64 },
+    NonFiniteFloat { value: f64 },
+}
+
+impl NumericProfileViolation {
+    /// The existing number-literal reason code this violation reports.
+    pub(crate) fn reason(&self) -> NumberLiteralErrorReason {
+        match self {
+            Self::IntOutOfRange { .. } => NumberLiteralErrorReason::OutsideIntRange,
+            Self::NonFiniteFloat { .. } => NumberLiteralErrorReason::NonFiniteFloat,
+        }
+    }
+
+    /// The normalized value text the number-literal diagnostic reports.
+    ///
+    /// A `Float` value that only overflows the narrower precision has no authored spelling left
+    /// at this point, so it reports its exponent form rather than a long digit run.
+    pub(crate) fn value_text(&self) -> String {
+        match self {
+            Self::IntOutOfRange { value } => value.to_string(),
+            Self::NonFiniteFloat { value } => format!("{value:e}"),
         }
     }
 }
@@ -714,6 +794,7 @@ pub(crate) fn build_config_fingerprint(
     field_name: &str,
     contract: BuildInputType,
     value: Option<&PrimitiveBuildValue>,
+    numeric_profile: NumericProfile,
 ) -> BuildConfigFingerprint {
     const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     let mut hash = OFFSET_BASIS;
@@ -730,6 +811,18 @@ pub(crate) fn build_config_fingerprint(
             PrimitiveBuildInputType::Char => 4,
         }],
     );
+
+    // Only `Int` width and `Float` precision change what a resolved value means, so the profile's
+    // stable byte participates for those two contract primitives alone. A `String` contract
+    // fingerprint must stay independent of the profile.
+    match contract.primitive() {
+        PrimitiveBuildInputType::Int | PrimitiveBuildInputType::Float => {
+            fingerprint_feed(&mut hash, &[numeric_profile.fingerprint_byte()]);
+        }
+        PrimitiveBuildInputType::String
+        | PrimitiveBuildInputType::Bool
+        | PrimitiveBuildInputType::Char => {}
+    }
 
     match value {
         None => fingerprint_feed(&mut hash, &[0]),
@@ -1056,6 +1149,18 @@ pub(crate) enum BuildConfigResolutionError {
     MissingRequiredValue {
         contract: Box<BuildConfigContractFact>,
     },
+    /// A selected or default value does not satisfy the boundary numeric profile.
+    ///
+    /// WHAT: the contract whose value was refused, the normalized value text and the existing
+    ///       number-literal reason code.
+    /// WHY:  `Int` width and `Float` precision are boundary facts, so a resolution that selected a
+    ///       value outside the profile reports the same out-of-range or non-finite diagnostic a
+    ///       source literal of that width uses.
+    NumericProfileViolation {
+        contract: Box<BuildConfigContractFact>,
+        text: String,
+        reason: NumberLiteralErrorReason,
+    },
     /// A declaration-owned config contract reached the barrier without its folded provider payload.
     ///
     /// This is an internal handoff invariant: config selection belongs exclusively to the
@@ -1085,6 +1190,9 @@ impl BuildConfigResolutionError {
             | Self::MissingRequiredValue {
                 contract: source, ..
             }
+            | Self::NumericProfileViolation {
+                contract: source, ..
+            }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
             } => source.name(),
@@ -1109,6 +1217,9 @@ impl BuildConfigResolutionError {
             | Self::MissingRequiredValue {
                 contract: source, ..
             }
+            | Self::NumericProfileViolation {
+                contract: source, ..
+            }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
             } => source.span(),
@@ -1127,6 +1238,7 @@ impl BuildConfigResolutionError {
             | Self::FixedProjectSourceTypeMismatch { .. }
             | Self::DefaultTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
+            | Self::NumericProfileViolation { .. }
             | Self::DirectProjectProviderMissing { .. } => None,
         }
     }
@@ -1152,6 +1264,7 @@ impl BuildConfigResolutionError {
             Self::DefaultTypeMismatch { .. }
             | Self::ValueTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
+            | Self::NumericProfileViolation { .. }
             | Self::DirectProjectProviderMissing { .. }
             | Self::UnknownExplicitInput { .. } => None,
         }
@@ -1169,6 +1282,9 @@ impl BuildConfigResolutionError {
                 contract: source, ..
             }
             | Self::MissingRequiredValue {
+                contract: source, ..
+            }
+            | Self::NumericProfileViolation {
                 contract: source, ..
             }
             | Self::DirectProjectProviderMissing {
@@ -1340,6 +1456,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
         transient_source_facts: &[BuildConfigContractFact],
         explicit_inputs: &BuildConfigInputSet,
         builder_globals: &BuilderConfigGlobalSet,
+        numeric_profile: NumericProfile,
     ) -> Result<ResolvedBuildConfigMap, BuildConfigResolutionError> {
         // Source-contract conflicts are checked over canonical-then-transient authored order before
         // defaults or project compatibility, matching the owning boundary resolver without
@@ -1387,6 +1504,7 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                 Some(*source),
                 explicit_inputs,
                 builder_globals,
+                numeric_profile,
             )?;
             resolved.entries.insert((*name).clone(), value);
         }
@@ -1447,6 +1565,7 @@ pub(crate) fn resolve_build_config_values(
     direct_project_facts: &[BuildConfigContractFact],
     explicit_inputs: &BuildConfigInputSet,
     builder_globals: &BuilderConfigGlobalSet,
+    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigMap, BuildConfigResolutionError> {
     let source_by_name = collect_source_facts(source_facts)?;
     let fixed_project_by_name = collect_project_facts(fixed_project_facts)?;
@@ -1480,6 +1599,7 @@ pub(crate) fn resolve_build_config_values(
             source_by_name.get(&name),
             explicit_inputs,
             builder_globals,
+            numeric_profile,
         )?;
         resolved.insert(name, value);
     }
@@ -1643,9 +1763,10 @@ fn resolve_one_build_config_value(
     source: Option<&BuildConfigContractFact>,
     explicit_inputs: &BuildConfigInputSet,
     builder_globals: &BuilderConfigGlobalSet,
+    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
     if let (Some(fixed_project), Some(source)) = (fixed_project, source) {
-        return resolved_fixed_project_value(source, fixed_project);
+        return resolved_fixed_project_value(source, fixed_project, numeric_profile);
     }
 
     if let Some(direct_project) = direct_project {
@@ -1714,24 +1835,21 @@ fn resolve_one_build_config_value(
         (None, BuildConfigValueOrigin::DeclarationDefault, None)
     };
 
-    Ok(resolved_value_from_contract(
-        contract,
-        value,
-        origin,
-        value_location,
-    ))
+    resolved_value_from_contract(contract, value, origin, value_location, numeric_profile)
 }
 
 fn resolved_fixed_project_value(
     source: &BuildConfigContractFact,
     fixed_project: &BuildConfigContractFact,
+    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
-    Ok(resolved_value_from_contract(
+    resolved_value_from_contract(
         source,
         fixed_project.default.clone(),
         BuildConfigValueOrigin::FixedProjectField,
         fixed_project.span.map(BuildConfigValueLocation::Source),
-    ))
+        numeric_profile,
+    )
 }
 
 fn resolved_value_from_provider(
@@ -1751,19 +1869,39 @@ fn resolved_value_from_provider(
     }
 }
 
+/// Build one resolved value, accepting its value under the boundary numeric profile.
+///
+/// WHAT: the single point where a selected value becomes a resolved value: it re-establishes the
+///       profile rule for the value, then fingerprints the field over the profile.
+/// WHY:  source-authored defaults materialise at the profile when their boundary fact is built and
+///       command inputs materialise at the profile in the command layer, but programmatic typed
+///       inputs arrive from carriers built before a profile was known. Checking here keeps one
+///       acceptance rule for every resolved value instead of trusting each entry point.
 fn resolved_value_from_contract(
     contract: &BuildConfigContractFact,
     value: Option<PrimitiveBuildValue>,
     origin: BuildConfigValueOrigin,
     value_location: Option<BuildConfigValueLocation>,
-) -> ResolvedBuildConfigValue {
+    numeric_profile: NumericProfile,
+) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
+    let value = match value {
+        Some(value) => Some(value.checked_for_numeric_profile(numeric_profile).map_err(
+            |violation| BuildConfigResolutionError::NumericProfileViolation {
+                contract: Box::new(contract.clone()),
+                text: violation.value_text(),
+                reason: violation.reason(),
+            },
+        )?),
+        None => None,
+    };
     let fingerprint = build_config_fingerprint(
         contract.name().as_str(),
         contract.value_type(),
         value.as_ref(),
+        numeric_profile,
     );
 
-    ResolvedBuildConfigValue {
+    Ok(ResolvedBuildConfigValue {
         name: contract.name().clone(),
         value_type: contract.value_type(),
         required: contract.required(),
@@ -1773,5 +1911,5 @@ fn resolved_value_from_contract(
         fingerprint,
         span: contract.span,
         value_location,
-    }
+    })
 }

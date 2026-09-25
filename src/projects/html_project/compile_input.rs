@@ -7,6 +7,7 @@ use crate::build_system::BuildProfile;
 use crate::build_system::build::ProjectEntry;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirReachability;
@@ -34,6 +35,9 @@ pub(crate) struct HtmlModuleCompileInput<'a> {
     pub build_profile: BuildProfile,
     pub root_activity: &'a ModuleRootActivity,
     pub external_package_registry: Arc<ExternalPackageRegistry>,
+    /// Compiler-owned numeric widths for this compilation boundary, settled at bootstrap and
+    /// carried on the project compilation.
+    pub numeric_profile: NumericProfile,
 }
 
 /// Builder-owned context for compiling one selected HTML module entry.
@@ -51,4 +55,8 @@ pub(crate) struct HtmlModuleCompileContext<'a> {
     pub(crate) document_config: &'a HtmlDocumentConfig,
     pub(crate) build_profile: BuildProfile,
     pub(crate) wasm_enabled: bool,
+    /// The boundary numeric profile settled at bootstrap, carried on the compilation.
+    ///
+    /// WHY: the backend must lower the settled value instead of re-asking the builder.
+    pub(crate) numeric_profile: NumericProfile,
 }

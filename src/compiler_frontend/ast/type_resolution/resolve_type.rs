@@ -112,6 +112,7 @@ fn resolve_parsed_type_annotation_inner(
                         capacity,
                         scope_context,
                         context.type_environment,
+                        context.numeric_profile,
                     ) {
                         Ok(value) => Some(value),
                         Err(diagnostic) => {

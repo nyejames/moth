@@ -1441,10 +1441,16 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirPlace::Index { base, index } => {
                 let base = self.lower_place(base, source, event_ids)?;
                 let projection = match index.kind {
-                    HirExpressionKind::Int(value) if value >= 0 => {
-                        ProjectionElem::FixedIndex(value as u32)
+                    HirExpressionKind::Int(value) => {
+                        // Fixed projections need a 32-bit table id, so only values that
+                        // fit `u32` stay fixed; negatives and oversized values use the
+                        // dynamic path.
+                        match u32::try_from(value) {
+                            Ok(fixed) => ProjectionElem::FixedIndex(fixed),
+
+                            Err(_) => ProjectionElem::DynamicIndex,
+                        }
                     }
-                    HirExpressionKind::Int(_) => ProjectionElem::DynamicIndex,
                     _ => {
                         self.lower_expression(index, source, event_ids)?;
                         ProjectionElem::DynamicIndex

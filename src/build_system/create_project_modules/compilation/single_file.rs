@@ -23,6 +23,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
     SourceSpanCapacityResource,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -71,6 +72,7 @@ use super::{append_finish_failure, publish_compiled_module};
 pub(crate) fn compile_single_file_frontend_with_inputs(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -82,6 +84,7 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
+        numeric_profile,
         style_directives,
         builder_surface,
         extension,
@@ -116,6 +119,7 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
 pub(crate) fn compile_single_file_boracle_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -125,6 +129,7 @@ pub(crate) fn compile_single_file_boracle_frontend(
     let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
+        numeric_profile,
         style_directives,
         builder_surface,
         extension,
@@ -171,6 +176,7 @@ enum SingleFileFrontendTarget {
 fn compile_single_file_frontend_with_target(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -446,10 +452,14 @@ fn compile_single_file_frontend_with_target(
             string_table,
         )?;
 
-        let source_facts =
-            config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
+        let source_facts = config_boundary::source_contract_facts_from_prepared(
+            &prepared,
+            string_table,
+            base_len,
+            numeric_profile,
+        )?;
         let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table)?;
+            config_boundary::effective_project_fields(config, string_table, numeric_profile)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
@@ -462,6 +472,7 @@ fn compile_single_file_frontend_with_target(
             builder_surface.config_globals(),
             fallback_span,
             string_table,
+            numeric_profile,
         )?;
         // Semantic compilation is one compiler service call. A synthetic single-file module has no
         // completed providers, so it binds against empty provider and materialisation views.
@@ -469,7 +480,7 @@ fn compile_single_file_frontend_with_target(
         let mut provider_materialisations = ProviderMaterialisationRegistry::default();
         let mut generated_store = BoundaryGeneratedFunctionStore::default();
         let compile_context = ModuleCompilationContext {
-            options: config.frontend_options(),
+            options: config.frontend_options(numeric_profile),
             build_profile,
             root_role_override: None,
             project_path_resolver: Some(&project_path_resolver),

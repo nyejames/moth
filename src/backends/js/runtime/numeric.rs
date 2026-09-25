@@ -11,7 +11,6 @@
 
 use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::builtins::casts::numeric_limits::{I32_MAX, I32_MIN};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 
 impl<'hir> JsEmitter<'hir> {
@@ -61,8 +60,14 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn emit_numeric_int_range_constants(&mut self) {
-        self.emit_line(&format!("const __BS_INT_MIN = {I32_MIN};"));
-        self.emit_line(&format!("const __BS_INT_MAX = {I32_MAX};"));
+        // The lowering gate rejects non-standard profiles, so these bounds are the
+        // Bits32 pair today; reading them from the profile keeps the single owner.
+        let int_width = self.config.numeric_profile.int_width;
+        let min = int_width.min_value();
+        let max = int_width.max_value();
+
+        self.emit_line(&format!("const __BS_INT_MIN = {min};"));
+        self.emit_line(&format!("const __BS_INT_MAX = {max};"));
         self.emit_line("");
     }
 
@@ -124,9 +129,12 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line(&Self::error_result_call(BuiltinErrorCode::DivideByZero));
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (a === __BS_INT_MIN && b === -1) {");
+            // Remainder by -1 is zero at every width; the signed-minimum overflow
+            // belongs to the paired quotient only. Return the single Moth Int zero
+            // directly so a JS `-0` from `a % b` is never observable.
+            emitter.emit_line("if (b === -1) {");
             emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::IntOverflow));
+                em.emit_line("return __moth_int_ok(0);");
             });
             emitter.emit_line("}");
             emitter.emit_line("return __moth_int_check(a % b);");

@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -48,14 +49,20 @@ pub(crate) struct ConstRangeCursor {
     emitted_iterations: usize,
     limit: usize,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+    /// Boundary `Float` precision for mixed/int-widened float iteration.
+    ///
+    /// WHY: `Int` bounds and steps widen and `Float` counters accumulate at the
+    ///      compilation boundary precision, so Bits32 counters advance exactly
+    ///      as Bits32 literals do instead of drifting in f64.
+    float_precision: FloatPrecision,
 }
 
 enum ConstRangeCursorKind {
     Int {
-        current: i32,
-        end: i32,
+        current: i64,
+        end: i64,
         end_kind: RangeEndKind,
-        step: i32,
+        step: i64,
     },
     Float {
         current: f64,
@@ -67,7 +74,7 @@ enum ConstRangeCursorKind {
 
 #[derive(Clone, Copy)]
 pub(crate) enum ConstRangeIterationValue {
-    Int(i32),
+    Int(i64),
     Float(f64),
 }
 
@@ -76,6 +83,7 @@ impl ConstRangeCursor {
         range: &RangeLoopSpec,
         limit: usize,
         span: Option<crate::compiler_frontend::source::SourceSpan>,
+        float_precision: FloatPrecision,
     ) -> Result<Self, TemplateError> {
         let start = const_numeric_expression(&range.start)?;
         let end = const_numeric_expression(&range.end)?;
@@ -100,6 +108,7 @@ impl ConstRangeCursor {
                 emitted_iterations: 0,
                 limit,
                 span,
+                float_precision,
             }),
 
             (
@@ -131,12 +140,16 @@ impl ConstRangeCursor {
                     emitted_iterations: 0,
                     limit,
                     span,
+                    float_precision,
                 })
             }
 
             (start, end, step) => {
-                let start = start.as_float();
-                let end = end.as_float();
+                // Widened `Int` bounds convert at the boundary precision (never via an
+                // f64 intermediate under Bits32) and literal `Float` bounds round once,
+                // so mixed ranges and counters start exactly where the boundary types them.
+                let start = start.to_float(float_precision);
+                let end = end.to_float(float_precision);
 
                 if !start.is_finite() || !end.is_finite() {
                     return Err(CompilerDiagnostic::invalid_template_structure(
@@ -155,7 +168,7 @@ impl ConstRangeCursor {
                         .into());
                     }
                     Some(step_value) => {
-                        let magnitude = step_value.as_float().abs();
+                        let magnitude = step_value.to_float(float_precision).abs();
                         if magnitude == 0.0 || !magnitude.is_finite() {
                             return Err(CompilerDiagnostic::invalid_template_structure(
                                 InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
@@ -173,7 +186,7 @@ impl ConstRangeCursor {
                     -step_magnitude
                 };
 
-                if start + step == start {
+                if float_precision.round(start + step) == start {
                     return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
                         span,
@@ -191,6 +204,7 @@ impl ConstRangeCursor {
                     emitted_iterations: 0,
                     limit,
                     span,
+                    float_precision,
                 })
             }
         }
@@ -262,7 +276,9 @@ impl ConstRangeCursor {
                 self.emitted_iterations += 1;
 
                 let previous = *current;
-                *current += *step;
+                // Round every accumulation at the boundary precision so Bits32 counters
+                // follow f32 stepping (and stall exactly when f32 cannot advance).
+                *current = self.float_precision.round(*current + *step);
 
                 if !current.is_finite() || *current == previous {
                     return Err(CompilerDiagnostic::invalid_template_structure(
@@ -279,9 +295,9 @@ impl ConstRangeCursor {
 }
 
 fn int_step_magnitude(
-    step: i32,
+    step: i64,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
-) -> Result<i32, TemplateError> {
+) -> Result<i64, TemplateError> {
     step.checked_abs().ok_or_else(|| {
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
@@ -293,15 +309,17 @@ fn int_step_magnitude(
 
 #[derive(Clone, Copy)]
 enum ConstNumericValue {
-    Int(i32),
+    Int(i64),
     Float(f64),
 }
 
 impl ConstNumericValue {
-    fn as_float(self) -> f64 {
+    fn to_float(self, float_precision: FloatPrecision) -> f64 {
         match self {
-            Self::Int(value) => value as f64,
-            Self::Float(value) => value,
+            // Widened `Int` bounds convert at the boundary precision (never via an
+            // f64 intermediate under Bits32), while literal `Float` bounds round once.
+            Self::Int(value) => float_precision.round_int(value),
+            Self::Float(value) => float_precision.round(value),
         }
     }
 }
@@ -319,7 +337,7 @@ fn const_numeric_expression(expression: &Expression) -> Result<ConstNumericValue
     }
 }
 
-fn int_range_contains(current: i32, end: i32, end_kind: RangeEndKind, ascending: bool) -> bool {
+fn int_range_contains(current: i64, end: i64, end_kind: RangeEndKind, ascending: bool) -> bool {
     match (ascending, end_kind) {
         (true, RangeEndKind::Exclusive) => current < end,
         (true, RangeEndKind::Inclusive) => current <= end,
@@ -384,14 +402,13 @@ pub(crate) fn build_range_iteration_bindings(
     }
 
     if let Some(index) = &bindings.index {
+        // Iteration indices stay within the const-loop expansion limit, well
+        // below `i64::MAX`, so this checked conversion cannot fail in practice.
+        let index_value = i64::try_from(zero_based_index).unwrap_or(i64::MAX);
         fold_bindings.push(TemplateFoldBinding {
             path: index.id,
-            value: Expression::int(
-                zero_based_index as i32,
-                index.value.span,
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(range_provenance.clone()),
+            value: Expression::int(index_value, index.value.span, ValueMode::ImmutableOwned)
+                .with_synthetic_interface_provenance(range_provenance.clone()),
         });
     }
 
@@ -419,14 +436,13 @@ pub(crate) fn build_collection_iteration_bindings(
     }
 
     if let Some(index) = &bindings.index {
+        // Iteration indices stay within the const-loop expansion limit, well
+        // below `i64::MAX`, so this checked conversion cannot fail in practice.
+        let index_value = i64::try_from(zero_based_index).unwrap_or(i64::MAX);
         fold_bindings.push(TemplateFoldBinding {
             path: index.id,
-            value: Expression::int(
-                zero_based_index as i32,
-                index.value.span,
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(iterable_provenance.clone()),
+            value: Expression::int(index_value, index.value.span, ValueMode::ImmutableOwned)
+                .with_synthetic_interface_provenance(iterable_provenance.clone()),
         });
     }
 

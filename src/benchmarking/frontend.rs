@@ -24,6 +24,7 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -44,7 +45,7 @@ pub enum FrontendBenchmarkBuildProfile {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FrontendBenchmarkInputValue {
     String(String),
-    Int(i32),
+    Int(i64),
     Float(f64),
     Bool(bool),
     Char(char),
@@ -313,8 +314,13 @@ fn frontend_benchmark_error_without_ledger(
     )
 }
 
+/// Convert benchmark-declared inputs into the typed set the benchmark build starts from.
+///
+/// The selected builder is constructed before this runs, so every whole-number value is checked
+/// against the profile's `Int` width here rather than only inside boundary resolution.
 fn build_config_inputs_from_options(
     inputs: &[FrontendBenchmarkInput],
+    numeric_profile: NumericProfile,
 ) -> Result<BuildConfigInputSet, FrontendBenchmarkError> {
     let mut typed_inputs = BuildConfigInputSet::new();
 
@@ -348,6 +354,18 @@ fn build_config_inputs_from_options(
             FrontendBenchmarkInputValue::Bool(value) => PrimitiveBuildValue::Bool(*value),
             FrontendBenchmarkInputValue::Char(value) => PrimitiveBuildValue::Char(*value),
         };
+
+        let value = value.checked_for_numeric_profile(numeric_profile).map_err(|violation| {
+            frontend_benchmark_error(
+                FrontendBenchmarkFailureKind::BuildConfigInput,
+                Vec::new(),
+                format!(
+                    "Frontend benchmark build-config input '{}' has value {} outside the builder's numeric profile.",
+                    input.name,
+                    violation.value_text()
+                ),
+            )
+        })?;
 
         typed_inputs
             .insert(BuildConfigInputEntry::new(
@@ -434,7 +452,11 @@ fn run_frontend_benchmark_with_owner_internal(
     // Reset at the benchmark command boundary, before bootstrap/config compilation. The
     // compilation module itself must not reset here because bootstrap owns measured preparation.
     crate::compiler_frontend::instrumentation::reset_memory_ledger();
-    let requested_inputs = build_config_inputs_from_options(&options.build_config_inputs)?;
+    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let requested_inputs = build_config_inputs_from_options(
+        &options.build_config_inputs,
+        project_builder.numeric_profile(),
+    )?;
 
     let path = options.entry_path.to_str().ok_or_else(|| {
         frontend_benchmark_error(
@@ -464,9 +486,9 @@ fn run_frontend_benchmark_with_owner_internal(
         }
     };
 
-    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let BuildBootstrap {
         mut config,
+        numeric_profile,
         style_directives,
         mut string_table,
         mut frontend_surface,
@@ -493,6 +515,7 @@ fn run_frontend_benchmark_with_owner_internal(
     let (messages, retention, compilation_failed) = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
+        numeric_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

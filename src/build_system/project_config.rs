@@ -17,6 +17,7 @@ use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
@@ -44,6 +45,11 @@ pub(crate) struct ProjectConfigParseServices<'a> {
     pub frontend_surface: &'a BuilderSurface,
     /// Typed explicit inputs supplied by the command or programmatic build caller.
     pub build_config_inputs: &'a BuildConfigInputSet,
+    /// The selected builder's boundary numeric profile, threaded into config compilation.
+    ///
+    /// WHY: `config.moth` is compiled by the same frontend as project source, so it must fold
+    ///      `Int`/`Float` values under the boundary's widths rather than a default.
+    pub numeric_profile: NumericProfile,
 }
 
 // -------------------------
@@ -195,6 +201,7 @@ pub(crate) fn compile_project_config_file(
                 .config_schemas
                 .project()
                 .project_field_config_policies(),
+            numeric_profile: services.numeric_profile,
         },
         string_table,
     );

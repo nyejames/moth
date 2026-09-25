@@ -16,6 +16,7 @@ use crate::build_system::create_project_modules::module_artifact_store::ModuleAr
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -71,6 +72,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
         project,
         CompletedSourcePackageRegistry::new(),
         resource_inputs,
+        NumericProfile::STANDARD,
     )
 }
 

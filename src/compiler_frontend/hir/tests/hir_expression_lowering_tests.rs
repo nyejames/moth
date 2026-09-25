@@ -573,6 +573,30 @@ fn lowers_primitive_literals() {
 }
 
 #[test]
+fn lowers_int_above_i32_range_without_truncation() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+
+    // Above `i32::MAX` so an `i32` carrier would truncate; the `i64` carrier preserves it.
+    let lowered = builder
+        .lower_expression(&Expression::int(
+            3_000_000_000,
+            span,
+            ValueMode::ImmutableOwned,
+        ))
+        .expect("wide int lowering should succeed");
+
+    assert!(lowered.prelude.is_empty());
+    assert_eq!(lowered.value.value_kind, ValueKind::Const);
+    assert!(matches!(
+        lowered.value.kind,
+        HirExpressionKind::Int(3_000_000_000)
+    ));
+}
+
+#[test]
 fn lowers_reference_to_registered_local() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -2489,7 +2513,7 @@ fn count_block_appends_local_string(block: &HirBlock) -> usize {
         .count()
 }
 
-fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i32) -> bool {
+fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i64) -> bool {
     block.statements.iter().any(|statement| {
         let HirStatementKind::Assign { value, .. } = &statement.kind else {
             return false;

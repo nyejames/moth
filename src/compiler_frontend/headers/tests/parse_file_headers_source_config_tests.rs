@@ -20,7 +20,11 @@ fn source_config_contracts_are_normalized_in_authored_order() {
     );
     assert_eq!(
         contracts[0].default,
-        Some(crate::compiler_frontend::build_config::PrimitiveBuildValue::Bool(false))
+        Some(
+            crate::compiler_frontend::declaration_syntax::build_config_contract::SourceConfigDefault::Value(
+                crate::compiler_frontend::build_config::PrimitiveBuildValue::Bool(false)
+            )
+        )
     );
     assert!(!contracts[0].required);
 
@@ -44,6 +48,41 @@ fn source_config_contracts_are_normalized_in_authored_order() {
             .any(|header| matches!(header.kind, HeaderKind::Constant { .. })),
         "the declaration shell must remain retained for the later config barrier"
     );
+}
+
+#[test]
+fn source_config_numeric_defaults_are_retained_until_a_profile_materialises_them() {
+    let prepared = prepare_source_contract_syntax("count #Config of Int = 4_000_000_000\n").expect(
+        "a numeric default prepares without a profile; only the boundary decides its range",
+    );
+
+    let default = prepared.source_build_config_contracts[0]
+        .default
+        .as_ref()
+        .expect("the numeric default should be retained");
+    assert_eq!(
+        default.primitive_type(),
+        crate::compiler_frontend::build_config::PrimitiveBuildInputType::Int
+    );
+
+    let wide = crate::compiler_frontend::datatypes::numeric_profile::NumericProfile {
+        int_width: crate::compiler_frontend::datatypes::numeric_profile::IntWidth::Bits64,
+        float_precision:
+            crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision::Bits64,
+    };
+    assert_eq!(
+        default.materialize(wide),
+        Ok(crate::compiler_frontend::build_config::PrimitiveBuildValue::Int(4_000_000_000))
+    );
+
+    let error = default
+        .materialize(crate::compiler_frontend::datatypes::numeric_profile::NumericProfile::STANDARD)
+        .expect_err("the standard Int width must reject the wider value");
+    assert_eq!(error.text, "4_000_000_000");
+    assert!(matches!(
+        error.reason,
+        crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange
+    ));
 }
 
 #[test]

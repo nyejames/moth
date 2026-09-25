@@ -1076,7 +1076,7 @@ fn lower_minimal_module_with_float_helper(
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )

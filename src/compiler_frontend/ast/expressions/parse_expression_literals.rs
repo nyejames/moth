@@ -23,7 +23,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
+use crate::compiler_frontend::numeric_text::parse::{materialize_float, materialize_int};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -64,7 +64,7 @@ pub(super) struct LiteralParseState<'a> {
 ///
 /// Signed numeric tokens are materialized directly from their token metadata. The
 /// `next_number_negative` fallback keeps parser-owned unary negation and hand-built test streams
-/// on the same signed-i32 boundary policy as tokenizer-signed literals.
+/// on the same boundary-width policy as tokenizer-signed literals.
 pub(super) fn parse_literal_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -90,16 +90,25 @@ pub(super) fn parse_literal_expression(
                         token.sign
                     };
                 *state.next_number_negative = false;
+                let value = materialize_int(
+                    &token,
+                    effective_sign,
+                    context.numeric_profile.int_width,
+                    string_table,
+                )
+                .map_err(|reason| {
+                    // Use authored source text so diagnostics report the original literal.
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                })?;
 
-                let value_i32 = materialize_i32_with_sign(&token, effective_sign, string_table)
-                    .map_err(|reason| {
-                        // Use authored source text so diagnostics report the original literal.
-                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
-                    })?;
-
-                Expression::int(value_i32, span, state.value_mode.to_owned())
+                Expression::int(value, span, state.value_mode.to_owned())
             } else {
-                let mut value = materialize_f64(&token, string_table).map_err(|reason| {
+                let mut value = materialize_float(
+                    &token,
+                    context.numeric_profile.float_precision,
+                    string_table,
+                )
+                .map_err(|reason| {
                     // Use authored source text so diagnostics report the original literal.
                     CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                 })?;
@@ -107,6 +116,8 @@ pub(super) fn parse_literal_expression(
                 if *state.next_number_negative {
                     *state.next_number_negative = false;
                     if token.sign == NumericLiteralSign::Positive {
+                        // Float negation is exact at any precision, so the rounded
+                        // materialized value keeps its precision here.
                         value = -value;
                     }
                 }

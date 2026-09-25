@@ -14,6 +14,8 @@
 //! - `generic_parameters.rs` — parsed generic parameter declarations and scopes.
 //! - `generic_bindings.rs` — TypeId-native generic parameter bindings.
 //! - `generic_identity_bridge.rs` — HIR/diagnostic bridge keys only.
+//! - `numeric_profile.rs` — the compiler-owned `NumericProfile` fixing `Int` width and
+//!   `Float` precision for one compilation boundary.
 //!
 //! Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! Type compatibility POLICY does NOT belong here (see `type_coercion`).
@@ -27,6 +29,7 @@ pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;
 pub mod ids;
+pub mod numeric_profile;
 pub mod parsed;
 pub mod queries;
 

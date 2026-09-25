@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::literal::parse_li
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, NumberLiteralErrorReason};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
@@ -77,6 +78,7 @@ fn malformed_numeric_literal_payload_is_infrastructure_error() {
     let error = parse_literal_pattern(
         &mut token_stream,
         builtin_type_ids::INT,
+        NumericProfile::STANDARD,
         &mut StringTable::new(),
         &type_environment,
     )
@@ -147,6 +149,7 @@ fn parse_whole_number_pattern(
     parse_literal_pattern(
         &mut token_stream,
         builtin_type_ids::INT,
+        NumericProfile::STANDARD,
         &mut string_table,
         &type_environment,
     )
@@ -193,6 +196,7 @@ fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestRes
     parse_literal_pattern(
         &mut token_stream,
         builtin_type_ids::INT,
+        NumericProfile::STANDARD,
         &mut string_table,
         &type_environment,
     )

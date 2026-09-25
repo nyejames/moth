@@ -3,4 +3,5 @@
 mod datatype_invariant_tests;
 mod environment_tests;
 mod generics_tests;
+mod numeric_profile_tests;
 mod parsed_remap_tests;

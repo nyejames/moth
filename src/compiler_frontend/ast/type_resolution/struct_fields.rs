@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -208,6 +209,7 @@ fn resolve_struct_field_defaults(
         declaration_table: type_resolution_context.declaration_table,
         visible_declaration_ids: type_resolution_context.visible_declaration_ids,
         declaring_file_id: type_resolution_context.declaring_file_id,
+        numeric_profile: type_resolution_context.numeric_profile,
         scope: *struct_path,
         path_fork,
     };
@@ -250,12 +252,14 @@ fn resolve_struct_field_defaults(
 /// The declaration surface one field default resolves against.
 ///
 /// WHAT: the visible declarations a reference may name, plus the identity of the file that
-/// WHY: inlining recurses through every nested expression shape, so these three facts travel
+/// owns them and the compilation boundary numeric widths field defaults fold under.
+/// WHY: inlining recurses through every nested expression shape, so these facts travel
 ///      together to the evaluation scope at the bottom rather than through each hop by hand.
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<PathId>>>,
     declaring_file_id: SourceId,
+    numeric_profile: NumericProfile,
     scope: PathId,
     path_fork: &'a PathInternerFork,
 }
@@ -310,9 +314,9 @@ fn inline_visible_constant_references(
                 Vec::new(),
                 0,
                 Rc::clone(template_ir_store),
+                scope.numeric_profile,
             )
             .with_declaring_file_id(scope.declaring_file_id);
-
             // The visibility set arrives as the same handle the scope stores, so entering the
             // field-default evaluation shares it instead of copying every visible path.
             evaluation_context.visible_declaration_ids =

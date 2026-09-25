@@ -144,6 +144,9 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = HtmlEntryPathPlan::from_config(config, string_table)?;
+        // The compilation carries the profile its frontend already typed numbers under, so both
+        // backend paths below lower that settled value instead of re-asking the builder.
+        let numeric_profile = project_compilation.numeric_profile();
         let mut resource_inputs = project_compilation.take_resource_inputs();
 
         let mut output_files = Vec::new();
@@ -243,6 +246,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                     document_config: &document_config,
                     build_profile,
                     wasm_enabled,
+                    numeric_profile,
                 },
                 string_table,
             )?;
@@ -501,6 +505,7 @@ impl HtmlProjectBuilder {
             document_config,
             build_profile,
             wasm_enabled,
+            numeric_profile,
         } = context;
 
         // Validate that every selected external call has lowering metadata for the target.
@@ -604,6 +609,7 @@ impl HtmlProjectBuilder {
             build_profile,
             root_activity: &module.metadata.root_activity,
             external_package_registry: Arc::clone(&module.link_facts.external_package_registry),
+            numeric_profile,
         };
         if wasm_enabled {
             let compiled_wasm = compile_html_module_wasm(

@@ -28,9 +28,13 @@ use crate::compiler_frontend::ast::templates::{
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::compiler_messages::{
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -510,7 +514,7 @@ impl Expression {
     }
 
     /// Constructs an integer literal expression.
-    pub fn int(value: i32, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
+    pub fn int(value: i64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Int(value),
             builtin_type_ids::INT,
@@ -529,6 +533,35 @@ impl Expression {
             span,
             value_mode,
         )
+    }
+
+    /// Constructs a `Float` expression from a host-package constant.
+    ///
+    /// WHAT: rounds the foreign `f64` payload once at the boundary precision and rejects a
+    ///       non-finite result, reporting the constant's name and reference site.
+    /// WHY: `ExpressionKind::Float` must hold a value exactly representable at the profile
+    ///      precision and `Float` is finite by contract, so every external projection shares one
+    ///      rounding rule and one diagnostic instead of each parse site re-deriving them.
+    pub(crate) fn float_from_external_constant(
+        value: f64,
+        precision: FloatPrecision,
+        constant_name: StringId,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Result<Self, CompilerDiagnostic> {
+        let rounded = precision.round(value);
+
+        if !rounded.is_finite() {
+            // The compile-time evaluation lane already owns non-finite numeric projections;
+            // `operation` carries the constant name so the host value stays identifiable.
+            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                CompileTimeEvaluationErrorReason::FloatOverflow,
+                Some(constant_name),
+                span,
+            ));
+        }
+
+        Ok(Self::float(rounded, span, value_mode))
     }
 
     /// Constructs a string slice literal expression.
@@ -1474,3 +1507,7 @@ impl Expression {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/external_float_constant_tests.rs"]
+mod external_float_constant_tests;

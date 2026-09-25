@@ -34,6 +34,17 @@ pub fn lower_hir_to_js(
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
 ) -> Result<JsModule, CompilerError> {
+    // Numeric plan: temporary lowering gate removed by Phase 4 (JavaScript fixed numeric).
+    // WHY: fixed-width `Int`/`Float` materialisation, arithmetic, folding and formatting are not
+    // implemented yet, so a non-standard boundary profile must fail here rather than silently
+    // lower numbers under the default widths.
+    if !config.numeric_profile.is_standard() {
+        return Err(CompilerError::compiler_error(format!(
+            "The JavaScript backend does not lower NumericProfile {} yet.",
+            config.numeric_profile
+        )));
+    }
+
     let emitter = JsEmitter::new(
         hir,
         borrow_analysis,

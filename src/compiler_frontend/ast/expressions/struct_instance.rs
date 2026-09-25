@@ -168,6 +168,7 @@ pub(super) fn parse_struct_constructor_expression(
             path_fork,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            float_precision: context.numeric_profile.float_precision,
         },
     )?;
 

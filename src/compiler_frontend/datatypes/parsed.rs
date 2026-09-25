@@ -22,7 +22,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 pub(crate) enum ParsedCollectionCapacity {
     /// A positive integer literal such as `64`.
     Literal {
-        value: i32,
+        value: i64,
         span: Option<SourceSpan>,
     },
     /// A bare visible constant name such as `capacity`.

@@ -80,7 +80,7 @@ pub enum ExpressionKind {
     ///      RPN cannot smuggle statement bodies into value contexts.
     Runtime(ExpressionRpn),
 
-    Int(i32),
+    Int(i64),
     Float(f64),
     StringSlice(StringId),
     Bool(bool),

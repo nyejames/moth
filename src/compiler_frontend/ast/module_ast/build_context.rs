@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -157,6 +158,13 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Current build profile (dev/release) affecting optimization and diagnostic levels.
     pub build_profile: FrontendBuildProfile,
 
+    /// The compilation boundary's `Int` width and `Float` precision.
+    ///
+    /// WHAT: the selected builder's profile for this whole boundary, read from `FrontendOptions`.
+    /// WHY: literal materialisation, constant folding, casts and template folding all type numbers,
+    ///      so they read this one boundary fact here instead of choosing a representation.
+    pub numeric_profile: NumericProfile,
+
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
@@ -207,6 +215,9 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// The compilation boundary's `Int` width and `Float` precision, copied from
+    /// [`AstBuildContext`] so every AST phase and child scope reads one boundary fact.
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 
@@ -235,6 +246,7 @@ impl<'a> AstPhaseContext<'a> {
     ) -> (Self, &'a mut StringTable, &'a mut PathInternerFork) {
         let AstBuildContext {
             build_profile,
+            numeric_profile,
             external_package_registry,
             style_directives,
             string_table,
@@ -262,6 +274,7 @@ impl<'a> AstPhaseContext<'a> {
                 entry_dir,
                 root_role,
                 build_profile,
+                numeric_profile,
                 file_value_resolution,
                 config_resolution,
                 build_config_values,

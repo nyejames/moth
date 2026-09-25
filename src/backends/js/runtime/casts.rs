@@ -6,7 +6,6 @@
 //!      `cast ... catch:` semantics work uniformly.
 
 use crate::backends::js::JsEmitter;
-use crate::compiler_frontend::builtins::casts::numeric_limits::{I32_MAX, I32_MIN};
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use std::collections::HashSet;
@@ -65,20 +64,26 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    /// Emits the shared signed i32 cast range constants and predicate.
+    /// Emits the shared signed int cast range constants and predicate.
     ///
     /// WHAT: `__moth_cast_int_in_range` and the `__BS_INT_CAST_MIN`/`__BS_INT_CAST_MAX`
-    ///      constants are derived from the Rust `numeric_limits` owner so the JS
+    ///      constants are derived from the lowering profile's `IntWidth` owner so the JS
     ///      runtime cannot drift from the Rust-side fold policy.
-    /// WHY: keeping one source of truth for the i32 bounds prevents the runtime from
+    /// WHY: keeping one source of truth for the int bounds prevents the runtime from
     ///      accepting or rejecting values that the compiler already folded differently.
+    ///      The lowering gate rejects non-standard profiles, so the emitted text stays
+    ///      the Bits32 pair today.
     fn emit_cast_int_range_helpers(&mut self, emitted: &mut HashSet<&'static str>) {
         if !emitted.insert("__moth_cast_int_in_range") {
             return;
         }
 
-        self.emit_line(&format!("const __BS_INT_CAST_MIN = {I32_MIN};"));
-        self.emit_line(&format!("const __BS_INT_CAST_MAX = {I32_MAX};"));
+        let int_width = self.config.numeric_profile.int_width;
+        let min = int_width.min_value();
+        let max = int_width.max_value();
+
+        self.emit_line(&format!("const __BS_INT_CAST_MIN = {min};"));
+        self.emit_line(&format!("const __BS_INT_CAST_MAX = {max};"));
         self.emit_line("function __moth_cast_int_in_range(value) {");
         self.with_indent(|emitter| {
             emitter.emit_line(

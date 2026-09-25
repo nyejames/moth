@@ -42,6 +42,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -84,6 +85,7 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         bindings: vec![],
     }
 }
@@ -197,6 +199,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         bindings: vec![TemplateFoldBinding {
             path,
             value: Expression::int(1, None, ValueMode::ImmutableOwned),
@@ -248,6 +251,7 @@ fn prepared_view_rejects_identity_mismatch() {
     let mut context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         bindings: vec![],
     };
     let error = fold_prepared_template(&preparation, alternate_view, &mut context)
@@ -1039,6 +1043,7 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         bindings: vec![],
     };
 

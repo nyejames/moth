@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn discover_modules_uses_reachable_files_only() {
@@ -1114,6 +1115,7 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     let frontend = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
+        NumericProfile::STANDARD,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),

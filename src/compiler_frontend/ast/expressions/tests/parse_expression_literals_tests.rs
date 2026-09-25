@@ -15,6 +15,9 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, NumberLiteralErrorReason, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
@@ -31,8 +34,14 @@ use std::sync::Arc;
 
 #[test]
 fn parse_literal_expression_accepts_signed_i32_min_token() {
-    let outcome = parse_whole_number_token(NumericLiteralSign::Negative, "2147483648", 10, false)
-        .expect("signed i32 minimum boundary should parse");
+    let outcome = parse_whole_number_token(
+        NumericLiteralSign::Negative,
+        "2147483648",
+        10,
+        false,
+        NumericProfile::STANDARD,
+    )
+    .expect("signed i32 minimum boundary should parse");
 
     assert!(!outcome.next_number_negative);
     assert_eq!(outcome.expression.len(), 1);
@@ -40,13 +49,19 @@ fn parse_literal_expression_accepts_signed_i32_min_token() {
     let ExpressionRpnItem::Operand(value) = &outcome.expression[0] else {
         panic!("literal should parse to an operand item");
     };
-    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == i32::MIN));
+    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == i64::from(i32::MIN)));
 }
 
 #[test]
 fn parse_literal_expression_rejects_positive_i32_overflow() {
-    let error = parse_whole_number_token(NumericLiteralSign::Positive, "2147483648", 10, false)
-        .expect_err("positive i32 overflow should return a syntax diagnostic");
+    let error = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "2147483648",
+        10,
+        false,
+        NumericProfile::STANDARD,
+    )
+    .expect_err("positive i32 overflow should return a syntax diagnostic");
 
     let diagnostic = error
         .diagnostic()
@@ -67,8 +82,14 @@ fn parse_literal_expression_rejects_positive_i32_overflow() {
 
 #[test]
 fn parse_literal_expression_effective_negative_sign_allows_i32_min() {
-    let outcome = parse_whole_number_token(NumericLiteralSign::Positive, "2147483648", 10, true)
-        .expect("effective negative sign should allow -2147483648");
+    let outcome = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "2147483648",
+        10,
+        true,
+        NumericProfile::STANDARD,
+    )
+    .expect("effective negative sign should allow -2147483648");
 
     assert!(!outcome.next_number_negative);
     assert_eq!(outcome.expression.len(), 1);
@@ -76,13 +97,19 @@ fn parse_literal_expression_effective_negative_sign_allows_i32_min() {
     let ExpressionRpnItem::Operand(value) = &outcome.expression[0] else {
         panic!("literal should parse to an operand item");
     };
-    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == i32::MIN));
+    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == i64::from(i32::MIN)));
 }
 
 #[test]
 fn parse_literal_expression_effective_negative_sign_rejects_i32_underflow() {
-    let error = parse_whole_number_token(NumericLiteralSign::Positive, "2147483649", 10, true)
-        .expect_err("effective negative sign should reject -2147483649");
+    let error = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "2147483649",
+        10,
+        true,
+        NumericProfile::STANDARD,
+    )
+    .expect_err("effective negative sign should reject -2147483649");
 
     let diagnostic = error
         .diagnostic()
@@ -96,6 +123,134 @@ fn parse_literal_expression_effective_negative_sign_rejects_i32_underflow() {
     ));
 }
 
+#[test]
+fn parse_literal_expression_accepts_int32_overflow_only_under_int64_width() {
+    let error = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "3000000000",
+        10,
+        false,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect_err("3000000000 exceeds the Int32 boundary");
+
+    let diagnostic = error
+        .diagnostic()
+        .expect("literal overflow should remain a typed diagnostic");
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideIntRange,
+            ..
+        }
+    ));
+
+    let outcome = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "3000000000",
+        10,
+        false,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect("3000000000 fits the Int64 boundary");
+
+    assert_eq!(outcome.expression.len(), 1);
+
+    let ExpressionRpnItem::Operand(value) = &outcome.expression[0] else {
+        panic!("literal should parse to an operand item");
+    };
+    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == 3_000_000_000));
+}
+
+#[test]
+fn parse_literal_expression_effective_negative_sign_allows_i64_min() {
+    let outcome = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "9223372036854775808",
+        19,
+        true,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect("effective negative sign should allow -9223372036854775808");
+
+    assert!(!outcome.next_number_negative);
+
+    let ExpressionRpnItem::Operand(value) = &outcome.expression[0] else {
+        panic!("literal should parse to an operand item");
+    };
+    assert!(matches!(value.kind, ExpressionKind::Int(v) if v == i64::MIN));
+}
+
+#[test]
+fn parse_literal_expression_rejects_positive_i64_overflow() {
+    let error = parse_whole_number_token(
+        NumericLiteralSign::Positive,
+        "9223372036854775808",
+        19,
+        false,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect_err("positive 2^63 has no Int64 representation");
+
+    let diagnostic = error
+        .diagnostic()
+        .expect("literal overflow should remain a typed diagnostic");
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideIntRange,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn parse_literal_expression_materializes_float_at_profile_precision() {
+    let float32_outcome = parse_float_token(
+        "0.1",
+        2,
+        1,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+    )
+    .expect("0.1 should parse at Float32 precision");
+
+    let ExpressionRpnItem::Operand(value) = &float32_outcome.expression[0] else {
+        panic!("literal should parse to an operand item");
+    };
+    assert!(matches!(value.kind, ExpressionKind::Float(v) if v == f64::from(0.1f32)));
+
+    let float64_outcome = parse_float_token(
+        "0.1",
+        2,
+        1,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect("0.1 should parse at Float64 precision");
+
+    let ExpressionRpnItem::Operand(value) = &float64_outcome.expression[0] else {
+        panic!("literal should parse to an operand item");
+    };
+    assert!(matches!(value.kind, ExpressionKind::Float(v) if v == 0.1_f64));
+}
+
 #[derive(Debug)]
 struct LiteralParseOutcome {
     expression: Vec<ExpressionRpnItem>,
@@ -107,6 +262,46 @@ fn parse_whole_number_token(
     normalized_text: &str,
     digit_count: u32,
     next_number_negative: bool,
+    profile: NumericProfile,
+) -> Result<LiteralParseOutcome, ExpressionParseError> {
+    parse_numeric_token(
+        sign,
+        NumericLiteralKind::WholeNumber,
+        normalized_text,
+        digit_count,
+        0,
+        next_number_negative,
+        profile,
+    )
+}
+
+fn parse_float_token(
+    normalized_text: &str,
+    digit_count: u32,
+    fractional_digit_count: u32,
+    profile: NumericProfile,
+) -> Result<LiteralParseOutcome, ExpressionParseError> {
+    parse_numeric_token(
+        NumericLiteralSign::Positive,
+        NumericLiteralKind::DecimalPoint,
+        normalized_text,
+        digit_count,
+        fractional_digit_count,
+        false,
+        profile,
+    )
+}
+
+/// Parse one numeric token fixture while the profile under test reaches the parser
+/// only through the scope context.
+fn parse_numeric_token(
+    sign: NumericLiteralSign,
+    kind: NumericLiteralKind,
+    normalized_text: &str,
+    digit_count: u32,
+    fractional_digit_count: u32,
+    next_number_negative: bool,
+    profile: NumericProfile,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -123,7 +318,8 @@ fn parse_whole_number_token(
         Arc::new(ExternalPackageRegistry::new()),
         vec![],
         0,
-    );
+    )
+    .with_numeric_profile(profile);
 
     let min_text = string_table.intern(normalized_text);
     // For signed tokens the source_text includes the sign prefix.
@@ -139,9 +335,9 @@ fn parse_whole_number_token(
                 sign,
                 source_text,
                 min_text,
-                NumericLiteralKind::WholeNumber,
+                kind,
                 digit_count,
-                0,
+                fractional_digit_count,
                 0,
                 NumericExponentSign::None,
             ),

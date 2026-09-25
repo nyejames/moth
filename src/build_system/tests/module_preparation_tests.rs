@@ -14,6 +14,7 @@ use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -350,7 +351,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,
@@ -718,7 +719,8 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
-        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
+        options: Config::new(temp_dir.path().to_path_buf())
+            .frontend_options(NumericProfile::STANDARD),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
@@ -911,7 +913,8 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
-        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
+        options: Config::new(temp_dir.path().to_path_buf())
+            .frontend_options(NumericProfile::STANDARD),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
@@ -1125,7 +1128,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,
@@ -1417,7 +1420,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
 
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,

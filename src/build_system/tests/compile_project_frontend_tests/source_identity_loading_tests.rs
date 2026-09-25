@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -112,6 +113,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,
@@ -214,6 +216,7 @@ fn unselected_preload_read_failure_stays_inert() {
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,

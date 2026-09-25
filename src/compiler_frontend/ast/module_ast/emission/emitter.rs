@@ -297,6 +297,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             Vec::<TypeId>::new(),
             input.scope_frame_capacity,
             self.context.template_ir_store.clone(),
+            self.context.numeric_profile,
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)

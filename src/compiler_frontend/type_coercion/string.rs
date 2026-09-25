@@ -7,6 +7,7 @@
 //! the policy explicit and reusable without touching template mechanics.
 
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -22,6 +23,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) fn fold_expression_kind_to_string(
     kind: &ExpressionKind,
     string_table: &StringTable,
+    float_precision: FloatPrecision,
 ) -> Option<String> {
     match kind {
         ExpressionKind::StringSlice(string) => Some(string_table.resolve(*string).to_owned()),
@@ -29,7 +31,7 @@ pub(crate) fn fold_expression_kind_to_string(
             // Compile-time Float values are finite by language contract, but the
             // formatter still returns a Result. Fold non-finite values away from
             // the compile-time path rather than panicking on an internal invariant.
-            format_finite_float(*value).ok()
+            format_finite_float(*value, float_precision).ok()
         }
         ExpressionKind::Int(value) => Some(value.to_string()),
         ExpressionKind::Bool(value) => Some(value.to_string()),
@@ -38,7 +40,7 @@ pub(crate) fn fold_expression_kind_to_string(
             // Contextual coercion nodes do not change the rendered scalar value;
             // delegate to the inner expression so coerced literals fold the same
             // way as their unwrapped counterparts.
-            fold_expression_kind_to_string(&value.kind, string_table)
+            fold_expression_kind_to_string(&value.kind, string_table, float_precision)
         }
         _ => None,
     }

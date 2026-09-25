@@ -26,6 +26,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -42,6 +43,11 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
     pub template_const_loop_iteration_limit: usize,
+    /// The compilation boundary's `Int` width and `Float` precision for folds under this context.
+    ///
+    /// WHY: substituted RPN folds and range iteration values must use the same widths
+    ///      as literal materialisation rather than assuming the default profile.
+    pub(crate) numeric_profile: NumericProfile,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
 }
@@ -442,7 +448,11 @@ fn fold_runtime_expression_with_bindings<'a>(
     // node from the pre-fold items, so this caller keeps its own copy.
     add_ast_counter(AstCounter::ExpressionOperandClones, substituted.len());
 
-    match constant_fold(substituted.clone(), fold_context.string_table) {
+    match constant_fold(
+        substituted.clone(),
+        fold_context.string_table,
+        fold_context.numeric_profile,
+    ) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()

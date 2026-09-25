@@ -218,6 +218,7 @@ pub(crate) fn emit_statement(
             let lhs_idx = local_index(*lhs, context)?;
             let rhs_idx = local_index(*rhs, context)?;
 
+            // `i64.rem_s` yields zero (no trap) for `i64::MIN % -1`, so no divisor guard is needed.
             // rem = lhs rem_s rhs  (signed/truncating remainder)
             function.instruction(&Instruction::LocalGet(lhs_idx));
             function.instruction(&Instruction::LocalGet(rhs_idx));

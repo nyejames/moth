@@ -5,8 +5,9 @@
 //! byte spans; validation then consumes that shape against an immutable prepared schema and
 //! produces the public owned [`Value`] tree.
 
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::numeric_text::parse::{
-    materialize_normalized_f64, materialize_normalized_i32, parse_numeric_literal,
+    materialize_normalized_float, materialize_normalized_int, parse_numeric_literal,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
@@ -1309,22 +1310,35 @@ fn validate_int(
             "Int requires whole-number spelling",
         ));
     }
-    materialize_normalized_i32(&number.normalized, number.text.starts_with('-'))
-        .map(Value::Int)
-        .map_err(|reason| {
-            let code = match reason {
-                crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange => {
-                    MonErrorCode::NumericRange
-                }
-                _ => MonErrorCode::NumericSyntax,
-            };
-            MonError::new(
-                code,
-                Some(span),
-                path,
-                format!("cannot materialise Int ({reason:?})"),
-            )
+
+    // MON is compiled at STANDARD until Phase 6, so the boundary widths stay fixed here
+    // rather than threading a profile argument. The i32 narrowing below is exact because
+    // materialisation at Bits32 already confined the value.
+    materialize_normalized_int(
+        &number.normalized,
+        number.text.starts_with('-'),
+        IntWidth::Bits32,
+    )
+    .and_then(|value| {
+        i32::try_from(value).map_err(|_| {
+            crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange
         })
+    })
+    .map(Value::Int)
+    .map_err(|reason| {
+        let code = match reason {
+            crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange => {
+                MonErrorCode::NumericRange
+            }
+            _ => MonErrorCode::NumericSyntax,
+        };
+        MonError::new(
+            code,
+            Some(span),
+            path,
+            format!("cannot materialise Int ({reason:?})"),
+        )
+    })
 }
 
 fn validate_float(
@@ -1336,7 +1350,13 @@ fn validate_float(
     let RawKind::Number(number) = raw.kind else {
         return type_mismatch(span, path, "expected Float numeric literal");
     };
-    materialize_normalized_f64(&number.normalized, number.text.starts_with('-'))
+
+    // MON is compiled at STANDARD until Phase 6, so Float precision stays fixed here.
+    materialize_normalized_float(
+        &number.normalized,
+        number.text.starts_with('-'),
+        FloatPrecision::Bits64,
+    )
         .map(Value::Float)
         .map_err(|reason| {
             let code = match reason {

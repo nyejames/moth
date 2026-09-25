@@ -20,6 +20,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, int_expression,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
@@ -406,6 +407,7 @@ fn request_with_helper_exports() -> WasmBackendRequest {
         external_package_registry: Default::default(),
         structural_string_urls: None,
         function_emission_policy: Default::default(),
+        numeric_profile: NumericProfile::STANDARD,
     }
 }
 

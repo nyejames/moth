@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
     InvalidConfigReason, SyntaxDiagnosticKind,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -36,7 +37,10 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn request(input: MothTemplateInput) -> MothTemplateCompileRequest {
-    MothTemplateCompileRequest { input }
+    MothTemplateCompileRequest {
+        input,
+        numeric_profile: NumericProfile::STANDARD,
+    }
 }
 
 fn temp_project(files: &[(&str, &str)]) -> TempDir {
@@ -1120,6 +1124,7 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
             source_code: None,
             style_directives: &style_directives,
             file_value_resolution: Some(bundle),
+            numeric_profile: NumericProfile::STANDARD,
         },
         &mut string_table,
     )

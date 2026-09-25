@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::cell::RefCell;
@@ -38,12 +39,14 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
     ast_nodes: &mut [AstNode],
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
+    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     let mut fragments = Vec::new();
     let mut context = DocFragmentCollectionContext {
         string_table,
         template_const_loop_iteration_limit,
+        numeric_profile,
         template_ir_store,
     };
 
@@ -87,6 +90,7 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
 struct DocFragmentCollectionContext<'strings> {
     string_table: &'strings mut StringTable,
     template_const_loop_iteration_limit: usize,
+    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 }
 
@@ -127,6 +131,7 @@ fn collect_doc_fragments(
         let mut fold_context = TirFoldContext {
             string_table: context.string_table,
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
+            numeric_profile: context.numeric_profile,
             bindings: Vec::new(),
         };
         let reference = template.tir_reference;

@@ -30,10 +30,7 @@ pub(crate) fn lower_expression(
     match &expression.kind {
         HirExpressionKind::Int(value) => {
             let dst = context.alloc_temp(WasmAbiType::I64);
-            statements.push(WasmLirStmt::ConstI64 {
-                dst,
-                value: *value as i64,
-            });
+            statements.push(WasmLirStmt::ConstI64 { dst, value: *value });
             Ok(ExprLoweringOutput {
                 value: dst,
                 prefer_move: false,

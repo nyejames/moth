@@ -331,6 +331,7 @@ fn build_mutation_from_target(
                 rhs,
                 target_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::Assignment,
             )?
         }

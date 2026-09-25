@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
@@ -37,7 +38,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
-use crate::compiler_frontend::module_compilation::FrontendOptions;
+use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
@@ -79,6 +80,12 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     /// Prepared Stage 0 file-value inputs, present when the source names file values.
     pub(crate) file_value_resolution: Option<MothTemplateFileValueBundle>,
+    /// The compilation boundary's `Int` width and `Float` precision.
+    ///
+    /// WHY: a template folds under the same boundary widths as any other source in the calling
+    ///      project, so the caller supplies the selected profile instead of this service choosing
+    ///      one. Test-only callers compile standalone fixtures and pass `NumericProfile::STANDARD`.
+    pub(crate) numeric_profile: NumericProfile,
 }
 
 /// Prepared file-value inputs one direct Moth template folds against.
@@ -682,7 +689,7 @@ fn fold_template_ast(
     path_fork: &mut PathInternerFork,
     file_value_resolution: Option<Rc<FileValueResolutionServices>>,
 ) -> Result<Ast, CompilerMessages> {
-    let options = FrontendOptions::default();
+    let numeric_profile = request.numeric_profile;
 
     Ok(Ast::new(
         AstBuildInput {
@@ -701,10 +708,11 @@ fn fold_template_ast(
             path_fork,
             entry_dir: entry_scope,
             build_profile: FrontendBuildProfile::Dev,
+            numeric_profile,
             file_value_resolution,
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
-            template_const_loop_iteration_limit: options.template_const_loop_iteration_limit,
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]
             timing_context: None,

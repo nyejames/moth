@@ -11789,6 +11789,13 @@ contract = "backend.html_wasm.unreachable_numeric_helper_ignored"
 role = "backend"
 
 [[case]]
+id = "int_remainder_signed_minimum_by_negative_one_runtime"
+path = "int_remainder_signed_minimum_by_negative_one_runtime"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numeric.signed_minimum_remainder_by_negative_one_acceptance"
+role = "primary"
+
+[[case]]
 id = "float_formatting_unreachable_helper_ignored"
 path = "float_formatting_unreachable_helper_ignored"
 tags = ["integration", "language", "cast", "runtime", "float", "formatting", "html-wasm"]

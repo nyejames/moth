@@ -170,7 +170,7 @@ fn required_field(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> 
     }
 }
 
-fn defaulted_int_field(id: PathId, value: i32, span: Option<SourceSpan>) -> Declaration {
+fn defaulted_int_field(id: PathId, value: i64, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         value: Expression::int(value, span, ValueMode::ImmutableOwned),

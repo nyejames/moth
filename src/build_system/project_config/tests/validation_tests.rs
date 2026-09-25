@@ -28,6 +28,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
@@ -1145,6 +1146,7 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n\nhtml #= (\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n)\n",
@@ -1183,6 +1185,7 @@ fn preserves_project_shape_diagnostic_after_dependency_projection() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= \"docs\"\n",
@@ -1463,6 +1466,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    custom_note = \"open\",\n)\n",
@@ -1548,6 +1552,7 @@ fn applies_direct_project_config_global_through_validation() {
         .expect("builder global name should be platform-neutral");
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "version #Config of String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
@@ -1584,6 +1589,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",

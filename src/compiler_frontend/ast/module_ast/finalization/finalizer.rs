@@ -108,6 +108,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut emitted.ast,
             string_table,
             self.context.template_const_loop_iteration_limit,
+            self.context.numeric_profile,
             Rc::clone(&self.context.template_ir_store),
         )
         .map_err(TemplateNormalizationError::from)
@@ -208,6 +209,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
+            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -290,6 +292,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
+            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -339,6 +342,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             string_table,
             &const_values,
             Rc::clone(&self.context.template_ir_store),
+            self.context.numeric_profile,
         )
         .collect(&const_values, &emitted.ast, start_function_path.as_ref())
         .map_err(|error| {
@@ -444,6 +448,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         .as_ref()
                         .map(|services| Rc::clone(&services.module_resources)),
                     string_table,
+                    numeric_profile: self.context.numeric_profile,
                     template_const_loop_iteration_limit: self
                         .context
                         .template_const_loop_iteration_limit,

@@ -455,6 +455,7 @@ pub fn resolve_declaration_syntax(
             capacity,
             Some(&*context),
             type_interner.environment_mut_for_derived_types(),
+            context.numeric_profile,
         )
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
@@ -552,6 +553,7 @@ pub fn resolve_declaration_syntax(
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
                 declaring_file_id: context.shared.declaring_file_id,
+                numeric_profile: context.numeric_profile,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -788,6 +790,7 @@ pub fn resolve_declaration_syntax(
                     expression,
                     declared_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::Declaration,
                 )?
             } else {

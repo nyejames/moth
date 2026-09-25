@@ -67,6 +67,7 @@ pub fn evaluate_expression(
             &context.template_ir_store,
             string_table,
             context.kind.is_constant_context(),
+            context.numeric_profile,
         )?;
 
         validate_expression_result_type(
@@ -114,7 +115,7 @@ pub fn evaluate_expression(
     let value_mode = value_mode.as_owned();
     eval_log!("Attempting to Fold: ", Pretty rpn_items);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
-    let fold_outcome = constant_fold(rpn_items, string_table)?;
+    let fold_outcome = constant_fold(rpn_items, string_table, context.numeric_profile)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
     eval_log!("Stack after folding: ", Pretty fold_outcome);
 

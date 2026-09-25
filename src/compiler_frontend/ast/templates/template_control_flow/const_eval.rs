@@ -178,7 +178,7 @@ fn fold_substituted_runtime_condition(
     // itself is returned by move.
     add_ast_counter(AstCounter::ExpressionOperandClones, rpn.items.len());
 
-    match constant_fold(rpn.items.clone(), string_table) {
+    match constant_fold(rpn.items.clone(), string_table, context.numeric_profile) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()

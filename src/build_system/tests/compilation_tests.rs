@@ -24,6 +24,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 
@@ -518,8 +519,12 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
     let names = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -547,8 +552,12 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
 
     assert_eq!(
         fields
@@ -612,6 +621,7 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
                 input_name.as_str(),
                 input_contract,
                 input_value.as_ref(),
+                NumericProfile::STANDARD,
             ),
             qualifier_span: None,
             value_location: None,
@@ -627,8 +637,12 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
             span: None,
         });
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
     assert_eq!(
         fields
             .iter()

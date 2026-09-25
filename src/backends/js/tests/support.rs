@@ -19,6 +19,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor,
 };
+pub(super) use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
@@ -276,7 +277,7 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -333,7 +334,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -342,7 +343,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
 }
 
 pub(super) fn default_config() -> JsLoweringConfig {
-    JsLoweringConfig::direct_js(false)
+    JsLoweringConfig::direct_js(false, NumericProfile::STANDARD)
 }
 
 /// Builds and lowers a minimal module that performs one runtime cast expression.
@@ -403,7 +404,7 @@ fn lower_minimal_module_with_cast(
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -515,7 +516,7 @@ pub(super) fn lower_minimal_module_with_io_call(
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -600,7 +601,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )

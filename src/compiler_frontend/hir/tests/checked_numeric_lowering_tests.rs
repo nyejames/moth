@@ -28,7 +28,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn int_expr(value: i32, span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
+fn int_expr(value: i64, span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
     Expression::int(value, span, ValueMode::ImmutableOwned)
 }
 

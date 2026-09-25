@@ -7,6 +7,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
@@ -18,6 +19,11 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MothTemplateCompileRequest {
     pub(crate) input: MothTemplateInput,
+    /// The requesting project's boundary numeric profile.
+    ///
+    /// WHY: a template folds under the same boundary widths as any other compilation in the same
+    /// project, so the profile travels with the request instead of being re-selected here.
+    pub(crate) numeric_profile: NumericProfile,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

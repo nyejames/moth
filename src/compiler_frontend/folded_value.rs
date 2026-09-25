@@ -225,7 +225,7 @@ impl Hash for FiniteFloat {
 /// payloads, collection elements and option payloads all project through the same conversion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
-    Int(i32),
+    Int(i64),
     Float(FiniteFloat),
     Bool(bool),
     Char(char),

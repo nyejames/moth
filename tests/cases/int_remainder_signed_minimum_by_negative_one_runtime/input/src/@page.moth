@@ -1,0 +1,14 @@
+-- Remainder by -1 is zero at every Int width: the signed-minimum overflow
+-- belongs to the paired quotient only. Both operands arrive through parameters
+-- so the remainder is computed at runtime instead of folded.
+
+remainder |dividend Int, divisor Int| -> Int:
+    return dividend % divisor
+;
+
+min_value = -2147483648
+
+minimum_remainder = remainder(min_value, -1)
+ordinary_remainder = remainder(-7, 3)
+
+[:int_remainder_signed_minimum_by_negative_one_runtime minimum=[minimum_remainder] ordinary=[ordinary_remainder]]

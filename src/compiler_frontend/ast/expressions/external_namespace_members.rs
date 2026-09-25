@@ -190,8 +190,18 @@ pub(super) fn parse_external_namespace_constant_member(
     let value_mode = ValueMode::ImmutableOwned;
 
     let constant_expression = match constant_definition.value {
-        ExternalConstantValue::Float(value) => Expression::float(value, member_span, value_mode),
-        ExternalConstantValue::Int(value) => Expression::int(value, member_span, value_mode),
+        ExternalConstantValue::Float(value) => Expression::float_from_external_constant(
+            value,
+            context.numeric_profile.float_precision,
+            member_name,
+            member_span,
+            value_mode,
+        )?,
+        // Foreign constants keep their ABI shape; only the Moth `Int` projection
+        // widens to `i64` here. The foreign `I32` payload fits every width.
+        ExternalConstantValue::Int(value) => {
+            Expression::int(i64::from(value), member_span, value_mode)
+        }
         ExternalConstantValue::StringSlice(value) => {
             let string_id = string_table.intern(value);
             Expression::string_slice(string_id, member_span, value_mode)

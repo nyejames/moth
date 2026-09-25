@@ -8,9 +8,10 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, InvalidTypeAnnotationReason};
+use crate::compiler_frontend::datatypes::numeric_profile::IntWidth;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::numeric_text::parse::materialize_i32;
+use crate::compiler_frontend::numeric_text::parse::materialize_int;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -594,6 +595,9 @@ fn collect_collection_inner_range(
 ///       syntax site rather than a generic parse failure.
 /// WHY: the language only allows literal-or-bare-const capacity in type position;
 ///      named constants can still hold arithmetic before they are used in type annotations.
+///      Header parsing has no profile, so literals materialise at `Bits64` only as the
+///      widest lossless carrier; capacity folding owns the final boundary-`IntWidth`
+///      range check. Capacity must be a positive `Int` literal of the boundary width.
 fn parsed_capacity(
     tokens: TypeTokenWindow<'_>,
     string_table: &mut StringTable,
@@ -637,13 +641,14 @@ fn parsed_capacity(
                     ));
                 }
 
-                let value = materialize_i32(&numeric, string_table).map_err(|reason| {
-                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
-                        numeric.source_text,
-                        reason,
-                        token_span,
-                    ))
-                })?;
+                let value = materialize_int(&numeric, numeric.sign, IntWidth::Bits64, string_table)
+                    .map_err(|reason| {
+                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                            numeric.source_text,
+                            reason,
+                            token_span,
+                        ))
+                    })?;
 
                 if numeric.sign == NumericLiteralSign::Negative {
                     return Err(HeaderParseFailure::Diagnostic(

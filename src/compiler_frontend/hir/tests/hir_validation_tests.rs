@@ -166,7 +166,7 @@ fn inject_collection_expression_statement(
 
 fn int_expression(
     id: HirValueId,
-    value: i32,
+    value: i64,
     type_id: TypeId,
     region: RegionId,
     span: &Option<SourceSpan>,

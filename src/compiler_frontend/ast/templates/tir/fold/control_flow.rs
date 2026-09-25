@@ -245,6 +245,7 @@ pub(super) fn fold_tir_loop(
                 range_ref,
                 fold_context.template_const_loop_iteration_limit,
                 loop_span,
+                fold_context.numeric_profile.float_precision,
             )?;
             let range_provenance =
                 SyntheticInterfaceProvenance::union_all(range_provenance_expressions(range_ref));

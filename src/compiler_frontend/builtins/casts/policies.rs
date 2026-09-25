@@ -1,20 +1,24 @@
 //! Pure builtin cast policy implementations.
 //!
 //! WHAT: implements every initial builtin evidence row from the cast plan as a
-//!      pure function over a `BuiltinCastLiteral` input. The helpers return
+//!      pure function over a `BuiltinCastLiteral` input and the compilation boundary's
+//!      `NumericProfile`. The helpers return
 //!      either a folded `BuiltinCastLiteral` value or a `BuiltinCastError` that
 //!      carries the stable `BuiltinErrorCode` so diagnostic and runtime layers
 //!      can render the same code path.
 //! WHY: the policy owner is the single source of truth for the actual rules.
 //!      The constant folder and later backend phases can ask the policy owner
 //!      for the same answer instead of duplicating per-cast ad hoc match logic.
+//!      The boundary profile owns every `Int` range and `Float` rounding decision,
+//!      so policies that materialise numbers take it as an explicit parameter.
 
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::numeric_text::parse::{
-    parse_numeric_text_to_f64, parse_numeric_text_to_i32,
+    parse_numeric_text_to_float, parse_numeric_text_to_int,
 };
 
 /// A literal scalar value in policy space.
@@ -28,7 +32,7 @@ use crate::compiler_frontend::numeric_text::parse::{
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BuiltinCastLiteral {
     Bool(bool),
-    Int(i32),
+    Int(i64),
     Float(f64),
     String(String),
     Char(char),
@@ -65,24 +69,25 @@ impl BuiltinCastError {
     }
 }
 
-/// Dispatches a builtin policy by id.
+/// Dispatches a builtin policy by id under the compilation boundary's numeric profile.
 pub(crate) fn apply_builtin_cast_policy(
     policy: BuiltinCastPolicyId,
     source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
 ) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     match policy {
-        BuiltinCastPolicyId::IntToFloat => int_to_float(source),
+        BuiltinCastPolicyId::IntToFloat => int_to_float(source, numeric_profile),
         BuiltinCastPolicyId::IntToString => int_to_string(source),
-        BuiltinCastPolicyId::FloatToString => float_to_string(source),
+        BuiltinCastPolicyId::FloatToString => float_to_string(source, numeric_profile),
         BuiltinCastPolicyId::BoolToString => bool_to_string(source),
         BuiltinCastPolicyId::CharToString => char_to_string(source),
         BuiltinCastPolicyId::CharToInt => char_to_int(source),
         BuiltinCastPolicyId::StringToError => string_to_error(source),
         BuiltinCastPolicyId::ErrorToString => error_to_string(source),
-        BuiltinCastPolicyId::FloatToInt => float_to_int(source),
+        BuiltinCastPolicyId::FloatToInt => float_to_int(source, numeric_profile),
         BuiltinCastPolicyId::IntToChar => int_to_char(source),
-        BuiltinCastPolicyId::StringToInt => string_to_int(source),
-        BuiltinCastPolicyId::StringToFloat => string_to_float(source),
+        BuiltinCastPolicyId::StringToInt => string_to_int(source, numeric_profile),
+        BuiltinCastPolicyId::StringToFloat => string_to_float(source, numeric_profile),
         BuiltinCastPolicyId::StringToBool => string_to_bool(source),
         BuiltinCastPolicyId::StringToChar => string_to_char(source),
     }
@@ -92,7 +97,10 @@ pub(crate) fn apply_builtin_cast_policy(
 //  Infallible policies
 // -----------------------------------------------------------
 
-fn int_to_float(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+fn int_to_float(
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::Int(value) = source else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
@@ -102,7 +110,11 @@ fn int_to_float(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Built
             ),
         ));
     };
-    Ok(BuiltinCastLiteral::Float(*value as f64))
+
+    // Single direct rounding at the destination precision, never via an f64 intermediate.
+    Ok(BuiltinCastLiteral::Float(
+        numeric_profile.float_precision.round_int(*value),
+    ))
 }
 
 fn int_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
@@ -118,7 +130,10 @@ fn int_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Buil
     Ok(BuiltinCastLiteral::String(value.to_string()))
 }
 
-fn float_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+fn float_to_string(
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::Float(value) = source else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
@@ -129,9 +144,9 @@ fn float_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Bu
         ));
     };
 
-    // Moth `Float` is finite `f64`, so a non-finite value reaching the cast
+    // Moth `Float` is finite, so a non-finite value reaching the cast
     // policy is a defensive invariant failure rather than ordinary user input.
-    let text = format_finite_float(*value).map_err(|error| {
+    let text = format_finite_float(*value, numeric_profile.float_precision).map_err(|error| {
         BuiltinCastError::new(
             BuiltinErrorCode::FloatFormatInvariant,
             format!("Float -> String formatting failed: {error}"),
@@ -177,7 +192,7 @@ fn char_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Builti
             ),
         ));
     };
-    Ok(BuiltinCastLiteral::Int(*value as i32))
+    Ok(BuiltinCastLiteral::Int(*value as i64))
 }
 
 fn string_to_error(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
@@ -213,7 +228,10 @@ fn error_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Bu
 //  Fallible policies
 // -----------------------------------------------------------
 
-fn float_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+fn float_to_int(
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::Float(value) = source else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
@@ -231,16 +249,30 @@ fn float_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Built
         ));
     }
 
-    // Truncate toward zero, then require the result to fit Moth's signed i32 Int.
+    // Truncate toward zero, then require the result to fit the boundary Int width.
     let truncated = value.trunc();
-    if truncated < (i32::MIN as f64) || truncated > (i32::MAX as f64) {
+
+    // Guard the f64-to-i64 narrowing below: an out-of-i64 truncated value would
+    // saturate the `as` cast, so reject it in the f64 domain first. The bounds are
+    // exact: `i64::MIN` is representable as f64, and `2^63` (one above `i64::MAX`)
+    // is the first integral f64 that no longer fits.
+    if truncated < (i64::MIN as f64) || truncated >= 9_223_372_036_854_775_808.0 {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::FloatCastToIntOutOfRange,
             format!("Float -> Int source {value} is out of Int range"),
         ));
     }
 
-    Ok(BuiltinCastLiteral::Int(truncated as i32))
+    // The guard above rules out saturation, so this narrowing cast is exact.
+    let candidate = truncated as i64;
+    if !numeric_profile.int_width.contains(candidate) {
+        return Err(BuiltinCastError::new(
+            BuiltinErrorCode::FloatCastToIntOutOfRange,
+            format!("Float -> Int source {value} is out of Int range"),
+        ));
+    }
+
+    Ok(BuiltinCastLiteral::Int(candidate))
 }
 
 fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
@@ -261,20 +293,22 @@ fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Builti
         ));
     }
 
-    if (0xD800..=0xDFFF).contains(value) {
+    if (0xD800_i64..=0xDFFF_i64).contains(value) {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::IntCastToCharInvalidCodepoint,
             format!("Int -> Char source {value} falls in the surrogate range"),
         ));
     }
 
-    if *value > 0x10FFFF {
+    if *value > 0x10FFFF_i64 {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::IntCastToCharInvalidCodepoint,
             format!("Int -> Char source {value} exceeds the maximum Unicode scalar"),
         ));
     }
 
+    // The range checks above leave exactly the valid scalar range, so this checked
+    // conversion documents the i64-to-u32 narrowing rather than handling new failures.
     let codepoint = u32::try_from(*value).map_err(|_| {
         BuiltinCastError::new(
             BuiltinErrorCode::IntCastToCharInvalidCodepoint,
@@ -291,7 +325,10 @@ fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Builti
     Ok(BuiltinCastLiteral::Char(scalar))
 }
 
-fn string_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+fn string_to_int(
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::String(text) = source else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
@@ -302,7 +339,7 @@ fn string_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Buil
         ));
     };
 
-    match parse_numeric_text_to_i32(text) {
+    match parse_numeric_text_to_int(text, numeric_profile.int_width) {
         Ok(value) => Ok(BuiltinCastLiteral::Int(value)),
         Err(NumberLiteralErrorReason::OutsideIntRange) => Err(BuiltinCastError::new(
             BuiltinErrorCode::IntParseOutOfRange,
@@ -315,7 +352,10 @@ fn string_to_int(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Buil
     }
 }
 
-fn string_to_float(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+fn string_to_float(
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::String(text) = source else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
@@ -326,7 +366,7 @@ fn string_to_float(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Bu
         ));
     };
 
-    match parse_numeric_text_to_f64(text) {
+    match parse_numeric_text_to_float(text, numeric_profile.float_precision) {
         Ok(value) => Ok(BuiltinCastLiteral::Float(value)),
         Err(NumberLiteralErrorReason::NonFiniteFloat | NumberLiteralErrorReason::ParseOverflow) => {
             Err(BuiltinCastError::new(

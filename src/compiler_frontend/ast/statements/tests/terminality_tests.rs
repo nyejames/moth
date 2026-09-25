@@ -21,7 +21,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 fn int_return(line: i32) -> AstNode {
     node(
         NodeKind::Return(vec![Expression::int(
-            line,
+            i64::from(line),
             test_source_location(line),
             ValueMode::ImmutableOwned,
         )]),
@@ -43,7 +43,11 @@ fn assert_bool(condition: bool, _line: i32) -> AstNode {
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(line, None, ValueMode::ImmutableOwned)),
+        NodeKind::ExpressionStatement(Expression::int(
+            i64::from(line),
+            None,
+            ValueMode::ImmutableOwned,
+        )),
         None,
     )
 }

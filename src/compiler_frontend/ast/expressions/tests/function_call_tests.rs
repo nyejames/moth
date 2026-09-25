@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -569,6 +570,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork: &path_fork,
+            float_precision: FloatPrecision::Bits64,
         },
     )
     .unwrap_or_else(|_| panic!("retained slots should resolve without rerouting"));

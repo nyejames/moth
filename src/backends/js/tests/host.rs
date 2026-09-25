@@ -76,6 +76,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
+            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -143,6 +144,7 @@ fn auto_invokes_start_function_when_enabled() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
+            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),

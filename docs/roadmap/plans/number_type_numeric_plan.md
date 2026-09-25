@@ -4,8 +4,10 @@
 
 - Status: active on numeric-type-expanding.
 - Current slice: Phase 2, canonical types, profile and materialisation.
-- Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.46 against the n^1.70 budget).
-- Next action: Slice 1a, the compiler-owned numeric profile, then HIR-reaching canonical semantics.
+- Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.40 against the n^1.70 budget).
+- Delivered: Slice 1a. The builder-selected `NumericProfile` is threaded through the config, module, single-file, template and backend boundaries. Profile-width `Int`/`Float` literals, folds, casts, struct defaults, capacities and const ranges are covered for all four combinations. JS and Wasm lowering reject non-standard profiles until Phases 4 and 5, and MON materialises at the standard profile until Phase 6.
+- Known Phase 5 gap: Wasm `IntMod` still applies a Euclidean correction, while folding and JS follow the dividend's sign.
+- Next action: Slice 1b, canonical fixed widths and Byte identities with target gates, then Slice 1c materialisation.
 
 ## Goal and delivery order
 
