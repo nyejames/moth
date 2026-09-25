@@ -1,1215 +1,578 @@
 # Moth Compiler Design Overview
 
-Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by the project tool, development server, tooling overlays and backend builders.
+> **Final design only.** This document specifies accepted compiler design, regardless of implementation progress. Status, migration steps and backend coverage belong in the roadmap and progress matrices. `V1` identifies a deliberately bounded feature contract, not unfinished implementation. Mark genuinely unsettled design explicitly.
 
-This document is the single source of truth for accepted core compiler architecture, semantic ownership and cross-stage compiler contracts. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
+Moth is a high-level language with first-class string templates. Its compiler is a staged, backend-neutral library used by project tools, development servers, tooling overlays and builders.
 
-The compiler implements template directives, declaration-owned `#Config of T` inputs plus grouped
-`project`/`html` (`#=`) records as ordinary folded constants, and immutable project fields through
-explicit `@project`. General non-template directives, `$config` prefixes, closed `$project` /
-`$html_builder` configuration, root-only `$page` and explicit root purposes are accepted queued
-design. Other accepted end-state contracts are labelled in their owning sections.
+This document owns core compiler architecture, semantic ownership and cross-stage contracts. `docs/build-system-design.md` owns bootstrap, Stage 0 graphs, project and package topology, command policy, linking and output orchestration. Read both for cross-boundary work.
 
-`docs/build-system-design.md` owns project bootstrap, Stage 0 graph construction, config, module and package topology, command policy, project builders, linking and output ownership. Read both documents when a task crosses the compiler and build-system boundary.
-
-`docs/src/developer-docs/compiler-design/**` is an educational explanation layer for compiler concepts and their relationship to Moth. It does not override this architecture document, `docs/build-system-design.md`, the language authorities or the progress matrix.
+Accepted roadmap plans and their approved design decisions resolve gaps or conflicts in these references. Apply explicit supersession within its stated scope, not an assumption that any newer file overrides every older authority. Before retiring a plan, preserve its unique accepted contracts in their permanent owners and update references. Implementation behaviour and progress labels do not override design.
 
 Companion authorities:
 
-- `docs/build-system-design.md` for project and build orchestration
-- `docs/src/docs/mon/mon-format.mtf` for MON literal-data format semantics; this document owns only the compiler and Rust API boundary for that format
-- `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
-- `docs/src/docs/directives/directives.mtf` for general directive syntax, ownership and argument rules
-- `docs/src/docs/design-scope/` for design bias and scope boundaries
-- `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared regions, affine ownership, Retained Edge Counting and backend memory lowering
-- `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
-- `docs/src/docs/progress/@page.moth` for current support and backend coverage
-- `docs/roadmap/roadmap.md` and `docs/roadmap/plans/` for implementation order and genuinely deferred design
+- `docs/src/developer-docs/language/overview.mtf` routes to canonical unsuffixed language references. They own source syntax and observable semantics. Paired Basic pages teach subsets.
+- `docs/compiler-data-layout-design.md` owns source, token and diagnostic representation, identity lifetimes and the three failure lanes.
+- `docs/src/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over temporary memory implementation plans.
+- `docs/src/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/src/docs/mon/mon-format.mtf` owns MON literal-data semantics.
+- `docs/src/docs/design-scope/` owns accepted and excluded language boundaries. `docs/src/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
+- `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/src/docs/progress/@page.moth` and the packages-and-builders matrix record support.
 
-User-facing pages under `docs/src/docs/**` teach the language. They do not replace this architecture reference.
+Educational compiler pages explain these contracts without overriding them. Routine internal API details belong in owning modules and doc comments. Use `index.md` to locate code rather than treating a source-path inventory as architecture.
 
 ## Task-reading guide
 
-For every compiler task, read the opening authority text above and
-`Architectural invariants`. Heading paths use `>` to name nested sections. Read
-the selected heading through the next heading of the same or higher level,
-including nested subsections unless the route narrows further. Read the full
-document for architecture plans, cross-stage ownership changes, broad refactors
-or thorough reviews.
+For every compiler task, read the authority text and `Architectural invariants`. A heading path uses `>` for nesting. Read a selected section through the next heading of the same or higher level, including subsections unless the route narrows further. Read the full document for architecture changes, cross-stage refactors and thorough reviews.
 
-| Task | Read in this document | Also read when affected |
+| Task | Read here | Also read when affected |
 |---|---|---|
-| Module compilation inputs, outcomes, root roles or artefact lanes | `Compiler input and result boundary` | `docs/build-system-design.md` > `Deterministic scheduling and graph outcomes` |
-| Diagnostic lanes, render context or deterministic diagnostic identity | `Diagnostics and deterministic identity` | `docs/src/developer-docs/style-guide/style-guide.mtf` > `Diagnostics` and `Returning errors` |
-| Cross-module declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
-| Public surfaces, exported effects, aliases, conformances or project provenance | `Public semantic interfaces` | `Stable semantic identities` and the relevant language reference |
-| Fingerprints, invalidation inputs or compiler-owned reuse facts | `Fingerprints and reuse facts` | `docs/build-system-design.md` > `Incremental and persistent artefacts` |
-| Concrete generic materialisation or generated sidecars | `Generated concrete functions`; `Frontend stages > Stage 4: AST semantics > Generics` | `docs/build-system-design.md` > `Generated-function boundary` |
-| Tokenization, header syntax, interface binding, source-kind preparation or local declaration ordering | The relevant section under `Frontend stages > Stage 1: tokenization`, `Stage 2: header syntax and interface binding` or `Stage 3: local declaration ordering` | `docs/build-system-design.md` > `Prepared-source orchestration` when Stage 0 consumes or schedules the result |
-| AST typing, constants, traits, casts, templates, reactivity or another language feature | `Frontend stages > Stage 4: AST semantics` and the exact relevant subsection | The feature's canonical unsuffixed language references and routed memory material when value flow is affected |
-| File-value path expressions, graph-active file references, resource identity or structural resource-bearing strings | `Frontend stages > Stage 4: AST semantics > File values and resources` | `docs/src/docs/resources/file-paths.mtf`, `docs/src/docs/resources/file-values.mtf` and `docs/build-system-design.md` > `Resource linking and output placement` |
-| HIR shape, lowering, validation, numeric ownership or call targets | `Frontend stages > Stage 5: HIR and validation` and the exact relevant subsection | The affected Stage 4 producer, Stage 6 consumer or backend handoff |
-| Numeric typing, literals, promotion, casts or the compilation-wide `NumericProfile` | `Numeric model and profile` | The canonical numeric, cast and Error references selected by `docs/src/developer-docs/language/overview.mtf`, and `docs/build-system-design.md` > `Selected command and capability surface` for profile selection timing |
-| Borrow validation, transfer facts or exported access summaries | `Frontend stages > Stage 6: borrow validation` | The task route in `docs/src/developer-docs/memory-management/overview.mtf` |
-| Lifetime regions, escapes, retention, cleanup frontiers or exported lifetime summaries | `Lifetime-region and escape validation` | The memory task route and `docs/build-system-design.md` > `HTML project builder > Link planning and lifetime topology` when project lifecycles are involved |
-| Memory-strategy selection, REC, handle tags or collector-free lowering | `Lifetime-region and escape validation` > `Memory-strategy planning` | `docs/src/developer-docs/memory-management/retained-edge-counting/` and the backend memory route |
-| Reachability, link facts, target checks or backend inputs | `Per-function link facts`; `Target-contract validation`; `Backend-facing compiler handoff` | `docs/build-system-design.md` > `Entry and package link planning` and the relevant builder section |
-| Current source locations | `Compiler implementation map` | Open the owning module entry point and adjacent producer or consumer before changing code |
-| Rust-only MON data service, literal reader, schema boundary or MON errors | `Rust-only MON service` | `docs/compiler-data-layout-design.md` > `MON data handoff` when input lifetime, spans or owned results are affected |
+| Module inputs, outcomes, root roles and artefact lanes | `Compiler input and result boundary` | Build design > `Deterministic scheduling and graph outcomes` |
+| Source identities, diagnostics and failure handling | `Diagnostics and deterministic identity` | Data-layout design and the style guide's diagnostic rules |
+| Dense IR, HIR ownership and capacity estimates | `Compiler storage and capacity` and Stage 5 > `Dense HIR ownership` | Data-layout design for its separately owned records |
+| Declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
+| Public surfaces, effects, evidence and provenance | `Public semantic interfaces` | Relevant canonical language and memory references |
+| Fingerprints and compiler reuse facts | `Fingerprints and reuse facts` | Build design > `Incremental and persistent artefacts` |
+| Generics and generated sidecars | `Generated concrete functions` and Stage 4 > `Generics` | Build design > `Generated-function boundary` |
+| Tokens, headers, source kinds and local ordering | Relevant Stage 1, 2 or 3 section | Build design > `Prepared-source orchestration` |
+| Typing, calls, directives, constants or casts | Relevant Stage 4 subsection | The feature's accepted language contract |
+| Multiple results and Core constant evaluation | Stage 4 > `Result slots and receiving boundaries` and `Core external constant evaluation` | Stage 5 > `Result channels` and routed memory references |
+| Wiring | Stage 4 > `Wiring boundary` | The accepted Wiring source contract named there |
+| Numeric identities, literals and profiles | `Numeric model and profile` and Stage 4 > `Numeric typing and literal materialisation` | Stage 5 > `Numeric ownership` and build bootstrap |
+| Templates and structural strings | Stage 4 > `Templates and TIR` and `File values and resources` | Canonical template/resource references and build resource linking |
+| HIR lowering and validation | Stage 5 | The producing Stage 4 owner and consuming analysis or lowerer |
+| Borrow validation and transfer facts | Stage 6 | The memory overview's borrow-validation route |
+| Lifetimes, retention and cleanup frontiers | `Lifetime-region and escape validation` | Build design > `HTML project builder > Link planning and lifetime topology` |
+| Physical memory strategies and REC | `Lifetime-region and escape validation > Memory-strategy planning` | The memory overview's runtime/backend route |
+| Reachability, target checks and backend inputs | `Per-function link facts`, `Target-contract validation` and `Backend-facing compiler handoff` | Build entry/package and builder sections |
+| MON codec boundaries | `Rust-only MON service` | MON format and data-layout design > `MON data handoff` |
+
+`Stage 4`, `Stage 5` and `Stage 6` above are under `Frontend stages`. `Build design` means `docs/build-system-design.md`.
 
 ## Architectural invariants
 
-- One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit.
-- A physical module is compiled once per project or package compilation boundary and owns local type, HIR, borrow and lifetime-analysis identity/facts.
-- Every normal module included in a command's semantic graph has its dormant root work parsed, type-checked, lowered, borrow-validated and lifetime-analysed before any entry can activate it.
-- Tokenization and declaration-shell parsing happen once. Later phases bind and consume retained syntax rather than reparsing source.
-- Call-shaped argument syntax has one parser and one shared argument owner. Functions,
-  constructors, receiver methods, builtin members, statement intrinsics and directive invocations
-  route supplied values through signature parameter slots on that shared path rather than copying
-  delimiter or named-argument handling. Anonymous const-record entries and inline nested folded
-  values use the same shared owner with named-only field routing; signature parameter slots and
-  record fields remain distinct routings.
-- Local semantic compilation is one compiler-owned service. The build system schedules it and consumes its outcome; it never sequences binding, ordering, AST, HIR or borrow stages itself.
-- Each semantic fact has one source owner. A later stage does not reconstruct the same fact from source or an earlier IR.
-- Module interfaces use stable semantic identities rather than donor-local indexes.
-- Moth-source modules and packages always use Moth semantic interfaces, including when their physical output is Wasm. WIT is the foreign Wasm/component boundary and never replaces `PublicSemanticInterface`.
-- Every physical-target-bearing file-value path in selected source is graph-active before AST reachability, folding or static specialisation. Ordinary `if` keeps both branches in selected source. Future `$feature` selection excludes source before graph and declaration publication. Filesystem resolution happens once per retained physical-target-bearing structural reference, with no later source or rendered-string rescan. `SourceKindNoFileValue` remains diagnostic-only and has no physical target.
-- Graph and input validity is separate from executable and output liveness. Graph activity is conservative for physical-target-bearing authored path occurrences; `SourceKindNoFileValue` remains diagnostic-only. Emission is exact and follows entry or package reachability.
-- A file value has language type `String`. There is no source-visible `Path` type. Resource and site-root anchors stay structural inside the string until a builder assigns output placement and a URL context.
-- Resource origin, resource use and byte source are three separate facts. Semantic resource identity carries no absolute path, output path, route, URL or content hash.
-- AST resolves constants, generic call inference, traits, casts and template semantics, then emits concrete generic requests. Generated functions are materialised, HIR-validated, borrow-validated and lifetime-analysed before backend handoff.
-- Stage 4 validates both branches of an ordinary `if` before static selection. A known compile-time Bool selects one branch before HIR, and the selected branch retains its lexical scope.
-- Terminality and durable generated requests are derived from the specialised active AST. An inactive static branch contributes no HIR or downstream executable facts.
-- HIR never receives an `if` whose condition is already a known compile-time Bool.
-- Ordinary `#Config` values and static `if` specialise executable behaviour. They cannot change
-  Stage 0 graphs or declaration structure. Future `$feature` is a separate compiler-owned
-  structural-selection contract before graph and declaration publication.
-- Source does not select or inspect physical targets.
-- TIR is AST-local. HIR receives folded strings or neutral owned runtime handoff data only.
-- HIR is the first backend-facing semantic IR. Borrow validation reads validated HIR and writes side tables without rewriting it.
-- Public semantic facts, executable state, backend-neutral link facts and compiler metadata are separate artefact lanes.
-- User-facing failures use `CompilerDiagnostic`. Internal invariants and infrastructure failures use `CompilerError`.
-- Backend validation consumes explicit roots, target assignments, validated HIR and validated lifetime topology. Lowerers never rediscover source meaning or reconsider lifetime legality.
-- Static proof is the semantic baseline, not garbage collection. GC is one permitted physical representation of an already legal topology and preserves the same accepted programs and observable behaviour.
-- Lifetime-region and escape validation is mandatory and backend-independent. GC cannot bypass topology legality.
-- Backends declare whether they support collector-free release lowering. A capable full-control release backend must not fall back to a tracing or reachability collector.
-- Imprecise memory planning retains conservatively; it must not reject legal source. A missing physical strategy after successful topology validation is `CompilerError`.
-- MON decoding never enters the canonical module compilation service and never constructs AST, HIR, TIR, borrow facts or module artefacts.
-- The Rust-only MON service owns exactly one public root: `moth::mon`. `compiler_frontend` internals stay crate-private; no MON path exposes them.
-- MON decoded values are owned trees a caller can keep after releasing the input text. The public boundary has no borrowed document view and publishes no partial result on failure.
-- One compiler-owned `NumericProfile` fixes `Int` width and `Float` precision for a whole compilation boundary before command inputs or config are materialised. Source, directives and the command line never select it.
-- Numeric promotion, comparison, conversion and failure semantics are language-defined and target-independent. A target lowers them with native primitives without weakening or redefining them, and a lowerer never selects a different `Int` width or `Float` precision.
-- Semantic numeric type, scalar storage layout and computation carrier are separate facts. The compiler-owned memory planner and its `ValidatedMemoryPlan` retain every layout, strategy, cleanup and count decision.
+- One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit. A boundary compiles it once, including dormant root work, before entry activation.
+- Each semantic fact has one producing owner. Later stages consume retained syntax and validated facts rather than reconstructing meaning from source or another representation.
+- Stage 0 schedules compiler services. The compiler alone sequences local semantic stages and owns their outputs. Build code never mutates HIR or installs semantic summaries.
+- Source preparation and provider binding are separate. Each preparation lane retains its token and declaration syntax for all later consumers.
+- Shared argument parsing supports distinct signature-slot and record-field routing. Sharing punctuation never merges their semantic contracts.
+- Cross-module facts use stable origins and canonical types, not donor-local indexes. Published module artefacts and generated sidecars are immutable.
+- Moth-source modules and packages use Moth semantic interfaces even when emitted as Wasm. WIT is a foreign component boundary, not a replacement interface.
+- Ordinary static `if` validates both branches before selecting executable work and preserves the selected lexical scope. Structural `$feature` selection is a separate pre-graph contract.
+- Authored physical file references establish graph/input validity before executable reachability. Exact output liveness neither creates nor retracts graph membership.
+- File values are `String`, with structural resource and site-root pieces until builder placement. Semantic origins, authored uses, byte sources and rendered URLs remain distinct.
+- Source cannot select or inspect physical targets. One boundary-wide `NumericProfile` fixes the semantic `Int` width and `Float` precision independently of target partition and build profile.
+- TIR is AST-local. Completed AST and HIR contain folded values or neutral owned runtime data, never TIR authority. HIR is the first backend-facing semantic IR.
+- Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types. Wiring capabilities do not turn strings into live templates.
+- Borrow and lifetime-topology validation are mandatory. GC choice and build profile preserve access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
+- A compiler-owned validated memory plan determines each physical variant's layout, strategies, cleanup and count transitions. Lowerers only realise it. Full-control release lowering has no tracing-collector fallback.
+- User diagnostics, operational failures and proven compiler bugs have separate failure lanes. Parallelism and reuse preserve deterministic identities, diagnostics and output order.
+
+## Compiler storage and capacity
+
+Long-lived, high-volume graph-like IR defaults to stage-owned dense stores addressed by compact typed IDs and ranges. Fixed-arity edges store IDs inline. Variable-arity edges use ranges into typed side stores. Construction uses growable storage and freezes to fixed dense ownership when later structural growth is no longer required. Recursive owning graph trees need a specific semantic or measured reason.
+
+This rule does not require flattening parser-owned AST trees. Source/token/diagnostic sizes and exceptions remain under the data-layout authority. HIR's concrete contract is in Stage 5.
+
+Capacity estimates are allocation policy, never semantic facts or hard limits. Reuse `FrontendArenaCapacityEstimate`, cheap statistics from parallel tokenization/preparation and existing header aggregation. Use naturally available exact counts, but add no counting traversal or duplicate lowering logic solely to predict capacity. Underestimation grows normally. Published HIR retains no unnecessary spare capacity. Compact-ID overflow uses the owning capacity diagnostic rather than truncation.
 
 ## Compiler input and result boundary
 
-The build system owns discovery, source ownership, graph construction, provider scheduling and command-specific module selection. The compiler owns source preparation, interface binding, local semantic compilation and target-contract validation.
+The build system selects source ownership, graph structure, providers and command roots. The compiler owns preparation, binding, semantic compilation and validation. Rust names may change without changing these boundaries.
 
-Exact Rust names may change. The ownership boundaries may not.
+For module compilation, a compilation boundary is one project graph or separately compiled package graph with its own identity context and publication owner. Entry activation and target partitioning do not create new semantic compilation boundaries.
 
 ### Canonical module compilation service
 
-Local semantic compilation is one compiler-owned service, not a stage sequence the build system assembles.
-
-Stage 0 schedules that service. It builds one compiler input value for a ready module and receives one typed outcome. It does not invoke interface binding, local declaration ordering, AST construction, public-interface projection, HIR lowering, borrow validation or generated semantic completion as separate steps.
-
-The service owns the whole local semantic sequence:
+Stage 0 supplies one input to one compiler-owned service for each ready module. The service owns:
 
 ```text
 bind provider interfaces
 -> order local declarations
--> run AST semantics
--> build the public semantic projection
+-> run AST semantics and build the public semantic projection
 -> lower and validate HIR
--> collect compiler-owned link facts
+-> collect active compiler-owned link facts
 -> run borrow validation
--> complete generated semantic work
+-> complete generated semantic work and required call summaries
+-> complete local lifetime-region and escape analysis
 -> finalise the public semantic interface
--> assemble the compiler-owned module artefact and generated delta
+-> validate and return the module result with its generated delta
 ```
 
-Rules:
+Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts. Link-level lifecycle validation remains a later operation.
 
-- Compiler-owned module compilation is the only production owner of binding -> ordering -> AST -> HIR -> borrow sequencing.
-- Build-system and project code must not construct public-interface drafts, install call summaries, mutate HIR or rerun compiler analyses.
-- Compiler module artefact lanes are produced and owned by the compiler boundary even when the build system stores, remaps and publishes them.
-- A new local semantic stage is added inside this service, never beside it in Stage 0.
-- The compiler receives compiler-owned option values. It does not depend on the project tool's configuration container to compile a module.
-- Normal modules, support modules, project package facades and synthetic single-file compilation use this one service after provider-independent preparation.
-- Specialised shorter paths are separate named compiler services, not permission for build or project code to assemble raw stages.
+A new local semantic stage belongs inside this service. Normal modules, support modules, project facades and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
-These rules are enforced, not only stated. Every stage owner named above is `pub(in crate::compiler_frontend)` or narrower, so a build-side caller does not compile. `xtask/src/architecture_boundary.rs` guards the edit that would widen one of them back, and guards the reverse direction — `compiler_frontend` importing the build system or the project tool's config container — which the module tree cannot express.
+Raw stage owners have frontend-only or narrower Rust visibility. The architecture boundary check also rejects reverse dependencies on build/project configuration. Build code cannot construct interface drafts, mutate semantic state, install summaries or rerun analyses. Named config and direct-template services are the only shorter semantic paths defined here.
 
-Stage 0 keeps one narrow exception. It asks the compiler to prepare provider-independent source before any provider interface exists, because it needs the retained structural provider and file references to finish the graph. That exception ends at prepared syntax: Stage 0 decides which source candidate to prepare and when, and reads structural provider and file references from the result. It does not bind source symbols, order declarations or enter AST, HIR or borrow stages.
+Stage 0 may request provider-independent preparation before provider interfaces exist because graph discovery needs structural references. It schedules that work and consumes its structural results. The exception ends before binding and semantic compilation.
 
 ### Module compilation input
 
-A canonical module compilation receives:
+A module input contains:
 
-- a stable module identity and root role
-- the module's semantic source set selected by Stage 0
-- retained token and header-syntax preparation for every semantic source
-- the Stage 0 resolved file-reference table paired with that prepared syntax
-- graph-resolved provider identities and dependency-ordered provider interfaces
-- the namespace and capability surface selected for the project or package build
-- resolved build-configuration values and synthetic compile-time interfaces visible to the module
-- the compilation boundary's `NumericProfile`, the compiler-owned semantic option that fixes
-  `Int` width and `Float` precision for every numeric type the module materialises; it is not a
-  build profile, a builder-provided primitive global or a `#Config` contract
-- final lane source identities and a diagnostic identity context; a module input therefore
-  carries no provisional identity
+- stable module identity and root role
+- the selected semantic source set and retained `PreparedHeaderSyntax` for each source
+- the matching Stage 0 resolved file-reference table
+- graph-resolved providers and immutable dependency-ordered interfaces
+- the selected namespace and capability surface
+- resolved configuration values and visible synthetic compile-time interfaces
+- the boundary `NumericProfile`
+- final source identities and the diagnostic identity context
 
-Source preparation and provider binding are deliberately separate.
-
-`PreparedHeaderSyntax` is produced before the provider graph has been compiled. It contains syntax that can be known without opening a provider interface:
-
-- tokens or source-kind prepared payloads
-- declaration shells
-- dependency clause shells and aliases
-- structural provider references
-- structural file references
-- local declaration-ordering hints
-- root-activity and fragment-placement metadata
-- retained `#Config` input-contract shells and other declaration-prefix directive metadata
-- source locations, diagnostics and remap information
-
-`BoundModuleHeaders` is produced when the build system schedules the module after its required providers have compiled. The compiler binds retained dependency clauses against immutable provider interfaces and produces:
-
-- stable bound declaration identities
-- bound canonical type and folded-value facts
-- final file-local visibility
-- source and binding namespace records
-- receiver-surface visibility
-- completed collision results
-
-Binding does not retokenize source or reparse declaration syntax. It passes the resolved file-reference table through without interpreting it.
-
-Provider-created binding interfaces are available before source-module compilation and may be bound as soon as provider discovery has produced them. A source-module dependency cannot become a stable dependency symbol binding until the source provider's public interface exists.
+Stage 2 defines prepared syntax and bound headers. Binding consumes retained dependency clauses without retokenizing or reparsing. Provider-created bindings can exist before source compilation. A source provider must publish its public interface before consumer binding.
 
 ### Module compilation outcomes
 
-A diagnosed source module and an internal compiler failure are different result classes.
+A module returns success or diagnosed source through the typed operational-result boundary defined in `Diagnostics and deterministic identity`. Compiler bugs are not another result variant.
 
-```rust
-pub type CompileModuleResult =
-    Result<ModuleCompilationOutcome, CompilerError>;
+A successful compiler result is complete but unpublished. It contains the validated module lanes, public interface, generated delta, resource-source delta and identity data needed for publication. The build system remaps and publishes it atomically as a `CompiledModuleArtifact`. Production and publication are distinct ownership steps.
 
-pub enum ModuleCompilationOutcome {
-    Success(ModuleSemanticResult),
-    Diagnosed(ModuleDiagnostics),
-}
-```
+A source diagnosis publishes no partial module, public interface, generated sidecar or semantic resource table. A required generated failure diagnoses its enclosing module transaction. Build-only missing-resource watch interests may survive without manufactured semantic origins. Successful independent branches may remain available to tooling, but a backend never receives a partial linkable project.
 
-`ModuleSemanticResult` is the complete unmerged result of one module compilation: the validated module lanes, the generated delta completed in the same transaction, the closed public interface, and the module-local string table plus path-interner fork carrying every diagnostic render identity. The build system merges the string delta first, merges the path delta into one final boundary path table, remaps the result and stores the published identity context in a `CompiledModuleArtifact`.
-
-The two types are deliberately different. The success payload is what the compiler produced; the artefact is what the boundary published. Publication is atomic, so a result that fails validation at the boundary is discarded whole rather than leaving a merged half.
-
-Contracts:
-
-- `Diagnosed` contains user-facing diagnostics and no partial public interface.
-- A successful artefact never contains errors.
-- Consumers blocked by a diagnosed required interface are not semantically compiled.
-- Independent graph branches may continue under build-system orchestration.
-- An internal `CompilerError` aborts the owning project or package compilation because later results cannot be trusted.
-- Structured warnings may be retained only on a successful artefact.
-- A successful result also carries a build-facing resource source delta. The build system merges it into the boundary-wide registry only when the semantic result is publishable.
-- A `Diagnosed` module exposes no semantic resource table. It may retain build-only watch interests for missing resource targets so creating the file triggers a later rebuild. Those observations carry no public semantic value and cannot be read by another module.
-- A shared module produces one canonical diagnostic set rather than one repeated failure per blocked dependant.
-
-The build system may collect successful independent branches for `check` or future LSP use. A backend never receives a partial linkable project.
+Successful artefacts contain no errors and may retain structured warnings. Diagnosed results retain their report context without pretending to be artefacts. A shared module produces one diagnostic set, not a copy per blocked dependant. Build scheduling owns blocking and aggregation.
 
 ### Compiled module artefact
 
-A successful module result separates the consumer-visible interface from the module-local semantic lanes and their transient identity deltas.
+Separate four consumer lanes:
 
-```rust
-pub struct Module {
-    pub executable: ModuleExecutable,
-    pub link_facts: ModuleLinkFacts,
-    pub metadata: ModuleCompilerMetadata,
-}
+| Lane | Contract |
+|---|---|
+| `PublicSemanticInterface` | Complete canonical facts visible to semantic consumers, defined under `Public semantic interfaces`. |
+| `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts. |
+| `ModuleLinkFacts` | Backend-neutral per-function facts and generated materialisation requests, defined under `Per-function link facts`. |
+| `ModuleCompilerMetadata` | Dormant root activity, folded fragments and runtime insertion indexes, folded root metadata, documentation/API-index data, semantic resource origins and non-executable uses, site-root use and warnings. |
 
-pub struct CompiledModuleArtifact {
-    pub module: Module,
-    pub interface: PublicSemanticInterface,
-}
-```
+The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
-The module-local lanes are grouped because they share one publication lifetime. String-ID remapping runs first; the path delta then merges and PathId remapping runs before consumers observe the `Module`. The interface is separate because it is the only lane another module reads.
-
-The reuse fingerprints described under `Fingerprints and reuse facts` are planned design, not a current artefact lane.
-
-`PublicSemanticInterface` contains consumer-visible semantic facts.
-
-`ModuleExecutable` contains module-local semantic state plus its final boundary identity table:
-
-- the local `TypeEnvironment`
-- validated module-local HIR
-- borrow-analysis facts
-- lifetime-region and escape-validation facts
-- the immutable `PathTable` shared by completed artefacts in the project or package boundary
-
-`PublicSemanticInterface` carries the stable consumer-visible facts listed in `Public semantic interfaces`, including complete lifetime and effect summaries. Donor-local region identities do not cross that boundary.
-
-
-`ModuleLinkFacts` contains backend-neutral facts used by graph linking and target validation:
-
-- per-function source call edges
-- stable binding-backed call IDs
-- helper and capability requirements
-- reactive features
-- numeric and cast operations
-- map and other target-gated features
-- per-function resource uses in deterministic source order
-- per-function project-context provenance
-- generated-function requests
-
-`ModuleCompilerMetadata` contains non-HIR compiler and builder-facing metadata:
-
-- dormant root activity
-- folded top-level fragment values and runtime insertion indexes
-- resolved root-local entry metadata
-- documentation fragments and API-index metadata
-- module-local resource origins and the non-executable resource uses carried by fragments and metadata
-- structured warnings
-
-Compile-time page fragments never live in HIR. HIR validation checks executable fragment operations only. An artefact-level validator checks compile-time fragment values, insertion indexes and their relationship to dormant root metadata.
+Compile-time page fragments never live in HIR. The artefact validator checks folded fragment values, insertion indexes and their relationship to dormant root metadata. HIR validation checks executable fragment operations only.
 
 ### Module root semantic roles
 
-A normal module may define declarations, dormant top-level runtime work and page fragments. Authored
-root runtime or direct output requires an implemented purpose whose contract has an applicable
-consumer. `$page` is the first HTML purpose. All dormant root work is semantically compiled before
-the artefact is available for entry activation. Depending on a module exposes declarations without
-activating `start` or inserting fragments.
+A normal module may define declarations, dormant top-level runtime work and page fragments. Authored root runtime work or direct output requires an explicit purpose with an applicable consumer. `$page` supplies the HTML purpose. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
 
-Support modules and the project package facade are API-only semantic modules. They may define
-functions, types, constants, traits and other legal declarations. Ordinary runtime code inside
-functions remains valid. They have no implicit `start`, top-level runtime statements, page fragments,
-route, builder artefact or page purpose. Invalid root activity is diagnosed before executable HIR
-leaves the compiler.
+Support modules and the project package facade are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit `start`, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
 
-The project package facade compiles with project-facade visibility supplied by the build system. Its
-semantic result is an ordinary immutable module artefact and public interface. The separate
-`ProjectPackageAssembly` and its project-wide assembly privilege belong to the build system.
+The project facade consumes build-supplied facade visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
-`export:` is the current public visibility marker for every module root role. Accepted future
-direction replaces it with compiler-owned `$export`. Directive-block support is undecided, and both
-forms will not remain permanent alternatives. This document describes the implemented `export:`
-compilation path until that migration.
+Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
 
 ### Normal-root `start`
 
-A normal root's implicit `start` is compiler-synthesised, non-exported and cannot be bound through a
-dependency clause. Purpose directives do not create a second start or a per-file compilation unit.
+The normal root's implicit `start` is compiler-synthesised, non-exported and unavailable to dependency binding. Purpose directives create neither another start nor a per-file compilation unit.
 
-It is infallible as a function contract. It has no `Error!` return channel. Runtime failures that are
-not handled in source follow the applicable trap or invariant behaviour rather than becoming
-builder-defined error fragments.
+`start` owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
 
-`start` owns the normal root's dormant top-level runtime work and produces runtime fragment strings
-in source order. Entry assembly may activate it once after the module has already compiled.
-Compilation itself never activates it.
-
-Support roots and the project package facade have no implicit `start`.
+Its function contract is infallible, with no `Error!` return channel. Unhandled failures follow the language's trap or invariant behaviour, not builder-defined error fragments. Infallible does not mean trap-free.
 
 ## Diagnostics and deterministic identity
 
-Diagnostics are durable compiler data rather than a final formatting step.
-
 ### Diagnostic lanes
 
-The names below describe the current stage APIs. The accepted physical
-representation and the separation of user diagnostics, operational failures and
-compiler bugs are owned by `docs/compiler-data-layout-design.md`. Its remaining
-failure/report migration is not implemented by this documentation pass.
+`docs/compiler-data-layout-design.md` owns the complete failure and storage contracts:
 
-- `CompilerDiagnostic` owns source, syntax, dependency, config, type, rule, borrow and target-contract failures.
-- `CompilerError` owns impossible compiler states, transformation failures, filesystem failures and tooling or backend infrastructure failures.
-- `DiagnosticBag` owns stage-local accumulation.
-- `CompilerMessages` is used at build and rendering boundaries.
-- Diagnostic payloads carry structured reasons, exact `SourceSpan` values, symbols and semantic identities rather than pre-rendered prose.
-- Deferred-feature diagnostics remain distinct from outside-design-scope diagnostics.
+- User-caused source, project, configuration, dependency, type, access and target failures use typed diagnostic drafts that compact into deterministic reports. Warnings share the diagnostic machinery. Deferred-feature and outside-design-scope reasons stay distinct.
+- Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the diagnostic store. A failure retaining compact compiler IDs carries their matching frozen identity context. Pre-source or non-source failures may instead carry ordinary filesystem/host context without compact IDs. Each failure has one context shape, never both.
+- A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and carries self-contained bounded report facts before suspect worker state is discarded. Malformed input, capacity limits and unavailable capabilities never justify a bug panic.
 
-Type diagnostics carry semantic type identities plus context. Rendering resolves user-facing names through `DiagnosticRenderContext` and the relevant local type environment.
+Diagnostic schemas own stable codes and typed facts. Codes are not repurposed when prose changes. Stages preserve exact source spans, symbols and semantic reasons rather than pre-rendering messages. Type-display snapshots retain only what rendering needs, not complete type environments solely for diagnostics. Renderers resolve facts without mutating the report.
 
-Every user-facing diagnostic has a stable code and descriptor independent of its rendered wording. A stable code is not repurposed for a different semantic diagnostic family. Renderers may improve wording and presentation without changing the payload identity or code contract.
+MON's public errors are a separate caller-owned data-service boundary, described under `Rust-only MON service`.
 
 ### Build-lifetime render context
 
-One project or package compilation boundary owns a diagnostic identity context from bootstrap through final rendering.
+One project or package boundary owns its mutable source, string and path identity construction. Source identities are final before downstream use. Inventory lanes register them upfront. Private discovery lanes normalise provisional identities once at their publication barrier.
 
-- `SourceSpan` stores a final `SourceId` and exact local byte range; source display paths are resolved through the attached context.
-- Parallel workers may return deterministic string-table deltas.
-- Parallel workers may return deterministic path-interner deltas alongside string-table deltas.
-- File deltas merge in original source order.
-- Module deltas merge in canonical module order.
-- Diagnostics and warnings never merge in worker-completion order.
-- Source identities are final before every downstream consumer: inventory lanes register them
-  upfront and private discovery lanes rebind once at their finalize barrier
-  (`docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
-  finalization`).
-- Tokens, headers, visibility records, type-rendering contexts and artefacts are remapped before a later consumer uses them.
-- A success or diagnosed result that outlives the active compilation call carries the merged `StringTable` and final `PathTable`, or an equivalent paired self-contained render context.
+Source-identity finalisation and span-table finalisation are different operations. A source's span owner remains live until its last span-producing consumer finishes, including config application and check-only work. The data-layout authority owns the exact build/freeze representation and private-discovery protocol.
 
-Full string/path table cloning remains valid for genuinely independent identity boundaries. It is not the ordinary module-compilation strategy.
+Workers return append-only identity deltas. Canonical merging and remapping precede consumer access. File order, module order and diagnostic order never follow worker completion order. The build document owns the merge sequence.
 
-Process-local `StringId` and `PathId` values and absolute filesystem paths are not persistent semantic identities. A serialised artefact stores canonical logical identities plus self-contained strings/path tables or a remappable identity context.
+A retained diagnosed or warning result carries its immutable identity context and report-local type-display data. An identity domain is the set of source, string and path IDs issued by one context. Reports from independent domains retain their own contexts, rather than combining raw IDs. Rare cross-domain diagnostic sites carry explicit ownership data instead of inferring an owner from an ID or path. A clean output with no compact compiler IDs need not retain a frozen compiler context.
+
+Full table cloning is reserved for genuinely independent identity boundaries. Process-local IDs and absolute paths are neither semantic identities nor persistent compatibility keys. Persistent artefacts use canonical logical identity and self-contained or remappable data.
 
 ## Stable semantic identities
 
 ### Origin identities and export bindings
 
-A declaration has a stable semantic origin identity rooted in its defining package, module and declaration.
+A declaration's semantic origin identifies its defining package, module and declaration. Source aliases do not change it. Private declarations gain no consumer-visible public identity. Donor-local AST, HIR and type indexes never cross semantic module boundaries.
 
-Conceptual forms include:
-
-```rust
-OriginDeclarationId
-OriginFunctionId
-OriginTypeId
-OriginConstantId
-```
-
-The exact names may change. These rules do not:
-
-- donor-local AST indexes, HIR indexes and `TypeId` values do not cross module boundaries
-- private declarations never receive a consumer-visible identity
-- source aliases do not change origin identity
-- identity assignment is deterministic across thread scheduling
-
-A public re-export adds a separate stable export binding:
-
-```rust
-pub struct ExportBinding {
-    pub exporting_module: ModuleId,
-    pub public_name: PublicName,
-    pub origin: OriginDeclarationId,
-}
-```
-
-The origin identity remains stable when another module re-exports it under a different name. The export binding belongs to the exporting module and its public API name. Changing a re-export alias changes the exporting module's public-interface fingerprint but does not change the origin declaration identity.
+An export binding separately identifies the exporting module, public name and original declaration. Re-exporting under another name preserves the origin. Renaming that public alias changes the exporter's public-interface fingerprint, not the declaration's origin.
 
 ### Cross-build stability
 
-A public origin identity derives from:
+A public origin derives from stable project/package identity, canonical module path, root role, declaration name and category, plus receiver identity where relevant. It excludes root-filename suffix, ordinary source filename, source position, declaration order and thread scheduling.
 
-- stable project or dependency package identity
-- canonical module path
-- module root role
-- defining declaration name
-- declaration category
-- receiver identity where relevant
-
-It does not depend on:
-
-- the cosmetic suffix of a root filename
-- the ordinary source file that contains the declaration
-- source position
-- declaration order
-- thread scheduling
-
-Moving an exported declaration between ordinary files in the same module preserves origin identity. Renaming it or moving it to another module changes identity.
+Moving an exported declaration between ordinary files in one module preserves identity. Renaming it or moving it to another module changes identity.
 
 ### Type identity
 
-Each compiled module owns one local `TypeEnvironment`. `TypeId` equality in that environment is the only valid comparison for module-local semantic decisions.
+Each compiled module owns one `TypeEnvironment`. Module-local semantic equality compares its `TypeId` handles. Interfaces instead carry canonical identities for builtins, nominal structs and choices, transparent aliases, constructed types such as options/collections/maps, concrete generic instances, exported generic parameters and binding-backed external types. Numeric identities retain width, signedness, precision or scale as applicable.
 
-Cross-module interfaces use canonical type identities rather than donor-local `TypeId` values. Canonical identity covers:
+A consumer interns dependency types into local handles with a canonical-origin map. Cross-module equality compares canonical identity, never rendered names or unrelated local handles. After resolution, `DataType` is parse/diagnostic vocabulary only. Mutability and shared/exclusive access remain classifications, not manufactured type shapes.
 
-- builtins
-- module-owned nominal structs and choices
-- transparent aliases
-- options, collections, maps and fallible carriers
-- concrete generic nominal instances
-- generic parameters inside exported generic templates
-- binding-backed external package types
-- numeric builtins carrying width, signedness, binary precision or `Number` scale,
-  including the profile-selected `Int` and `Float` identities
+Growable `{T}` and fixed `{N T}` collections are distinct canonical shapes. Fixed capacity is semantic identity, not an allocation hint. Maps retain key and value identities directly. Later stages query semantic shapes instead of parse syntax or private duplicate tables.
 
-A consumer may intern compact local `TypeId` handles for dependency-bound canonical types. The local environment retains an origin map to canonical identity. Cross-module equality compares canonical identity, never rendered names or unrelated local handles.
-
-`DataType` is parse-only or diagnostic-only after semantic resolution. It must not drive executable AST, HIR or backend semantic decisions.
-
-Access classification remains separate from type identity. Mutability, shared access and exclusive access do not create manufactured type shapes.
-
-Collection and map identity remain canonical constructed shapes:
-
-- growable `{T}` and fixed `{N T}` collections are distinct
-- fixed capacity is semantic identity rather than an allocation hint
-- `{K = V}` maps store key and value identities directly
-- later stages query semantic shapes rather than parse syntax or private side tables
-
-AST builds the local type environment. Early nominal registration creates identity and generic parameter metadata. Canonical fields and variants are written only after AST resolves their type shells.
-
-Member queries expose borrowed field or variant views and direct lookup helpers. Later stages do not clone member lists for semantic lookup.
-
-AST body emission uses a narrow interner over `TypeEnvironment`. It may intern derived types and dependency-bound canonical types but cannot mutate completed nominal declarations.
-
-External parameters with no frontend mapping use an explicit unknown-external state. They never use sentinel `TypeId` values.
+AST registers nominal identity and generic parameters early, then completes fields and variants after their type shells resolve. Body emission may intern derived or dependency-bound types but cannot mutate completed nominal declarations. Member queries borrow resolved views rather than cloning lists. Unmapped external parameters use an explicit unknown-external state, not sentinel valid IDs.
 
 ### Compiler-owned and binding-backed symbols
 
-Compiler-owned builtins are neither source declarations nor builder-provided bindings. They own language-defined operations, builtin type policies, runtime error identities and compiler-defined cast evidence.
+Compiler-owned builtins define language operations, builtin type policy, runtime error identity and closed cast contracts. They are neither source declarations nor builder bindings.
 
-Binding-backed packages are typed semantic interfaces rather than Moth modules. They:
+Binding-backed packages expose stable package/symbol identities, opaque types, constants and free functions. They may have recursive package-local namespaces but do not expose source-defined receiver methods. Source-owned wrapper types supply method APIs over external handles. Source-module namespace records stay shallow and field-access-only.
 
-- use stable package and symbol identities
-- may expose opaque types, constants and free functions
-- may expose recursive package-local namespace paths
-- do not expose source-defined receiver methods
-- map to target helpers, imports, glue or native operations only after HIR
+Binding metadata maps to imports, helpers, glue or native operations after HIR. WIT component discovery validates a supported foreign profile and projects it once into canonical Moth types and binding identities. AST and HIR carry no WIT syntax. The value-only V1 profile crosses independent semantic values, retains no Moth reference and returns independent Moth result graphs. Backend planning retains the closed boundary classification needed for Canonical ABI lowering.
 
-WIT components enter through this binding-backed boundary. Discovery validates the supported WIT profile and projects it once into Moth canonical types and stable binding identities. Ordinary interface binding, AST and HIR do not carry WIT syntax. Link and backend planning retain only the closed WIT boundary classification needed for Canonical ABI lowering.
+Foreign `s8` through `s64` and `u8` through `u64` map to explicit `I*` and `U*` types. Foreign `f32`/`f64` map to `F32`/`F64`, not `Float`. `u8` does not imply `Byte`. The baseline WIT profile has no `f16` primitive, so `F16` needs an explicit foreign conversion or bit-representation contract. Correcting a foreign carrier never changes a Moth-native Core or Builder signature declared with `Int` or `Float`.
 
-Foreign numeric widths project to explicit Moth widths. WIT `s8` through `s64` and `u8` through `u64` become `I8` through `I64` and `U8` through `U64`, and `f32` and `f64` become `F32` and `F64`. They never become `Int` or `Float`, and `u8` is not automatically `Byte`. The baseline WIT surface has no `f16` primitive, so `F16` needs an explicit foreign conversion or bit-representation contract. A Moth-native signature declared with `Int` or `Float` remains that function: correcting a physical foreign carrier never rewrites a Core or Builder language signature.
+`Error.code` is a runtime Moth `U32` value with default `0`. It is distinct from compiler diagnostic codes, process-local IDs and Rust MON error codes. Its representation follows the ordinary numeric and runtime Error contracts.
 
-The builtin runtime `Error` type's public `code` field is `U32` with default `0`. Runtime error codes are Moth language values; they are not compiler `DiagnosticCode` identities, compiler diagnostic codes, process-local IDs, the Rust MON `MonErrorCode` enum or any other infrastructure code.
-
-A future component export is an optional WIT-compatible projection of a Moth package facade. It does not replace the facade's `PublicSemanticInterface` and Moth-only declarations remain available to Moth consumers.
-
-Source-owned wrapper types provide method-style APIs over external handles when needed.
-
-Source-module namespace records remain shallow and field-access-only. They do not silently acquire the recursive namespace behaviour of binding-backed packages.
-
-The bare `io` namespace is prelude policy for the Core IO package rather than a separate package category.
+An optional WIT-compatible export projects a package facade for foreign consumers without replacing its Moth interface or hiding Moth-only declarations. The bare `io` namespace is Core IO prelude policy, not a package category.
 
 ## Numeric model and profile
 
-The canonical numeric references selected by
-`docs/src/developer-docs/language/overview.mtf` own user-visible syntax,
-operators, conversions and `Number` arithmetic. This section owns the
-compiler-side numeric identities, the compilation-wide profile and the layer
-ownership that consumes both.
+The accepted numeric extension is specified in `docs/roadmap/plans/number_type_numeric_plan.md` > `Accepted numeric contract`. Preserve that contract when consolidating it into the canonical numeric and cast references routed by the language overview. This section owns compiler identities, profile propagation and separation from physical representation, not another operator matrix.
 
 ### Canonical numeric identities
 
-The complete numeric source surface is `Int`, `Float`, `I8`, `I16`, `I32`,
-`I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `Number`, `Number0`
-through `Number256` and `Byte`. Canonical numeric identity therefore carries
-width, signedness, binary precision or `Number` scale rather than a rendered
-name:
+The numeric types are `Int`, `Float`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and the `Number` family, with scales `Number0` through `Number256`. `Byte` is a separate octet scalar, nominally distinct from `U8`, `I8` and `Char`, with no arithmetic.
 
-- `Int` and `Float` keep distinct canonical identities. Neither is an alias for
-  an explicit-width type, even when the selected profile gives it the same
-  physical precision.
-- `Number0` is the accepted spelling alias for `Number`'s scale-zero identity.
-  `Number1` through `Number256` carry their scale as canonical identity. Reject
-  leading-zero scales and scales above 256.
-- `Byte` is nominally distinct from `U8`, `I8` and `Char`, and it is outside
-  numeric arithmetic.
-- A module-local `TypeId` still identifies a numeric type only inside its own
-  `TypeEnvironment`; cross-module equality compares canonical identity.
+`Int` and `Float` keep distinct canonical identities even when their selected precision matches a fixed-width type. `Number0` aliases the scale-zero `Number` identity. Other `NumberN` types carry scale in identity. Leading-zero scales and scales above 256 are invalid.
 
 ### Compilation-wide numeric profile
 
-One compiler-owned `NumericProfile` selects the `Int` width and the `Float`
-precision independently from 32 or 64 bits. All four combinations are
-supported:
+`NumericProfile` independently selects 32- or 64-bit `Int` and `Float`. The default is 32-bit `Int` and 64-bit `Float`. The builder settles it before command-input materialisation and config compilation. It has no source, directive, build-input or command-line selection syntax.
 
-| `Int` width \ `Float` precision | 32-bit | 64-bit |
-|---|---|---|
-| 32-bit | supported | supported (default) |
-| 64-bit | supported | supported |
+The profile is fixed across directly linked Moth modules, generated functions, Core/Builder source packages and Moth-source dependencies. It never varies by function, target partition or development/release representation. Incompatible precompiled Moth artefacts require a matching build or rejection, never silent numeric adaptation. Foreign components retain explicit foreign types and separate value boundaries.
 
-The default profile is `Int32` with `Float64`.
+The profile affects numeric materialisation, folding, overflow limits, rounding, diagnostics and ABI/layout facts. Every numeric compiler service consumes it, including synthetic sources, config, direct templates and MON schema preparation. Existing fingerprint and compatibility owners include profile-dependent facts, including private implementation behaviour. They do not form a separate numeric cache system.
 
-The build system settles the profile with the selected builder, before explicit
-command inputs are materialised and before config compilation
-(`docs/build-system-design.md` > `Selected command and capability surface`).
-This delivery adds no source spelling, directive, `#Config` contract or
-command-line flag that selects it, and it is not a builder-provided primitive
-global. Lowerers consume the boundary profile instead of choosing one.
+### Semantic and physical separation
 
-The profile is fixed for a whole compilation boundary. It never varies by
-function, target partition or build-profile representation, and it applies to
-directly linked Moth modules, generated concrete functions, Core and Builder
-source packages and Moth-source dependencies alike. A source dependency
-compiles for that profile; an incompatible precompiled Moth artefact requires a
-matching build or rejection, never silent numeric adaptation. Foreign
-components remain separate value boundaries with explicit foreign types.
+Promotion, comparison, conversion, rounding and failure follow the accepted language rules on every target. Arithmetic checks its semantic result domain, not a narrow operand's storage width. Operator promotion does not authorise receiving coercions. Cast evidence follows source/target policy rather than an optimiser's proof about one value.
 
-A different profile may change `Int` overflow limits, `Float` rounding and
-folded results, so numeric materialisation, folding, diagnostics and ABI/layout
-facts are profile-dependent semantic inputs. The same profile must preserve
-behaviour across the JavaScript and Wasm backends. The profile threads through
-every compiler service that types numbers, including synthetic sources, config,
-direct templates and MON schema preparation, and it participates in the
-existing fingerprint and compatibility owners rather than a separate cache
-system.
+Semantic type, scalar storage layout and computation carrier remain distinct. A Wasm carrier's wrapping or truncating behaviour is not Moth arithmetic. Lowerers cannot substitute wrapping, saturation or arbitrary precision for a required checked result. Compile-time and runtime operations preserve the same failure order and rounding boundaries.
 
-Numeric promotion, comparison, conversion and failure rules are language-defined
-and target-independent: the canonical references own their matrices, and the
-compiler applies them identically on every target. No target substitutes
-wrapping, saturating or arbitrary-precision behaviour for a required checked
-result, and a combination the references reject is a source diagnostic rather
-than a silent widening.
-
-### Layer ownership
-
-`Frontend stages > Stage 5: HIR and validation > Numeric ownership` owns the
-per-layer numeric responsibility list, and the canonical references own the
-user-visible matrices. This section adds only the facts those owners consume:
-canonical numeric identity comes from the local `TypeEnvironment`, `Int` width
-and `Float` precision come from the boundary `NumericProfile`, and no layer
-keeps a parallel width table or selects a numeric representation of its own.
-
-Queued support: the current compiler reaches only `Int` as `i32` and `Float` as
-`f64`, materialises literals eagerly through those types and does not yet thread
-a profile. The accepted end state above is queued implementation; current
-support and backend coverage remain `docs/src/docs/progress/@page.moth`'s
-responsibility.
+`Frontend stages > Stage 5: HIR and validation > Numeric ownership` defines layer responsibilities. `Backend-facing compiler handoff > Numeric scalar storage and carriers` defines physical handoff ownership.
 
 ## Public semantic interfaces
 
-A public interface contains only facts a semantic consumer may observe:
+A public interface contains the complete semantic facts observable by consumers:
 
 - exported origin identities and export bindings
 - canonical exported type shapes
-- folded exported constants and const-template values, including stable resource origins and site-root pieces inside exported resource-bearing strings, and canonical numeric values at their declared width, precision or scale
+- owned folded constants and const-template values, including structural resource/site-root pieces and exact numeric width, precision or scale
 - generic templates, bounds and required evidence
 - exported traits and reusable conformance evidence
 - receiver surfaces and visible methods
-- function parameter access modes
-- mutation, optional transfer eligibility and effect categories
-- complete result provenance: fresh roots, parameter aliases, projections, detached stored results, result-to-result aliases and independent result graphs
+- parameter access modes and Wiring parameter contracts with canonical underlying types
+- mutation, optional-transfer eligibility and effects
+- complete result provenance, including fresh roots, parameter aliases, projections, detached stored results, result-to-result aliases and independent result graphs
 - retained-parameter and outlives summaries
-- retention cardinality and persistent-edge creation or destruction effects
-- detached stored-result effects and whole-domain kill effects
-- frontier-enabling retention effects and outcome-sensitive success and error effects
+- retention cardinality and persistent-edge creation/destruction effects
+- detached stored-result effects and whole-domain kills
+- frontier-enabling retention effects and outcome-sensitive success/error effects
 - external-boundary classifications
-- relevant reactive effect summaries
-- project-context provenance for every exported fact
+- project-context provenance for every affected exported fact
 
-Backend planning facts do not belong in this interface. Per-function calls, helper requirements, resource uses and target-gated features live in `ModuleLinkFacts`.
-
-Exported resource facts use stable origins only. A donor-local resource ID, an output path, a route or a rendered URL never crosses a public interface.
-
-Aliases affect source spelling. They do not replace semantic origin identity.
-
-Receiver methods remain attached to their receiver type's exported source surface. They are not independent free namespace entries and cannot be bound, aliased or re-exported separately.
+Per-function calls, capabilities, resource uses and other backend-planning facts live in `ModuleLinkFacts`, not the semantic interface. Exported resources carry stable origins, never donor-local IDs, output paths, routes or rendered URLs. Receiver methods stay attached to their type's exported source surface and cannot be bound, aliased or re-exported independently.
 
 ### Public-surface and package-export validation
 
-AST rejects every exported semantic surface that transitively exposes an unavailable identity or prohibited project context.
+Validation transitively covers every interface fact above, including signatures, fields, aliases, constants, generic templates, evidence, receivers and all access/effect/lifetime summaries. AST validates resolved source surfaces. Later analysis completes and validates its summaries before interface publication.
 
-Semantic surface validation covers:
+An export cannot expose a private nominal type, private trait/evidence identity, private receiver surface, hidden runtime anonymous-record identity or project-context fact prohibited by package policy.
 
-- function parameters and returns
-- struct and choice fields
-- type aliases
-- exported constants and const records
-- generic bounds and templates
-- trait requirements
-- receiver methods
-- reusable conformance evidence
-- access, optional-transfer, complete result provenance, retention, cardinality, detached stored-result effects, whole-domain kills, frontier-enabling and outcome-sensitive retention effects, outlives, external-boundary and reactive summaries
-
-An exported semantic surface cannot leak:
-
-- a private nominal type
-- a private trait or evidence identity
-- a private receiver surface
-- a runtime anonymous-record type
-- a project-context fact prohibited by the active package facade policy
-
-Runtime anonymous records remain deferred to a separate plan. When they exist, each literal site will use a hidden nominal type local to its source site, and that type must not escape through an exported signature, field, alias, return, receiver method or trait evidence.
-
-
-The compiler also records project-context provenance for executable source and generated functions in per-function link facts. Provenance follows direct value use, compile-time-derived implementation facts and source or generated call edges.
-
-For external package eligibility, the build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private `@project`. This includes an exported function that calls a private project-dependent helper. The validator does not treat implementation-only dependence as a reusable package specialisation mechanism.
+The compiler records project provenance through folded values, compile-time-derived implementation facts and source/generated call edges. The build system owns external-package eligibility, including rejection when an exported function reaches a private project-dependent helper. Implementation-only dependence is not an escape from that policy.
 
 ### Synthetic compile-time interfaces
 
-The compiler may consume specialised immutable interfaces produced outside ordinary module discovery, including the build-system-owned project-global interface.
+Synthetic interfaces enter through ordinary dependency binding. They contain stable member identities, folded backend-neutral values, source locations, member fingerprints and provenance, with no AST, HIR or runtime body.
 
-A synthetic compile-time interface contains:
-
-- stable member identities
-- folded backend-neutral values
-- source locations
-- member-level fingerprints
-- provenance
-- no AST
-- no HIR
-- no runtime body
-
-`@project` publishes only predefined project fields. Config helper constants and `#Config` input
-declarations are not implicitly public project metadata.
-
-It enters visibility through the same dependency binding boundary as other interfaces. AST consumes
-its values and provenance but does not own its bootstrap or namespace policy.
+The build-owned `@project` interface publishes the predefined project field set, not helper constants or `$config` declarations. AST consumes values and provenance but never owns bootstrap or namespace policy. The build document defines that field policy and package isolation.
 
 ## Fingerprints and reuse facts
 
-Each successful base module records five separate fingerprints.
+Each successful base module has five distinct fingerprint domains:
 
-### Public-interface fingerprint
+| Fingerprint | Contents and exclusions |
+|---|---|
+| Public interface | The complete canonical `PublicSemanticInterface`. Excludes private bodies, source locations, warnings, formatting metadata and non-public dormant root work. |
+| Implementation | Executable body semantics and non-interface implementation facts, including exported bodies whose public facts stay unchanged. Excludes dormant root work and generated sidecar bodies. |
+| Dormant root activity | Implicit `start`, top-level runtime work, fragments and folded root-local entry metadata. |
+| Runtime dependencies | Backend-neutral calls, helpers, capabilities, target-gated operations, glue requirements, resource uses and site-root requirements of executable functions/root work. |
+| Documentation | Public documentation, editor metadata and API-index data. |
 
-Covers the complete canonical semantic contents of `PublicSemanticInterface`, as listed in `Public semantic interfaces`. This includes stable resource-bearing values, generic templates, conformance evidence, access/effect/lifetime summaries and project-context provenance.
+Generated requests come from the active specialised AST. They are materialisation dependencies carried with link data, not runtime-dependency fingerprint contents. A changed request set follows implementation invalidation and updates the generated sidecars. Sidecars retain their own implementation, runtime and compatibility fingerprints.
 
-It excludes private bodies, source locations, warnings, formatting-only metadata and dormant root activity that is not public API.
+Configuration values and `NumericProfile` participate in whichever existing domains they affect. Configuration may change folded values, executable behaviour and derived public, root or link facts while preserving declaration/export existence and declaration-origin identity. Provenance survives folding. Structural `$feature` selection requires separate selection-compatibility facts, not ordinary configuration folding.
 
-
-### Implementation fingerprint
-
-Covers executable body semantics and non-interface implementation facts that can change generated code. It includes private function bodies and bodies of exported functions when their public semantic facts remain unchanged.
-
-Generated requests and link facts come from active specialised executable control flow. Project
-metadata, configuration dependence, public semantic facts and root metadata remain separate
-fingerprint inputs. Configuration dependencies use the existing fingerprint owners; they do not
-create a separate fingerprint family. The boundary `NumericProfile` participates the same way: it
-is an input to whichever fingerprint facts depend on numeric behaviour, folded numeric values or
-numeric ABI and layout, and it never introduces a parallel fingerprint family. Exported folded
-values or effect summaries may vary when they
-depend on configuration, with provenance retained, while structural public identity remains stable.
-Ordinary `#Config` inputs cannot create or remove declarations or exports. They may change active
-executable effects and derived link facts only. Future structural `$feature` selection needs
-distinct selection-compatibility facts before reuse; it is not ordinary configuration folding.
-
-It excludes dormant root activity and generated sidecar bodies.
-
-### Dormant root-activity fingerprint
-
-Covers compiler-synthesised `start`, top-level runtime work, page fragments and resolved entry metadata owned by a normal root.
-
-### Runtime-dependency fingerprint
-
-Covers backend-neutral link facts derived from callable functions and dormant root activity:
-
-- helper and capability families
-- source and binding-backed calls
-- target-gated features
-- runtime glue requirements
-- exact reachable resource uses
-
-Generated-function requests are materialisation dependencies carried with module link data, but they are not runtime-dependency fingerprint contents. A change to the emitted request set is covered by implementation invalidation, updates generated sidecars and relinks affected assemblies.
-
-### Documentation fingerprint
-
-Covers public documentation, editor metadata and API-index data.
-
-### Invalidation meaning
-
-- A private or exported body change does not recompile semantic consumers unless a public semantic fact or exported effect changes.
-- An implementation change may require relinking or code regeneration without semantic consumer recompilation.
-- A root-activity change relinks entries that activate the module.
-- A runtime-dependency change updates capability, glue and resource planning.
-- A resource byte change without a stable-origin change invalidates content and output fingerprints only. It does not change type identity or public semantic identity, and it does not recompile semantic consumers.
-- A documentation-only change regenerates documentation or editor indexes without invalidating semantic consumers or executable instances.
-
-The build system owns invalidation, relinking and persistent cache compatibility over these compiler-defined facts.
+Resource bytes and rendered URLs are not semantic-origin identity. `docs/build-system-design.md` > `Incremental and persistent artefacts` owns recompilation, relinking and cache policy. Its resource section owns content/output invalidation.
 
 ## Generated concrete functions
 
-Base module artefacts remain immutable. Concrete generic functions live in generated sidecars owned by the consuming project or package compilation.
+Concrete generic functions live in generated sidecars owned by the consuming project or package boundary. Base module artefacts remain immutable.
 
-A generated request is keyed by:
+A request key contains the stable generic declaration, canonical concrete type identities and required evidence identities. The declaring module validates and publishes its immutable generic template and retained materialisation context. A consumer emits durable requests only from its active specialised AST.
 
-- stable generic declaration identity
-- canonical concrete type identities
-- required evidence identities
+The compiler canonicalises and deduplicates requests against an immutable view of published instances and work completed within its transaction. It owns materialisation, HIR validation, borrow analysis, lifetime/escape analysis, call-summary installation and semantic convergence. The build system owns the published set, sidecar storage, placement, reuse and atomic publication with the requesting module.
 
-The declaring module owns and validates the immutable generic template. AST in a consumer emits requests
-from the active specialised executable AST. Calls in inactive static branches may be frontend-validated
-but emit no generated request.
+Each sidecar owns its concrete HIR, generated-local type environment or immutable canonical-to-local delta, borrow/lifetime facts, complete effect summaries, link facts and fingerprints. It neither borrows the requester's mutable type environment nor extends the declaring dependency artefact. Its compatibility includes the boundary `NumericProfile`.
 
-Generated boundary scheduling and generated semantic completion are different owners.
+Nested requests, including cross-module and cross-package requests, converge inside the requesting compiler transaction using the declaring artefact's retained context. They never create another source-module job or alter provider-wave ordering. Build code does not filter requests later or rerun analyses to complete them.
 
-The build system owns the compilation boundary around generated functions:
-
-- boundary-wide generated identity aggregation
-- the published set every request is deduplicated against, lent as an immutable view
-- completed sidecar storage and transactional publication
-- boundary placement and reuse across entries
-
-The compiler owns every generated semantic fact:
-
-- canonicalising a concrete request from AST facts
-- deterministic deduplication of requests against that published set and against work already
-  completed in the same transaction
-- generated AST and HIR materialisation
-- generated HIR validation
-- generated borrow analysis
-- call-summary installation and semantic convergence
-- the local semantic fixed point required to complete one module compilation transaction
-- construction of the final generated sidecar delta
-
-The build system supplies an immutable view of already published generated identities and summaries. The
-compiler never mutates a build-owned store while semantic analysis is running, and the build system never
-mutates base or generated HIR or reruns a compiler analysis.
-
-Each generated function artefact owns:
-
-- its stable request identity
-- a generated-local type environment or immutable canonical-to-local type delta
-- concrete validated HIR
-- generated borrow facts
-- generated lifetime-region and escape facts
-- generated exported lifetime and effect summaries
-- generated link facts
-- implementation, runtime and compatibility fingerprints
-
-Generated materialisation consumes the compilation boundary's `NumericProfile`,
-so its compatibility facts include that profile and a generated artefact is
-reusable only under the same one.
-
-Generated HIR does not borrow the mutable local type environment of the requesting module and does not extend the declaring dependency artefact. Cross-module calls use stable targets.
-
-A generated function may request further instances. Every request converges inside the requesting module's own compiler
-transaction, including a request against a generic declared in another module: the declaring module's retained
-materialisation context is published with its artefact, so the requester materialises from it without a second module
-job. The build system contributes the published set the request is deduplicated against and the wave order the module
-was scheduled in; it schedules no additional compilation to reach the generated fixed point.
-
-A diagnosed generated request exposes no partial generated artefact. It blocks only entries or package surfaces that require it. An internal generated-function `CompilerError` aborts the owning project or package compilation.
+The module outcome contract governs generated failures. A diagnosis discards the transaction's unpublished module/generated result. Operational failures and compiler bugs follow their distinct lanes. Already published independent artefacts remain immutable.
 
 ## Frontend stages
 
-Stage 0 belongs to the build system. It selects the project and package graph, semantic source sets, provider order and command roots. See `docs/build-system-design.md`.
-
-Stage 1 preparation is provider-independent and may be scheduled by Stage 0 for one selected source at a time. Stages 2 through 6 run inside the one compiler-owned module compilation service described in `Compiler input and result boundary > Canonical module compilation service`. The sections below describe what each stage owns, not a menu of entry points for build or project code.
+Stage 0 belongs to the build system. It selects graphs, source sets, provider order and command roots. It may schedule Stage 1 tokenization and Stage 2 header-syntax preparation before provider interfaces exist. Interface binding and subsequent local semantic stages run inside the canonical module service. Stage descriptions are ownership contracts, not independent build-side entry points.
 
 ### Stage 1: tokenization
 
-Tokenization converts source text into located tokens.
+Tokenization recognises lexical forms and records exact source locations, string/template delimiter context, numeric spelling, operator/assignment spacing and registered directive syntax. Retained tokens belong to their source. Later consumers use bounded ranges and typed handles rather than cloned token vectors.
 
-It owns:
+`numeric_text` owns numeric grammar, normalisation, separators, exponents and destination-aware materialisation helpers. Tokenization preserves numeric spelling rather than assigning every literal an `i32` or `f64` value.
 
-- lexical recognition
-- source location tracking
-- string and template delimiter context
-- numeric literal scanning and source diagnostics
-- symbolic operator, assignment and mutable-declaration spacing diagnostics
-- directive token recognition through the supplied registered surface
-- syntax-level rejection of unsupported or unknown directive forms
+Frontend directive names are always present. Builders extend one registry without overriding them. Tokenization and template parsing use that registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, signature, processing phase and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
 
-`numeric_text` owns shared numeric grammar, normalisation, separator and exponent validation and materialisation helpers used by later semantic consumers.
+Ordinary `.moth` starts in code mode. `.mtf` starts in an implicit template body while preserving original locations. Plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode. Tokenization does not resolve dependencies, types or declarations.
 
-Frontend-owned directives are always present. Builders may extend the registry without overriding frontend names. Tokenization and template parsing consume the same merged registry, and template lexical modes remain distinct from ordinary source mode.
-
-Structural selection is deferred. Its future implementation must identify excluded regions before resolving their contained directives or publishing their graph and declaration facts. The exact structural/lexical mechanism remains to be designed, including directive-controlled template body modes. V1 adds no source skipper and grants ordinary `if` no such exclusion behaviour.
-
-`TokenizerEntryMode` selects the initial lexical state:
-
-- ordinary `.moth` starts in code mode
-- Moth template `.mtf` starts in an implicit template body while preserving original source locations
-- plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode
-
-The tokenizer does not resolve dependencies, types or declarations.
+Structural `$feature` selection must exclude source before contained directives are resolved or graph/declaration facts are published. Its predicate grammar and lexical mechanism, including directive-controlled template body modes, remain open design. Ordinary static `if` provides no such exclusion.
 
 ### Stage 2: header syntax and interface binding
 
-Header work has two explicit phases so syntax is parsed once without pretending provider interfaces already exist.
+Header work separates provider-independent syntax preparation from binding against completed interfaces. A preparation lane is a source-processing context, such as canonical compilation or a separate check-only unit. It scopes syntax reuse without creating another physical source identity.
 
 #### Header syntax preparation
 
-Syntax preparation is the only phase that discovers module-wide top-level declaration syntax.
+Preparation is the sole owner of module-wide top-level declaration discovery. `PreparedHeaderSyntax` retains:
 
-It owns:
-
-- dependency clause and public re-export syntax
-- root-role-aware `export:` parsing
-- dependency clause shells, flat direct selections and aliases
+- tokens or source-kind payloads and source locations
+- dependency/re-export clauses, direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
-- declaration-prefix metadata such as `#Config of T` on the following eligible declaration
-- retained config and root directive invocations, including their balanced argument token ranges
-- dormant normal-root start-body separation
-- compile-time fragment placement metadata
-- source-kind adapters that synthesise ordinary declarations
-- structural provider references
-- structural file references, classified from the dense path rows tokenization already produced
+- declaration modifiers, including `$config` input-contract shells
+- root metadata/purpose invocations and balanced argument ranges
+- dormant start-body separation and compile-time fragment placement information
+- structural provider references and structural file references
 - conservative local declaration-ordering hints
-- retained `#Config` input-contract shells
+- diagnostics and identity/remap data
 
-Support roots and project package facades reject root runtime activity before executable HIR can be produced. Normal roots retain dormant start, fragment and root-directive metadata.
+Source-kind adapters may synthesise ordinary declarations. API-only root roles reject authored root runtime/output activity. Normal roots retain the corresponding dormant work and purpose facts.
 
-Syntax preparation does not type-check executable bodies, fold expressions, parse a parallel argument language or open source provider interfaces. File-reference classification is shallow for the same reason: it reads path rows and their spelling, and never parses the surrounding expression. Directive arguments are semantically parsed once through the shared call owner when the receiving context is available.
+Preparation neither checks executable bodies nor folds expressions. It retains directive arguments without parsing a parallel argument language. The shared argument owner parses them semantically once the receiving context is known. File classification reads the tokenizer's dense path rows, not surrounding expressions.
 
-`#Config` contract shells are not structural provider references and cannot affect Stage 0 edges. `config.moth` is compiled before Stage 0 constructs the source graph, so a file-value path is rejected there rather than becoming a graph edge.
+Input-contract shells do not create provider edges. Config compilation precedes source-graph construction, so an authored file-value path in `config.moth` is diagnosed rather than resolved into a graph edge.
 
 #### Interface binding
 
-After required source providers have compiled, interface binding resolves retained dependency clauses against immutable interfaces.
+Binding resolves retained clauses against immutable provider interfaces and produces `BoundModuleHeaders`: stable origins/export bindings, canonical types and folded values, final file-local visibility, source and binding-package namespaces, receiver surfaces, prelude/builtin reservations and completed collision results.
 
-It owns:
-
-- stable bound origin identities and export bindings
-- bound canonical types and folded values
-- final file-local visibility
-- source namespace records
-- binding-backed package namespace records
-- receiver-surface visibility
-- prelude and builtin reservations
-- completed name and alias collision checks
-
-Binding-backed provider interfaces may already exist before source graph compilation. Source-module bindings wait for provider interfaces.
-
-Interface binding never copies provider declarations into the consumer. It never bypasses a facade to inspect private source.
+Provider-created binding interfaces may be available before source compilation. Source providers must compile first. Binding never copies provider declarations into a consumer, reparses source or bypasses a facade. It passes resolved file-reference facts to AST without interpreting their value meaning.
 
 #### Four reference classes
 
-Header processing keeps four classes distinct:
+Keep these facts distinct:
 
-- Structural provider references belong to Stage 0 graph construction.
-- Structural file references belong to Stage 0 graph and physical input resolution.
-- Dependency symbol bindings belong to visibility and AST semantics.
-- Local declaration-ordering edges belong to Stage 3.
+| Fact | Consumer and purpose |
+|---|---|
+| Structural provider reference | Stage 0 provider-graph construction. |
+| Structural file reference | Stage 0 content-source membership and physical input resolution. |
+| Dependency symbol binding | File visibility and AST semantic use. |
+| Local declaration-ordering edge | Stage 3 ordering within one module. |
 
-A dependency-bound declaration is never a node in the consumer's local declaration graph.
+A dependency clause may produce a provider edge and later a symbol binding. Its consumed path row is never also published as a structural file reference. A dependency-bound declaration is never a node in the consumer's local declaration graph.
 
-One authored path row carries exactly one of these roles. A row a dependency clause consumed is never also published as a structural file reference.
-
-Local ordering edges include same-module facts needed before AST can consume declarations linearly:
-
-- local type alias targets
-- local struct and choice field type references
-- local function parameter and return type references
-- local explicit constant type references
-- fixed collection capacities that use local compile-time constants
-- local constant initializer references
-- structurally visible local const-template control references
-- local trait requirement and conformance references where ordering requires them
-
-A reference to a dependency-bound declaration may support a structural provider edge and later become a dependency symbol binding. It is not a local ordering edge.
-
-Declaration-shell parsers are shared with AST body-local declaration parsing so equivalent syntax remains on one parser path.
+Local edges cover alias targets, field and signature types, explicit constant types, constant initialisers, fixed capacities, structurally visible const-template controls and trait/conformance references that require local ordering. Declaration-shell parsing is shared with body-local declaration parsing where the syntax is equivalent.
 
 #### Source-kind adapters
 
-Moth template `.mtf` preparation contributes one private synthetic `content #String` declaration. Its initializer is a structurally built `$md` template over the original body tokens. Nested templates without an explicit directive inherit the Moth template Markdown formatter. An explicit directive overrides that default.
+An `.mtf` source contributes one private synthetic `content #String` declaration. Its initialiser is a structurally built `$md` template over the original body tokens. Nested templates inherit Markdown formatting unless an explicit directive overrides it.
 
-Plain Markdown `.md` preparation renders raw Markdown to HTML and contributes the same private `content #String` declaration shape with a synthetic string-literal initializer.
+Plain `.md` renders raw Markdown to HTML and contributes the same declaration shape with a synthetic string-literal initialiser. Ordering and AST folding then treat both as ordinary constants. Neither creates a separate AST, HIR, borrow or backend pipeline.
 
-Later ordering and AST folding treat both as ordinary compile-time constants. There is no Moth-template-specific or Markdown-specific AST, HIR, borrow or backend path.
-
-A recognised source kind unsupported by the active builder is rejected with a typed dependency diagnostic. Resolution does not silently fall through to another extension candidate.
+A recognised source kind unsupported by the active builder receives a typed dependency diagnostic. Resolution never falls through to another extension candidate.
 
 #### Direct Moth template service
 
-The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` dependencies. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
+The direct service reuses tokenization, synthetic-header preparation, local ordering and AST folding. It extracts folded `content` and warnings, then stops before HIR, borrow/target validation, lowering and output writing.
 
-This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
-For a standalone source, it owns preparation through folding. For a Stage 0 file-value bundle, it
-consumes the retained entry and content-source preparations without tokenizing or preparing them
-again. Stage 0 asks the compiler to prepare each selected source once while discovering the content
-closure, as in the general prepared-source orchestration contract.
+For a standalone source it owns preparation through folding. For a Stage 0 content bundle it consumes the retained preparations without repeating them. Tooling supplies inputs and receives owned folded values, never assembling raw stages itself.
 
-Project tooling receives folded `content` and warnings. It never implements preparation semantics,
-binds symbols, orders declarations or folds templates itself.
-
-The bundle transfers its source database and live source-local span builders into the service.
-The service retains those builders through folding and extraction, then installs their tables
-under exclusive ownership after all AST readers have ended. Folded results and diagnosed service
-outcomes retain the source context needed by their resource facts and warnings.
-
-If bundle discovery diagnoses a source before folding can begin, its owning preparation boundary
-retains the known snapshots and builders and finalizes them there. The request owner preserves each
-document's source context with its warnings, including when a later document fails. Recursive
-discovery normalizes provisional source identities once before publishing success or diagnosis,
-under `docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
-finalization`. Standalone sources receive final IDs upfront.
+The service owns the bundle's source database and live span builders through folding/extraction. It finalises tables after AST readers end. If discovery fails first, the preparation owner finalises its known snapshots at that terminal boundary. Aggregation retains each document's warning context even when a later document fails. Private discovery normalises source identities once before success or diagnosis, as specified by the data-layout authority.
 
 #### Project config compilation service
 
-Build-system config bootstrap is the other sanctioned short compiler path. The compiler owns one named service that runs tokenization, synthetic-free declaration-shell preparation, interface binding for the single authored config source, local declaration ordering and AST semantic checking, then stops at folded AST values.
+One named compiler service prepares the single authored config source, binds its permitted compiler surface, orders declarations and performs AST checking/folding. It consumes the boundary `NumericProfile` and stops at folded values, with no HIR, borrow facts, link facts or public module interface.
 
-It produces no HIR, borrow facts, link facts or public interface. The service returns typed folded directive-invocation facts and explicit input-contract results to the existing build and config application owners. It consumes the compilation boundary's `NumericProfile`, so folded `Int` and `Float` config values already use the selected widths. Recognised-name record extraction is not the accepted architecture. Config-specific diagnostics, authored key and argument locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
+It returns typed folded directive arguments, input-contract results, original key/argument locations and diagnostics. Build-owned config consumers apply the settings. They do not scan recognised record names or compose compiler stages.
 
-The config outcome also returns the original live source-local span builder, including on diagnosed
-paths. The build owner keeps it through config application and output validation, then installs its
-frozen table under exclusive source-database ownership. Semantic compilation alone is too early to
-freeze a config source whose build-owned validation can still produce spans.
-
-Both services stop earlier than canonical module compilation. Neither exists so that build or project code may reach raw stage functions.
+The config outcome returns its live source-local span owner on success and diagnosis. Build validation may still produce spans during config application and output-path checks, so that owner freezes only after those consumers finish. Both short services preserve the same source/identity contracts as canonical compilation.
 
 ### Stage 3: local declaration ordering
 
-Stage 3 orders top-level declarations inside one canonical module using retained local edges. Stage 0 has already ordered provider modules and packages.
+Stage 3 topologically orders retained local declaration shells, diagnoses cycles and preserves source order among independent declarations. Stage 0 has already ordered providers. Stage 3 appends builtins and dormant normal-root `start` after declarations.
 
-Stage 3 owns:
+Same-file constants retain source-order semantics and reject forward references. Cross-file constants use header-provided local edges. Cross-module constants are already folded interface facts. Directive retention changes none of these rules.
 
-- topological sorting of local declaration shells
-- cycle detection in the local declaration graph
-- source-order stability among independent declarations
-- local constant initializer ordering
-- finalising the module's declaration order
-- appending builtin declarations
-- appending dormant normal-root `start` after declarations
+A concrete required edge with no local declaration is a graph diagnostic. A conservative symbol-shaped hint that cannot be identified as local may reach AST for a precise type/expression diagnostic. Unresolved hints do not all become missing-header errors.
 
-It does not:
+AST consumes the resulting declaration order linearly. Local nominal identities are registered before alias targets resolve. Completed member shells follow the alias targets and capacity constants they require. An alias that folds a module constant is published at its own ordered position, never provisionally.
 
-- order project or package modules
-- copy dependency-bound declarations into the local graph
-- inspect executable function or start-body references
-- order body-local declarations
-- rediscover dependencies
-
-Same-file constants retain source-order semantics and same-file forward references are rejected. Cross-file constants in one module use header-provided local edges. Cross-module constants are already folded owned facts in provider interfaces.
-
-Directive retention does not create forward-reference exceptions or a second graph owner. Ordinary constant visibility and the module start boundary remain unchanged.
-
-A concrete required local edge that names no local declaration is a Stage 3 graph diagnostic. A conservative symbol-shaped hint that cannot be proven to denote a local declaration may be deferred to AST so type or expression resolution can issue the precise semantic diagnostic. Stage 3 does not convert every unresolved hint into a missing-header error.
-
-After ordering:
-
-- AST consumes declarations linearly
-- AST does not rebuild visibility
-- local nominal identities are registered before alias targets resolve, and each nominal's final member shells are built after the alias targets and capacity constants its members use
-- alias targets that fold a module constant are published at their own Stage 3 position, so no consumer observes a provisional alias target
-- missing local edges are fixed in header syntax preparation
-- missing providers are fixed in the Stage 0 graph
-- dormant `start` is never a dependency participant
+Stage 3 does not order modules or body-local declarations, inspect executable body references or copy dependency symbols into its graph. Dormant `start` is not a dependency participant. Missing local edges belong in header preparation. Missing providers belong in Stage 0.
 
 ### Stage 4: AST semantics
 
-AST consumes sorted declaration shells and bound visibility. It resolves declarations, folds constants and templates, parses executable bodies, type-checks expressions, validates terminality and emits typed AST nodes.
+The typed abstract syntax tree (AST) stage consumes sorted shells and bound visibility. It resolves declarations and canonical types, parses/checks executable bodies, applies receiving-context rules, folds constants/templates, validates public surfaces and prepares active executable work for HIR.
 
-AST owns:
+Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and folded root metadata. Root metadata enters the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
 
-- module-local semantic declaration resolution
-- dependency-bound canonical type projection into local `TypeId` handles
-- public-interface validation and canonical export projection
-- executable body parsing and type checking
-- body-local declarations
-- function terminality validation
-- contextual coercion at explicit receiving boundaries
-- generic template validation and module-local request emission
-- trait, conformance and generic-bound evidence validation
-- explicit cast evidence resolution and builtin folding
-- constant, anonymous const-record and const-template folding
-- file-value expression semantics over already-resolved file references, and module-local resource identity
-- template composition, slot routing, folding and runtime handoff preparation
-- reactive source and subscription metadata
-- module-local TIR from direct parser emission through finalisation
-- root-local folded metadata through ordinary module visibility, including resource anchors and documentation categories stored in the non-HIR metadata lane rather than by scanning HIR constant names
-- common frontend value-to-string behaviour for Float, Number, templates and runtime lowering
-
-AST currently reserves accepted deferred `name:` headers in executable statement position and rejects exact `_:`. The later declared-region implementation owns body parsing, scope, `into name` placement and freshness validation. Declared-region identity must not enter `TypeId`.
-
-AST is defined by ownership and data flow rather than a fixed number of internal passes.
-
-The Stage 4 semantic sequence is:
+The semantic order is:
 
 ```text
 parse and type-check complete authored bodies
 -> fold constants and final compile-time expressions
--> specialise known Bool `if`
--> commit active generated requests and executable summaries
--> validate terminality over active control flow
--> hand the active AST to HIR
+-> specialise known-Bool if branches
+-> derive active generated requests and executable summaries
+-> validate active terminality
+-> hand the completed active AST to HIR
 ```
 
-Both authored branches are frontend-valid before static selection. Inactive branches are not skipped
-during name, visibility, type, generic-evidence, cast or constant-expression validation.
+This specifies dependencies, not a fixed count of internal passes. `Static Bool control-flow specialisation` defines exactly what remains validated and what selection removes.
 
 #### Dependencies and visibility
 
-AST consumes bound file visibility. It may validate semantic use of visible symbols but does not rebuild dependencies or discover top-level visibility.
+AST validates uses through bound file visibility. It never rebuilds dependencies or top-level visibility. One collision policy covers declarations, dependency clauses, aliases, prelude symbols and builtins, with no silent shadowing.
 
-All user-visible names use one collision policy. Same-file declarations, source dependency clauses, binding dependency clauses, aliases, prelude symbols and builtins cannot silently shadow one another.
-
-If AST cannot resolve a top-level declaration by walking sorted declarations and bound visibility, the missing fact belongs in syntax preparation, interface binding, local ordering or the Stage 0 graph. It does not justify another discovery pass.
+A top-level lookup that cannot work from sorted declarations and bound visibility reveals a missing preparation, binding, ordering or graph fact. It does not justify another discovery pass.
 
 #### Type checking and coercion
 
-Expression evaluation determines an expression's natural type and remains strict. Contextual coercion is applied only by the frontend owner of an explicit receiving boundary.
+Expressions have natural semantic types. Only an explicit receiving-boundary owner applies contextual coercion. These boundaries include declarations/assignments, returns, concrete parameters, fields, defaults, typed collection/map entries, string/template content, explicit cast targets and `then` arms with a known receiver.
 
-Boundary owners include:
+Compiler and binding-backed calls use the same rule. AST carries `TypeId` through fields, receivers, calls, operators and compatibility checks. A receiving annotation does not retroactively change an already typed operator result.
 
-- declarations and assignments
-- returns
-- concrete function parameters
-- struct and choice fields
-- default values
-- typed collection and map entries
-- template and string content
-- explicit `cast` targets
-- `then` arms whose enclosing producer has an explicit receiver
-- compiler and binding-backed call contracts
+#### Result slots and receiving boundaries
 
-AST carries semantic `TypeId` values through fields, receiver lookup, calls, operators and compatibility checks.
+An expression produces zero, one or multiple ordered result slots. The common zero/single representation is allocation-free. A multiple-result payload contains at least two slot types. There is one authoritative resolved result shape per expression, not a duplicated call-local return list.
+
+An optional `none` is one result. Zero results do not imply divergence. Terminality remains a separate control-flow fact. A single collection or record is also one result, not a way to transport multiple returns.
+
+Single-value consumers validate exactly one slot. Multi-bind, returns and value-producing control flow validate arity and coercion per slot. A producer executes once regardless of result count. Folded multi-result producers use ordered ordinary single-valued constants through the same receiving path, without a synthetic tuple type or an external-only value hierarchy.
+
+All right-hand results are computed before assigning existing multi-bind targets. Distinct result slots preserve result-to-parameter and result-to-result provenance. They do not prove separate allocations or pairwise disjointness, including when a summary classifies results as fresh.
+
+The accepted detailed contract is `docs/roadmap/plans/native-result-slots-and-core-const-eval.md` > `Final representation contracts`. Physical result packing belongs only to ABI owners.
 
 #### Numeric typing and literal materialisation
 
-AST consumes the compilation boundary's `NumericProfile` for every `Int` and
-`Float` it types; no stage below or beside it selects a different width or
-precision. Fixed-width types, `Byte` and `Number` scales are profile-independent.
+AST consumes the boundary `NumericProfile` for `Int` and `Float`. Fixed-width types, `Byte` and `Number` scales are profile-independent.
 
-Numeric literals stay on the retained source-local spelling until a destination
-is known. Materialisation is destination-aware:
+Numeric literals retain source-local spelling until a destination is known:
 
-- an unconstrained whole literal defaults to `Int`, and a decimal or exponent
-  literal defaults to `Float`
-- small values never infer a narrow fixed type such as `I8` or `U8` by size
-- a direct typed boundary materialises the literal in its requested numeric type,
-  so a `U64` literal above `Int32`'s range never needs an `Int` intermediate
-- whole literals may initialise binary floats, but decimal or exponent spelling
-  never initialises a fixed integer, `Int` or `Byte`
-- binary float literals round directly to their destination using
-  round-to-nearest, ties-to-even; inexact values are valid, a rounded non-finite
-  result is rejected and subnormals and signed zero are preserved
-- integer minima materialise with their sign without first rejecting the
-  positive magnitude, and negative values never initialise `U*` or `Byte`
-- `Number`'s exact decimal materialisation is its own scale rule rather than a
-  reuse of binary literal rounding
+- An unconstrained whole literal defaults to `Int`. Decimal/exponent spelling defaults to `Float`. Small values never infer a narrow type by size.
+- A direct typed receiver materialises the requested numeric type without an `Int` intermediate. A `U64` literal can therefore exceed the default `Int` range.
+- Whole literals may initialise binary floats. Decimal/exponent spelling never initialises an integer or `Byte` merely because its mathematical value is integral.
+- Binary float literals round directly to the destination using round-to-nearest, ties-to-even. Inexact finite values are valid. Rounded non-finite results fail. Subnormals and signed zero are preserved.
+- Signed integer minima materialise with their sign without first rejecting the positive magnitude. Negative values cannot initialise unsigned types or `Byte`.
+- `Number` uses its exact decimal scale rule, not binary literal rounding.
 
-An immediate concrete numeric peer may type an otherwise untyped literal before
-operator promotion, and a literal outside that peer's range is a diagnostic.
-Generic inference uses these same local rules and gains no distant conversion
-search. A receiving annotation does not retrospectively retag an operator's
-result, parentheses add no receiving boundary, and already typed values keep
-their identities. Literal materialisation never routes through a fixed
-`i32`/`f64` bottleneck, and it is not where operator promotion, comparison or
-cast eligibility is decided.
+An immediate concrete numeric peer may type an otherwise untyped literal before operator promotion. A literal outside that peer's range is diagnosed. A receiving annotation does not retrospectively retag an operator's result. Generic inference uses these local rules, without distant conversion search. Parentheses add no receiving boundary and already typed values keep their identities.
+
+Materialisation never routes through a fixed `i32`/`f64` bottleneck. Operator promotion, comparison and cast eligibility remain separate decisions. The accepted numeric contract defines their matrices and checked result domains.
+
+#### Core external constant evaluation
+
+A binding may advertise a compiler-owned typed constant-evaluation operation beside its backend lowerings. AST dispatches that operation through the resolved stable binding identity into compiler-owned Rust evaluation. Package spelling, helper names, arbitrary callbacks, JavaScript execution and source purity annotations are not dispatch mechanisms.
+
+V1 permits trusted Core-origin registrations only. Parameters use shared access, success slots have the accepted fresh-result classification, no error channel exists and the complete signature matches the operation's supported value contract. Ordered multiple results and supported optionals follow ordinary result-slot rules. Opaque handles, unresolved types and unsupported value representations are ineligible. An invalid trusted registration or evaluator result is a compiler bug, not a fold refusal.
+
+Required and opportunistic folding share one evaluator and ordinary constant owners. Normal visibility, argument order, access checks, arity and source handling syntax are validated first. Evaluation requires genuine compile-time inputs with the concrete data the operation observes. Shared access alone is not constness.
+
+Every output slot retains its semantic type and conservative input/config/project provenance. Exported constants publish completed values. Consumers never rerun a provider's evaluator. Folding an ordinary runtime declaration does not turn it into a source constant declaration.
+
+A fully folded call contributes no runtime call, helper or asset requirement, but keeps its semantic input dependencies. A visible Core call may fold even when the selected target lacks its runtime lowering. A surviving runtime call still requires that lowering, and folding never makes an unavailable package visible.
+
+A missing evaluator or runtime argument produces a required-constant diagnostic where constness is required and retains the runtime call otherwise. The same distinction applies to a bounded evaluation refusal. An observing operation on an unresolved structural resource string cannot guess its characters: required folding diagnoses it, while opportunistic evaluation keeps the runtime operation. Checked-value failures retain the language's established compile-time failure policy rather than silently becoming runtime work.
+
+Operations use deterministic work/output limits and checked capacities. Fallible calls, mutable execution, arbitrary source-function interpretation and user-selected evaluators are outside V1. See `docs/roadmap/plans/native-result-slots-and-core-const-eval.md` > `External constant-evaluation contract`.
 
 #### Call-shaped syntax and assertion intrinsics
 
-Call-shaped argument syntax has one focused AST owner. It consumes parentheses, commas, newline
-whitespace, positional and named targets, mutable-access markers, argument expression boundaries,
-expected-type and cast-target routing. Functions, constructors, receiver methods, builtin members,
-statement intrinsics and directive invocations route supplied values through signature parameter
-slots on that owner. Anonymous const-record entries and inline nested folded values use the same
-owner with named-only field routing and const-required values. The same owner retains each
-parsed argument's parameter slot for final validation, so call validation fills defaults and checks
-types and access without routing the source arguments a second time. Specialised template argument
-categories remain under their current template owners.
+One shared argument owner parses delimiters, commas, multiline whitespace, positional/named entries, mutable-access markers and expression boundaries. Signatures route values to parameter slots and retain that mapping for default, type and access validation. Anonymous records use named-only field routing instead. No consumer reroutes the source list or manufactures a callee signature merely to parse a record.
 
-`assert` remains a reserved, statement-only language intrinsic. It uses the shared call-shaped
-syntax with compiler-owned synthetic expectations equivalent to:
+Template-specific slot labels, indices and helper categories retain their own meaning over this shared list syntax. Directive signatures require compile-time arguments, reject escaping/mutable evaluation and distinguish standalone invocations from declaration modifiers. Builders cannot turn the shared parser into an arbitrary source-transform API.
 
-[codeblock, $code("moth"):
-    assert |condition Bool, message String? = none|
-]
+`assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:
 
-Those expectations are compiler metadata. They do not create an importable, shadowable or
-first-class function. Shared call validation owns named-argument, default, type, access and
-argument-shape rules. AST owns only assertion-specific placement, completed-statement suffix
-rejection and the semantic effect rule that prevents message construction from escaping its
-evaluation through `!`, `?`, `return`, `break` or `continue`. A handled fallible expression retains its ordinary
-call/value location separately from the authored postfix propagation location, so call side-table
-mapping remains call-owned while escape diagnostics point at `!` (and the equivalent explicit
-propagation operator).
+```moth
+assert |condition Bool, message String? = none|
+```
 
-The completed AST carries both the typed condition and the typed optional message expression. An
-omitted message is the normal typed `none` expression, not a second literal-only payload.
-The compile-time `true` assertion message is still parsed, type checked, generic-inferred,
-evidence-checked and fully normalized, including nested templates, before AST finalization
-replaces it with the canonical typed `none` value. Its compiler-owned provisional generic requests
-are discarded before that boundary, so no inactive TIR, runtime handoff, reactive metadata,
-message request, generated sidecar, HIR, link or target fact reaches the build boundary. A
-compile-time `false` or dynamic assertion retains its message work on the failure edge.
+These expectations create no importable, shadowable or first-class function. Shared call validation handles argument shape, defaults, types and access. Assertion semantics handle placement, completed-statement suffix rejection and the prohibition on escaping message evaluation through `!`, `?`, `return`, `break` or `continue`.
+
+A handled fallible expression retains its ordinary call/value location separately from the authored propagation-operator location. Call side-table mapping remains call-owned while escape diagnostics identify the operator.
+
+The completed assertion carries a typed condition and typed optional message. Omission uses ordinary typed `none`. Even for a compile-time `true` condition, the message is parsed, type-checked, generic-inferred, evidence-checked and fully normalised, including nested templates. Finalisation then replaces it with typed `none` and discards provisional message requests. No inactive TIR, runtime payload, Wiring capture, generated sidecar or link/target fact survives from that message.
+
+A compile-time `false` or dynamic assertion retains message work only on the failure edge. Stage 5 defines its lazy lowering and target validation checks capability without silently discarding evaluation.
 
 #### Value-producing blocks and terminality
 
-Value-producing `if`, match and block-form `catch` are closed receiving constructs rather than general expressions.
+Value-producing `if`, match and block-form `catch` are closed receiving constructs, valid where a receiver is explicit. Every producing path satisfies its required slot arity and types.
 
-They are valid only where the receiver is explicit. Every producing path must satisfy the receiving arity.
-
-AST owns receiving-context, arity and terminality diagnostics. Non-unit success returns must be terminal before HIR lowering.
-
-If HIR receives a non-unit function that can fall through, AST violated its contract and HIR reports an internal transformation error.
-
-Both value-producing `if` branches must first satisfy normal completeness, receiving-arity and type
-rules. A known Bool then selects one validated branch, so no runtime branch or hidden merge value is
-needed. Runtime conditions retain the existing all-path rules.
+AST owns receiving-context and terminality diagnostics. A function requiring success results cannot fall through without producing them. A completed AST violating that rule is a compiler bug at HIR handoff. Both branches of a value-producing `if` satisfy completeness before static selection. Runtime conditions retain all-path rules.
 
 #### Constants, build configuration and const records
 
-Constants are compile-time declarations and metadata rather than runtime top-level statements.
+Header preparation discovers constant dependencies. AST checks and folds them. `$config` marks one following explicitly typed top-level compile-time binding as an input contract. Project fields and ordinary helpers never supply or block inputs implicitly.
 
-Header preparation owns local dependency discovery. AST owns semantic checking and folding.
+Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 
-`#Config of T` is the implemented source spelling for an explicit input contract on one earlier
-explicitly typed top-level declaration. Only those declarations create input contracts. `$config`
-prefixes, closed `$project` / `$html_builder` configuration, root-only `$page` and explicit root
-purposes remain queued general directives. Fixed grouped-project fields retain their current
-authoritative provider and override-blocking policy; ordinary helper constants do not become input
-contracts.
+A module folds each ordinary constant and const template once. Exported facts are owned backend-neutral values. Consumers do not parse or fold provider templates again. Advisory private const facts change neither declaration semantics nor ordering/visibility.
 
-Declaration-owned bootstrap `#Config` contracts resolve during the config compilation service. Source-module input defaults stay literal-only and resolve after graph discovery, before that module's AST semantics.
-Source defaults are deliberately restricted to self-contained primitive literals or `none`, as
-defined in `docs/build-system-design.md`. AST consumes the resolved primitive value and treats the
-declaration as an ordinary folded constant.
+Fully folded structs and anonymous records may form const records. Anonymous const records use named-only `(name = value)` entries and permit an empty record. Fields may contain inline nested anonymous values, bound values and explicit nominal constructions. They declare no nested types and imply no conversion. Whole const records are field-access-only compile-time groups, not runtime objects that can be passed, returned, stored at runtime or used through runtime methods.
 
-A source `#Config` declaration creates:
+#### Runtime anonymous records
 
-- no runtime wrapper type
-- no HIR node category
-- no source dependency clause
-- no new visibility rule
+A runtime anonymous record uses an ordinary hidden nominal struct, distinct from a const record. Each static literal site has one type per owning compiled body, qualified by module/body and concrete materialisation identity where needed. Repeated execution reuses that type. Different sites remain distinct even with identical fields. Copies and aliases preserve identity.
 
-A module folds each ordinary constant and const template once. Exported folded facts are copied into the immutable interface as owned backend-neutral values. Consumers never parse or fold provider templates again.
+Resolve nested children before registering ordered parent fields. Hidden anonymous parents may contain hidden children, including an existing child value. This exception does not allow hidden types in authored nominal fields, function arguments/returns, exported surfaces, collections/maps or generic arguments. Check restrictions recursively through parents, optionals and captures. An extracted ordinary leaf retains its normal uses.
 
-Private inferred const facts are advisory optimisation metadata. They do not affect semantics, declaration ordering or visibility.
+Empty runtime records are invalid. Constant-looking fields alone do not select the const-record path. Ordinary struct construction, projection, copy, access and lifetime rules apply, with no anonymous-specific HIR/backend node or structural type unification. See `docs/src/docs/structs/anonymous-records.mtf` and `docs/roadmap/plans/runtime-anonymous-records-plan.md` for the full local-use contract.
 
 #### Static Bool control-flow specialisation
 
-Static specialisation applies to ordinary statement and value-producing `if` forms and uses the normal
-folded Bool authority. It has no `#Config` special case and no config-specific branch node.
+Ordinary statement and value-producing `if` use the normal folded Bool authority, with no config-specific branch node. Selection follows full name, visibility, type, generic-evidence, cast, constant-expression and value-production validation of both authored branches.
 
-The current AST finalisation owner performs this selection after type and value-production
-validation and before terminality, durable generated requests and executable const facts.
+A known `true` selects the `then` branch. A known `false` selects the `else` branch or an empty scoped result when absent. Preserve the selected lexical scope. Runtime or unknown conditions remain ordinary `if`.
 
-- both branches are fully frontend-valid before selection
-- a known `true` selects the `then` branch
-- a known `false` selects the `else` branch or an empty scoped result when no `else` exists
-- the selected lexical scope is preserved
-- runtime or unknown conditions remain ordinary `if`
-- inactive calls do not publish generated requests
-- inactive code contributes no effect, project-context, link or target facts
-- no match folding, loop unrolling or general CFG partial evaluator is implied
+Terminality and durable executable summaries use the active specialised AST. Inactive code publishes no generated request, HIR, effect, project-context, link or target fact. Every `if` remaining in HIR has a runtime condition. This rule adds no match folding, loop unrolling or general control-flow partial evaluator.
 
-Terminality and durable executable summaries observe the specialised active AST. HIR receives no
-statically decided ordinary `if`; every `if` remaining in HIR has a runtime condition.
-
-Fully folded struct and anonymous-record constants may become const records. Anonymous const records use parenthesized named-only `(name = value)` entries; the empty record is permitted and fields may fold inline nested anonymous, already bound, or explicitly constructed nominal values. Records declare no nested types, perform no conversion, and whole records remain runtime-ineligible. Const records are compile-time field-access-only groups. They are not runtime values and cannot be passed, returned, stored or used through runtime methods.
+Structural references were already graph-active before selection. Frontend errors in inactive ordinary branches remain errors. Structural `$feature` exclusion is a different earlier contract.
 
 #### Generics
 
-The declaring module owns and validates each immutable generic template.
+The declaring module validates immutable generic templates. At a call, AST infers concrete arguments from immediate call arguments and expected result context, resolves visible trait evidence and diagnoses failures at that call site.
 
-At a call site, AST:
-
-- infers concrete arguments from immediate call arguments and immediate expected result context
-- resolves required visible trait evidence
-- emits a module-local request keyed by stable generic identity, canonical concrete types and evidence identities
-- diagnoses inference failures and missing evidence at the requesting call site
-
-The compiler owns request canonicalisation, deduplication and materialisation within the module transaction. The build system owns boundary-wide publication and supplies the immutable published set, as defined in `Generated concrete functions`.
-
-HIR and backends never infer generic arguments or consume unresolved generic template state.
+Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result-slot, numeric-profile, source-identity and Wiring contracts.
 
 #### Traits, conformances and casts
 
-Trait declarations and conformances are compile-time frontend metadata.
+Headers retain trait/conformance shells. AST resolves requirement types, stable trait identity, explicit conformance, evidence visibility, bounds, bound-provided receiver calls and incompatibility diagnostics. Exported evidence uses stable identities rather than structural reconstruction.
 
-Header syntax records trait and conformance shells. AST owns:
+Traits are compile-time contracts, not value types. Static bound calls become concrete executable targets before HIR. No trait object, erased dispatch or runtime evidence crosses that boundary.
 
-- stable trait identity
-- requirement type resolution
-- explicit conformance validation
-- evidence visibility
-- generic-bound checks
-- bound-provided receiver-call resolution
-- conflict and incompatibility diagnostics
+Cast evidence proves that an explicit source/target conversion is permitted. Builtin conversions use compiler-defined policy. Source-authored evidence comes from explicit conformance of an eligible same-file nominal source type to a compiler-owned cast trait, together with its required receiver method. Matching method shape alone is insufficient. Fallible/infallible evidence for the same target remains mutually exclusive.
 
-Exported traits and reusable evidence use stable semantic identities. Consumers do not reconstruct conformance structurally.
+AST resolves evidence and folds permitted conversions. Builtin runtime conversions become explicit HIR cast operations. Source-authored evidence becomes an ordinary direct source-function call before or during HIR lowering. Evidence metadata itself never enters HIR.
 
-Traits are not value types. Static bound calls resolve to concrete executable targets before HIR. HIR carries no trait objects, erased dispatch or runtime trait evidence.
-
-Explicit `cast` is AST-owned. It resolves compiler-defined cast policy and evidence, performs foldable conversions and emits explicit runtime cast operations where needed. Contextual coercion and explicit casting remain separate paths.
-
-User-defined cast evidence becomes an ordinary direct source-function call before or during HIR lowering. Cast evidence metadata itself does not cross into HIR.
+Contextual coercion remains separate from explicit casting. User-defined cast targets, generic target parameters, opaque foreign targets and a general user conversion framework are not implied. The canonical cast references own eligibility and handling syntax, with the accepted numeric contract defining its extension to numeric targets.
 
 #### Templates and TIR
 
-AST owns all template semantics.
+AST owns all template semantics. Template IR (TIR) retains template structure while composition, formatting and folding are resolved. A view selects effective reads through module-owned override layers called overlays.
 
 One module AST build owns one `TemplateIrStore`. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store. All TIR IDs are module-local typed IDs.
 
-`Template` is a thin handle carrying a durable TIR reference and source location while AST construction is active. The reference contains a module-local root, the root phase and a value-carried `TemplateViewContext`; it is not a registry handle.
+`Template` is a thin handle carrying a durable TIR reference and source location while AST construction is active. The reference contains a module-local root, the root phase and a value-carried `TemplateViewContext`. It is not a registry handle.
 
 The phase sequence is:
 
@@ -1223,7 +586,7 @@ An exact `TirView` is the structural read authority after parser emission. Its `
 
 Recursive consumers use two explicit view transitions:
 
-- Structural child and wrapper transitions preserve the current complete expression overlay. Parsed references ignore their referenced slot-resolution and wrapper-context overlays; Composed or later references supply those two structural dimensions. Resolved slot sources and structural helpers retain the complete current context.
+- Structural child and wrapper transitions preserve the current complete expression overlay. Parsed references ignore their referenced slot-resolution and wrapper-context overlays. Composed or later references supply those two structural dimensions. Resolved slot sources and structural helpers retain the complete current context.
 - Nested-value transitions enter an independently owned nested `Template` through that value's complete context rather than inheriting the containing structural root's expression overlay.
 
 A composed or finalised root overlay contains effective overrides for every structural descendant reachable through children, wrappers, resolved slots, branches, fallbacks, loops and helper roots. Expression lookup uses that complete overlay followed by structural fallback.
@@ -1235,7 +598,7 @@ One semantic preparation owner:
 - detects cycles by exact view identity
 - classifies the value as foldable, runtime or helper
 - preserves lazy runtime semantics
-- returns `CompilerError` for missing authority
+- treats missing authority as a compiler bug
 
 Preparation validates and classifies. It does not perform final folding or HIR handoff.
 
@@ -1260,824 +623,304 @@ Root-local page and documentation metadata folds through this AST path into `Mod
 
 No TIR store, ID, view, overlay, preparation type or registry crosses into a completed module, public interface, HIR or backend.
 
-Missing roots, phases, overlays or exact-view authority are internal errors. Template meaning is never reconstructed from a second representation.
+Missing roots, phases, overlays or exact-view authority are compiler bugs. Template meaning is never reconstructed from a second representation.
 
 Number formatting uses the common value-to-string path. It does not add Number-specific TIR nodes.
 
 #### File values and resources
 
-The authored-reference rules below apply to source retained for the build. Ordinary static `if` retains both branches for structural discovery. Future `$feature` selection, when implemented, defines this source before its provider and file references are published.
+A dependency clause binds declarations or a namespace and produces no value. An explicit-extension path in expression position is a file value of language type `String`. Each path occurrence has one of these owners.
 
-A `@` path spelling has two semantic roles. A top-level dependency clause binds declarations or a
-namespace and produces no value. An explicit-extension path in expression position is a file value
-whose language type is `String`. Neither owner reinterprets the other's path family.
+Tokenization retains dense path rows. Header preparation classifies rows outside dependency-clause ranges without parsing surrounding expressions:
 
-File references are discovered before AST, not by it:
+| Spelling | Retained meaning |
+|---|---|
+| Bare `@/` | Site-root string piece, with no file edge. |
+| Explicit `.mtf` or `.md` | Content-source reference. |
+| Explicit `.moth` | Diagnostic-only `SourceKindNoFileValue`, with no physical target. |
+| Another explicit extension | Resource-file reference. |
+| Extensionless non-dependency path | Left for AST's semantic diagnostic, with no physical target. |
 
-- tokenization owns authored path syntax and dense path rows
-- compiler-owned source preparation classifies non-dependency path rows into structural file
-  references, without a second tokenization, a second expression parser or a source-text scan
-- Stage 0 resolves each physical-target-bearing structural file reference against the filesystem exactly once
-- AST interprets the published outcome as a value and never probes the filesystem
+Stage 0 resolves each physical-target-bearing reference once and publishes its outcome. All retained occurrences are classified even when the containing expression later fails syntax validation. That later error does not retract graph/input facts. Diagnostic ordering keeps a speculative missing-file error from displacing the primary syntax error.
 
-Preparation excludes the path rows a dependency clause consumed, so one authored path occurrence
-keeps one semantic role. Classification is shallow: bare `@/` is a site root and creates no file
-edge, explicit `.mtf` or `.md` is a content-source reference, explicit `.moth` is retained so AST
-can issue its precise diagnostic, another explicit extension is a resource-file reference, and an
-extensionless non-dependency path is left for AST to diagnose. No type checking, folding or
-surrounding-expression parsing happens during that scan.
+`SourceKindNoFileValue` never causes target resolution, semantic-source membership, a byte-source record or a watch interest. AST reports `MothFileHasNoValue` regardless of whether a matching file exists. The same rule applies to another recognised source kind with no file-value semantics.
 
-Because the scan never reads the surrounding expression, two consequences are stated rather than
-left to an implementation. Every retained path token outside a dependency-clause-owned range is
-classified, and a later AST syntax failure in the containing expression does not retract that
-structural classification or any graph/input fact for a physical-target-bearing reference.
-Diagnostic ordering keeps a speculative missing-file error from displacing the primary syntax error.
-`SourceKindNoFileValue` is retained as a structural diagnostic fact with no physical target. Stage 0
-does not resolve or validate a `.moth` target, add semantic-source membership or create a
-physical-source or watch record. No filesystem target resolution occurs. AST always issues
-`MothFileHasNoValue`, whether or not a matching `.moth` file exists. The same holds for any future
-recognised source kind with no file-value semantics.
+Ordinary static `if` keeps both branches structurally selected. A physical reference remains graph-active even when AST later removes its executable use. Referenced content is prepared and validated regardless of the consuming expression's eventual liveness. The canonical file-path reference owns the complete list of authored positions. The build document owns the discovery worklist and physical containment policy.
 
-Graph membership for physical-target-bearing references is settled before AST runs, so AST never
-decides it. A physical-target-bearing path AST later finds in an unreachable position was already
-resolved and validated, and errors inside a referenced content file are reported whether or not the
-consuming code survives specialisation. The canonical list of positions this covers is in
-`docs/src/docs/resources/file-paths.mtf`.
+AST's file-value resolver receives the source-owned path identity and its resolved entry, never a filesystem resolver. It interprets:
 
-What Stage 0 validates, registers and deliberately does not do with a file reference is owned by
-`docs/build-system-design.md` > `Prepared-source orchestration`. AST consumes its published result.
+- `.mtf`/`.md` as the existing synthetic `content` constant, with no second parser, renderer or observable filename
+- an ordinary resource as a stable semantic origin plus an authored use location and one structural Resource piece
+- `@/` as one SiteRoot piece, with no resource identity
+- `.moth` as the typed no-file-value diagnostic
 
-AST owns value meaning through one focused file-value resolver. It is reached with the authored
-path's file-owned identity and the matching resolved-reference entry, and it is not given a
-filesystem resolver, so rediscovery is unavailable rather than merely discouraged:
+Direct content constants use retained local ordering edges. Actual content-dependency cycles are diagnosed by declaration/source ordering, not an AST recursion guard.
 
-- `.mtf` and `.md` resolve to the existing compiler-owned synthetic `content` string, prepared once
-  through its normal source-kind adapter; no second parser, renderer or content constant exists, and
-  the source filename is not observable
-- an ordinary resource interns its stable origin into the module-local resource table, records the
-  authored use location and produces a `String` carrying one Resource anchor
-- bare `@/` produces a `String` carrying one SiteRoot piece and creates no resource identity
-- `.moth` has no file value and gets a typed diagnostic pointing at dependency clauses
+A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-A direct content-file value reuses a synthetic `content` constant, so header preparation's retained
-local dependency facts create the ordering relationship a constant initializer or const-template
-body needs. A real content dependency cycle is diagnosed by the existing local declaration and
-source ordering authority rather than an AST recursion guard.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor is the sole recursive conversion route into public values, HIR constants and direct-template results. Consumers never reconstruct the string from AST expressions or TIR.
 
-A resource-bearing or site-root-bearing string is an ordinary `String`. It may be mutable, a
-parameter, a return, an optional, a collection element, an exported constant or a runtime value, and
-nothing is rejected merely because the string carries an anchor. The module-local folded-value
-authority owns both the plain-text fast path and the ordered piece form; its postorder visitor is
-the only recursive conversion route into public projection, HIR constant projection and direct
-`.mtf` extraction. No consumer reconstructs a structural string from AST expressions or TIR.
+Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 
-Whether an operation may keep a string structural or needs its final characters is one owned
-question, answered in one place rather than decided again by each folding consumer. Composition
-preserves structure: assignment, storage, concatenation, interpolation, slot and wrapper
-composition, copying, collection and record storage, export and re-export, and passing or returning
-the value. Observation requires concrete text: equality, length, containment, prefix and suffix
-tests, parsing and casts from `String`, compile-time hashing, use as a compile-time map key,
-duplicate-key validation, a compiler or host call needing real characters, and any formatter that
-inspects characters instead of preserving an opaque anchor. While any Resource or SiteRoot piece
-remains unresolved, every observing operation is diagnosed rather than folded against a guessed URL.
-Partial symbolic equality and partial hashing are not attempted. Runtime string semantics are
-unaffected, because each selected physical variant lowers its structural map before the running
-program observes the value.
+A required compile-time observation of unresolved pieces is diagnosed. Partial symbolic equality, partial hashing and guessed URLs are invalid. Opportunistic Core constant evaluation may instead retain the runtime operation under its explicit refusal contract. Runtime semantics are ordinary string semantics because the selected physical variant materialises the pieces before execution observes them.
 
-A direct file value in a template emits a TIR Resource or SiteRoot node without first becoming text.
-Both are output-producing and non-reactive, formatters see opaque anchors with no filesystem or
-output detail, and every exact-view TIR owner handles them. Subtree copy and identity remap preserve
-stable resource identity while allocating any required local ID. A missing case in an exhaustive TIR
-or runtime-handoff walk is an internal error.
+Direct file values in templates become TIR Resource or SiteRoot nodes without intermediate text. They produce output and carry no Wiring dependency. Formatters treat them as opaque anchors. Every exact-view traversal, subtree copy and identity remap preserves their stable meaning. Local IDs may be reassigned, but an omitted structural case is a compiler bug.
 
-The direct `.mtf` compiler service has no route and no containing output artefact. It returns owned
-structural folded content with its resource source facts, permits plain-text extraction only when no
-unresolved anchors remain, and never renders builder URLs inside the frontend.
+The direct `.mtf` service has no containing output artefact or route. It returns owned structural content and resource-source facts. Plain-text extraction succeeds only when no unresolved piece remains. Frontend code never invents a URL context.
 
-#### Reactivity boundary
+#### Wiring boundary
 
-This subsection describes the current Reactivity V1 implementation, which the accepted Wiring direction will replace. It is not a permanent reservation of `$` for reactive bindings. The separate Wiring work owns that semantic replacement and the roadmap owns its delivery.
+Wiring has two constrained parameter contracts. A **wire** preserves a binding instance's continuing identity. A **constructor route** records how future input completes a known choice constructor. These routes are unrelated to HTML URL routes. Messages remain ordinary choice values.
 
-Current implementation ownership is:
+`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. The accepted contract is `docs/roadmap/plans/wiring-v1-cleanup-and-foundations.md` > `Accepted language contract to publish`.
 
-- declaration parsing recognises reactive markers as syntax
-- AST resolves ordinary `TypeId` values, stable source identity and subscriptions
-- HIR carries backend-neutral source, sink and reachability metadata
-- borrow validation treats subscriptions as read-only dependencies rather than active borrow lifetimes
-- target validation rejects unsupported reachable runtime forms before lowering
-- runtime update strategy remains backend-owned artefact policy
+A V1 `Wire of T` parameter accepts a named local binding or a compatible existing wire parameter. An ordinary local acquires identity only when a wire-receiving call needs it, with no `Wire()` constructor or call-site marker. Mutable and immutable locals are eligible. Projections, indexed places and fresh/computed expressions are not. An ordinary `T` receiver reads the current value under normal access rules. A compatible wire receiver forwards identity. An ordinary value parameter does not preserve its caller's identity merely because its body could use one.
 
-Reactivity does not become a second type system, implicit reflection mechanism or general higher-order function model.
+Identity belongs to the binding instance, not its contents, address or source position. Reassignment preserves an eligible local's identity. Separate calls or loop executions create distinct instances where ordinary binding semantics do so. Assignment from a wire reads an ordinary value, not a new wire capability or a deep copy.
+
+A wire grants no exclusive authority and is not an active long-lived value borrow. Actual reads, captures and mutations obey ordinary borrow validation. Identity never proves storage outlives a consumer or legalises an escape.
+
+V1 constructor routes have zero or one future input. At an immediate route-receiving boundary, a direct choice variant/application may capture a contiguous leading payload prefix. Future input supplies the remaining trailing payload in declaration order. Captures are ordinary expressions evaluated once at formation, with normal evaluation, error and ownership rules. They are not saved expressions to rerun later. A fully supplied zero-input route retains ordinary complete-constructor argument rules.
+
+An unchanged compatible route parameter may be forwarded. Exact input/output types and ordinary concrete generic inference apply, without callable variance or first-class constructors. Outside this receiving boundary, incomplete construction remains an error. A route is neither a destination, an event registration nor an implicit send.
+
+Wire/Route capabilities are not ordinary stored or returned values. V1 capabilities have no field/choice-payload storage, collection/map storage, capability aliases, defaults, capability comparison, serialisation or channel transfer. Routes have no general application/composition, and a function name, closure or arbitrary expression cannot replace a direct constructor route. Returning an ordinary `T` read from a wire remains an ordinary value return.
+
+AST resolves parameter contracts, binding identity, constructor identity and capture semantics. HIR retains the minimal neutral facts and ordinary captured values. Public interfaces and generated materialisation preserve contract kinds and canonical underlying types. Target validation rejects a reachable contract it cannot realise rather than silently reducing it to value-only behaviour.
+
+Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
 
 ### Stage 5: HIR and validation
 
-HIR lowers fully typed AST and generated concrete functions into the first backend-facing semantic IR.
+High-level intermediate representation (HIR) is the first backend-facing semantic IR. It lowers completed typed AST and concrete generated functions into explicit control flow, places, locals, calls and effects. Each module or generated body retains its paired type environment. Cross-module calls use stable targets without copying callee bodies into callers.
 
-Each module retains local HIR IDs and its paired local `TypeEnvironment`. Cross-module executable references use stable targets. The callee body is never copied into the caller.
+A HIR `RegionId` identifies the lexical scope tree. Source-declared lifetime regions use distinct `DeclaredRegionId` metadata, never a manufactured `TypeId` or a reused lexical-region identity.
 
-Current HIR `RegionId` identifies the lexical HIR scope/region tree. It is not source-declared-region identity and must not be reused as such. The future source construct uses a distinct `DeclaredRegionId`.
+#### Dense HIR ownership
 
-HIR owns:
+HIR expressions live in module-owned dense storage addressed by `HirValueId`. Store position supplies identity, so expression records need no redundant self-ID. Fixed child relationships store IDs inline. Variable-sized argument, element, field and string-piece payloads use typed ranges into dense side stores.
 
-- explicit local control flow
-- locals, places, regions and terminators
-- stable local and cross-module call targets
-- concrete generated-function targets
-- expression side-effect linearisation
-- runtime template string construction
-- structural resource and site-root append operations for anchor-bearing strings
-- template control flow as ordinary CFG
-- runtime slot accumulators and appends
-- map operations
-- checked numeric operations
-- runtime casts
-- Float and Number formatting operations
-- explicit external Float validation
-- reactive metadata
-- module constants and advisory private const facts
-- function-origin metadata
-- stable binding-backed external call IDs
-- backend-neutral per-function link facts
+A place consists of a root local and an ordered projection range. Indexed projections refer to expression IDs rather than owning recursive expressions. One builder appends during construction. IDs/ranges survive vector reallocation and compact conversions reject overflow. Completed HIR freezes to fixed dense ownership before publication.
 
-Calls, checked operations, casts, map operations and other effectful expression work are linearised into statement preludes and temporary locals before the final value is used.
+All visitors, remappers, validators, side tables and lowerers consume the same store. Numeric value payloads retain their full width/precision/scale and are not mistaken for expression graph edges. The storage change creates no persistent-cache, mmap, unsafe-pointer or general allocator contract. See `Compiler storage and capacity` and `docs/roadmap/plans/hir-dense-storage-and-capacity-foundations-plan.md` for the complete storage/capacity contract.
 
-HIR does not:
+#### Lowering boundary
 
-- merge provider bodies into consumers
-- carry donor-local identities across modules
-- fold constants or templates
-- reconstruct slot or render plans
-- carry TIR
-- carry compile-time page fragments
-- carry absolute source paths, output paths, routes, URLs, content hashes or builder names
-- receive a statically decided ordinary `if`
-- evaluate `#Config` or recover page metadata from constant names
-- choose target- or platform-specific source branches
-- solve generic arguments
-- decide trait conformance
-- carry runtime trait evidence
-- decide final runtime ownership
-- model exact lifetimes
-- assemble routes or project artefacts
+HIR owns explicit control flow, local/place access, lexical regions and terminators, stable source/binding calls, concrete generated targets, runtime template construction, slot accumulation, map operations, numeric/cast operations, external finite-float checks, Wiring argument/capture facts, module constants and function origins.
 
-Every `if` remaining in HIR has a runtime condition. Static Bool branch selection is complete before
-HIR and is never redone by HIR or a backend.
+Effectful expression work is linearised into ordered statement preludes and temporary locals before its final value is used. Plain binary expressions remain valid for booleans and comparisons. Scalar arithmetic and negation use explicit checked numeric operations. Template strings use explicit append operations. Validation rejects work left in the wrong representation.
 
-HIR String constants retain the ordered Text, Resource and SiteRoot shape rather than flattening to
-text, and top-level compile-time fragments retain the same structural content with their runtime
-insertion indexes. A site-root piece carries no `ResourceId`, so it is not reached through the
-resource union. Selected functions and metadata therefore record whether they use the site root as
-their own fact, and the structural walk that collects resource uses collects that fact in the same
-pass. Both are lowered to final text only when the containing output artefact and its URL context
-are known, which happens after the physical variant is selected. A known-Bool inactive branch
-contributes no resource use to HIR or link facts.
+HIR contains no unresolved generic/trait work, TIR, compile-time page fragments, config evaluation, target-selected source branches, absolute source paths, routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
 
-Plain binary operations remain valid for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic and unary negation lower through explicit checked numeric statements. HIR validation rejects arithmetic that survives in the wrong representation.
+Structural String constants retain ordered Text/Resource/SiteRoot pieces. Folded fragments retain the same value shape plus insertion indexes in metadata. Per-function and metadata walks collect resource uses and a separate site-root-use fact, since SiteRoot has no `ResourceId`. The builder supplies a validated URL map for each physical variant. Lowering materialises final characters from that map without mutating canonical HIR. Inactive static branches contribute no executable uses.
+
+#### Result channels
+
+HIR preserves ordered success slots and an optional single error channel. A call executes once and produces ordered result locals. Fallible calls have mutually exclusive continuations: success locals are defined only on the success edge and the error local only on the error edge.
+
+Successful returns carry ordered values. Error returns carry one error value. Zero success results remain valid for both infallible and fallible functions. There is no semantic `Result<Tuple<...>, Error>` carrier or hidden tuple/payload extraction path.
+
+Value-producing branches and catch recovery join individual slots through ordinary block/value targets. Propagation transfers the error channel without constructing an aggregate. Result-slot identity survives analysis, generated artefacts and public summaries. Backends may pack physical results only at the ABI boundary while preserving order, references and exactly-once evaluation.
 
 #### Lazy assertion failure messages
 
-An assertion message is a backend-neutral HIR value used only on the failure edge. HIR lowering
-keeps message preludes in the failure block, evaluates the optional value once and terminates with
-`AssertFailure` after the value is ready. A compile-time `true` assertion retains no message
-runtime work. A compile-time `false` assertion remains terminal after lowering its failure-edge
-message. The message is an ordinary value use for validation, remapping, display, borrow facts and
-reachability. It does not create an assertion-specific ownership or reactivity category.
+An assertion message is an ordinary HIR value used only on the failure edge. Message preludes stay in that block. The optional message is evaluated once, then `AssertFailure` terminates. A compile-time `true` assertion has no message runtime work. A compile-time `false` assertion remains terminal after its failure-edge work.
 
-The HIR message also carries the compiler-owned fact that distinguishes a default or fully folded
-message from a message whose construction needs runtime evaluation. Backends consume that fact
-through target validation and do not infer it from source or AST.
+Validation, remapping, display, borrowing and reachability treat the message as an ordinary value use. It creates no assertion-specific ownership or Wiring category. HIR also carries the compiler-owned distinction between default/fully folded messages and messages requiring runtime construction. Target validation consumes it rather than inferring it from source.
 
 #### HIR validation
 
-HIR validation completes before borrow validation or target validation.
+Validation completes before borrow or target validation. It checks definition/type links, dense IDs and ranges, lexical regions, control-flow graph (CFG) shape, block ownership/terminators, locals/places, dominance, side-table mappings, function origins, constants, patterns, expressions and Wiring contracts/captures.
 
-It checks:
+Call validation also checks result count, slot types, channel compatibility and edge-specific definitions. Finite binary-float values remain an invariant. `NaN`, infinity, a missing trusted local or malformed completed control flow are compiler bugs.
 
-- definition identities
-- frontend type links
-- region and CFG shape
-- block ownership and terminators
-- local and place references
-- start-function and function-origin metadata
-- module constants
-- reactive metadata
-- side-table mappings
-- pattern and expression invariants
-- finite Float values
-
-Compile-time fragment values and insertion indexes are not HIR. Their validation belongs to the module artefact validator.
-
-`NaN` and infinity in HIR are internal invariant failures.
-
-A backend-neutral structured HIR view may be derived and validated when a structured lowerer needs it. It is not a second semantic authority and may be cached only as derived data.
+The module artefact validator, not HIR validation, checks folded fragments and their insertion indexes. A structured HIR view may be derived and validated for a structured lowerer. It remains cached derived data, never another semantic authority.
 
 #### Numeric ownership
 
-Numeric behaviour has one owner at each layer:
+- `numeric_text` owns lexical grammar, normalisation and materialisation helpers.
+- AST owns semantic types, receiving rules, promotion, constant evaluation and cast evidence.
+- HIR records canonical numeric domain, operator and failure mode, not backend helper names or one statement family per target.
+- Compile-time and runtime operations round/fail at the same semantic boundaries. `Number` rounds at every language-level operation result.
+- Numeric optimisation facts are side tables over validated HIR. They preserve effects, failure order and source validity.
+- Target validation checks reachable numeric capabilities. Lowerers consume the boundary profile, canonical domain and physical plan rather than parallel width tables.
+- Binary-float and Number formatting use the common value-to-string boundary for templates and runtime lowering.
 
-- `numeric_text` owns lexical grammar, normalisation, separators, exponent rules and text materialisation.
-- AST owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence.
-- HIR records numeric domain, operator and failure mode rather than backend helper names or one duplicated statement family per target.
-- Compile-time and runtime operations round and fail at the same language-defined boundaries. `Number` rounds after every language-level operation result.
-- Numeric optimisation facts remain side tables and do not mutate HIR.
-- Target validation rejects unsupported reachable numeric domains before lowering.
-- Every numeric consumer takes `Int` width and `Float` precision from the boundary `NumericProfile`, and numeric domain facts derive from canonical type identity rather than a duplicated width table.
-- Scalar storage size, alignment and computation carriers are target facts separate from semantic identity; `Backend-facing compiler handoff > Numeric scalar storage and carriers` owns that boundary and the routed backend-lowering leaf owns the per-target numbers.
-- JS-only check elision remains in the JavaScript path until another backend needs a shared analysis owner.
-- Float and Number formatting use the common value-to-string boundary consumed by templates and runtime lowering.
+Target-local check elision stays local unless another backend needs the same analysis. Scalar size, alignment and computation carriers remain distinct from semantic numeric identity.
 
 #### Call targets
 
-Source calls use three explicit target classes:
+Executable source calls distinguish module-local functions, stable cross-module functions and stable binding-backed external functions. HIR stores no dependency alias, package spelling or backend runtime name as a call target.
 
-- module-local function identity
-- stable cross-module function identity
-- stable binding-backed external function identity
-
-HIR stores no dependency aliases, package source spelling or backend runtime names. Borrow validation resolves source targets to exported access and effect summaries. Target validation and lowerers resolve executable targets through explicit graph and link-plan inputs.
+Borrow validation resolves calls to access/effect summaries. Target validation and lowerers resolve executable targets through explicit graph, capability and link-plan inputs.
 
 ### Stage 6: borrow validation
 
-Borrow validation runs once for each canonical module and once for each generated concrete function.
+Borrow validation runs for every canonical module and generated concrete function. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
 
-It enforces:
-
-- shared and exclusive access rules
-- optional transfer eligibility and no-later-use proof
-- conservative aliasing for collections and maps
-- legal mutable call access
-- control-flow joins
-- reactive invalidation facts
-
-Its output contract is solver-independent. Later stages consume:
+Its solver-independent output contains:
 
 - normalised semantic places and overlap facts
 - value origins and preliminary provenance
-- shared and exclusive loan or access liveness
+- shared/exclusive loan or access liveness
 - path-sensitive future-use and last-use classifications
 - optional affine-transfer candidates
-- proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
-- proof that no capable source alias survives a candidate cleanup frontier
-- preliminary return-root alias and projection evidence
-- reactive invalidation and observability facts
+- proof that persistent edges or affine roots cannot disappear while dependent temporary borrows remain usable
+- proof that no capable source alias survives a proposed cleanup frontier
+- preliminary return-root alias/projection evidence
 - resolved external access-boundary classifications
 
-The current alpha checker's abstract-state lattice, `LocalId`-centred root approximation, per-block future-use precomputation, forward fixed-point transfer implementation and advisory drop candidates are current implementation rather than permanent architecture. A stronger production solver may replace them without changing this handoff or source legality. `docs/src/developer-docs/memory-management/borrow-validation/` owns the detailed contract.
+An affine responsibility is cleanup responsibility that may transfer at a proven final-use site. It neither proves uniqueness nor creates another lifetime owner. Optional inferred transfer is an optimisation, not an acceptance requirement. Transfer requires proof on every relevant path. Otherwise the operation remains a borrow. Both immutable and mutable parameters may receive cleanup responsibility at a proven final-use call.
 
-Borrow validation reads validated HIR and writes read-only side tables. It does not rewrite HIR, decide lifetime topology or decide final runtime ownership.
+Borrow validation reads validated HIR and produces immutable side tables. It neither rewrites HIR nor decides final result provenance, retained-edge summaries, lifetime topology or physical ownership. The memory authority owns the detailed solver contract, not a particular abstract-state implementation.
 
-Stage 6 conflict checking still uses conservative storage-root overlap; the feature-gated
-Boracle reference solver separately evaluates typed `OriginRelations` provenance and is not
-the production checker.
+Cross-module transfer consumes stable exported summaries without opening a callee's HIR as local control flow. Binding-backed calls use semantic package access/mutation/alias contracts, not source spelling or backend helper names. Missing trusted summaries are compiler bugs. Separate result slots preserve known alias relationships without inventing disjointness.
 
-Optional inferred transfer is an optimisation path. When proof is unavailable on every relevant path, the operation remains a borrow. Failure to prove transfer must not reject an otherwise valid program. Immutable and mutable parameters may both receive inferred affine cleanup responsibility at a proven final-use call site.
+Closed external profiles restrict transfer: WIT value-only and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the native ownership ABI. Donor-local type, allocation-family, region and counter IDs never enter public summaries, and REC is not source semantics.
 
-Borrow validation may emit preliminary return-root alias evidence for the later lifetime analysis. It does not own final result provenance, retained-edge summaries or topology constraints.
+Wire identity is not a persistent value borrow. Ordinary reads, captures, mutations and their lifetimes still undergo normal validation. Fresh rvalues passed to mutable call slots become hidden locals before checking, without becoming legal mutable receivers merely because they were materialised.
 
-Closed external boundary profiles override this general rule. WIT value-only calls and restricted host-value crossings are non-consuming. Mutable opaque-handle access does not transfer Moth storage through the ordinary Moth ownership ABI.
-
-Interfaces and fingerprints carry stable semantic identities and summaries only. Donor-local `TypeId`, HIR, allocation-family, region and counter indexes never cross module boundaries, and REC is never exposed as source semantics.
-
-Cross-module call transfer consumes these summaries. It never opens the callee's HIR as local control flow.
-
-Borrow validation resolves binding-backed function IDs through semantic package metadata to recover parameter access, mutation and return-alias contracts. It does not use source dependency clause syntax or backend runtime names.
-
-Missing or inconsistent summaries are `CompilerError` invariant failures.
-
-GC-native backends may ignore affine cleanup facts but cannot skip borrow validation or lifetime-region validation. Garbage-collected, debug and collector-free lowering accept and reject exactly the same programs.
-
-Reactive subscriptions are read-only source dependencies rather than active borrow lifetimes.
-
-Fresh rvalues passed to mutable call slots are materialised into compiler-introduced hidden locals before borrow validation. The checker then sees ordinary local access. Fresh-rvalue materialisation does not make temporaries valid mutable receivers.
+GC-native targets may ignore physical affine-cleanup facts but cannot skip access or lifetime-topology validation. Collector choice preserves these source-law decisions. Numeric-profile differences and target capability checks remain separate contracts.
 
 ## Lifetime-region and escape validation
 
-Lifetime-region and escape validation is a distinct backend-neutral analysis after Stage 6 borrow validation and before target planning. It is not a numbered Stage 7.
+Lifetime-region and escape validation is a backend-neutral analysis after Stage 6 and before target planning, not a numbered Stage 7. It consumes validated HIR and immutable borrow/effect facts without rewriting HIR.
 
-Local per-function and module work:
+The memory authority defines the full model. In this boundary:
 
-- reads validated HIR and read-only borrow/effect facts
-- owns allocation-family identity, complete result provenance, retention, escape and outlives constraints
-- owns retention cardinality, detached stored-result classification, whole-domain kill and cleanup-frontier candidate facts
-- exports exit-specific retention effects and frontier-enabling effects. Concrete cleanup frontiers remain caller and link-level facts
-- produces compiler-generated non-lexical lifetime intervals
-- writes immutable side-table facts and exported lifetime summaries
-- does not rewrite HIR
-- does not choose target partition or physical allocation representation
+- An **allocation family** is a containing allocation together with field, element and other projections still rooted in it. A projection is not an independent allocation merely because it has a distinct place.
+- A **region** is a semantic lifetime-owner domain, distinct from a lexical scope or physical arena. Inferred regions have compiler-chosen non-lexical intervals. Declared regions have explicit membership, cannot be silently widened and retain their allocations until region exit.
+- A **retained edge** is a directed storage relationship from a retaining object to a referenced allocation that survives the immediate operation. A **retention domain** groups these edges for creation/destruction analysis.
+- A **final cleanup frontier** is a control-flow point after which the relevant edges and usable aliases are gone and cannot be recreated. The proof conditions are under `Retained-edge analysis`. A **region epoch** is one population-and-teardown cycle while the retaining aggregate may remain alive.
 
-Project and link work instantiates those summaries over the reachable call graph and builder-supplied lifecycle roots. Local module compilation cannot validate every cross-module or builder-lifecycle relationship by itself.
+Every allocation family has one proven semantic lifetime owner. A retained value's region must be the same as or outlive its container's region. Inference starts with the narrowest valid owner and widens only along the nearest existing ancestor on one ordered lifetime chain. It cannot move laterally across independently ending siblings or invent a lifecycle root to avoid a diagnosis.
 
-The analysis decides semantic lifetime ownership and topology legality. Diagnostics distinguish topology proven invalid from topology not proven legal by conservative analysis. Backends receive a validated topology and may not reconsider source legality.
+Local analysis owns allocation-family identity, complete result provenance, retention cardinality, escape/outlives constraints, detached stored results, whole-domain kills and candidate cleanup frontiers. It publishes immutable intervals and exit-specific lifetime/effect summaries. Frontier-enabling summaries describe effects that may enable cleanup, not donor-local concrete frontier IDs.
+
+Caller/link analysis combines summaries over the reachable graph with aliases, future edge creation, other retention domains and builder-supplied lifecycle roots. Local module compilation alone cannot establish all cross-module or lifecycle relationships.
+
+Topology legality is a mandatory proof. Diagnostics distinguish topology proven invalid from topology not proven legal by conservative analysis. Both differ from failure to prove an optional transfer or physical optimisation. Backends consume validated topology and cannot reopen source legality.
 
 ### Retained-edge analysis
 
-Retained-edge liveness belongs to this analysis, not to a separate runtime ownership system. It owns:
+Retained-edge analysis owns domains, direct edge creation/destruction, whole-domain kills, path-sensitive final frontiers, region epochs and semantic commit points. A semantic commit is the successful mutation boundary at which the retained-edge state changes. The **may-coexist relation** records which direct edges may exist together in one reachable committed state.
 
-- retention domains and the edges within them
-- edge creation and whole-domain kill effects
-- final cleanup frontiers, which may be path-sensitive
-- compiler-generated region epochs for repeated population and teardown
-- semantic commit points and the committed retained-edge state each successful mutation produces
-- the may-coexist relation over direct retained edges
+A final cleanup frontier may end an inferred region before the aggregate that held its values. On that path, every relevant retained edge must be gone, no live local/projection alias may survive, no capable source may recreate an edge and no external or builder lifecycle may retain the family. Any surviving aliasing aggregate must be unable to retain it again.
 
-A final cleanup frontier lets an inferred region end before the aggregate that once held its values. Individual `remove` or `set` does not establish a frontier. Uniqueness scans and alias registries are rejected.
+Whole-domain kills such as `clear`, destruction or replacement can enable that proof. Individual `remove` or `set` does not establish a frontier. Clearing declared-region edges does not reclaim their storage before region exit. Failure to prove a frontier retains storage conservatively, rather than invalidating otherwise legal topology. Per-removal uniqueness scans and alias registries are excluded.
 
-Cycle validation runs over direct retained edges that may coexist in one reachable committed program state. A successful retention-sensitive mutation removes old edges and adds new edges atomically at its semantic commit; a failed mutation preserves the old topology and the retained-edge obligations that topology holds, while an incoming affine responsibility follows its separately planned failure path. Path or epoch separation may prove two edge sets never coexist, so a path-insensitive union of pre-commit and post-commit edges is not by itself proof of a runtime cycle. Where coexistence cannot be disproved, the topology is not proven legal and receives the normal topology diagnostic. A real direct source-created self-cycle or multi-family strongly connected component still requires one declared region.
+Cycle validation runs over direct retained edges that may coexist in one reachable committed state. A successful retention-sensitive mutation removes old edges and adds new edges atomically at its semantic commit. A failed mutation preserves the old topology and its retained-edge obligations, while incoming affine responsibility follows its separately planned failure path.
+
+Path or epoch separation may prove that edge sets never coexist. A path-insensitive union of pre-commit and post-commit edges is therefore not proof of a runtime cycle. Where coexistence cannot be disproved, topology is not proven legal and receives the normal diagnostic. A real direct self-cycle or multi-family strongly connected component (SCC) requires one declared region. Inference never invents a cyclic region.
 
 ### Backend-neutral memory requirements
 
-After topology, interval, frontier and epoch completion, this analysis publishes backend-neutral memory requirements. They are the final target-independent handoff and are shared by every physical variant.
+After topology, intervals, frontiers and epochs are complete, analysis publishes the final target-independent requirements shared by physical variants. They contain allocation families, validated owners, intervals, frontiers, epochs, retained-edge/domain facts, cardinality, declared-region membership, affine cleanup/transfer candidates, hidden-destination constraints, lifecycle/external constraints and possible Retained Edge Counting (REC) use.
 
-They may contain:
+REC may serve runtime-dependent persistent-edge multiplicity when edges disappear independently and simpler cleanup, region or bounded-retention strategies are insufficient. It is not an alias counter or a way to legalise topology. Requirements carry candidacy facts only. The memory authority owns the selection ladder.
 
-- allocation-family identity
-- validated lifetime owner
-- intervals, frontiers and epochs
-- retained-edge and retention-domain facts
-- retention cardinality
-- REC candidacy facts
-- declared-region membership
-- affine transfer and cleanup candidates
-- hidden-destination constraints
-- lifecycle constraints
-- external-boundary constraints
-
-They must not contain:
-
-- selected REC representation
-- selected host-GC representation
-- target allocator choice
-- concrete counter layout
-- target-specific arena layout
-- target-specific handle representation
-- concrete retained-edge obligation transitions
-- planned affine-responsibility transitions
-
-Mandatory lifetime topology and these requirements are target-independent. Anything that depends on the target, the build profile or physical layout belongs to memory-strategy planning below.
+Requirements contain no selected physical strategy, allocator, counter/arena/handle layout, concrete retained-edge obligation transition or planned affine-responsibility transition. A hidden-destination constraint describes a required result-storage relationship, not a backend's physical allocation choice. Target, build-profile and layout-dependent decisions belong to the memory planner.
 
 ### Memory-strategy planning
 
-The memory-strategy planner is compiler-owned and selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation.
+After build-owned partitioning and compiler-owned target validation establish a candidate physical variant, the compiler-owned planner consumes validated topology, backend-neutral requirements, target, build profile and memory capabilities. It returns one `ValidatedMemoryPlan` for that variant.
 
-It is invoked only after build-owned target partition and target-contract validation have established a candidate physical variant. It consumes validated topology, the backend-neutral memory requirements, the selected target, the build profile and backend memory capability metadata, performs target-specific family and layout refinement, and returns one `ValidatedMemoryPlan` per physical variant.
+The planner selects one physical strategy per allocation family. Choices include stack/inline placement, static affine cleanup, inferred-region allocation, declared-region bulk reclamation, REC and permitted host-GC representation. Borrow and lifetime analysis supply facts, never representations. Lowerers realise the plan, never choose strategies. Selection is deterministic for the same inputs and cannot affect source legality.
 
-The planner is the sole owner of strategy selection. Borrow validation and lifetime validation supply facts and never choose a representation. Backend lowerers realise the plan and never choose a strategy. Selection is deterministic for one target, profile and backend configuration, and never affects source legality.
+Field-sensitive family/layout refinement runs per candidate variant. It rebuilds affected direct family edges and revalidates outlives, SCC and family-base facts. A split establishes independent child ownership before the runtime escape it supports, never retroactively detaching an escaped projection. Unproven refinement falls back to the unsplit family with conservative retention, never a source diagnostic.
 
-Field-sensitive family and layout refinement runs per candidate variant, rebuilds the affected direct family-edge graph and revalidates the affected outlives, SCC and family-base facts. A refinement that cannot be proven falls back to the unsplit family and conservative retention; it never produces a source diagnostic.
+The planner owns every concrete physical transition. It translates each semantic commit into normalised per-family obligations, fuses same-family removals/additions before lowering and selects root-to-edge or edge-to-root reclassification. Backends encode these transitions rather than deriving retain/release operations from borrow facts.
 
-The planner also owns every concrete physical transition. Retained-edge analysis says which direct persistent edges an operation creates or removes; the planner turns each semantic commit into one normalised per-family obligation transition, fuses same-family removals and additions before lowering, and decides root-to-edge and edge-to-root reclassification. Backends encode those transitions and never derive them.
+Physical coalescing finishes before plan validation and fingerprinting. It may retain storage longer without widening semantic topology or changing outlives/legality. A full-control release variant cannot select `HostGC` or fall back to a tracing/reachability collector. Failure to provide a physical strategy for proven-legal topology is a compiler bug.
 
-Each target/profile physical variant owns one `ValidatedMemoryPlan`. It is neither a module artefact nor a project-global plan. The complete contents, seven accepted strategy outcomes and 16 publication invariants are owned by `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `ValidatedMemoryPlan contract`.
+`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `ValidatedMemoryPlan contract` owns complete plan contents and publication invariants. Its `Planning order` and the build document define orchestration. `check` validates the plan before stopping short of lowering/output.
 
-Physical coalescing finishes before plan validation and fingerprinting. It may retain storage longer without widening semantic topology, changing outlives or changing source legality. Lowering consumes only the validated plan. A capable full-control release variant cannot select `HostGC`.
+### Declared regions and backend handoff
 
-The full analysis-to-lowering order is defined in the same reference's `Planning order`. `check` runs through memory-plan validation and stops before lowering and output emission. The roadmap owns implementation sequencing.
+AST owns declared `name:` scopes, `into name` placement and freshness validation. The exact `_:` header is invalid. Declared-region identity is separate from type identity and lexical HIR regions. HIR records region metadata/exits and explicit recoverable failure control flow before memory analysis. It still does not decide exact lifetime topology.
 
-
-### Backend handoff
-
-Backends consume the variant's validated physical memory plan. Borrow facts and lifetime topology are validation context, not alternate sources of strategy, cleanup or count decisions. `Backend-facing compiler handoff` defines the full input boundary, and `Memory-strategy planning` defines the plan's owner and guarantees.
-
-Canonical design lives under `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`. Declared `name:` / `into name` is accepted end-state syntax with declared-region semantics deferred; see `docs/src/developer-docs/memory-management/declared-regions/` for the canonical semantic contract and `docs/roadmap/roadmap.md` for implementation sequencing.
-
-When declared-region syntax is implemented:
-
-- AST owns parser, scope, placement and freshness validation
-- declared-region identity must not enter `TypeId`
-- HIR records declared-region metadata and exits
-- recoverable checked failure paths remain explicit HIR control flow before memory analyses
-- HIR still does not decide exact lifetime topology
+The declared-region and lifetime/escape references under the memory authority own the detailed source and analysis rules. `Backend-facing compiler handoff` defines the final input boundary. Borrow facts and topology remain validation context, not alternate authorities for physical cleanup or counting.
 
 ## Per-function link facts
 
-The compiler records backend-neutral facts for each executable source or generated function.
+The compiler records backend-neutral facts for each source and generated function:
 
-Facts include:
+- stable local/cross-module source calls and binding-backed calls
+- runtime helper and capability requirements
+- numeric/cast, map and other target-gated operations
+- required Wiring contracts/captures where execution needs a capability
+- resource uses in deterministic source order and a separate site-root-use fact
+- per-function project-context provenance
 
-- module-local and cross-module source calls
-- binding-backed external calls
-- runtime helper and capability families
-- reactive features
-- numeric and cast operations
-- maps and other target-gated features
-- resource uses in deterministic source order
+Generated-function requests accompany module link data as materialisation dependencies. They remain distinct from runtime-dependency fingerprint contents. Non-executable fragments and root metadata carry their own resource/site-root/provenance facts in the metadata lane.
 
-These facts are the compiler's linking authority. Module-wide summaries may exist as derived indexes but do not replace per-function facts.
-
-Reachability operates on already-specialised HIR. It does not fold constants or choose branches itself;
-Stage 4 has already removed ordinary `if` branches selected by known Bool conditions. Reachability
-does not inspect borrow facts, decide target partitioning or perform tree shaking.
-
-Some target checks require semantic type inspection in addition to raw reachability. Those checks use the paired type environment rather than syntax guesses or backend-owned type reconstruction.
+These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable call edges recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
 
 ## Target-contract validation
 
-The build system supplies explicit validation roots and target assignments from entry or package link planning. The compiler owns validation semantics over those inputs.
+The build system supplies explicit entry/package/tooling roots and the completed deterministic target assignment. Compiler validation runs after HIR, borrow and complete link-level lifetime-topology validation.
 
-Target validation:
+It traverses reachable source and generated functions, checks target-gated operations, binding profiles and host capabilities, and uses semantic types where link facts alone are insufficient. Mixed-target validation checks each function against its assigned target and validates every cross-target edge. Unsupported reachable features are structured user diagnostics. Inconsistent trusted compiler/builder metadata is a compiler bug.
 
-- runs after HIR validation, borrow validation and complete project/link lifetime-topology validation
-- traverses functions reachable from supplied roots
-- includes reachable generated functions
-- checks target-gated HIR features
-- checks reachable assertion-message evaluation against target capabilities
-- checks reachable binding-backed calls against target metadata
-- may inspect semantic types where reachability facts are insufficient
-- checks reachable document-title capability requirements against host metadata
-- returns structured `CompilerDiagnostic` values for user-visible target failures
-- returns `CompilerError` only for inconsistent compiler or builder metadata
+Unreachable private functions and statically removed executable branches impose no target requirements. Their authored source still received frontend validation. Target rejection never changes source meaning or hides an invalid inactive branch.
 
-Unsupported features in unreachable private functions do not fail validation.
+An assertion message needing runtime construction requires a target that can execute it faithfully. Otherwise validation reports the authored message location. Default or fully folded values may use static trap lowering where their source-visible work is complete. Lowerers cannot discard reachable evaluation silently.
 
-A target that cannot faithfully execute dynamic assertion-message construction reports a structured
-unsupported-backend diagnostic at the authored message location. Default and fully folded message
-values may use static trap lowering when their source-visible runtime work is already complete.
-Validation owns this capability boundary so lowerers do not silently discard reachable message
-evaluation.
+Reachable site-root strings and browser document-title calls likewise require explicit host policies/capabilities. A backend name alone does not prove a browser host or a meaningful site root.
 
-Unsupported target features in an inactive static branch do not fail target validation because that
-branch is absent from HIR and link facts. Frontend source errors in that branch were still diagnosed
-earlier. Target assignment remains build-owned and source-neutral.
-
-For mixed-target artefacts, validation receives the completed deterministic partition. It validates each function against its assigned target and verifies every permitted cross-target edge.
-
-Target validation precedes physical memory planning. A candidate physical variant is validated against its target contract before the memory planner is invoked for it, so no physical planning outcome can retroactively change target or source validity. Failure of a physical optimisation, including a field-sensitive split that cannot be proven, falls back to conservative retention and never reopens target or source legality.
-
-Future `$layout` contracts constrain physical representation without manufacturing a new nominal type category. Layout validation belongs with target and memory planning consumers after those contracts exist.
-
-Root selection, command policy and partition strategy belong to the build system.
+Target validation precedes physical memory planning. A failed physical refinement falls back conservatively without reopening source or target validity. Accepted `$layout` direction constrains representation without creating another nominal type category. Its exact field/layout contract remains open design, so consumers must not invent one.
 
 ## Backend-facing compiler handoff
 
-Backend lowerers receive only explicit validated inputs:
+A lowerer receives only explicit validated inputs:
 
-- module and generated-function HIR
-- paired local or generated-local type environments
-- the compilation boundary's `NumericProfile`
-- stable local, cross-module and binding-backed call targets
-- borrow facts
-- validated lifetime-region facts and exported lifetime summaries
-- the target/profile-specific `ValidatedMemoryPlan`, the sole final authority for physical layouts, memory strategies, cleanup and ownership/count transitions
-- external boundary classifications
-- per-function link facts
-- selected-function, import and capability plans
-- semantic layout identities required by the target
-- builder lifecycle and runtime plans where relevant
+- selected module/generated HIR and paired type environments
+- the boundary `NumericProfile` and stable call targets
+- borrow/lifetime facts and exported summaries where needed as validation context
+- the variant's `ValidatedMemoryPlan`
+- closed external-boundary classifications
+- per-function link facts and selected function/import/export/capability plans
+- required semantic layout identities and builder lifecycle/runtime plans
+- the validated structural-string URL map for the containing output context
 
-Borrow facts and validated lifetime-region facts are present as validated context where a lowerer needs them. They are not the authority from which a lowerer invents ownership, cleanup or count operations: every ownership, cleanup, inferred-region, declared-region and REC decision, and every concrete obligation transition, comes from the `ValidatedMemoryPlan` for the variant being lowered.
+`ValidatedMemoryPlan` is the sole authority for aggregate layouts, memory strategies, cleanup, inferred/declared-region operations, REC and concrete ownership/count transitions. Source and generated functions follow the same handoff. Missing compiler-owned boundary classifications or required plan facts are compiler bugs, not invitations to infer a fallback.
 
-Generated function sidecars carry the same conceptual lifetime summaries and facts as ordinary functions.
-
-Binding-backed symbols carry a closed boundary classification such as WIT value-only or restricted host-binding. Exact Rust enum names are implementation detail. Missing compiler-owned boundary classification is `CompilerError`. Unsupported source-selected interface features are structured diagnostics.
-
-Backend lowerers do not:
-
-- load or parse source
-- rebuild dependencies or visibility
-- infer generic arguments
-- reconstruct traits or conformance
-- fold constants or templates
-- interpret TIR
-- rediscover project topology
-- choose command, entry or route policy
-- reconsider source legality, borrow facts or lifetime topology
-- reinterpret `#Config`, `$feature` or static branch selection
-- write final project outputs directly
-
-A lowerer may implement a language-owned HIR operation with a target-native instruction or runtime helper only when the result preserves the full Moth contract.
-
-Numeric checks, cast failure, finite-Float validation, map behaviour, error propagation and reactive semantics are not weakened because a target provides a more permissive primitive.
+Lowerers implement language-owned operations with native instructions or helpers only when they preserve the full contract. They never load/parse source, rebuild visibility, infer generics, reconstruct traits, fold templates, interpret TIR, choose entry/route policy or write final project outputs. They cannot weaken numeric checks, finite-value validation, cast failure, map behaviour, error propagation or Wiring semantics.
 
 ### Numeric scalar storage and carriers
 
-Semantic type, ordinary linear-memory storage and computation carrier are three
-separate facts. The compiler handoff owns that separation and the rule that
-carrier or storage width never changes semantic identity; it does not own the
-per-target numbers. The concrete scalar sizes, carriers, alignment and
-load/store behaviour for the ordinary Wasm layout are owned by
-`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
-> `Scalar storage and carriers`.
+A semantic type describes language meaning. Scalar storage describes bytes/alignment. A computation carrier is the target register/value representation used to operate on those bytes. Carrier or storage width never changes canonical identity.
 
-Target metadata derived here creates no allocation family and moves no layout
-ownership: aggregate layout, allocation, cleanup, counts and ownership
-transitions remain with the `ValidatedMemoryPlan` owner described in
-`Lifetime-region and escape validation` > `Memory-strategy planning` and
-`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/`.
-Compact scalar storage never introduces a buffer source type, never gives
-`Byte` arithmetic, and keeps `Byte` nominally distinct from `U8`. Other targets
-provide their own physical layout policy.
+`docs/roadmap/plans/number_type_numeric_plan.md` > `Backend contracts and layout` defines ordinary Wasm scalar sizes, carriers, alignment and load/store behaviour. The runtime/backend memory authority owns physical planning and aggregate layout. Other targets supply physical policies preserving the same semantics.
 
-Concrete HTML assembly, JavaScript and Wasm partitioning, external JavaScript glue, resource output placement, output manifests and incremental scheduling belong in `docs/build-system-design.md`.
+Scalar metadata alone creates no allocation family and moves no aggregate-layout or cleanup authority from `ValidatedMemoryPlan`. Compact storage creates neither a buffer source type nor arithmetic for `Byte`.
 
 ## Rust-only MON service
 
-The Rust-only MON service is a narrow public library service beside the canonical
-module compilation service. It accepts caller-owned UTF-8 MON text and returns
-owned data values; it never compiles a module, evaluates a Moth program, reads a
-file, discovers a project or writes a build output. Its public root is
-`moth::mon`, re-exported by `src/lib.rs`; the implementation owner is the
-crate-private `src/compiler_frontend/mon/`. The service is executable from
-another Rust crate, using only the Moth dependency and ordinary Rust data
-conversion code. It has no compiler command, source-file IO, compilable Moth
-source kind, builder registration or backend path, and compiled Moth programs
-cannot call its services. The MON literal-data format itself is owned by
-`docs/src/docs/mon/mon-format.mtf`; this section owns only the compiler and Rust
-API boundary for that format.
+The MON codec is an isolated literal-data service exposed to Rust callers through `moth::mon`, with compiler internals kept private. It receives complete caller-supplied text/values and an explicit prepared schema, then returns owned data or encoded text. It performs no project discovery, filesystem IO, module compilation, expression evaluation or backend lowering.
 
-The three accepted operations share one prepared schema and one writer:
+`docs/src/docs/mon/mon-format.mtf` owns root/field grammar, qualifiers, maps, defaults, encoding and receiver validation. `docs/compiler-data-layout-design.md` > `MON data handoff` owns cursor/input lifetime, spans, bounded allocation and public error context. Rust API signatures and routine internal shapes belong in public doc comments and their implementations, not a second field catalogue here.
 
-- `encode_document` receives a record value and its prepared static schema and
-  returns one complete ordinary UTF-8 MON `String` or a structured failure.
-- `encode_value` receives any eligible value and its schema and returns its
-  complete literal text, including string quotes or container delimiters, through
-  the same writer.
-- `decode_document` receives one complete document and its prepared record schema,
-  validates, applies defaults and returns an owned schema-checked record or the
-  first structured failure.
+### Isolation and schema ownership
 
-Encoding a `String` always encodes string data. It never guesses that the text
-resembles MON and should be inserted raw or decoded. Nested encoded fragments are
-ordinary strings with no trusted marker, hidden schema or deferred computation;
-composition requires final document validation.
+The literal reader uses a bounded MON cursor, not AST expression parsing, compiler tokens, TIR or compiler identity tables. It shares `numeric_text` grammar/materialisation policy while retaining MON-local traversal and escape decoding. Syntax sharing never authorises expression evaluation or widens source-language escapes.
 
-### Public root and crate boundary
+A caller prepares and validates its finite schema/default tree once, then reuses it immutably. Schema eligibility is transitive. Owned decoded values remain valid after the caller releases input, with no public borrowed document view, alias preservation or cyclic value graph. Internal borrowing during a call is permitted.
 
-The public surface is available through `moth::mon` with the exact names fixed
-for the Rust service: `decode_document`, `decode_document_bytes`,
-`encode_document`, `encode_value`, `Field`, `PreparedSchema`, `Schema`,
-`SchemaType`, `Variant`, `Value`, `Limits`, `MonError`, `MonErrorCode`,
-`PathSegment` and `Span`. The checked-in outside-crate coverage in
-`tests/mon_public_api.rs` builds a static schema once,
-encodes a record, decodes it, drops the source `String` and converts the
-owned result into native Rust data. The public path does not expose
-`compiler_frontend` internals, and availability here is not an assertion
-that compiled Moth programs can call MON services.
+Schema preparation captures `NumericProfile` for `Int`/`Float`, defaulting to the standard profile for standalone Rust callers. Explicit-width and Byte schemas are profile-independent. The accepted numeric extension covers all fixed widths, Byte and Number scales through 256 without another numeric parser. Integer/Byte targets require whole-number spelling, fixed floats use direct binary rounding and Number conversion remains exact. Encoding preserves typed round trips, including signed zero. Map-key schemas include fixed integers and Byte, while binary floats and Number remain excluded.
 
-`mon` owns an input cursor over the caller-provided text, `Span` byte ranges and
-owned `Value` results. It never constructs `SourceId`, `PathId`, `StringId`,
-`SourceDatabase`, AST, HIR or compiler cursors, and it performs no module
-compilation or evaluation. The AST call-argument owner remains unchanged because
-its `Expression` and scope contract cannot cross this boundary; MON reproduces
-only the accepted delimiter and slot policy in its data cursor.
+### Publication and receiving contracts
 
-### Literal-only reader
+Document/value encoders share one writer. Strings encode as quoted data, never trusted raw MON fragments. The decoder validates the complete receiving schema and applies defaults only at missing fields. Optionality alone does not allow omission. Supplied `none` is not replaced and nested records do not deep-merge with defaults.
 
-The reader consumes exactly one implicit or explicitly parenthesised root record.
-Empty and comments-only input denotes an empty root record; validation still
-checks every required field. Commas separate entries at every level with one
-optional trailing comma, and newlines are whitespace rather than a second
-separator. After an explicit root only whitespace and comments may remain.
-Multiple roots and concatenated documents are invalid. A lone scalar, collection
-or choice is not a document; the caller places it in a named root field.
+Resource and site-root pieces must have final characters before conversion to MON data. Unresolved anchors fail conversion. The codec exposes no Resource value and never reconstructs dependencies from strings.
 
-Every value in a completed document must be a supported literal form. The reader
-rejects names, arithmetic, calls, casts, field projections, variables, constant
-references and unevaluated templates before expression evaluation, even when the
-compiler could fold them. Constructor-shaped record and choice literals are data
-forms whose arguments recursively obey the literal restriction; they invoke no
-user code and create no structural-conversion rule. A folded const template is an
-ordinary `String` that an encoder can quote. An unevaluated template is not a
-serialisable value.
+Every public operation returns a complete result or its first structured `MonError`, never partial output. Schema misuse and MON internal failures use this public projection, not compiler diagnostics, `InfrastructureFailure` or `compiler_bug!`. Available decode spans are exact half-open byte ranges in the original input. Rendering their source excerpts or line/column locations requires that input, not compiler identity storage. The owned reason, detail and value path remain available without it.
 
-Records are closed: every unknown field fails, including a misspelling of a field
-whose correct name has a default. Maps provide the explicit dynamic-key surface.
-`{}` always parses as a collection and `{=}` always parses as a map; schema
-context never changes a container's kind, and map entries and collection items
-cannot mix. Maps preserve insertion order, reject duplicate keys under the
-receiving key contract and carry only the declared Moth map-key families:
-`String`, `Char`, `Bool`, `Int`, every fixed integer width and `Byte`. Binary
-floats, `Number` and its scales are never map keys. Bare names are references
-and are invalid as MON map keys. String and Char remain
-distinct keys and Bool is not a numeric key. A string-keyed map does not become a
-record.
+Finite receiver limits are policy, not grammar variants. Budget failures remain distinct from syntax and schema failures. Checked counters charge before allocation/expansion, including defaults, repeated values and numeric scratch. Map entries incur their additional node charge consistently across parsed, programmatic and default paths. Accepted recursion and rejected-value/schema cleanup stay bounded. The data-layout and format authorities retain the exact limits and accounting rules.
 
-Qualifiers are one case-sensitive identifier with no dotted path, alias, registry
-lookup or whitespace-separated `::`. Anonymous records are named-only. A nominal
-`Struct(name)` record accepts anonymous `(...)` or one exact `name(...)`; an
-explicit mismatch fails. Choices accept contextual `::Variant` or one exact
-`Choice::Variant`. A unit variant has no parentheses and a payload variant
-requires them. Positional arguments precede named arguments, each schema slot is
-supplied exactly once, unknown or duplicate slots fail, and choice payloads have
-no defaults. A qualifier is a checked assertion against the expected schema and
-never selects another schema; writers omit the checked qualifier. Contextual
-source `::Variant` construction outside literal data remains a later Moth feature.
+Writing is deterministic for the same ordered value, schema and encoder version, not canonical-byte equivalence. Applications own versions, migrations and resource interpretation. Producer-side validation never replaces receiving-boundary validation.
 
-Options permit `none` but never permit omission by themselves. Only an explicit
-field default permits omission, and a missing optional field without a default is
-an error. Defaults are prevalidated data applied at the exact missing field: a
-supplied `none` is validated as `none` and never replaced, a supplied nested
-record is validated as that record with no deep merge into a parent default, and
-`()` becomes a completed default-valued record only when its receiving schema
-permits every omission. Typed encoding emits all completed fields in schema
-declaration order, including explicit `none` and values equal to defaults.
-Eligibility is transitive over the complete concrete schema: an unsupported
-member makes the enclosing shape ineligible even when the current instance does
-not use it. `SchemaType::Unsupported` exists only so `prepare()` can reject such
-a schema before any document is processed; there is no public unsupported value.
+### Moth-native integration boundary
 
-Resource identifiers cross this boundary as ordinary strings. Compiler structural
-Resource and SiteRoot pieces are materialised to their final characters before
-encoding, and an unresolved anchor fails conversion to MON data rather than
-entering the API. There is no public `Resource` value. Decoding performs no path
-discovery, URL generation, filesystem check or resource loading.
-
-There is no mandatory schema header, reserved universal version field or
-automatic schema discovery. Applications may declare an ordinary
-`format_version` field and explicit migrations. A successful producer-side check
-never removes validation at a receiving boundary, and the receiver publishes
-live state only after its own checks succeed.
-
-### Static schema boundary
-
-The Rust caller defines its save-data contract once as an immutable `Schema` and
-shares the validated `PreparedSchema` across calls. Preparation validates the
-static schema and its defaults before any document is processed; reuse of the
-prepared value across calls is the ordinary pattern. Schema misuse is a
-structured failure, never a panic. The schema language defines ordinary data
-shapes, field types, nominal identities, choice variants and explicit default
-values; it defines no second expression language and adds no rename, skip,
-flatten, custom codec hook or user predicate. A schema-checked owned MON value is
-the initial codec result. The engine maps that value to its native struct with
-ordinary Rust functions, as the checked-in coverage in `tests/mon_public_api.rs`
-demonstrates. Automatic derives, procedural macros, Serde traits, broad reflection
-and automatic extraction from Moth types are not part of this boundary.
-
-The accepted end state has schema preparation record the numeric profile its
-`Int` and `Float` entries materialise under. A standalone Rust caller defaults
-to the standard profile, `Int32` with `Float64`, and a caller that needs another
-profile states it at preparation. Explicit-width schema entries are
-profile-independent, and no command, builder, `config.moth` field or source
-spelling selects this profile. Queued support: the delivered codec captures no
-profile, so its live `Int` and `Float` entries are fixed at `Int32` and
-`Float64`; profile capture arrives with the accepted value-model extension
-below.
-
-The delivered public values are owned trees: `None`, `Bool`, `Char`, `String`,
-`Int(i32)`, `Float(f64)`, exact `Integer(String)`, exact `Decimal(String)`,
-`Record(fields)`, `Collection(items)`, `Map(entries)` and
-`Choice { qualifier, variant, fields }`. The accepted end state extends that
-model with an owned variant for every supported numeric width (`I8` through
-`I64`, `U8` through `U64` and `F16` through `F64`) and for `Byte`, and it widens
-the exact decimal scale capacity to 256 so `Number`'s scales need no second
-parser. `Int` and `Float` remain the profile-selected entries, so their
-representation carries the prepared schema's captured width and precision;
-explicit-width and `Byte` entries are profile-independent. Exact Rust
-variant names may change; the boundary may not. Decoded values outlive and release the
-input text without a caller-retained backing buffer; internal borrowing during
-parsing is allowed. The default public API has no borrowed document view and
-exposes no partially built result. Repeated shared source values encode at each
-occurrence and decode with no preserved alias relationship or allocation
-identity. The public `Value` model is an owned tree and cannot represent cyclic
-host data. `SchemaType` is likewise a finite owned schema tree rather than a
-named-reference graph. The API has no schema-reference mechanism for recursive
-definitions; each declaration spells out every nesting level values are checked
-against, subject to the receiver's limits.
-
-Writing is deterministic without canonical-byte semantics: given the same
-ordered value, schema and encoder version, output is deterministic, but
-semantically equivalent documents need not share bytes. Public `encode_document`
-and `encode_value` emit compact output; pretty formatting is private to writer
-tests, not a public mode. A comment-preserving formatter and canonical hashing
-or signing facility are not part of this service.
-
-### Lexical contracts without source widening
-
-MON reuses the `numeric_text` grammar for numbers and otherwise decodes its
-literal data locally. Its data cursor reproduces only the accepted delimiter
-and slot policy; it does not clone the Moth source grammar, rescan repeatedly
-or route through `f64`, an `Int` token payload or display formatting.
-Whole-number and decimal or exponent spellings stay
-distinguishable through a lossless numeric literal representation until the
-destination is known. Signed numeric literals are allowed without allowing
-general unary expressions.
-Strict conversion keeps its accepted policy: `Int` and exact `Integer` require
-whole-number spelling, so `3.0` and `1e3` reject an `Int` target even when
-mathematically integral; the same spelling rule governs a `Byte` target and the
-fixed integer widths; lowercase `e` is the only accepted exponent marker and
-range checks are strict; finite `Float` materialisation follows the numeric
-authority and rejects non-finite source values and conversion results, emitting
-`-0.0` for negative zero and `0` for positive zero while decoding preserves the
-sign bit; exact `Number` and `NumberN` mapping uses the destination's declared
-scale of 0 to 18 in the delivered codec, while the accepted end state widens the
-capacity to 256 and rejects inexactly representable input such as `1.239`
-against a scale-two target without rounding. Unsupported concrete compiler-type
-adapters fail explicitly rather than narrowing or converting through `Float`.
-MON performs only the bounded literal normalisation, range and scale checks the
-codec needs; it adds no second arithmetic runtime.
-
-The MON-local decoder accepts quoted `String` escapes `\\`, `\"`, `\n`, `\r`,
-`\t` and `\u{H...}`, and `Char` escapes `\\`, `\'`, `\n`, `\r`, `\t` and
-`\u{H...}`. Unicode braces contain one to six ASCII hex digits, accept either
-case on input, reject empty, too-long, non-hex,
-surrogate and out-of-range scalars, and writer output uses uppercase hex. `\0`,
-`\xNN`, fixed-width `\uXXXX`, escaped physical newlines and unknown escapes
-fail. Unescaped string newlines and CRLF remain byte-for-byte content because
-MON's bounded reader decodes its own escape grammar; no source escape owner is
-shared. Moth source remains limited to its existing five escapes, so source
-`{=}`, Unicode-escape and contextual `::Variant` parity stay deferred. A
-schema-free internal parse may preserve qualifiers without claiming they have
-been validated.
-
-### Errors, budgets and first-error rollback
-
-MON failures are structured public values, not compiler diagnostics. The public
-error is `MonError { code: MonErrorCode, span: Option<Span>, path:
-Vec<PathSegment>, detail: String }` with no compiler identity table. Codes keep
-input, schema, resource, budget and internal lanes distinct: UTF-8, literal and
-syntax, schema and type, duplicate and qualifier and arity, numeric and Unicode,
-resource, each budget kind and internal invariant failures each have their own
-codes. A missing field points at its containing record rather than fabricated
-source text; duplicate map-key errors point at the duplicate key. Messages render
-only at the caller's diagnostic boundary. The service does not start the later
-compact-diagnostics migration and adds no competing global error taxonomy.
-
-Each public encode/decode operation reports failures through the same public
-`MonError` projection. Decoding can attach an original input byte range, while
-either operation can carry an available field or element path; both preserve the
-stable error reason and discard partial values. Encoding builds a private
-`String` and discards it on error; where an internal writer supports caller-owned
-buffers, its public contract either rolls back to the original length or keeps
-that facility private. Incremental input, streams and multiple-document framing
-remain deferred; complete documents fail fast.
-
-Limits are receiver resource policy, not grammar dialects: a valid document may
-exceed a receiver's budget and is reported distinctly from syntax and schema
-errors. Every counter uses checked arithmetic and is charged before the affected
-allocation or expansion, including default expansion and repeated shared-value
-expansion. A map entry carries one additional node charge beyond its key and
-value nodes, and that charge is the same for parsed input, programmatic
-completion and default expansion, so one shape consumes one node budget however
-it enters the service. Defaults are 1 MiB input bytes, depth 64, 100,000 nodes,
-4,096 numeric digits, 16 MiB decoded bytes, 16 MiB output bytes and 10,000
-default expansions. Configurable `max_depth` has an implementation ceiling of 64
-(`Limits::MAX_SAFE_DEPTH`); schema preparation rejects larger policies.
-Accepted recursion and rejected-schema/default cleanup stay bounded, and
-there is no unsafe unlimited switch.
-
-### Deferred source, backend and builder surface
-
-The following are explicitly not part of this service: compiler-owned `$mon`
-convenience with its undecided invocation syntax, Moth-side encode and decode
-operations, checked anonymous-record receiving contexts, automatic schema
-extraction from ordinary Moth types and generic instances, source-level `{=}`
-cutover, Unicode-escape widening, contextual `::Variant` construction where not
-already delivered, the static `.mon` project builder with its CLI, scaffolding,
-source-file integration and output ownership, Wasm and JS bindings, runtime code
-generation and engine UI lifecycle integration. MON text has no file IO, module
-import, schema discovery, command, builder registration, output write or runtime
-opcode. Dynamic schema construction and loading, public borrowed views,
-streaming, binary formats, graph identity preservation, automatic migrations,
-custom serialisation traits, field-transformation frameworks and byte-canonical
-output remain outside this boundary and are added only for a concrete accepted
-use case.
-
-## Compiler implementation map
-
-Current locations are navigation aids rather than permanent architecture.
-
-### Production entry points
-
-- Canonical module compilation: `src/compiler_frontend/module_compilation/service.rs`
-- Its inputs, options, outcome and artefact lanes: `src/compiler_frontend/module_compilation/`
-- Generated request canonicalisation, materialisation, convergence and delta: `src/compiler_frontend/module_compilation/generated/`
-- Project config compilation and direct Moth-template compilation: `src/compiler_frontend/single_source_compilation/`
-- The stage facade those services drive, which is not an entry point of its own: `src/compiler_frontend/pipeline.rs`
-- Rust-only MON service (implemented public Rust service): `moth::mon`, re-exported from `src/lib.rs`, over the crate-private `src/compiler_frontend/mon/` owner
-
-### Stage owners
-
-- Tokenization, canonical token storage, bounded cursors and numeric text:
-  `src/compiler_frontend/tokenizer/`, `src/compiler_frontend/numeric_text/`
-- Token schema and typed token payloads: `src/compiler_frontend/tokenizer/schema.rs`,
-  `src/compiler_frontend/tokenizer/storage.rs`, `src/compiler_frontend/tokenizer/cursor.rs`
-- Header syntax, binding and declaration shells: `src/compiler_frontend/headers/`,
-  `src/compiler_frontend/declaration_syntax/`
-- Path syntax tables and general path resolution: `src/compiler_frontend/paths/`
-- Dependency clause syntax, retained shells, target classification and interface binding:
-  `src/compiler_frontend/headers/`, `src/compiler_frontend/headers/dependency_target.rs`
-- Local declaration ordering: `src/compiler_frontend/module_dependencies.rs`
-- Type identity, access, coercion, traits and builtins: `src/compiler_frontend/datatypes/`,
-  `src/compiler_frontend/value_mode.rs`, `src/compiler_frontend/type_coercion/`,
-  `src/compiler_frontend/traits/`, `src/compiler_frontend/builtins/`
-- Canonical numeric identity and the compiler-owned numeric-profile input:
-  `src/compiler_frontend/canonical_type_identity.rs`, `src/compiler_frontend/build_config.rs`
-- Binding-backed interfaces: `src/compiler_frontend/external_packages/`
-- AST, constants, generics, templates and TIR: `src/compiler_frontend/ast/`
-- Generic retained syntax and donor payload provenance:
-  `src/compiler_frontend/ast/generic_functions/materialisation/`
-- Prepared-source ownership and exactly-once Stage 0 handoff:
-  `src/build_system/create_project_modules/prepared_source.rs`,
-  `src/build_system/create_project_modules/source_preparation.rs`
-- Public-interface projection and validation: `src/compiler_frontend/public_interface/`
-- Call-shaped argument parsing and slot routing: the focused owner under
-  `src/compiler_frontend/ast/expressions/`
-- HIR, validation and reachability: `src/compiler_frontend/hir/`
-- Borrow validation: `src/compiler_frontend/analysis/borrow_checker/`
-- Target-contract validation: backend feature and external package validation owners under
-  `src/backends/`
-- Rust-only MON literal reader, static schema preparation, deterministic writer, bounded budgets and structured `MonError` reporting: the crate-private MON owner above; shares `numeric_text` grammar and locally decodes bounded MON escapes without widening source syntax
-- Phase 3 probe-only ownership accounting:
-  `src/compiler_frontend/instrumentation/memory_ledger.rs`,
-  `src/benchmarking/frontend.rs`, `src/bin/data_layout_memory_probe.rs`
-- Boundary rules over these owners: `xtask/src/architecture_boundary.rs`
-- Integration cases and validation: `tests/cases/`, `src/compiler_tests/`, `justfile`
+Moth-native encode/decode, `$mon` convenience, automatic schemas from ordinary Moth types and static MON assets are accepted extensions. They reuse this codec and normal output ownership without serialization traits, another literal parser or hidden schema/runtime state in strings/templates. Exact directive/command syntax and schema-extraction/runtime handoffs remain open design. Dynamic schemas, public borrowed views, streaming and canonical-byte services require a separately accepted use case.
