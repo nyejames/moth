@@ -35,8 +35,8 @@ pub enum NumericScalar {
 impl NumericScalar {
     /// Derives the numeric domain for a canonical type, if it is one.
     ///
-    /// WHAT: maps `Int`/`Float` builtins directly and fixed scalars through the existing
-    ///       `fixed_scalar_of` derivation, rejecting `Byte` and everything else.
+    /// WHAT: maps `Int`/`Float` builtins and direct fixed scalars (never options), rejecting
+    ///       `Byte` and everything else.
     /// WHY: loop lowering and later promotion policy need one canonical derivation from `TypeId`
     ///      instead of re-matching builtins at each call site.
     pub(crate) fn from_type_id(type_id: TypeId, environment: &TypeEnvironment) -> Option<Self> {
@@ -50,7 +50,7 @@ impl NumericScalar {
             return Some(NumericScalar::Float);
         }
 
-        let scalar = environment.fixed_scalar_of(type_id)?;
+        let scalar = environment.fixed_scalar(type_id)?;
 
         if scalar == FixedScalar::Byte {
             return None;

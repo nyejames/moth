@@ -20,11 +20,14 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -140,6 +143,69 @@ fn expect_not_constant_stack(
         ConstantFoldOutcome::TextUnavailable { .. } => {
             panic!("expected a runtime-dependent stack")
         }
+    }
+}
+
+fn fixed_integer_expression(scalar: FixedScalar, value: i128) -> Expression {
+    let value = match scalar.class() {
+        FixedScalarClass::SignedInteger => FixedScalarValue::signed(
+            scalar,
+            i64::try_from(value).expect("test signed fixed integer fits its carrier"),
+        )
+        .expect("test signed fixed integer fits its domain"),
+        FixedScalarClass::UnsignedInteger => FixedScalarValue::unsigned(
+            scalar,
+            u64::try_from(value).expect("test unsigned fixed integer fits its carrier"),
+        )
+        .expect("test unsigned fixed integer fits its domain"),
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => {
+            panic!("fixed integer test helper requires an integer scalar")
+        }
+    };
+    Expression::fixed_scalar(value, None, ValueMode::ImmutableOwned)
+}
+
+fn fixed_float_value(scalar: FixedScalar, value: f64) -> FixedScalarValue {
+    let precision = match scalar {
+        FixedScalar::F16 => BinaryFloatPrecision::Binary16,
+        FixedScalar::F32 => BinaryFloatPrecision::Binary32,
+        FixedScalar::F64 => BinaryFloatPrecision::Binary64,
+        _ => panic!("fixed float test helper requires a binary-float scalar"),
+    };
+    FixedScalarValue::binary_float(scalar, precision.round(value))
+        .expect("test float rounds to a finite fixed scalar")
+}
+
+fn fixed_float_expression(scalar: FixedScalar, value: f64) -> Expression {
+    Expression::fixed_scalar(
+        fixed_float_value(scalar, value),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
+
+fn expect_fixed_scalar(expression: Expression) -> FixedScalarValue {
+    match expression.kind {
+        ExpressionKind::FixedScalar(value) => value,
+        other => panic!("expected a fixed scalar fold, got {other:?}"),
+    }
+}
+
+fn expect_folded_boolean(
+    lhs: Expression,
+    rhs: Expression,
+    operator: Operator,
+    string_table: &mut StringTable,
+) -> bool {
+    let folded = expect_folded_operator(lhs.evaluate_operator(
+        &rhs,
+        &operator,
+        string_table,
+        NumericProfile::STANDARD,
+    ));
+    match folded.kind {
+        ExpressionKind::Bool(value) => value,
+        other => panic!("expected a boolean comparison result, got {other:?}"),
     }
 }
 
@@ -910,6 +976,520 @@ fn evaluate_operator_rejects_float_modulo_by_zero() {
         None,
         &string_table,
     );
+}
+
+#[test]
+fn evaluate_operator_folds_fixed_integer_results_in_the_promoted_domain() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let cases = [
+        (
+            "U8 addition promotes to U32",
+            fixed_integer_expression(FixedScalar::U8, 255),
+            fixed_integer_expression(FixedScalar::U8, 255),
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U32, 510).expect("510 fits U32"),
+        ),
+        (
+            "mixed signedness selects I32",
+            fixed_integer_expression(FixedScalar::I8, -1),
+            fixed_integer_expression(FixedScalar::U8, 255),
+            Operator::Add,
+            FixedScalarValue::signed(FixedScalar::I32, 254).expect("254 fits I32"),
+        ),
+        (
+            "U64 maximum survives a no-op addition",
+            fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
+            fixed_integer_expression(FixedScalar::U64, 0),
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum fits"),
+        ),
+        (
+            "I8 minimum division uses the promoted I32 range",
+            fixed_integer_expression(FixedScalar::I8, -128),
+            fixed_integer_expression(FixedScalar::I8, -1),
+            Operator::IntDivide,
+            FixedScalarValue::signed(FixedScalar::I32, 128).expect("128 fits I32"),
+        ),
+        (
+            "signed minimum remainder by negative one is zero",
+            fixed_integer_expression(FixedScalar::I64, i128::from(i64::MIN)),
+            fixed_integer_expression(FixedScalar::I64, -1),
+            Operator::Modulus,
+            FixedScalarValue::signed(FixedScalar::I64, 0).expect("zero fits I64"),
+        ),
+        (
+            "negative integer division truncates toward zero",
+            fixed_integer_expression(FixedScalar::I32, -7),
+            fixed_integer_expression(FixedScalar::I32, 2),
+            Operator::IntDivide,
+            FixedScalarValue::signed(FixedScalar::I32, -3).expect("-3 fits I32"),
+        ),
+        (
+            "remainder follows the dividend sign",
+            fixed_integer_expression(FixedScalar::I32, -7),
+            fixed_integer_expression(FixedScalar::I32, 2),
+            Operator::Modulus,
+            FixedScalarValue::signed(FixedScalar::I32, -1).expect("-1 fits I32"),
+        ),
+        (
+            "negative divisor keeps positive dividend remainder",
+            fixed_integer_expression(FixedScalar::I32, 7),
+            fixed_integer_expression(FixedScalar::I32, -2),
+            Operator::Modulus,
+            FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+        ),
+        (
+            "U8 exponentiation promotes to U32",
+            fixed_integer_expression(FixedScalar::U8, 2),
+            fixed_integer_expression(FixedScalar::U8, 31),
+            Operator::Exponent,
+            FixedScalarValue::unsigned(FixedScalar::U32, 2_147_483_648).expect("2^31 fits U32"),
+        ),
+    ];
+
+    for (case, lhs, rhs, operator, expected) in cases {
+        let folded = expect_folded_operator(lhs.evaluate_operator(
+            &rhs,
+            &operator,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ));
+        assert_eq!(
+            expect_fixed_scalar(folded),
+            expected,
+            "{case} must preserve its promoted fixed scalar"
+        );
+    }
+}
+
+#[test]
+fn evaluate_operator_folds_fixed_integer_division_to_f64() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let cases = [
+        (
+            "U8 division",
+            fixed_integer_expression(FixedScalar::U8, 7),
+            fixed_integer_expression(FixedScalar::U8, 2),
+            fixed_float_value(FixedScalar::F64, 3.5),
+        ),
+        (
+            "I64 maximum division rounds each operand to binary64",
+            fixed_integer_expression(FixedScalar::I64, i128::from(i64::MAX)),
+            fixed_integer_expression(FixedScalar::I64, 1),
+            fixed_float_value(FixedScalar::F64, 9_223_372_036_854_775_808.0),
+        ),
+    ];
+
+    for (case, lhs, rhs, expected) in cases {
+        let folded = expect_folded_operator(lhs.evaluate_operator(
+            &rhs,
+            &Operator::Divide,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ));
+        assert_eq!(expect_fixed_scalar(folded), expected, "{case}");
+    }
+}
+
+#[test]
+fn evaluate_operator_handles_huge_fixed_integer_exponents_without_host_overflow() {
+    let _path_fork = PathInternerFork::empty();
+    let successes = [
+        (
+            "every integer raised to zero is one",
+            fixed_integer_expression(FixedScalar::U64, 2),
+            fixed_integer_expression(FixedScalar::U64, 0),
+            FixedScalarValue::unsigned(FixedScalar::U64, 1).expect("1 fits U64"),
+        ),
+        (
+            "one raised to a huge exponent stays one",
+            fixed_integer_expression(FixedScalar::U64, 1),
+            fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
+            FixedScalarValue::unsigned(FixedScalar::U64, 1).expect("1 fits U64"),
+        ),
+    ];
+
+    for (case, lhs, rhs, expected) in successes {
+        let mut string_table = StringTable::new();
+        let folded = expect_folded_operator(lhs.evaluate_operator(
+            &rhs,
+            &Operator::Exponent,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ));
+        assert_eq!(expect_fixed_scalar(folded), expected, "{case}");
+    }
+
+    let mut string_table = StringTable::new();
+    let error = fixed_integer_expression(FixedScalar::U64, 2)
+        .evaluate_operator(
+            &fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
+            &Operator::Exponent,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        )
+        .expect_err("a huge non-trivial power should overflow without a host-sized loop");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("^"),
+        &string_table,
+    );
+}
+
+#[test]
+fn evaluate_operator_reports_fixed_integer_overflow_and_invalid_exponents() {
+    let _path_fork = PathInternerFork::empty();
+    let cases = [
+        (
+            "U32 multiplication overflow",
+            fixed_integer_expression(FixedScalar::U32, i128::from(u32::MAX)),
+            fixed_integer_expression(FixedScalar::U32, 2),
+            Operator::Multiply,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+        ),
+        (
+            "I64 minimum quotient overflow",
+            fixed_integer_expression(FixedScalar::I64, i128::from(i64::MIN)),
+            fixed_integer_expression(FixedScalar::I64, -1),
+            Operator::IntDivide,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+        ),
+        (
+            "I32 minimum quotient overflows its promoted result domain",
+            fixed_integer_expression(FixedScalar::I32, i128::from(i32::MIN)),
+            fixed_integer_expression(FixedScalar::I32, -1),
+            Operator::IntDivide,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+        ),
+        (
+            "U32 exponent overflow",
+            fixed_integer_expression(FixedScalar::U8, 2),
+            fixed_integer_expression(FixedScalar::U8, 32),
+            Operator::Exponent,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+        ),
+        (
+            "negative fixed integer exponent",
+            fixed_integer_expression(FixedScalar::I32, 2),
+            fixed_integer_expression(FixedScalar::I32, -1),
+            Operator::Exponent,
+            CompileTimeEvaluationErrorReason::InvalidExponent,
+        ),
+    ];
+
+    for (case, lhs, rhs, operator, reason) in cases {
+        let mut string_table = StringTable::new();
+        let error = match lhs.evaluate_operator(
+            &rhs,
+            &operator,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("{case} should fail during folding"),
+        };
+        assert_compile_time_error(&error, reason, Some(operator.to_str()), &string_table);
+    }
+}
+
+#[test]
+fn evaluate_operator_reports_fixed_integer_and_float_zero_divisors() {
+    let _path_fork = PathInternerFork::empty();
+    let cases = [
+        (
+            "fixed integer division",
+            fixed_integer_expression(FixedScalar::I32, 5),
+            fixed_integer_expression(FixedScalar::I32, 0),
+            Operator::IntDivide,
+        ),
+        (
+            "fixed integer remainder",
+            fixed_integer_expression(FixedScalar::U8, 5),
+            fixed_integer_expression(FixedScalar::U8, 0),
+            Operator::Modulus,
+        ),
+        (
+            "fixed integer regular division",
+            fixed_integer_expression(FixedScalar::U8, 5),
+            fixed_integer_expression(FixedScalar::U8, 0),
+            Operator::Divide,
+        ),
+        (
+            "fixed float regular division",
+            fixed_float_expression(FixedScalar::F32, 5.0),
+            fixed_float_expression(FixedScalar::F32, 0.0),
+            Operator::Divide,
+        ),
+        (
+            "fixed float remainder",
+            fixed_float_expression(FixedScalar::F16, 5.0),
+            fixed_float_expression(FixedScalar::F16, -0.0),
+            Operator::Modulus,
+        ),
+    ];
+
+    for (case, lhs, rhs, operator) in cases {
+        let mut string_table = StringTable::new();
+        let error = match lhs.evaluate_operator(
+            &rhs,
+            &operator,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("{case} should fail during folding"),
+        };
+        assert_compile_time_error(
+            &error,
+            CompileTimeEvaluationErrorReason::DivideByZero,
+            None,
+            &string_table,
+        );
+    }
+}
+
+#[test]
+fn evaluate_operator_rounds_fixed_float_results_once_in_the_promoted_domain() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let half = fixed_float_value(FixedScalar::F16, 0.1);
+    let half_product = fixed_float_value(
+        FixedScalar::F32,
+        half.as_f64().expect("F16 has a float value")
+            * half.as_f64().expect("F16 has a float value"),
+    );
+    let f32_value = fixed_float_value(FixedScalar::F32, 0.1);
+    let f64_value = fixed_float_value(FixedScalar::F64, 0.2);
+    let cases = [
+        (
+            "F16 product rounds once to F32",
+            Expression::fixed_scalar(half, None, ValueMode::ImmutableOwned),
+            Expression::fixed_scalar(half, None, ValueMode::ImmutableOwned),
+            Operator::Multiply,
+            half_product,
+        ),
+        (
+            "F32 and F64 promote to F64",
+            Expression::fixed_scalar(f32_value, None, ValueMode::ImmutableOwned),
+            Expression::fixed_scalar(f64_value, None, ValueMode::ImmutableOwned),
+            Operator::Add,
+            fixed_float_value(
+                FixedScalar::F64,
+                f32_value.as_f64().expect("F32 has a float value")
+                    + f64_value.as_f64().expect("F64 has a float value"),
+            ),
+        ),
+        (
+            "F16 and F16 promote to F32",
+            fixed_float_expression(FixedScalar::F16, 0.5),
+            fixed_float_expression(FixedScalar::F16, 0.5),
+            Operator::Add,
+            fixed_float_value(FixedScalar::F32, 1.0),
+        ),
+    ];
+
+    for (case, lhs, rhs, operator, expected) in cases {
+        let folded = expect_folded_operator(lhs.evaluate_operator(
+            &rhs,
+            &operator,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ));
+        assert_eq!(
+            expect_fixed_scalar(folded),
+            expected,
+            "{case} must retain the semantic precision"
+        );
+    }
+}
+
+#[test]
+fn evaluate_operator_rounds_fixed_f32_arithmetic_to_f32_bits() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let lhs = fixed_float_expression(FixedScalar::F32, 0.1);
+    let rhs = fixed_float_expression(FixedScalar::F32, 0.2);
+    let expected_bits = f64::from(0.1f32 + 0.2f32).to_bits();
+
+    let folded = expect_folded_operator(lhs.evaluate_operator(
+        &rhs,
+        &Operator::Add,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    ));
+    let actual = expect_fixed_scalar(folded);
+    assert_eq!(actual.scalar(), FixedScalar::F32);
+    assert_eq!(
+        actual
+            .as_f64()
+            .expect("F32 result has a float value")
+            .to_bits(),
+        expected_bits,
+        "F32 addition must match independently computed F32 rounding"
+    );
+}
+
+#[test]
+fn evaluate_operator_preserves_signed_zero_result_bits() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let lhs = fixed_float_expression(FixedScalar::F32, -0.0);
+    let rhs = fixed_float_expression(FixedScalar::F32, 1.0);
+
+    let folded = expect_folded_operator(lhs.evaluate_operator(
+        &rhs,
+        &Operator::Multiply,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    ));
+    let actual = expect_fixed_scalar(folded);
+    assert_eq!(actual.scalar(), FixedScalar::F32);
+    assert_eq!(
+        actual
+            .as_f64()
+            .expect("F32 result has a float value")
+            .to_bits(),
+        f64::from(-0.0f32).to_bits(),
+        "negative zero must retain its sign bit through fixed-float folding"
+    );
+}
+
+#[test]
+fn evaluate_operator_rejects_fixed_float_overflow() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let lhs = fixed_float_expression(FixedScalar::F32, 3.0e38);
+    let rhs = fixed_float_expression(FixedScalar::F32, 10.0);
+    let error = lhs
+        .evaluate_operator(
+            &rhs,
+            &Operator::Multiply,
+            &mut string_table,
+            NumericProfile::STANDARD,
+        )
+        .expect_err("F32 multiplication overflow should fail during fold");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::FloatOverflow,
+        Some("*"),
+        &string_table,
+    );
+}
+
+#[test]
+fn constant_fold_uses_fixed_integer_and_float_negation_domains() {
+    let _path_fork = PathInternerFork::empty();
+    let successes = [
+        (
+            "I8 negates in I32",
+            fixed_integer_expression(FixedScalar::I8, -128),
+            FixedScalarValue::signed(FixedScalar::I32, 128).expect("128 fits I32"),
+        ),
+        (
+            "F16 negates in F32",
+            fixed_float_expression(FixedScalar::F16, 0.5),
+            fixed_float_value(FixedScalar::F32, -0.5),
+        ),
+    ];
+
+    for (case, operand, expected) in successes {
+        let mut string_table = StringTable::new();
+        let folded = expect_folded_stack(constant_fold(
+            vec![rvalue_item(operand), operator_item(Operator::Negate)],
+            &mut string_table,
+            NumericProfile::STANDARD,
+        ));
+        let [ExpressionRpnItem::Operand(folded)] = folded.as_slice() else {
+            panic!("{case} should produce one folded operand");
+        };
+        let actual = match &folded.kind {
+            ExpressionKind::FixedScalar(value) => *value,
+            other => panic!("{case} should return a fixed scalar, got {other:?}"),
+        };
+        assert_eq!(actual, expected, "{case}");
+    }
+
+    let mut string_table = StringTable::new();
+    let error = constant_fold(
+        vec![
+            rvalue_item(fixed_integer_expression(
+                FixedScalar::I64,
+                i128::from(i64::MIN),
+            )),
+            operator_item(Operator::Negate),
+        ],
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect_err("negating I64 minimum should overflow I64");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("-"),
+        &string_table,
+    );
+}
+
+#[test]
+fn evaluate_operator_compares_fixed_scalars_without_losing_value_identity() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let cases = [
+        (
+            "negative signed value orders below U64 maximum",
+            fixed_integer_expression(FixedScalar::I64, -1),
+            fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
+            Operator::LessThan,
+            true,
+        ),
+        (
+            "U64 maximum is not I64 maximum",
+            fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
+            fixed_integer_expression(FixedScalar::I64, i128::from(i64::MAX)),
+            Operator::Equality,
+            false,
+        ),
+        (
+            "adjacent integers above f64 exact precision remain ordered",
+            fixed_integer_expression(FixedScalar::U64, 9_007_199_254_740_993),
+            fixed_integer_expression(FixedScalar::I64, 9_007_199_254_740_992),
+            Operator::GreaterThan,
+            true,
+        ),
+        (
+            "positive and negative float zero compare equal",
+            fixed_float_expression(FixedScalar::F16, 0.0),
+            fixed_float_expression(FixedScalar::F64, -0.0),
+            Operator::Equality,
+            true,
+        ),
+        (
+            "Byte ordering is unsigned",
+            Expression::fixed_scalar(
+                FixedScalarValue::unsigned(FixedScalar::Byte, 200).expect("200 fits Byte"),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            Expression::fixed_scalar(
+                FixedScalarValue::unsigned(FixedScalar::Byte, 100).expect("100 fits Byte"),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            Operator::GreaterThan,
+            true,
+        ),
+    ];
+
+    for (case, lhs, rhs, operator, expected) in cases {
+        assert_eq!(
+            expect_folded_boolean(lhs, rhs, operator, &mut string_table),
+            expected,
+            "{case}"
+        );
+    }
 }
 
 #[test]

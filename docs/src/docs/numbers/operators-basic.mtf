@@ -48,5 +48,7 @@ signed type first. `Byte` takes part in no arithmetic at all.
 A compound assignment such as `+=` computes in the promoted type and then checks
 that the result fits the left-hand type.
 
-Fixed-width arithmetic is accepted end-state and remains queued. See
-@../progress (Progress) for current support.
+Fixed-width promotion, compatibility checks and numeric constant folding are
+implemented in the frontend/HIR. Fixed-width and `Byte` runtime values remain
+gated on JavaScript and Wasm. The `Number`/`NumberN` family is not implemented.
+See @../progress (Progress) for current support.

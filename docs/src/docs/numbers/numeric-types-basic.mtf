@@ -31,6 +31,9 @@ default profile is `Int32` with `Float64`.
 and needs an explicit conversion to `U8` before any arithmetic. A `{Byte}` is an
 ordinary collection rather than a special buffer or text type.
 
-**Current versus accepted.** The Alpha compiler implements `Int` and `Float`.
-The fixed widths, `Byte` and the `Number` family are accepted end-state and
-remain queued. See @../progress (Progress) for current support.
+**Current versus accepted.** The Alpha compiler implements `Int` and `Float` at
+the default runtime profile. The frontend also materialises fixed-width and
+`Byte` literals, types fixed-width operators and casts, and folds numeric
+operators and casts; JavaScript and Wasm runtime values remain gated. The
+`Number`/`NumberN` family is not implemented. See @../progress (Progress) for
+current support.

@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -56,13 +56,15 @@ fn nth_start_declaration_expression(source: &str, index: usize) -> Expression {
 fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperator) {
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnsupportedOperatorTypes {
-            operator,
-            ..
-        } if operator == expected_operator
-    ));
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::UnsupportedOperatorTypes { operator, .. }
+                if *operator == expected_operator
+        ),
+        "expected {expected_operator:?} for {source:?}, got {:?}",
+        diagnostic.payload
+    );
 }
 
 #[test]
@@ -845,4 +847,233 @@ fn unannotated_overflow_keeps_default_int_range_error() {
             ..
         }
     ));
+}
+
+#[test]
+fn fixed_width_arithmetic_uses_canonical_promotion_domains() {
+    let cases = [
+        ("U8", "+", "U8", FixedScalar::U32),
+        ("I32", "+", "U32", FixedScalar::I64),
+        ("I8", "*", "I16", FixedScalar::I32),
+        ("U32", "-", "U64", FixedScalar::U64),
+        ("U8", "/", "U8", FixedScalar::F64),
+        ("U8", "//", "U8", FixedScalar::U32),
+        ("I64", "%", "I8", FixedScalar::I64),
+        ("F16", "*", "F16", FixedScalar::F32),
+        ("F16", "+", "F64", FixedScalar::F64),
+    ];
+
+    for (left, operator, right, result) in cases {
+        assert_binary_result_type(
+            left,
+            operator,
+            right,
+            builtin_type_ids::fixed_scalar(result),
+        );
+    }
+
+    assert_binary_result_type("Int", "+", "Int", builtin_type_ids::INT);
+    assert_binary_result_type("Float", "+", "Float", builtin_type_ids::FLOAT);
+    assert_binary_result_type("Int", "+", "Float", builtin_type_ids::FLOAT);
+    assert_binary_result_type("Float", "+", "Int", builtin_type_ids::FLOAT);
+    assert_binary_result_type("Int", "/", "Int", builtin_type_ids::FLOAT);
+}
+
+#[test]
+fn unsupported_fixed_width_arithmetic_keeps_operator_diagnostics() {
+    let cases = [
+        ("I64", "+", "U64", DiagnosticOperator::Add),
+        ("I32", "+", "U64", DiagnosticOperator::Add),
+        ("U8", "+", "Int", DiagnosticOperator::Add),
+        ("Int", "+", "U8", DiagnosticOperator::Add),
+        ("F32", "+", "Float", DiagnosticOperator::Add),
+        ("U8", "+", "F32", DiagnosticOperator::Add),
+        ("Byte", "+", "Byte", DiagnosticOperator::Add),
+        ("F32", "//", "F32", DiagnosticOperator::IntDivide),
+    ];
+
+    for (left, operator, right, diagnostic_operator) in cases {
+        assert_binary_rejected(left, operator, right, diagnostic_operator);
+    }
+}
+
+#[test]
+fn fixed_width_comparisons_use_compatibility_without_arithmetic_promotion() {
+    for (left, operator, right) in [
+        ("Byte", "is", "Byte"),
+        ("Byte", "<", "Byte"),
+        ("I64", "<", "U64"),
+        ("F16", "is", "F64"),
+    ] {
+        assert_binary_result_type(left, operator, right, builtin_type_ids::BOOL);
+    }
+
+    assert_binary_rejected("Byte", "is", "U8", DiagnosticOperator::Equality);
+    assert_binary_rejected("U8", "is", "Int", DiagnosticOperator::Equality);
+}
+
+#[test]
+fn unary_minus_uses_the_numeric_negation_domain() {
+    for (operand_type, result_scalar) in [
+        ("I8", FixedScalar::I32),
+        ("F16", FixedScalar::F32),
+        ("I64", FixedScalar::I64),
+    ] {
+        let source = format!("operand {operand_type} = 1\nvalue = -operand\n");
+        let value = nth_start_declaration_expression(&source, 1);
+        assert_eq!(
+            value.type_id,
+            builtin_type_ids::fixed_scalar(result_scalar),
+            "unexpected negation result for {operand_type}"
+        );
+    }
+
+    assert_unsupported_operator("zero U8 = 0\nvalue = -zero\n", DiagnosticOperator::Subtract);
+    assert_unsupported_operator(
+        "zero #U8 = 0\nvalue = -zero\n",
+        DiagnosticOperator::Subtract,
+    );
+    assert_unsupported_operator(
+        "octet Byte = 0\nvalue = -octet\n",
+        DiagnosticOperator::Subtract,
+    );
+}
+
+#[test]
+fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
+    let right_peer = nth_start_declaration_expression("x U8 = 5\nvalue = x + 1\n", 1);
+    assert_eq!(
+        right_peer.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    assert_runtime_contains_fixed_literal(
+        &right_peer,
+        FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("U8 literal should materialise"),
+    );
+
+    let left_peer = nth_start_declaration_expression("x U8 = 5\nvalue = 1 + x\n", 1);
+    assert_eq!(
+        left_peer.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    assert_runtime_contains_fixed_literal(
+        &left_peer,
+        FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("U8 literal should materialise"),
+    );
+
+    let float_peer = nth_start_declaration_expression("f F32 = 1\nvalue = f * 0.5\n", 1);
+    assert_eq!(
+        float_peer.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F32)
+    );
+    assert_runtime_contains_fixed_literal(
+        &float_peer,
+        FixedScalarValue::binary_float(FixedScalar::F32, 0.5)
+            .expect("0.5 is exactly representable as F32"),
+    );
+
+    let byte_comparison =
+        nth_start_declaration_expression("raw Byte = 255\nvalue = raw is 255\n", 1);
+    assert_eq!(byte_comparison.type_id, builtin_type_ids::BOOL);
+    assert_runtime_contains_fixed_literal(
+        &byte_comparison,
+        FixedScalarValue::unsigned(FixedScalar::Byte, 255)
+            .expect("Byte maximum should materialise"),
+    );
+
+    let chained = nth_start_declaration_expression("x U8 = 5\nvalue = x + 1 + 1\n", 1);
+    assert_eq!(
+        chained.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+
+    let grouped_literal = nth_start_declaration_expression("x U8 = 5\nvalue = x + (1)\n", 1);
+    assert_eq!(
+        grouped_literal.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    assert_runtime_contains_fixed_literal(
+        &grouped_literal,
+        FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("U8 literal should materialise"),
+    );
+}
+
+#[test]
+fn peer_literal_materialisation_preserves_natural_and_grouped_operator_types() {
+    let out_of_range = parse_single_file_ast_diagnostic("x U8 = 5\nvalue = x + 300\n");
+    assert!(matches!(
+        out_of_range.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U8),
+            ..
+        }
+    ));
+
+    assert_unsupported_operator("x U8 = 5\nvalue = x + 1.5\n", DiagnosticOperator::Add);
+    assert_unsupported_operator("x U8 = 5\nvalue = x + (1 + 2)\n", DiagnosticOperator::Add);
+    assert_unsupported_operator("x U8 = 5\nvalue = 1 + 1 + x\n", DiagnosticOperator::Add);
+    assert_unsupported_operator("x U8 = 5\nvalue = x to 10\n", DiagnosticOperator::Range);
+}
+
+#[test]
+fn optional_fixed_scalar_does_not_materialise_pending_peers_as_inner_scalars() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "optional_value U8? = none\nresult = optional_value + 1\n",
+    );
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnsupportedOperatorTypes {
+            operator: DiagnosticOperator::Add,
+            rhs: Some(type_id),
+            ..
+        } if type_id == builtin_type_ids::INT
+    ));
+}
+
+fn assert_binary_result_type(
+    left_type: &str,
+    operator: &str,
+    right_type: &str,
+    expected_type: TypeId,
+) {
+    let expression = binary_expression(left_type, operator, right_type);
+    assert_eq!(
+        expression.type_id, expected_type,
+        "{left_type} {operator} {right_type} resolved to {:?}",
+        expression.diagnostic_type
+    );
+}
+
+fn assert_binary_rejected(
+    left_type: &str,
+    operator: &str,
+    right_type: &str,
+    diagnostic_operator: DiagnosticOperator,
+) {
+    let source =
+        format!("left {left_type} = 1\nright {right_type} = 2\nvalue = left {operator} right\n");
+    assert_unsupported_operator(&source, diagnostic_operator);
+}
+
+fn binary_expression(left_type: &str, operator: &str, right_type: &str) -> Expression {
+    let source =
+        format!("left {left_type} = 1\nright {right_type} = 2\nvalue = left {operator} right\n");
+    nth_start_declaration_expression(&source, 2)
+}
+
+fn assert_runtime_contains_fixed_literal(expression: &Expression, expected: FixedScalarValue) {
+    let ExpressionKind::Runtime(rpn) = &expression.kind else {
+        panic!("expected a runtime expression, got {:?}", expression.kind);
+    };
+
+    assert!(
+        rpn.items.iter().any(|item| matches!(
+            item,
+            ExpressionRpnItem::Operand(operand)
+                if matches!(operand.kind, ExpressionKind::FixedScalar(value) if value == expected)
+        )),
+        "expected runtime RPN to contain {expected}, got {:?}",
+        rpn.items
+    );
 }

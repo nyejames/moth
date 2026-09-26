@@ -8,12 +8,11 @@
 use super::HirValidator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, negation_domain};
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
-use crate::compiler_frontend::hir::numeric::{
-    HirNumericOperands, HirNumericOperator, NumericFailureMode,
-};
+use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
@@ -233,8 +232,8 @@ impl<'a> HirValidator<'a> {
                     ));
                 }
 
-                // Every operand must already carry the domain type; Int/Float conversion is
-                // explicit HIR, so a mismatched operand means the lowering forgot its cast.
+                // Every operand must already carry the operation domain type; required numeric
+                // conversions are explicit HIR, so a mismatch means lowering omitted a cast.
                 let domain_type = op.domain.type_id(self.type_environment);
 
                 match operands {
@@ -265,11 +264,12 @@ impl<'a> HirValidator<'a> {
                     }
                 }
 
-                // Real division needs a binary-float domain; truncating integer division needs
-                // an integer domain. Fixed domains inherit the same operator contract.
+                // The special division and negation rules are domain invariants; all other
+                // NumericOperator variants are valid for supported numeric domains.
                 let operator_domain_valid = match op.operator {
-                    HirNumericOperator::Divide => op.domain.is_binary_float(),
-                    HirNumericOperator::IntegerDivide => op.domain.is_integer(),
+                    NumericOperator::Divide => op.domain.is_binary_float(),
+                    NumericOperator::IntegerDivide => op.domain.is_integer(),
+                    NumericOperator::Negate => negation_domain(op.domain) == Some(op.domain),
                     _ => true,
                 };
 
@@ -467,8 +467,12 @@ impl<'a> HirValidator<'a> {
 
             HirTerminator::Match { scrutinee, arms } => {
                 self.validate_expression(scrutinee, anchor)?;
+                let pattern_subject_type_id = self
+                    .type_environment
+                    .option_inner_type(scrutinee.ty)
+                    .unwrap_or(scrutinee.ty);
                 for arm in arms {
-                    self.validate_match_arm(block_id, arm, anchor)?;
+                    self.validate_match_arm(block_id, arm, pattern_subject_type_id, anchor)?;
                 }
             }
 

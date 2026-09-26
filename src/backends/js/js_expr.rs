@@ -371,15 +371,6 @@ impl<'hir> JsEmitter<'hir> {
             && left.ty == self.type_environment.builtins().string
             && right.ty == self.type_environment.builtins().string;
 
-        if operator == HirBinOp::Add
-            && (left.ty == self.type_environment.builtins().string
-                || right.ty == self.type_environment.builtins().string)
-        {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend received source String addition instead of a validated numeric Add or StringAppend",
-            ));
-        }
-
         let left = self.lower_expr(left)?;
         let right = self.lower_expr(right)?;
 
@@ -408,15 +399,6 @@ impl<'hir> JsEmitter<'hir> {
 
         let js_operator = match operator {
             HirBinOp::StringAppend => "+",
-            HirBinOp::Add => "+",
-            HirBinOp::Sub => "-",
-            HirBinOp::Mul => "*",
-            HirBinOp::Div => "/",
-            HirBinOp::Mod => {
-                return Ok(format!(
-                    "(() => {{ const __lhs = {left}; const __rhs = {right}; if (__rhs === 0) {{ throw new Error(\"Modulus by zero\"); }} return ((__lhs % __rhs) + Math.abs(__rhs)) % Math.abs(__rhs); }})()"
-                ));
-            }
             HirBinOp::Eq => "===",
             HirBinOp::Ne => "!==",
             HirBinOp::Lt => "<",
@@ -428,12 +410,6 @@ impl<'hir> JsEmitter<'hir> {
             // free at expression level. Branch-gated RHS evaluation is lowered earlier.
             HirBinOp::And => "&&",
             HirBinOp::Or => "||",
-            HirBinOp::Exponent => "**",
-            HirBinOp::IntDiv => {
-                return Ok(format!(
-                    "(() => {{ const __lhs = {left}; const __rhs = {right}; if (__rhs === 0) {{ throw new Error(\"Integer division by zero\"); }} return Math.trunc(__lhs / __rhs); }})()"
-                ));
-            }
         };
 
         Ok(format!("({left} {js_operator} {right})"))

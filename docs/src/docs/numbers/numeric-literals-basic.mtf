@@ -43,6 +43,7 @@ never initialises a fixed integer, `Int` or `Byte` merely because its value is
 whole, and a literal that does not fit its destination is rejected. Small values
 never infer a narrow type by size.
 
-**Current versus accepted.** The Alpha compiler still types literals as `Int` or
-`Float`. The fixed-width, `Byte` and `Number` destinations are accepted end-state
-and remain queued. See @../progress (Progress) for current support.
+**Current versus accepted.** The frontend materialises fixed-width and `Byte`
+literals with destination-aware range checks; their runtime values remain gated
+on JavaScript and Wasm. The `Number`/`NumberN` family is not implemented. See
+@../progress (Progress) for current support.

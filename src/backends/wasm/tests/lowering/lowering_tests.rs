@@ -496,17 +496,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
             305,
             HirStatementKind::Assign {
                 target: HirPlace::Local(LocalId(0)),
-                value: expression(
-                    306,
-                    HirExpressionKind::BinOp {
-                        left: Box::new(load_local(307, LocalId(0), types.int, RegionId(0))),
-                        op: HirBinOp::Add,
-                        right: Box::new(int_expression(308, 1, types.int, RegionId(0))),
-                    },
-                    types.int,
-                    RegionId(0),
-                    ValueKind::RValue,
-                ),
+                value: load_local(307, LocalId(0), types.int, RegionId(0)),
             },
             305,
         )],
@@ -832,7 +822,7 @@ fn lowers_string_equality_by_content_comparison_operations() {
 }
 
 #[test]
-fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
+fn lowers_ordered_comparison_and_control_flow() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -851,54 +841,19 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         RegionId(0),
         ValueKind::RValue,
     );
-    let updated_sum = expression(
-        1403,
-        HirExpressionKind::BinOp {
-            left: Box::new(load_local(1404, LocalId(1), types.int, RegionId(0))),
-            op: HirBinOp::Add,
-            right: Box::new(int_expression(1405, 1, types.int, RegionId(0))),
-        },
-        types.int,
-        RegionId(0),
-        ValueKind::RValue,
-    );
-    let decremented_counter = expression(
-        1410,
-        HirExpressionKind::BinOp {
-            left: Box::new(load_local(1411, LocalId(0), types.int, RegionId(0))),
-            op: HirBinOp::Sub,
-            right: Box::new(int_expression(1412, 1, types.int, RegionId(0))),
-        },
-        types.int,
-        RegionId(0),
-        ValueKind::RValue,
-    );
 
     let entry_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
-        ],
-        statements: vec![
-            statement(
-                1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(1406, 0, types.int, RegionId(0)),
-                },
-                1,
-            ),
-            statement(
-                2,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: int_expression(1407, 10, types.int, RegionId(0)),
-                },
-                2,
-            ),
-        ],
+        locals: vec![local(0, types.int, RegionId(0))],
+        statements: vec![statement(
+            1,
+            HirStatementKind::Assign {
+                target: HirPlace::Local(LocalId(0)),
+                value: int_expression(1406, 0, types.int, RegionId(0)),
+            },
+            1,
+        )],
         terminator: HirTerminator::If {
             condition,
             then_block: BlockId(1),
@@ -909,25 +864,8 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         id: BlockId(1),
         region: RegionId(0),
         locals: vec![],
-        statements: vec![
-            statement(
-                3,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: updated_sum,
-                },
-                3,
-            ),
-            statement(
-                4,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: decremented_counter,
-                },
-                4,
-            ),
-        ],
-        terminator: HirTerminator::Return(load_local(1408, LocalId(1), types.int, RegionId(0))),
+        statements: vec![],
+        terminator: HirTerminator::Return(load_local(1408, LocalId(0), types.int, RegionId(0))),
     };
     let else_block = HirBlock {
         id: BlockId(2),
@@ -958,7 +896,7 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         &type_environment,
         &path_fork.snapshot_table(),
     )
-    .expect("ordered comparisons and Add should lower in non-runtime functions");
+    .expect("ordered comparison and control flow should lower");
 
     let lowered = result
         .lir_module
@@ -975,18 +913,11 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         "entry block should include ordered comparison lowering"
     );
     assert!(
-        lowered.blocks[1]
-            .statements
-            .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::IntAdd { .. })),
-        "then block should include numeric add lowering"
-    );
-    assert!(
-        lowered.blocks[1]
-            .statements
-            .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::IntSub { .. })),
-        "then block should include numeric sub lowering"
+        matches!(
+            lowered.blocks[0].terminator,
+            WasmLirTerminator::Branch { .. }
+        ),
+        "entry block should preserve the conditional control flow"
     );
 }
 

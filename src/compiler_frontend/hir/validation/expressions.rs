@@ -9,6 +9,8 @@ use super::HirValidator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
 };
@@ -27,9 +29,10 @@ impl<'a> HirValidator<'a> {
         &self,
         source_block_id: BlockId,
         arm: &HirMatchArm,
+        pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
-        self.validate_pattern(&arm.pattern, anchor)?;
+        self.validate_pattern(&arm.pattern, pattern_subject_type_id, anchor)?;
 
         if let Some(guard) = &arm.guard {
             self.validate_expression(guard, anchor)?;
@@ -40,48 +43,32 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    /// WHAT: returns `true` for arithmetic operators that must now be represented as
-    ///       `HirStatementKind::NumericOp` rather than a plain `HirExpressionKind::BinOp`.
-    /// WHY: validation guards against regressions where numeric arithmetic bypasses the checked
-    ///      lowering path.
-    fn is_arithmetic_binop(&self, op: HirBinOp) -> bool {
-        matches!(
-            op,
-            HirBinOp::Add
-                | HirBinOp::Sub
-                | HirBinOp::Mul
-                | HirBinOp::Div
-                | HirBinOp::IntDiv
-                | HirBinOp::Mod
-                | HirBinOp::Exponent
-        )
-    }
-
     pub(super) fn validate_pattern(
         &self,
         pattern: &HirPattern,
+        pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
         match pattern {
             HirPattern::Literal(value) => {
-                self.validate_literal_pattern_expression(value, anchor)?;
+                self.validate_literal_pattern_expression(value, pattern_subject_type_id, anchor)?;
             }
 
             HirPattern::OptionNone => {}
 
             HirPattern::OptionValue { value } => {
-                self.validate_literal_pattern_expression(value, anchor)?;
+                self.validate_literal_pattern_expression(value, pattern_subject_type_id, anchor)?;
             }
 
             HirPattern::OptionRelational { value, .. } => {
-                self.validate_literal_pattern_expression(value, anchor)?;
+                self.validate_literal_pattern_expression(value, pattern_subject_type_id, anchor)?;
                 self.validate_relational_pattern_expression(value, anchor)?;
             }
 
             HirPattern::Wildcard => {}
 
             HirPattern::Relational { value, .. } => {
-                self.validate_literal_pattern_expression(value, anchor)?;
+                self.validate_literal_pattern_expression(value, pattern_subject_type_id, anchor)?;
                 self.validate_relational_pattern_expression(value, anchor)?;
             }
 
@@ -102,10 +89,10 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    /// WHAT: checks that a relational pattern's inner expression is a literal
-    ///       (int, float, or char).
-    /// WHY: relational patterns compare against compile-time constant values;
-    ///      only these literal kinds are valid comparison targets.
+    /// WHAT: checks that a relational pattern's inner expression is an ordered literal
+    ///       (int, float, fixed scalar, or char).
+    /// WHY: relational patterns compare against compile-time constants; only ordered literal
+    ///      kinds are valid comparison targets.
     pub(super) fn validate_relational_pattern_expression(
         &self,
         expression: &HirExpression,
@@ -113,23 +100,28 @@ impl<'a> HirValidator<'a> {
     ) -> Result<(), CompilerError> {
         if !matches!(
             expression.kind,
-            HirExpressionKind::Int(_) | HirExpressionKind::Float(_) | HirExpressionKind::Char(_)
+            HirExpressionKind::Int(_)
+                | HirExpressionKind::Float(_)
+                | HirExpressionKind::FixedScalar(_)
+                | HirExpressionKind::Char(_)
         ) {
-            return Err(
-                self.error_with_hir("Match relational pattern must be int/float/char", anchor)
-            );
+            return Err(self.error_with_hir(
+                "Match relational pattern must be int/float/fixed-scalar/char",
+                anchor,
+            ));
         }
 
         Ok(())
     }
 
     /// WHAT: checks that a literal pattern's inner expression is const-valued
-    ///       and is one of the allowed literal kinds (int, float, bool, char, string).
+    ///       and is one of the allowed literal kinds (including fixed scalars).
     /// WHY: match arms destructure against compile-time constants; non-const or
     ///      structurally complex expressions are not valid pattern targets.
     pub(super) fn validate_literal_pattern_expression(
         &self,
         expression: &HirExpression,
+        pattern_subject_type_id: TypeId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
         self.validate_expression(expression, anchor)?;
@@ -144,12 +136,28 @@ impl<'a> HirValidator<'a> {
             expression.kind,
             HirExpressionKind::Int(_)
                 | HirExpressionKind::Float(_)
+                | HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)
                 | HirExpressionKind::StringLiteral(_)
         ) {
             return Err(self.error_with_hir(
-                "Match literal pattern must be int/float/bool/char/string",
+                "Match literal pattern must be int/float/fixed-scalar/bool/char/string",
+                anchor,
+            ));
+        }
+        if expression.ty != pattern_subject_type_id {
+            return Err(self.error_with_hir(
+                "Match pattern value type does not match the direct scrutinee type",
+                anchor,
+            ));
+        }
+
+        if let HirExpressionKind::FixedScalar(value) = &expression.kind
+            && self.type_environment.fixed_scalar(pattern_subject_type_id) != Some(value.scalar())
+        {
+            return Err(self.error_with_hir(
+                "HIR fixed-scalar pattern value does not match its direct scrutinee type",
                 anchor,
             ));
         }
@@ -375,12 +383,24 @@ impl<'a> HirValidator<'a> {
             }
 
             HirExpressionKind::BinOp { op, left, right } => {
-                // All arithmetic must go through the checked NumericOp path.
-                if self.is_arithmetic_binop(*op) {
+                let is_comparison = matches!(
+                    op,
+                    HirBinOp::Eq
+                        | HirBinOp::Ne
+                        | HirBinOp::Lt
+                        | HirBinOp::Le
+                        | HirBinOp::Gt
+                        | HirBinOp::Ge
+                );
+                if is_comparison
+                    && let (Some(left_scalar), Some(right_scalar)) = (
+                        NumericScalar::from_type_id(left.ty, self.type_environment),
+                        NumericScalar::from_type_id(right.ty, self.type_environment),
+                    )
+                    && !comparison_supported(left_scalar, right_scalar)
+                {
                     return Err(self.error_with_hir(
-                        format!(
-                            "Plain HirBinOp::{op:?} arithmetic must be lowered through HirStatementKind::NumericOp"
-                        ),
+                        "HirBinOp comparison operands have incompatible types",
                         anchor,
                     ));
                 }

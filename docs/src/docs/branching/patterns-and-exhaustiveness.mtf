@@ -69,7 +69,9 @@ capture when `else =>` is omitted.
     >= value
 ]
 
-Relational patterns support `Int`, `Float` and `Char`.
+Frontend relational pattern typing supports `Int`, `Float`, `Char`, fixed-width
+numeric types and `Byte`. Fixed-width and `Byte` runtime values remain
+backend-gated; `Number` and `NumberN` are not implemented.
 
 ### The catch-all arm
 
@@ -85,10 +87,10 @@ other full-match pattern positions is invalid syntax.
 ]
 
 General bare-name capture has been removed from full-match positions, and
-`String` is not a relational pattern subject. Relational patterns remain
-available for `Int`, `Float` and `Char`; option `|name|` and declared choice
-payload captures remain the explicit capture forms. See @../progress (Progress)
-for current backend and coverage status.
+`String` is not a relational pattern subject. Frontend literal and relational
+patterns also support fixed-width numeric types and `Byte`; their runtime
+values remain backend-gated. The `Number` family remains unimplemented. See
+@../progress (Progress) for current backend and coverage status.
 
 ### Choice payload capture contract
 

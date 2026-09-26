@@ -1,0 +1,6 @@
+hide_optional_ordering ||:
+    left U8? = none
+    right U8? = none
+    result = left < right
+;
+[:optional fixed-width ordering rejected]

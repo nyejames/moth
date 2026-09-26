@@ -112,27 +112,37 @@ pub(crate) enum WasmLirStmt {
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntAdd {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntSub {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntMod {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntMul {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
     /// Truncating integer division (for `//` operator); dst, lhs, rhs all I64.
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntFloorDiv {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
@@ -140,32 +150,44 @@ pub(crate) enum WasmLirStmt {
     },
     /// Regular division with integer operands. lhs/rhs are I64; dst is F64.
     /// WHY: Moth `Int / Int` always yields Float; conversion is emitted here.
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     IntToFloatDiv {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     FloatAdd {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     FloatSub {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     FloatMul {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     FloatDiv {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
     /// Euclidean float modulus; emitted as `a − b·floor(a/b)` using the WASM stack.
+    #[allow(dead_code)]
+    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
     FloatMod {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,

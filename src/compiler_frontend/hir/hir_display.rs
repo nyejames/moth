@@ -1194,11 +1194,6 @@ impl Display for HirBinOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             HirBinOp::StringAppend => write!(f, "++"),
-            HirBinOp::Add => write!(f, "+"),
-            HirBinOp::Sub => write!(f, "-"),
-            HirBinOp::Mul => write!(f, "*"),
-            HirBinOp::Div => write!(f, "/"),
-            HirBinOp::Mod => write!(f, "%"),
             HirBinOp::Eq => write!(f, "=="),
             HirBinOp::Ne => write!(f, "!="),
             HirBinOp::Lt => write!(f, "<"),
@@ -1207,8 +1202,6 @@ impl Display for HirBinOp {
             HirBinOp::Ge => write!(f, ">="),
             HirBinOp::And => write!(f, "&&"),
             HirBinOp::Or => write!(f, "||"),
-            HirBinOp::IntDiv => write!(f, "//"),
-            HirBinOp::Exponent => write!(f, "^"),
         }
     }
 }

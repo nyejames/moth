@@ -9,10 +9,12 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId, builtin_type_ids,
 };
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -31,10 +33,10 @@ use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
 };
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
-use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
+use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -205,6 +207,286 @@ fn float_expression(
     }
 }
 
+fn validate_numeric_op_for_test(
+    op: HirNumericOp,
+    operand_types: &[TypeId],
+    result_type: TypeId,
+) -> Result<(), CompilerError> {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let result_local = LocalId(9000);
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: result_local,
+        ty: result_type,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+
+    let mut operands = Vec::with_capacity(operand_types.len());
+    for (index, operand_type) in operand_types.iter().copied().enumerate() {
+        let local_id = LocalId(9001 + index as u32);
+        module.blocks[entry_block_index].locals.push(HirLocal {
+            id: local_id,
+            ty: operand_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        });
+
+        let value_id = HirValueId(9000 + index as u32);
+        module.side_table.map_value(span, value_id, span);
+        operands.push(HirExpression {
+            id: value_id,
+            kind: HirExpressionKind::Load(HirPlace::Local(local_id)),
+            ty: operand_type,
+            value_kind: ValueKind::RValue,
+            region: entry_region,
+            span: None,
+        });
+    }
+
+    let operands = match (op.operator.is_unary(), operands.as_slice()) {
+        (true, [operand]) => HirNumericOperands::Unary {
+            operand: operand.clone(),
+        },
+        (false, [left, right]) => HirNumericOperands::Binary {
+            left: left.clone(),
+            right: right.clone(),
+        },
+        _ => panic!("test NumericOp operand types must match operation arity"),
+    };
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::NumericOp {
+            op,
+            failure_mode: NumericFailureMode::Trap,
+            operands,
+            result: result_local,
+        },
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+}
+
+fn fixed_type(scalar: FixedScalar) -> TypeId {
+    builtin_type_ids::fixed_scalar(scalar)
+}
+
+fn validate_comparison_for_test(
+    left_type: TypeId,
+    right_type: TypeId,
+    op: HirBinOp,
+) -> Result<(), CompilerError> {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let left_local = LocalId(9000);
+    let right_local = LocalId(9001);
+    module.blocks[entry_block_index].locals.extend([
+        HirLocal {
+            id: left_local,
+            ty: left_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        },
+        HirLocal {
+            id: right_local,
+            ty: right_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        },
+    ]);
+
+    let left_id = HirValueId(9000);
+    let right_id = HirValueId(9001);
+    module.side_table.map_value(span, left_id, span);
+    module.side_table.map_value(span, right_id, span);
+    let left = HirExpression {
+        id: left_id,
+        kind: HirExpressionKind::Load(HirPlace::Local(left_local)),
+        ty: left_type,
+        value_kind: ValueKind::RValue,
+        region: entry_region,
+        span: None,
+    };
+    let right = HirExpression {
+        id: right_id,
+        kind: HirExpressionKind::Load(HirPlace::Local(right_local)),
+        ty: right_type,
+        value_kind: ValueKind::RValue,
+        region: entry_region,
+        span: None,
+    };
+    let expression = HirExpression {
+        id: HirValueId(9002),
+        kind: HirExpressionKind::BinOp {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+        ty: builtin_type_ids::BOOL,
+        value_kind: ValueKind::RValue,
+        region: entry_region,
+        span: None,
+    };
+    module.side_table.map_value(span, expression.id, span);
+
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::Expr(expression),
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+}
+
+#[test]
+fn validator_rejects_numeric_ops_with_invalid_fixed_domains() {
+    let f32_type = fixed_type(FixedScalar::F32);
+    let u32_type = fixed_type(FixedScalar::U32);
+    let i8_type = fixed_type(FixedScalar::I8);
+    let cases = [
+        (
+            HirNumericOp {
+                operator: NumericOperator::IntegerDivide,
+                domain: NumericScalar::Fixed(FixedScalar::F32),
+            },
+            vec![f32_type, f32_type],
+            f32_type,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::Divide,
+                domain: NumericScalar::Fixed(FixedScalar::U32),
+            },
+            vec![u32_type, u32_type],
+            u32_type,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::Negate,
+                domain: NumericScalar::Fixed(FixedScalar::U32),
+            },
+            vec![u32_type],
+            u32_type,
+        ),
+        (
+            HirNumericOp {
+                operator: NumericOperator::Negate,
+                domain: NumericScalar::Fixed(FixedScalar::I8),
+            },
+            vec![i8_type],
+            i8_type,
+        ),
+    ];
+
+    for (op, operand_types, result_type) in cases {
+        let error = validate_numeric_op_for_test(op, &operand_types, result_type)
+            .expect_err("validator should reject NumericOp domains unsupported by the operator");
+        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert!(error.msg.contains("operator does not match the domain"));
+    }
+}
+
+#[test]
+fn validator_rejects_fixed_numeric_op_operand_type_mismatch() {
+    let u8_type = fixed_type(FixedScalar::U8);
+    let u32_type = fixed_type(FixedScalar::U32);
+    let error = validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        },
+        &[u8_type, u32_type],
+        u32_type,
+    )
+    .expect_err("validator should reject operands not converted to the NumericOp domain");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("operand type does not match the domain type")
+    );
+}
+
+#[test]
+fn validator_accepts_valid_fixed_numeric_ops() {
+    let u32_type = fixed_type(FixedScalar::U32);
+    let i32_type = fixed_type(FixedScalar::I32);
+
+    validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        },
+        &[u32_type, u32_type],
+        u32_type,
+    )
+    .expect("valid fixed unsigned addition should pass HIR validation");
+    validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Negate,
+            domain: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        &[i32_type],
+        i32_type,
+    )
+    .expect("valid fixed signed negation should pass HIR validation");
+    let f64_type = fixed_type(FixedScalar::F64);
+    validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Divide,
+            domain: NumericScalar::Fixed(FixedScalar::F64),
+        },
+        &[f64_type, f64_type],
+        f64_type,
+    )
+    .expect("valid fixed binary-float division should pass HIR validation");
+    validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::IntegerDivide,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        },
+        &[u32_type, u32_type],
+        u32_type,
+    )
+    .expect("valid fixed integer division should pass HIR validation");
+}
+
+#[test]
+fn validator_uses_numeric_comparison_compatibility_and_keeps_same_type_other_values() {
+    let i64_type = fixed_type(FixedScalar::I64);
+    let u64_type = fixed_type(FixedScalar::U64);
+    validate_comparison_for_test(i64_type, u64_type, HirBinOp::Lt)
+        .expect("exact mixed signed/unsigned comparison should remain valid");
+
+    let byte_type = fixed_type(FixedScalar::Byte);
+    validate_comparison_for_test(byte_type, byte_type, HirBinOp::Eq)
+        .expect("same-type Byte comparison should remain valid");
+
+    let f64_type = fixed_type(FixedScalar::F64);
+    let error = validate_comparison_for_test(builtin_type_ids::INT, f64_type, HirBinOp::Eq)
+        .expect_err("incompatible numeric comparison should be rejected");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("comparison operands have incompatible types")
+    );
+}
+
 #[test]
 fn valid_module_passes_explicit_validation() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -308,7 +590,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
-                operator: HirNumericOperator::Negate,
+                operator: NumericOperator::Negate,
                 domain: NumericScalar::Int,
             },
             failure_mode: NumericFailureMode::Trap,
@@ -374,7 +656,7 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
-                operator: HirNumericOperator::Add,
+                operator: NumericOperator::Add,
                 domain: NumericScalar::Int,
             },
             failure_mode: NumericFailureMode::Trap,
@@ -438,7 +720,7 @@ fn validator_rejects_integer_divide_on_float_domain() {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
-                operator: HirNumericOperator::IntegerDivide,
+                operator: NumericOperator::IntegerDivide,
                 domain: NumericScalar::Float,
             },
             failure_mode: NumericFailureMode::Trap,
@@ -456,63 +738,6 @@ fn validator_rejects_integer_divide_on_float_domain() {
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("operator does not match the domain"));
-}
-
-#[test]
-fn validator_rejects_plain_numeric_binop() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let entry_block_index = start_entry_block_index(&module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let int_type = type_environment.builtins().int;
-
-    let left = int_expression(
-        HirValueId(9000),
-        1,
-        int_type,
-        entry_region,
-        &span,
-        &mut module,
-    );
-    let right = int_expression(
-        HirValueId(9001),
-        2,
-        int_type,
-        entry_region,
-        &span,
-        &mut module,
-    );
-
-    let expression = HirExpression {
-        id: HirValueId(9002),
-        kind: HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
-            left: Box::new(left),
-            right: Box::new(right),
-        },
-        ty: int_type,
-        value_kind: ValueKind::RValue,
-        region: entry_region,
-        span: None,
-    };
-    module.side_table.map_value(span, expression.id, span);
-
-    let statement = HirStatement {
-        id: HirNodeId(9000),
-        kind: HirStatementKind::Expr(expression),
-        span,
-    };
-    module.side_table.map_statement(span, &statement);
-    module.blocks[entry_block_index].statements.push(statement);
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject plain numeric BinOp");
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
-        "Plain HirBinOp::Add arithmetic must be lowered through HirStatementKind::NumericOp"
-    ));
 }
 
 fn append_expression_for_validation(
@@ -686,65 +911,6 @@ fn validator_rejects_plain_numeric_unary_op() {
             .msg
             .contains("Plain HirUnaryOp::Neg must be lowered through HirStatementKind::NumericOp")
     );
-}
-
-#[test]
-fn validator_rejects_plain_string_concatenation_binop() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let entry_block_index = start_entry_block_index(&module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let string_type = type_environment.builtins().string;
-
-    let left = HirExpression {
-        id: HirValueId(9000),
-        kind: HirExpressionKind::StringLiteral("a".to_owned()),
-        ty: string_type,
-        value_kind: ValueKind::RValue,
-        region: entry_region,
-        span: None,
-    };
-    module.side_table.map_value(span, left.id, span);
-    let right = HirExpression {
-        id: HirValueId(9001),
-        kind: HirExpressionKind::StringLiteral("b".to_owned()),
-        ty: string_type,
-        value_kind: ValueKind::RValue,
-        region: entry_region,
-        span: None,
-    };
-    module.side_table.map_value(span, right.id, span);
-
-    let expression = HirExpression {
-        id: HirValueId(9002),
-        kind: HirExpressionKind::BinOp {
-            op: HirBinOp::Add,
-            left: Box::new(left),
-            right: Box::new(right),
-        },
-        ty: string_type,
-        value_kind: ValueKind::RValue,
-        region: entry_region,
-        span: None,
-    };
-    module.side_table.map_value(span, expression.id, span);
-
-    let statement = HirStatement {
-        id: HirNodeId(9000),
-        kind: HirStatementKind::Expr(expression),
-        span,
-    };
-    module.side_table.map_statement(span, &statement);
-    module.blocks[entry_block_index].statements.push(statement);
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject plain string BinOp");
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
-        "Plain HirBinOp::Add arithmetic must be lowered through HirStatementKind::NumericOp"
-    ));
 }
 
 fn inject_float_statement(
@@ -1107,6 +1273,117 @@ fn validator_rejects_non_literal_match_pattern() {
         .expect_err("validator should reject non-literal match pattern");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Match literal pattern"));
+}
+
+fn inject_fixed_scalar_match_pattern(
+    module: &mut HirModule,
+    scrutinee_type_id: TypeId,
+    pattern_type_id: TypeId,
+    pattern_value: FixedScalarValue,
+    build_pattern: impl FnOnce(HirExpression) -> HirPattern,
+) {
+    let start_function = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
+    let entry_block_id = start_function.entry;
+    let entry_block_index = entry_block_id.0 as usize;
+    let region = module.blocks[entry_block_index].region;
+    let local_id = LocalId(9000);
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: local_id,
+        ty: scrutinee_type_id,
+        mutable: false,
+        region,
+        span: None,
+    });
+
+    let scrutinee_id = HirValueId(9000);
+    let pattern_id = HirValueId(9001);
+    module.side_table.map_value(None, scrutinee_id, None);
+    module.side_table.map_value(None, pattern_id, None);
+
+    let scrutinee = HirExpression {
+        id: scrutinee_id,
+        kind: HirExpressionKind::Load(HirPlace::Local(local_id)),
+        ty: scrutinee_type_id,
+        value_kind: ValueKind::Place,
+        region,
+        span: None,
+    };
+    let pattern_value = HirExpression {
+        id: pattern_id,
+        kind: HirExpressionKind::FixedScalar(pattern_value),
+        ty: pattern_type_id,
+        value_kind: ValueKind::Const,
+        region,
+        span: None,
+    };
+
+    module.blocks[entry_block_index].terminator = HirTerminator::Match {
+        scrutinee,
+        arms: vec![HirMatchArm {
+            pattern: build_pattern(pattern_value),
+            guard: None,
+            body: entry_block_id,
+        }],
+    };
+}
+
+#[test]
+fn validator_rejects_fixed_match_literal_type_different_from_scrutinee() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    inject_fixed_scalar_match_pattern(
+        &mut module,
+        fixed_type(FixedScalar::U8),
+        fixed_type(FixedScalar::U16),
+        FixedScalarValue::unsigned(FixedScalar::U16, 200).expect("200 fits in U16"),
+        HirPattern::Literal,
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a pattern with a different type from its scrutinee");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("direct scrutinee type"));
+}
+
+#[test]
+fn validator_rejects_fixed_match_relational_type_different_from_scrutinee() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    inject_fixed_scalar_match_pattern(
+        &mut module,
+        fixed_type(FixedScalar::U8),
+        fixed_type(FixedScalar::U16),
+        FixedScalarValue::unsigned(FixedScalar::U16, 10).expect("10 fits in U16"),
+        |value| HirPattern::Relational {
+            op: HirRelationalPatternOp::LessThan,
+            value,
+        },
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a relational pattern with the wrong scalar type");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("direct scrutinee type"));
+}
+
+#[test]
+fn validator_rejects_option_labelled_fixed_scalar_match_pattern() {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let u8_type = fixed_type(FixedScalar::U8);
+    let option_u8_type = type_environment.intern_option(u8_type);
+    inject_fixed_scalar_match_pattern(
+        &mut module,
+        option_u8_type,
+        option_u8_type,
+        FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8"),
+        |value| HirPattern::OptionValue { value },
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a fixed payload labelled with the option type");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("direct scrutinee type"));
 }
 
 #[test]

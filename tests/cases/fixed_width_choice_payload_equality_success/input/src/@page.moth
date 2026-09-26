@@ -1,0 +1,11 @@
+Status ::
+    Empty,
+    Value | count U8 |,
+;
+
+hide_choice_equality ||:
+    left Status = Status::Value(7)
+    right Status = Status::Value(7)
+    equal = left is right
+;
+[:fixed-width choice payload equality succeeds]

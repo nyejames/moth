@@ -32,6 +32,7 @@ pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;
 pub mod ids;
+pub(crate) mod numeric_operators;
 pub mod numeric_profile;
 pub(crate) mod numeric_scalar;
 pub mod parsed;

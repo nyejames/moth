@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -24,7 +25,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
-use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperator};
+use crate::compiler_frontend::hir::numeric::HirNumericOp;
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -293,11 +294,7 @@ impl<'a> HirBuilder<'a> {
     /// WHY: loop lowering must not re-match builtins at each arithmetic site; the binding is
     ///      validated as `Int` or `Float` by `resolve_range_loop_types`, so a missing domain
     ///      here is a builder bug rather than a user diagnostic.
-    fn numeric_op_for_binding(
-        &self,
-        binding: TypeId,
-        operator: HirNumericOperator,
-    ) -> HirNumericOp {
+    fn numeric_op_for_binding(&self, binding: TypeId, operator: NumericOperator) -> HirNumericOp {
         let domain = NumericScalar::from_type_id(binding, &self.type_environment)
             .expect("range-loop binding is validated as Int or Float before numeric lowering");
 
@@ -571,7 +568,7 @@ impl<'a> HirBuilder<'a> {
             abs_negate_region,
         );
         let abs_zero = self.range_loop_zero_literal(types, span_ref, abs_negate_region);
-        let abs_sub_op = self.numeric_op_for_binding(types.binding, HirNumericOperator::Subtract);
+        let abs_sub_op = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
         self.emit_checked_numeric_assignment(
             locals.step,
             abs_sub_op,
@@ -633,7 +630,7 @@ impl<'a> HirBuilder<'a> {
             desc_negate_region,
         );
         let desc_zero = self.range_loop_zero_literal(types, span_ref, desc_negate_region);
-        let desc_sub_op = self.numeric_op_for_binding(types.binding, HirNumericOperator::Subtract);
+        let desc_sub_op = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
         self.emit_checked_numeric_assignment(
             locals.step,
             desc_sub_op,
@@ -877,7 +874,7 @@ impl<'a> HirBuilder<'a> {
             ValueKind::Place,
             step_region,
         );
-        let current_add_op = self.numeric_op_for_binding(types.binding, HirNumericOperator::Add);
+        let current_add_op = self.numeric_op_for_binding(types.binding, NumericOperator::Add);
         self.emit_checked_numeric_assignment(
             locals.current,
             current_add_op,
@@ -903,7 +900,7 @@ impl<'a> HirBuilder<'a> {
         self.emit_checked_numeric_assignment(
             locals.iteration_index,
             HirNumericOp {
-                operator: HirNumericOperator::Add,
+                operator: NumericOperator::Add,
                 domain: NumericScalar::Int,
             },
             index_current,
@@ -1176,7 +1173,7 @@ impl<'a> HirBuilder<'a> {
         self.emit_checked_numeric_assignment(
             iteration_index_local,
             HirNumericOp {
-                operator: HirNumericOperator::Add,
+                operator: NumericOperator::Add,
                 domain: NumericScalar::Int,
             },
             step_current,

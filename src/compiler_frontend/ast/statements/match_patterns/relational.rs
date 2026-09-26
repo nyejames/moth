@@ -63,7 +63,7 @@ pub(super) fn parse_relational_pattern(
 }
 /// Ensure the subject type supports relational ordering.
 ///
-/// Only `int`, `float`, and `char` may appear in relational patterns.
+/// Int, Float, Char, fixed-width numeric scalars, and Byte have ordered comparisons.
 fn ensure_relational_subject_type(
     subject_type_id: TypeId,
     span: Option<SourceSpan>,
@@ -74,7 +74,8 @@ fn ensure_relational_subject_type(
 
     let is_ordered_scalar = subject_type_id == builtins.int
         || subject_type_id == builtins.float
-        || subject_type_id == builtins.char;
+        || subject_type_id == builtins.char
+        || type_environment.fixed_scalar(subject_type_id).is_some();
 
     if !is_ordered_scalar {
         return Err(CompilerDiagnostic::invalid_match_pattern(

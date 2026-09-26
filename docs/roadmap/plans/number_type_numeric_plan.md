@@ -11,8 +11,9 @@
 - Delivered: Slice 1c. Numeric literals keep their source spelling until evaluation. A direct fixed-scalar or option-of-fixed receiving boundary (declarations, constants, assignment, returns, call arguments, struct and parameter defaults, typed collections, map values, then/else arms and multi-bind slots) materialises a lone literal in its destination with exact range checks, signed minima, `U64` maxima and single-rounded `F16`/`F32` bits. Parentheses stay transparent for a lone literal and never make an operand direct. Fixed values keep exact bits through constants, public folded values, import projection and HIR. Every other literal and diagnostic is unchanged.
 - Delivered: Slice 3a. HIR checked numeric operations record an operator plus a canonical `NumericScalar` domain.
 - Delivered: Slice 3b. Cast evidence covers every `Int`/`Float`/fixed-width numeric pair with range-derived fallibility, `Byte <-> U8`, and `String` parsing and formatting for every numeric domain (`Byte` text composes through `U8`). Const casts fold at the destination with single rounding; binary floats format as the shortest round-tripping text at their own precision, so `F16` 65504 prints `65500`. Template heads accept non-`Byte` fixed numeric values and format them through the same text policy; runtime fixed values stay behind the backend gates until Phases 4 and 5.
-- Phase 3 still owns the remaining literal typing: immediate numeric peers, match-pattern literals and generic inference where a fixed type argument meets a literal (`Box(200)` into `Box of U8` still reports two inferred types). Fixed-width map keys stay rejected until Phase 6.
-- Next action: Phase 3, the promotion and operator compatibility matrix.
+- Delivered: Slice 3c. Fixed integers use range-based promotion and compatibility; unsigned negation is rejected; fixed integer `/` produces `F64`, while `//` and `%` use checked integer semantics; fixed binary floats promote at their defined precision. Fixed comparisons remain exact. Literals in immediate typed-peer expressions and match patterns now type against fixed-width types and `Byte`; operator constant folding and pattern literal typing are represented in the frontend/HIR. JS/Wasm runtime gates remain unchanged.
+- Remaining literal inference work is limited to generic inference where a fixed type argument meets a literal (`Box(200)` into `Box of U8` still reports two inferred types). Fixed-width map keys remain deferred until Phase 6.
+- Next action: Slice 3d, cast/compound-assignment linearisation and numeric failure contracts.
 
 ## Goal and delivery order
 
@@ -509,7 +510,7 @@ runtime values escaping target validation.
 
 ### Phase 3: Operators, conversions and checked HIR
 
-- [ ] Implement the promotion/compatibility matrix, unsigned-negation rejection,
+- [x] Implement the promotion/compatibility matrix, unsigned-negation rejection,
   fixed integer `/ -> F64`, integer division/remainder and fixed float precision.
 - [x] Extend cast evidence and shared numeric folding, including target-aware
   String parsing and formatting. Test conversion policy independently of codegen.

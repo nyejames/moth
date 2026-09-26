@@ -835,6 +835,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_match_literal_pattern(
         &mut self,
         condition: &Expression,
+        scrutinee_type_id: TypeId,
     ) -> Result<HirExpression, CompilerError> {
         let lowered_pattern = self.lower_expression(condition)?;
         if !lowered_pattern.prelude.is_empty() {
@@ -858,9 +859,19 @@ impl<'a> HirBuilder<'a> {
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)
                 | HirExpressionKind::StringLiteral(_)
+                | HirExpressionKind::FixedScalar(_)
         ) {
             return_hir_transformation_error!(
-                "Match arm patterns currently support only literal int/float/bool/char/string values",
+                "Match arm patterns currently support only literal int/float/fixed-scalar/bool/char/string values",
+                self.hir_error_location(&condition.span)
+            );
+        }
+
+        if let ExpressionKind::FixedScalar(value) = &condition.kind
+            && self.type_environment.fixed_scalar(scrutinee_type_id) != Some(value.scalar())
+        {
+            return_hir_transformation_error!(
+                "Fixed-scalar match pattern type does not match the scrutinee",
                 self.hir_error_location(&condition.span)
             );
         }
@@ -874,23 +885,29 @@ impl<'a> HirBuilder<'a> {
         pattern: &MatchPattern,
         scrutinee_type_id: TypeId,
     ) -> Result<HirPattern, CompilerError> {
+        let pattern_value_type_id = self
+            .type_environment
+            .option_inner_type(scrutinee_type_id)
+            .unwrap_or(scrutinee_type_id);
         match pattern {
             MatchPattern::Literal(expression) => {
-                let lowered = self.lower_match_literal_pattern(expression)?;
+                let lowered =
+                    self.lower_match_literal_pattern(expression, pattern_value_type_id)?;
                 Ok(HirPattern::Literal(lowered))
             }
 
             MatchPattern::OptionNone { .. } => Ok(HirPattern::OptionNone),
 
             MatchPattern::OptionValue { value, .. } => {
-                let lowered = self.lower_match_literal_pattern(value)?;
+                let lowered = self.lower_match_literal_pattern(value, pattern_value_type_id)?;
                 Ok(HirPattern::OptionValue { value: lowered })
             }
 
             MatchPattern::OptionPresentCapture { .. } => Ok(HirPattern::OptionPresent),
 
             MatchPattern::Relational { op, value, .. } => {
-                let lowered_value = self.lower_match_literal_pattern(value)?;
+                let lowered_value =
+                    self.lower_match_literal_pattern(value, pattern_value_type_id)?;
                 let hir_op = lower_relational_pattern_op(*op);
 
                 if self

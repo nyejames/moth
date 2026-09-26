@@ -39,12 +39,10 @@ pub(super) fn order_expression_nodes(
     for node in nodes {
         eval_log!("Evaluating node in expression: ", Pretty node);
         match &node {
-            ExpressionRpnItem::Operand(..) => output_queue.push(node),
-
-            ExpressionRpnItem::PendingNumericLiteral { .. } => {
-                return Err(super::evaluator::pending_numeric_literal_bug(
-                    "expression ordering",
-                ));
+            ExpressionRpnItem::Operand(..) | ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                // Pending literals are typed immediately after ordering, before operator typing or
+                // folding can observe the RPN.
+                output_queue.push(node);
             }
 
             ExpressionRpnItem::Operator { operator, .. } => {

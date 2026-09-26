@@ -1,0 +1,7 @@
+value U8 = 1
+match_result ~= "unset"
+
+if value is:
+    300 => match_result = "out of range"
+    else => match_result = "other"
+;

@@ -1,11 +1,10 @@
 //! Comparison operator typing policy.
 //!
-//! WHAT: decides the result type of comparison operators and rejects invalid operand combinations.
-//! WHY: structural equality rules for choices, scalar ordering, and mixed numeric comparisons
-//! must be enforced consistently before backend lowering.
+//! WHAT: decides the result type of comparisons and rejects invalid operand combinations.
+//! WHY: scalar compatibility and structural equality rules must be enforced before backend
+//!      lowering.
 
 use super::diagnostics::invalid_comparison_types;
-use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -14,7 +13,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
@@ -30,6 +33,7 @@ pub(super) fn is_comparison_operator(op: &Operator) -> bool {
             | Operator::LessThanOrEqual
     )
 }
+
 pub(super) fn resolve_comparison_operator_type(
     lhs: TypeId,
     rhs: TypeId,
@@ -48,28 +52,33 @@ pub(super) fn resolve_comparison_operator_type(
     {
         return resolve_option_equality_type(lhs, rhs, op, span, type_environment);
     }
+    // Byte's comparison surface is deliberately exact: it orders only against another Byte.
+    let byte_type = builtin_type_ids::fixed_scalar(FixedScalar::Byte);
+    if lhs == byte_type || rhs == byte_type {
+        return if lhs == byte_type && rhs == byte_type {
+            Ok(builtins.bool)
+        } else {
+            invalid_comparison_types(lhs, rhs, op, span)
+        };
+    }
+
+    // Numeric compatibility belongs to the same policy as operator promotion, while comparisons
+    // deliberately need no common arithmetic result domain.
+    if let (Some(left), Some(right)) = (
+        NumericScalar::from_type_id(lhs, type_environment),
+        NumericScalar::from_type_id(rhs, type_environment),
+    ) {
+        return if comparison_supported(left, right) {
+            Ok(builtins.bool)
+        } else {
+            invalid_comparison_types(lhs, rhs, op, span)
+        };
+    }
 
     // ------------------------
     //  Same-type comparisons
     // ------------------------
     if lhs == rhs {
-        // Numeric scalars support full ordering and equality.
-        // Decimal is intentionally inactive in the Alpha surface and is not treated
-        // as a comparable numeric type.
-        let same_numeric_scalar = lhs == builtins.int || lhs == builtins.float;
-
-        if same_numeric_scalar {
-            return match op {
-                Operator::Equality
-                | Operator::NotEqual
-                | Operator::GreaterThan
-                | Operator::GreaterThanOrEqual
-                | Operator::LessThan
-                | Operator::LessThanOrEqual => Ok(builtins.bool),
-                _ => invalid_comparison_types(lhs, rhs, op, span),
-            };
-        }
-
         // Booleans only support equality checks.
         if lhs == builtins.bool {
             return match op {
@@ -115,11 +124,6 @@ pub(super) fn resolve_comparison_operator_type(
     // ------------------------
     //  Mixed-type comparisons
     // ------------------------
-
-    // Int and Float can be compared directly.
-    if is_mixed_int_float(lhs, rhs, type_environment) {
-        return Ok(builtins.bool);
-    }
 
     // Two choice values of different nominal types are never comparable.
     let lhs_is_choice = type_environment.variants_for(lhs).is_some();

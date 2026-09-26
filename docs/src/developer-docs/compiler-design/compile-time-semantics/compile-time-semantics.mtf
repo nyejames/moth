@@ -139,7 +139,11 @@ Accepted ownership splits cleanly:
 - **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
 - compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
 
-The richer `Number`, `NumberN` and `Byte` redesign is queued and deferred rather than landing now. Keep that surface question separate from the ownership split above, which is accepted and stable regardless of how far coverage grows.
+The frontend/HIR now implements fixed-width and `Byte` literal typing,
+fixed-width operator semantics, casts and numeric constant folding; JavaScript
+and Wasm runtime values remain gated. The unified `Number`/`NumberN` family is
+not implemented. Keep this surface question separate from the ownership split
+above, which is accepted and stable regardless of how far coverage grows.
 
 ## What can fail here
 

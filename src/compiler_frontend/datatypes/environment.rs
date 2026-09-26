@@ -1471,26 +1471,29 @@ impl TypeEnvironment {
         }
     }
 
+    /// Returns the fixed scalar when the type is exactly one, without unwrapping options.
+    ///
+    /// WHAT: direct scalar identity for operator, pattern and validation classification.
+    /// WHY: optional scalars must never be classified as plain numeric operands.
+    pub(crate) fn fixed_scalar(&self, id: TypeId) -> Option<FixedScalar> {
+        match self.get(id) {
+            Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
+                BuiltinTypeKey::FixedScalar(scalar) => Some(scalar),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Returns the fixed scalar when the type (or an option's inner type) is one.
     ///
     /// WHAT: maps a direct destination or `Option(scalar)` to its `FixedScalar` identity.
     /// WHY: destination-aware literal materialisation shares one option-unwrapping rule
     ///      between the parse-expectation owner and the evaluator's pending-literal resolver.
+    ///      Classification of operands and patterns uses the direct `fixed_scalar` instead.
     pub(crate) fn fixed_scalar_of(&self, id: TypeId) -> Option<FixedScalar> {
-        if let Some(TypeDefinition::Builtin(builtin)) = self.get(id)
-            && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
-        {
-            return Some(scalar);
-        }
-
-        let inner = self.option_inner_type(id)?;
-        if let Some(TypeDefinition::Builtin(builtin)) = self.get(inner)
-            && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
-        {
-            return Some(scalar);
-        }
-
-        None
+        self.fixed_scalar(id)
+            .or_else(|| self.fixed_scalar(self.option_inner_type(id)?))
     }
 
     /// Interns a tuple type with the given field types.
@@ -1532,6 +1535,16 @@ impl TypeEnvironment {
         id: TypeId,
         visited_choices: &mut FxHashSet<TypeId>,
     ) -> bool {
+        // WHAT: option equality delegates to the exact inner type.
+        // WHY: optional Byte and other fixed scalars share their direct equality contract.
+        if let Some(inner) = self.option_inner_type(id) {
+            return self.supports_runtime_equality_with_visited(inner, visited_choices);
+        }
+
+        if self.fixed_scalar(id).is_some() {
+            return true;
+        }
+
         match self.get(id) {
             Some(TypeDefinition::Builtin(builtin)) => matches!(
                 builtin.key,
@@ -1551,13 +1564,8 @@ impl TypeEnvironment {
             | Some(TypeDefinition::External(..))
             | Some(TypeDefinition::GenericParameter(..))
             | Some(TypeDefinition::AnonymousConstRecordMarker)
-            | None => false,
-
-            Some(TypeDefinition::Constructed(..)) => {
-                self.option_inner_type(id).is_some_and(|inner| {
-                    self.supports_runtime_equality_with_visited(inner, visited_choices)
-                })
-            }
+            | None
+            | Some(TypeDefinition::Constructed(..)) => false,
         }
     }
 

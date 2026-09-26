@@ -45,11 +45,10 @@ use super::typing_error::ExpressionTypingError;
 
 /// Resolve a parsed expression fragment into a fully typed AST `Expression`.
 ///
-/// WHAT: resolves deferred numeric literals against the caller's expected type, then applies
-///       shunting-yard ordering, operator type resolution, optional constant folding,
-///       and final type validation against the caller's expectation.
-/// WHY: this is the single entry point where AST decides whether an expression collapses to a
-///      compile-time value or must be preserved as runtime RPN for HIR lowering.
+/// WHAT: orders RPN, resolves literal materialization and operator typing in one pass, then folds
+///       and validates the final result.
+/// WHY: immediate peers select literal domains while the canonical operator policy remains the
+///      sole source of result types.
 pub fn evaluate_expression(
     context: &ScopeContext,
     nodes: Vec<ExpressionRpnItem>,
@@ -59,19 +58,26 @@ pub fn evaluate_expression(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<Expression, ExpressionTypingError> {
-    let nodes = resolve_pending_numeric_literals(
-        nodes,
-        context,
-        type_interner.environment(),
-        expected_type,
-        string_table,
-    )?;
-
-    let (rpn_items, span) = ordering::order_expression_nodes(nodes)?;
+    let direct_scalar =
+        direct_fixed_scalar_destination(&nodes, type_interner.environment(), expected_type);
+    let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes)?;
 
     // Fast path: a single R-value needs no operator resolution or RPN assembly.
-    if rpn_items.len() == 1 {
-        let ExpressionRpnItem::Operand(expression) = &rpn_items[0] else {
+    if ordered_nodes.len() == 1 {
+        if matches!(
+            &ordered_nodes[0],
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+        ) {
+            materialize_pending_literal(
+                &mut ordered_nodes,
+                0,
+                direct_scalar,
+                context,
+                string_table,
+            )?;
+        }
+
+        let ExpressionRpnItem::Operand(expression) = &ordered_nodes[0] else {
             return Err(CompilerError::compiler_error(
                 "Expression ordering produced a single operator without an operand.",
             )
@@ -89,7 +95,7 @@ pub fn evaluate_expression(
         validate_expression_result_type(
             expected_type,
             only_expression.type_id,
-            rpn_items[0].source_span(),
+            ordered_nodes[0].source_span(),
             type_interner.environment_mut_for_derived_types(),
         )?;
 
@@ -109,8 +115,10 @@ pub fn evaluate_expression(
 
     // General path: resolve operator types across the full RPN shape, then attempt folding.
     let resolved_type = resolve_expression_result_type(
-        &rpn_items,
+        &mut ordered_nodes,
         span,
+        direct_scalar,
+        context,
         string_table,
         type_interner.environment(),
         path_fork,
@@ -129,17 +137,17 @@ pub fn evaluate_expression(
         *expected_type = ExpectedType::Known(resolved_type);
     }
 
-    let stack_span = rpn_items.iter().find_map(|item| match item {
+    let stack_span = ordered_nodes.iter().find_map(|item| match item {
         ExpressionRpnItem::Operand(expression) => expression.span,
         ExpressionRpnItem::Operator { .. } => None,
-        // Resolution removes pending literals before this stage.
+        // Resolution replaces pending literals before folding.
         ExpressionRpnItem::PendingNumericLiteral { .. } => None,
     });
     // Runtime RPN needs an owned value mode for the final expression node.
     let value_mode = value_mode.as_owned();
-    eval_log!("Attempting to Fold: ", Pretty rpn_items);
+    eval_log!("Attempting to Fold: ", Pretty ordered_nodes);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
-    let fold_outcome = constant_fold(rpn_items, string_table, context.numeric_profile)?;
+    let fold_outcome = constant_fold(ordered_nodes, string_table, context.numeric_profile)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
     eval_log!("Stack after folding: ", Pretty fold_outcome);
 
@@ -191,67 +199,60 @@ pub fn evaluate_expression(
     )?)
 }
 
-/// The one destination-aware literal boundary. Phase 3 peer typing extends this helper.
+/// Materialise a pending literal using its immediate fixed-scalar peer or natural value mode.
 ///
-/// WHAT: replaces every deferred numeric literal with a materialised operand. A fragment that
-///       is exactly one pending literal with a fixed-scalar (or option-of-fixed) expectation
-///       materialises directly in that scalar with no `Int` intermediate; every other pending
-///       literal keeps today's default `Int`/`Float` materialisation byte for byte.
-/// WHY: direct typed receivers such as `#limit U64 = 18_000_000_000` must see the destination
-///      before the literal's range is checked, while operators, casts and peer positions keep
-///      their natural types. After this helper no pending item exists downstream.
-fn resolve_pending_numeric_literals(
-    nodes: Vec<ExpressionRpnItem>,
+/// WHAT: replaces one deferred RPN item with a typed operand and returns its semantic type.
+/// WHY: direct literal parsing must preserve lexical facts until either a peer or the receiving
+///      boundary chooses the materialisation domain.
+pub(super) fn materialize_pending_literal(
+    nodes: &mut [ExpressionRpnItem],
+    index: usize,
+    peer_scalar: Option<FixedScalar>,
     context: &ScopeContext,
-    type_environment: &TypeEnvironment,
-    expected_type: &ExpectedType,
     string_table: &mut StringTable,
-) -> Result<Vec<ExpressionRpnItem>, ExpressionTypingError> {
-    if !nodes
-        .iter()
-        .any(|node| matches!(node, ExpressionRpnItem::PendingNumericLiteral { .. }))
-    {
-        return Ok(nodes);
-    }
-
-    let direct_scalar = direct_fixed_scalar_destination(&nodes, type_environment, expected_type);
-
-    let mut resolved = Vec::with_capacity(nodes.len());
-    for node in nodes {
+) -> Result<TypeId, ExpressionTypingError> {
+    let expression = {
+        let Some(item) = nodes.get(index) else {
+            return Err(CompilerError::compiler_error(
+                "Pending literal resolution could not retrieve its RPN item.",
+            )
+            .into());
+        };
         let ExpressionRpnItem::PendingNumericLiteral {
             token,
             span,
             value_mode,
-        } = node
+        } = item
         else {
-            resolved.push(node);
-            continue;
+            return Err(CompilerError::compiler_error(
+                "Pending literal resolution indexed a non-literal RPN item.",
+            )
+            .into());
         };
 
-        if let Some(scalar) = direct_scalar
-            && literal_kind_initialises(token.kind, scalar)
-        {
-            let value = materialize_fixed_scalar(&token, token.sign, scalar, string_table)
-                .map_err(|reason| {
-                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
-                })?;
+        let scalar = peer_scalar.filter(|scalar| literal_kind_initialises(token.kind, *scalar));
+        if let Some(scalar) = scalar {
+            let value = materialize_fixed_scalar(token, token.sign, scalar, string_table).map_err(
+                |reason| {
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                },
+            )?;
 
-            resolved.push(ExpressionRpnItem::Operand(Expression::fixed_scalar(
-                value, span, value_mode,
-            )));
-            continue;
+            Expression::fixed_scalar(value, *span, value_mode.clone())
+        } else {
+            default_materialised_literal(token, *span, value_mode.clone(), context, string_table)?
         }
+    };
+    let type_id = expression.type_id;
+    let Some(item) = nodes.get_mut(index) else {
+        return Err(CompilerError::compiler_error(
+            "Pending literal resolution could not retrieve its RPN item.",
+        )
+        .into());
+    };
+    *item = ExpressionRpnItem::Operand(expression);
 
-        resolved.push(ExpressionRpnItem::Operand(default_materialised_literal(
-            &token,
-            span,
-            value_mode,
-            context,
-            string_table,
-        )?));
-    }
-
-    Ok(resolved)
+    Ok(type_id)
 }
 
 /// The direct destination when the whole fragment is one literal with a fixed expectation.

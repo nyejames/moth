@@ -13,9 +13,9 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
-use crate::compiler_frontend::hir::operators::HirUnaryOp;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::return_hir_transformation_error;
 
 use super::super::LoweredExpression;
 use super::RuntimeRpnTree;
@@ -78,24 +78,28 @@ impl<'a> HirBuilder<'a> {
                     self.lower_runtime_tree_child_for_parent(&mut prelude, operand, span)?;
                 let region = self.current_region_or_error(span)?;
                 let hir_op = self.lower_unary_op(op, span)?;
-                let result_ty = match hir_op {
-                    HirUnaryOp::Not => builtin_type_ids::BOOL,
-                    HirUnaryOp::Neg => lowered_operand.ty,
-                };
 
-                // Numeric negation is a checked effect and must go through NumericOp.
-                if *op == Operator::Negate
-                    && let Some((numeric_op, numeric_result_ty)) =
+                if *op == Operator::Negate {
+                    let Some((numeric_op, numeric_result_ty)) =
                         self.classify_checked_numeric_negation(&lowered_operand)
-                {
+                    else {
+                        return_hir_transformation_error!(
+                            "Numeric negation reached HIR lowering without a valid numeric domain",
+                            self.hir_error_location(span)
+                        );
+                    };
+
                     for prelude_statement in prelude.drain(..) {
                         self.emit_statement_to_current_block(prelude_statement, span)?;
                     }
+                    let operand = self.convert_numeric_operand_to_domain(
+                        lowered_operand,
+                        numeric_op.domain,
+                        span,
+                    )?;
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
-                        HirNumericOperands::Unary {
-                            operand: lowered_operand,
-                        },
+                        HirNumericOperands::Unary { operand },
                         numeric_result_ty,
                         span,
                     )?;
@@ -111,7 +115,7 @@ impl<'a> HirBuilder<'a> {
                         op: hir_op,
                         operand: Box::new(lowered_operand),
                     },
-                    result_ty,
+                    builtin_type_ids::BOOL,
                     ValueKind::RValue,
                     region,
                 );
@@ -149,9 +153,9 @@ impl<'a> HirBuilder<'a> {
                     return Ok(LoweredExpression { prelude, value });
                 }
 
-                // Numeric arithmetic is lowered as a checked NumericOp statement. Comparisons
-                // and booleans retain plain BinOp form, ranges use the dedicated Range node,
-                // and compiler-owned template appends use HirBinOp::StringAppend.
+                // Arithmetic always uses checked NumericOp effects. Comparisons and booleans
+                // retain their original operand types; ranges and template appends use dedicated
+                // HIR shapes.
                 if let Some((numeric_op, numeric_result_ty)) =
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
@@ -162,6 +166,7 @@ impl<'a> HirBuilder<'a> {
                         numeric_op,
                         lowered_left,
                         lowered_right,
+                        span,
                     )?;
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
@@ -175,9 +180,18 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
+                if op.numeric_operator().is_some() {
+                    return_hir_transformation_error!(
+                        format!(
+                            "Arithmetic operator {:?} reached plain HIR binary lowering without a valid numeric domain",
+                            op
+                        ),
+                        self.hir_error_location(span)
+                    );
+                }
+
                 let hir_op = self.lower_bin_op(op, span)?;
-                let result_ty =
-                    self.infer_binop_result_type(lowered_left.ty, lowered_right.ty, hir_op);
+                let result_ty = self.infer_binop_result_type(hir_op);
 
                 let value = self.make_expression(
                     span,

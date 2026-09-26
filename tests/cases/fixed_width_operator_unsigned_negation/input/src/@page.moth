@@ -1,0 +1,7 @@
+zero #U8 = 0
+
+hidden ||:
+    value = -zero
+;
+
+[:unreachable]

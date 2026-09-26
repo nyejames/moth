@@ -1,9 +1,8 @@
 //! Shared operator-policy helpers for binary expression typing.
 //!
-//! WHAT: small predicates and guards used by arithmetic, comparison, and logical
-//!      operator policy modules.
-//! WHY: operator categories share narrow rules (mixed numeric detection and fallible-carrier
-//!      rejection) that are easier to review in one place.
+//! WHAT: rejects binary operators applied to unwrapped fallible carriers.
+//! WHY: each operator category must report a source diagnostic before those carriers can reach
+//!      later pipeline stages.
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
@@ -69,19 +68,4 @@ pub(super) fn reject_fallible_operands(
     }
 
     Ok(())
-}
-
-/// Returns `true` when one operand is `Int` and the other is `Float`.
-///
-/// WHAT: detects the narrow mixed-numeric pair that implicit promotion supports.
-/// WHY: mixed `Int`/`Float` promotion is intentionally restricted so broader
-///      "compatible" types cannot quietly weaken arithmetic or comparison rules.
-pub(super) fn is_mixed_int_float(
-    lhs: TypeId,
-    rhs: TypeId,
-    type_environment: &TypeEnvironment,
-) -> bool {
-    let builtins = type_environment.builtins();
-
-    (lhs == builtins.int && rhs == builtins.float) || (lhs == builtins.float && rhs == builtins.int)
 }

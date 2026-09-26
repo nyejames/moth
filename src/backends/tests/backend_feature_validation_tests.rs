@@ -19,6 +19,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
@@ -30,7 +31,7 @@ use crate::compiler_frontend::hir::ids::{
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::reachability::{
     ReachableFloatStatementKind, collect_module_function_link_facts,
@@ -917,14 +918,14 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, span: Option<SourceSpan>) -> 
 
 fn int_add_op() -> HirNumericOp {
     HirNumericOp {
-        operator: HirNumericOperator::Add,
+        operator: NumericOperator::Add,
         domain: NumericScalar::Int,
     }
 }
 
 fn int_mul_op() -> HirNumericOp {
     HirNumericOp {
-        operator: HirNumericOperator::Multiply,
+        operator: NumericOperator::Multiply,
         domain: NumericScalar::Int,
     }
 }

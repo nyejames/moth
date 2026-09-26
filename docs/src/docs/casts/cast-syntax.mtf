@@ -15,9 +15,10 @@ target after the expression and no constructor-like conversion form.
 ]
 
 Each conversion above is infallible: `U8` fits `U64`, `Byte` and the `F16`
-finite range, and a whole number scales exactly into `Number2`. The fixed-width,
-`Byte` and `Number` targets are accepted end-state and remain queued; see
-@../progress (Progress) for current support.
+finite range, and a whole number scales exactly into `Number2`. Fixed-width and
+`Byte` cast policies and evidence are implemented in the frontend; runtime use
+remains gated on JavaScript and Wasm. The `Number`/`NumberN` family is not
+implemented. See @../progress (Progress) for current support.
 
 [codeblock, $code("moth"):
     parse_count |text String| -> Int, Error!:

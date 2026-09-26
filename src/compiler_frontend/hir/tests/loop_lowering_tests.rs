@@ -9,13 +9,12 @@ use crate::compiler_frontend::ast::ast_nodes::{
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, HirNumericOperator,
-};
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -315,7 +314,7 @@ fn lowers_range_loop_with_index_binding() {
                 HirStatementKind::NumericOp {
                     op:
                         HirNumericOp {
-                            operator: HirNumericOperator::Add,
+                            operator: NumericOperator::Add,
                             domain: NumericScalar::Int,
                         },
                     operands: HirNumericOperands::Binary { right, .. },
@@ -505,7 +504,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                     HirStatementKind::NumericOp {
                         op:
                             HirNumericOp {
-                                operator: HirNumericOperator::Add,
+                                operator: NumericOperator::Add,
                                 domain: NumericScalar::Int,
                             },
                         operands: HirNumericOperands::Binary { right, .. },

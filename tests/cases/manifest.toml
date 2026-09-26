@@ -12941,3 +12941,115 @@ path = "grouped_numeric_literal_member_access_rejected"
 tags = ["integration", "numeric", "diagnostics"]
 contract = "language.numbers.grouped_literal_member_access_keeps_default_type"
 role = "primary"
+
+[[case]]
+id = "match_u8_literal_out_of_range_rejected"
+path = "match_u8_literal_out_of_range_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.fixed_u8_out_of_range_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "match_i32_decimal_literal_rejected"
+path = "match_i32_decimal_literal_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.decimal_literal_rejected_for_i32"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_no_common_integer"
+path = "fixed_width_operator_no_common_integer"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_integer_operator_without_common_type_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_unsigned_negation"
+path = "fixed_width_operator_unsigned_negation"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.unsigned_unary_minus_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_mixed_int"
+path = "fixed_width_operator_mixed_int"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_int_mixing_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_byte_arithmetic"
+path = "fixed_width_operator_byte_arithmetic"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.byte_arithmetic_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_peer_literal_out_of_range"
+path = "fixed_width_operator_peer_literal_out_of_range"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.peer_literal_out_of_range_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_const_fold_success"
+path = "fixed_width_operator_const_fold_success"
+tags = ["integration", "language", "numeric"]
+contract = "language.numbers.fixed_operator_promotion_const_fold"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_arithmetic_rejected"
+path = "optional_fixed_width_arithmetic_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_arithmetic_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_negation_rejected"
+path = "optional_fixed_width_negation_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_negation_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_ordering_rejected"
+path = "optional_fixed_width_ordering_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_ordering_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_option_equality_mismatch_rejected"
+path = "fixed_width_option_equality_mismatch_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.fixed_width_option_equality_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_choice_payload_equality_success"
+path = "fixed_width_choice_payload_equality_success"
+tags = ["integration", "numeric", "choices", "reachability"]
+contract = "language.choices.fixed_width_payload_equality"
+role = "primary"
+
+[[case]]
+id = "byte_option_equality_success"
+path = "byte_option_equality_success"
+tags = ["integration", "numeric", "options", "reachability"]
+contract = "language.options.byte_option_equality"
+role = "primary"
+
+[[case]]
+id = "match_i32_integral_pattern_kinds_rejected"
+path = "match_i32_integral_pattern_kinds_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.integral_exponent_literal_rejected_for_i32"
+role = "primary"
+
+[[case]]
+id = "match_optional_u8_literal_pattern_success"
+path = "match_optional_u8_literal_pattern_success"
+tags = ["integration", "pattern-matching", "numeric", "options", "reachability"]
+contract = "language.patterns.optional_fixed_literal_pattern"
+role = "primary"

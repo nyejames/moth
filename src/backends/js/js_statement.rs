@@ -8,12 +8,13 @@ use crate::backends::js::js_expr::{escape_js_string, js_cast_helper_for_policy};
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -843,20 +844,20 @@ fn js_numeric_helper_for_op(op: HirNumericOp) -> Result<&'static str, CompilerEr
     let HirNumericOp { operator, domain } = op;
 
     match (operator, domain) {
-        (HirNumericOperator::Add, NumericScalar::Int) => Ok("__moth_int_add"),
-        (HirNumericOperator::Subtract, NumericScalar::Int) => Ok("__moth_int_sub"),
-        (HirNumericOperator::Multiply, NumericScalar::Int) => Ok("__moth_int_mul"),
-        (HirNumericOperator::IntegerDivide, NumericScalar::Int) => Ok("__moth_int_div"),
-        (HirNumericOperator::Remainder, NumericScalar::Int) => Ok("__moth_int_mod"),
-        (HirNumericOperator::Power, NumericScalar::Int) => Ok("__moth_int_pow"),
-        (HirNumericOperator::Negate, NumericScalar::Int) => Ok("__moth_int_neg"),
-        (HirNumericOperator::Add, NumericScalar::Float) => Ok("__moth_float_add"),
-        (HirNumericOperator::Subtract, NumericScalar::Float) => Ok("__moth_float_sub"),
-        (HirNumericOperator::Multiply, NumericScalar::Float) => Ok("__moth_float_mul"),
-        (HirNumericOperator::Divide, NumericScalar::Float) => Ok("__moth_float_div"),
-        (HirNumericOperator::Remainder, NumericScalar::Float) => Ok("__moth_float_mod"),
-        (HirNumericOperator::Power, NumericScalar::Float) => Ok("__moth_float_pow"),
-        (HirNumericOperator::Negate, NumericScalar::Float) => Ok("__moth_float_neg"),
+        (NumericOperator::Add, NumericScalar::Int) => Ok("__moth_int_add"),
+        (NumericOperator::Subtract, NumericScalar::Int) => Ok("__moth_int_sub"),
+        (NumericOperator::Multiply, NumericScalar::Int) => Ok("__moth_int_mul"),
+        (NumericOperator::IntegerDivide, NumericScalar::Int) => Ok("__moth_int_div"),
+        (NumericOperator::Remainder, NumericScalar::Int) => Ok("__moth_int_mod"),
+        (NumericOperator::Power, NumericScalar::Int) => Ok("__moth_int_pow"),
+        (NumericOperator::Negate, NumericScalar::Int) => Ok("__moth_int_neg"),
+        (NumericOperator::Add, NumericScalar::Float) => Ok("__moth_float_add"),
+        (NumericOperator::Subtract, NumericScalar::Float) => Ok("__moth_float_sub"),
+        (NumericOperator::Multiply, NumericScalar::Float) => Ok("__moth_float_mul"),
+        (NumericOperator::Divide, NumericScalar::Float) => Ok("__moth_float_div"),
+        (NumericOperator::Remainder, NumericScalar::Float) => Ok("__moth_float_mod"),
+        (NumericOperator::Power, NumericScalar::Float) => Ok("__moth_float_pow"),
+        (NumericOperator::Negate, NumericScalar::Float) => Ok("__moth_float_neg"),
         _ => Err(CompilerError::compiler_error(format!(
             "JS backend received unreachable numeric operation {op}"
         ))),

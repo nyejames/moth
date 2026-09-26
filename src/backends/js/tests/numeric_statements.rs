@@ -3,13 +3,14 @@
 use super::support::*;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -312,14 +313,14 @@ fn lower_minimal_module_with_numeric_op(
     .source
 }
 
-fn int_op(operator: HirNumericOperator) -> HirNumericOp {
+fn int_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,
         domain: NumericScalar::Int,
     }
 }
 
-fn float_op(operator: HirNumericOperator) -> HirNumericOp {
+fn float_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,
         domain: NumericScalar::Float,
@@ -333,7 +334,7 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -357,7 +358,7 @@ fn return_error_mode_int_add_lowers_to_carrier() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::ReturnError,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -383,7 +384,7 @@ fn int_neg_lowers_to_unary_helper() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Negate),
+        int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
             operand: int_expression(1, 1, types.int, region),
@@ -406,7 +407,7 @@ fn float_div_lowers_to_helper() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        float_op(HirNumericOperator::Divide),
+        float_op(NumericOperator::Divide),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: float_expression(1, 1.0, types.float, region),
@@ -449,7 +450,7 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -494,7 +495,7 @@ fn numeric_trap_returns_ok_and_throws_err() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -523,7 +524,7 @@ fn int_ok_helper_normalizes_negative_zero() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Negate),
+        int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
             operand: int_expression(1, 0, types.int, region),
@@ -547,7 +548,7 @@ fn int_check_helper_contains_overflow_error() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -577,7 +578,7 @@ fn int_helpers_delegate_to_int_check() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Add),
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -605,7 +606,7 @@ fn int_div_helper_contains_divide_by_zero_error() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::IntegerDivide),
+        int_op(NumericOperator::IntegerDivide),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -635,7 +636,7 @@ fn int_pow_helper_contains_invalid_exponent_error() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        int_op(HirNumericOperator::Power),
+        int_op(NumericOperator::Power),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 2, types.int, region),
@@ -665,7 +666,7 @@ fn float_helpers_contain_non_finite_error() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        float_op(HirNumericOperator::Add),
+        float_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: float_expression(1, 1.0, types.float, region),
@@ -700,7 +701,7 @@ fn numeric_op_arity_mismatch_returns_error() {
     let numeric_statement = statement(
         1,
         HirStatementKind::NumericOp {
-            op: int_op(HirNumericOperator::Add),
+            op: int_op(NumericOperator::Add),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Unary {
                 operand: int_expression(1, 1, types.int, region),

@@ -13,9 +13,12 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidMatchPatternReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::numeric_text::parse::{materialize_float, materialize_int};
+use crate::compiler_frontend::numeric_text::parse::{
+    literal_kind_initialises, materialize_fixed_scalar, materialize_float, materialize_int,
+};
 use crate::compiler_frontend::numeric_text::token::{
     NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
@@ -130,9 +133,30 @@ fn materialize_current_numeric_literal(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
     numeric_profile: NumericProfile,
+    fixed_scalar: Option<FixedScalar>,
 ) -> LiteralPatternResult<Expression> {
     if let Some(token) = token_stream.current_numeric_literal_in(string_table)? {
         let sign = sign_override.unwrap_or(token.sign);
+
+        if let Some(scalar) = fixed_scalar
+            && literal_kind_initialises(token.kind, scalar)
+        {
+            let value =
+                materialize_fixed_scalar(&token, sign, scalar, string_table).map_err(|reason| {
+                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                        token.source_text,
+                        reason,
+                        span,
+                    ))
+                })?;
+
+            return Ok(Expression::fixed_scalar(
+                value,
+                span,
+                ValueMode::ImmutableOwned,
+            ));
+        }
+
         return materialize_numeric_literal(&token, sign, span, string_table, numeric_profile);
     }
 
@@ -170,6 +194,7 @@ pub(super) fn parse_literal_pattern(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<Expression> {
+    let fixed_scalar = type_environment.fixed_scalar(subject_type_id);
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
         return Err(diagnostic.into());
     }
@@ -185,6 +210,7 @@ pub(super) fn parse_literal_pattern(
                 span,
                 string_table,
                 numeric_profile,
+                fixed_scalar,
             )?;
             token_stream.advance();
             expression
@@ -235,6 +261,7 @@ pub(super) fn parse_literal_pattern(
                 minus_sign_span,
                 string_table,
                 numeric_profile,
+                fixed_scalar,
             )?;
             token_stream.advance();
             expression

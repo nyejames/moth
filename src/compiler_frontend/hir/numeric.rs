@@ -11,6 +11,7 @@
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 
@@ -40,40 +41,6 @@ pub enum NumericFailureMode {
     Trap,
 }
 
-/// One backend-neutral checked numeric operator.
-///
-/// WHAT: the arithmetic shape without its scalar domain. `Divide` is real `/` and
-///       `IntegerDivide` is truncating `//`.
-/// WHY: the operator vocabulary stays fixed while numeric domains grow; HIR validation and
-///      backends combine this with `NumericScalar` to recover the full checked operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HirNumericOperator {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    IntegerDivide,
-    Remainder,
-    Power,
-    Negate,
-}
-
-impl HirNumericOperator {
-    /// The canonical operator name used in HIR display (`Int.add`, `Float.divide`, ...).
-    fn name(self) -> &'static str {
-        match self {
-            HirNumericOperator::Add => "add",
-            HirNumericOperator::Subtract => "subtract",
-            HirNumericOperator::Multiply => "multiply",
-            HirNumericOperator::Divide => "divide",
-            HirNumericOperator::IntegerDivide => "integer_divide",
-            HirNumericOperator::Remainder => "remainder",
-            HirNumericOperator::Power => "power",
-            HirNumericOperator::Negate => "negate",
-        }
-    }
-}
-
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.
 ///
 /// WHAT: identifies the scalar arithmetic operation and the domain it runs in (`Int`, `Float`,
@@ -82,14 +49,14 @@ impl HirNumericOperator {
 ///      can apply the correct checked runtime helper, without one enum variant per combination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HirNumericOp {
-    pub operator: HirNumericOperator,
+    pub operator: NumericOperator,
     pub domain: NumericScalar,
 }
 
 impl HirNumericOp {
     /// Whether the operation takes one operand.
     pub(crate) fn is_unary(self) -> bool {
-        matches!(self.operator, HirNumericOperator::Negate)
+        self.operator.is_unary()
     }
 }
 

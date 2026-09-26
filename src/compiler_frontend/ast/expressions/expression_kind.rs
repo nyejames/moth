@@ -26,6 +26,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -425,6 +426,35 @@ impl Operator {
             | Operator::NotEqual => 2,
 
             Operator::Not | Operator::Negate => 1,
+        }
+    }
+
+    /// The numeric operator this source operator applies, or `None` for logical, comparison and
+    /// range operators.
+    ///
+    /// WHY: AST typing, constant folding and HIR lowering all select the operation domain through
+    ///      `numeric_operators`, so the source-to-numeric mapping lives in one place.
+    pub(crate) fn numeric_operator(&self) -> Option<NumericOperator> {
+        match self {
+            Operator::Add => Some(NumericOperator::Add),
+            Operator::Subtract => Some(NumericOperator::Subtract),
+            Operator::Multiply => Some(NumericOperator::Multiply),
+            Operator::Divide => Some(NumericOperator::Divide),
+            Operator::IntDivide => Some(NumericOperator::IntegerDivide),
+            Operator::Modulus => Some(NumericOperator::Remainder),
+            Operator::Exponent => Some(NumericOperator::Power),
+            Operator::Negate => Some(NumericOperator::Negate),
+
+            Operator::And
+            | Operator::Or
+            | Operator::GreaterThan
+            | Operator::GreaterThanOrEqual
+            | Operator::LessThan
+            | Operator::LessThanOrEqual
+            | Operator::Equality
+            | Operator::NotEqual
+            | Operator::Not
+            | Operator::Range => None,
         }
     }
 

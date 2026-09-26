@@ -1,0 +1,5 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003"]
+message_contains = ["`Byte` has no arithmetic operators"]
