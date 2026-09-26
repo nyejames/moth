@@ -93,8 +93,10 @@ Valid target boundaries include:
 - a compiler-owned typed assertion argument slot (`condition: Bool` or `message: String?`)
 - a `then` arm whose enclosing value-producing block has an explicit receiver
 
-Generic parameter slots are not cast targets. Generic inference does not look
-through `cast`.
+Unsolved generic parameter slots are not cast targets. A generic struct or
+choice field becomes one only after the expected result fixes its parameter, as
+in `boxed Box of U16 = Box(cast small)`. Generic inference does not look through
+`cast`.
 
 These positions do not supply cast targets:
 

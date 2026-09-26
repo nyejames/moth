@@ -13053,3 +13053,17 @@ path = "match_optional_u8_literal_pattern_success"
 tags = ["integration", "pattern-matching", "numeric", "options", "reachability"]
 contract = "language.patterns.optional_fixed_literal_pattern"
 role = "primary"
+
+[[case]]
+id = "generic_fixed_literal_argument_success"
+path = "generic_fixed_literal_argument_success"
+tags = ["integration", "language", "numeric"]
+contract = "language.numbers.generic_literal_receiving_boundary"
+role = "primary"
+
+[[case]]
+id = "generic_fixed_literal_argument_out_of_range_rejected"
+path = "generic_fixed_literal_argument_out_of_range_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numbers.generic_literal_receiving_boundary"
+role = "boundary"

@@ -21,7 +21,8 @@ use crate::compiler_frontend::ast::expressions::expression::{
     ChoiceConstructInput, Expression, ExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::generic_nominal_inference::{
-    GenericNominalConstructorInput, GenericNominalTemplate, infer_generic_nominal_constructor,
+    GenericNominalConstructorContext, GenericNominalConstructorInput, GenericNominalTemplate,
+    infer_generic_nominal_constructor, seed_generic_nominal_constructor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -164,21 +165,45 @@ pub(super) fn parse_choice_construct(
     let has_parens = token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS);
     let mut parsed_payload_arguments = None;
     let mut constructor_span = variant_span;
+    let generic_declaration_kind = context
+        .generic_declarations_by_path
+        .as_ref()
+        .and_then(|declarations| declarations.get(&nominal_path))
+        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
+    let mut generic_constructor_context = GenericNominalConstructorContext {
+        nominal_path: &nominal_path,
+        display_name: &choice_name_str,
+        template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
+        span: constructor_span,
+    };
+    let mut generic_constructor_seed = None;
 
-    // Pre-parse call arguments for record variants so generic inference can
-    // inspect the raw argument expressions before type instantiation. Field
-    // expectations are derived from the payload shell so `cast` receives a
-    // concrete target for non-generic fields and `TargetIsGenericParameter` for
-    // generic parameter fields.
+    // Contextual substitutions make bound generic payload fields immediate literal receivers.
+    // Unbound parameter fields retain the parser's existing inference expectation.
     if let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload
         && has_parens
     {
         token_stream.advance(); // past variant name to '('
         constructor_span = Some(token_stream.current_span());
+        generic_constructor_context.span = constructor_span;
 
         let payload_field_views = ConstructorField::from_choice_payload_fields(fields);
-        let field_expectations =
+        let mut field_expectations =
             expectations_from_constructor_fields(&payload_field_views, path_fork);
+        if generic_declaration_kind.is_some() {
+            let seed = seed_generic_nominal_constructor(
+                generic_constructor_context,
+                context,
+                type_interner.environment(),
+                string_table,
+            )?;
+            seed.bind_parse_expectations(
+                &mut field_expectations,
+                type_interner.environment_mut_for_derived_types(),
+            );
+            generic_constructor_seed = Some(seed);
+        }
+
         let variant_name_str = string_table.resolve(variant_name).to_owned();
         let callee_name = string_table.intern(&format!("{choice_name_str}::{variant_name_str}"));
         parsed_payload_arguments = Some(parse_call_arguments_typed_with_expectations(
@@ -194,17 +219,22 @@ pub(super) fn parse_choice_construct(
         )?);
     }
 
-    let generic_declaration_kind = context
-        .generic_declarations_by_path
-        .as_ref()
-        .and_then(|declarations| declarations.get(&nominal_path))
-        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
+    // Unit variants and malformed record syntax have no argument parse to seed from, but
+    // still use contextual inference before the selected variant is instantiated.
+    if generic_declaration_kind.is_some() && generic_constructor_seed.is_none() {
+        generic_constructor_seed = Some(seed_generic_nominal_constructor(
+            generic_constructor_context,
+            context,
+            type_interner.environment(),
+            string_table,
+        )?);
+    }
 
     // ---------------------------
     //  Resolve generic parameters
     // ---------------------------
     let (instantiated_variant_defs, choice_type_id, generic_instance_key) =
-        if generic_declaration_kind.is_some() {
+        if let Some(seed) = generic_constructor_seed {
             let constructor_fields = match &variant.payload {
                 ChoiceVariantPayloadDefinition::Record { fields } => {
                     Some(ConstructorField::from_choice_payload_fields(fields))
@@ -213,14 +243,12 @@ pub(super) fn parse_choice_construct(
             };
             let inference = infer_generic_nominal_constructor(
                 GenericNominalConstructorInput {
-                    nominal_path: &nominal_path,
-                    display_name: &choice_name_str,
-                    template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
+                    context: generic_constructor_context,
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
-                    span: constructor_span,
                     path_fork,
                 },
+                seed,
                 context,
                 type_interner,
                 string_table,
