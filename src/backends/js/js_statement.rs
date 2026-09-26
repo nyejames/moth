@@ -52,10 +52,9 @@ impl<'hir> JsEmitter<'hir> {
                 result,
             } => {
                 let source_expr = self.lower_expr(source)?;
-                let helper = js_cast_helper_for_policy(*policy).ok_or_else(|| {
+                let helper = js_cast_helper_for_policy(*policy)?.ok_or_else(|| {
                     CompilerError::compiler_error(format!(
-                        "JavaScript backend: CastOp policy {:?} has no runtime helper",
-                        policy
+                        "JavaScript backend: CastOp policy {policy:?} has no runtime helper",
                     ))
                 })?;
                 let call = format!("{helper}({source_expr})");

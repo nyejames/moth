@@ -14,11 +14,16 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 #[test]
 fn float_to_int_truncates_toward_zero() {
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Int,
+    };
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(1.9),
         NumericProfile::STANDARD,
     )
@@ -26,7 +31,7 @@ fn float_to_int_truncates_toward_zero() {
     assert_eq!(result, BuiltinCastLiteral::Int(1));
 
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(-1.9),
         NumericProfile::STANDARD,
     )
@@ -36,8 +41,12 @@ fn float_to_int_truncates_toward_zero() {
 
 #[test]
 fn float_to_int_rejects_non_finite_with_invalid_value_code() {
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Int,
+    };
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(f64::NAN),
         NumericProfile::STANDARD,
     )
@@ -45,7 +54,7 @@ fn float_to_int_rejects_non_finite_with_invalid_value_code() {
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(f64::INFINITY),
         NumericProfile::STANDARD,
     )
@@ -55,8 +64,12 @@ fn float_to_int_rejects_non_finite_with_invalid_value_code() {
 
 #[test]
 fn float_to_int_rejects_out_of_i32_range_with_out_of_range_code() {
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Int,
+    };
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(3_000_000_000.0),
         NumericProfile::STANDARD,
     )
@@ -64,7 +77,7 @@ fn float_to_int_rejects_out_of_i32_range_with_out_of_range_code() {
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        policy,
         &BuiltinCastLiteral::Float(-3_000_000_000.0),
         NumericProfile::STANDARD,
     )
@@ -75,7 +88,10 @@ fn float_to_int_rejects_out_of_i32_range_with_out_of_range_code() {
 #[test]
 fn float_to_int_accepts_i32_max_boundary() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &BuiltinCastLiteral::Float(i32::MAX as f64),
         NumericProfile::STANDARD,
     )
@@ -86,7 +102,10 @@ fn float_to_int_accepts_i32_max_boundary() {
 #[test]
 fn float_to_int_accepts_i32_min_boundary() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &BuiltinCastLiteral::Float(i32::MIN as f64),
         NumericProfile::STANDARD,
     )
@@ -97,7 +116,10 @@ fn float_to_int_accepts_i32_min_boundary() {
 #[test]
 fn float_to_int_rejects_one_above_i32_max() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &BuiltinCastLiteral::Float((i32::MAX as f64) + 1.0),
         NumericProfile::STANDARD,
     )
@@ -108,7 +130,10 @@ fn float_to_int_rejects_one_above_i32_max() {
 #[test]
 fn float_to_int_rejects_one_below_i32_min() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &BuiltinCastLiteral::Float((i32::MIN as f64) - 1.0),
         NumericProfile::STANDARD,
     )
@@ -124,7 +149,10 @@ fn float_to_int_accepts_wider_values_under_int64() {
     };
 
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &BuiltinCastLiteral::Float(3_000_000_000.0),
         int64_profile,
     )
@@ -190,7 +218,7 @@ fn char_to_int_returns_unicode_scalar_value() {
 #[test]
 fn string_to_int_is_strict_base_10_with_optional_sign() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("-42".to_string()),
         NumericProfile::STANDARD,
     )
@@ -198,7 +226,7 @@ fn string_to_int_is_strict_base_10_with_optional_sign() {
     assert_eq!(result, BuiltinCastLiteral::Int(-42));
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("3.14".to_string()),
         NumericProfile::STANDARD,
     )
@@ -206,7 +234,7 @@ fn string_to_int_is_strict_base_10_with_optional_sign() {
     assert_eq!(error.code, BuiltinErrorCode::IntParseInvalidFormat);
 
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("1_000".to_string()),
         NumericProfile::STANDARD,
     )
@@ -214,7 +242,7 @@ fn string_to_int_is_strict_base_10_with_optional_sign() {
     assert_eq!(result, BuiltinCastLiteral::Int(1000));
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("1__000".to_string()),
         NumericProfile::STANDARD,
     )
@@ -225,7 +253,7 @@ fn string_to_int_is_strict_base_10_with_optional_sign() {
 #[test]
 fn string_to_int_rejects_surrounding_whitespace() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String(" 42 ".to_string()),
         NumericProfile::STANDARD,
     )
@@ -236,7 +264,7 @@ fn string_to_int_rejects_surrounding_whitespace() {
 #[test]
 fn string_to_int_rejects_unary_plus() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("+42".to_string()),
         NumericProfile::STANDARD,
     )
@@ -247,7 +275,7 @@ fn string_to_int_rejects_unary_plus() {
 #[test]
 fn string_to_int_rejects_exponent_forms() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("1e3".to_string()),
         NumericProfile::STANDARD,
     )
@@ -255,7 +283,7 @@ fn string_to_int_rejects_exponent_forms() {
     assert_eq!(error.code, BuiltinErrorCode::IntParseInvalidFormat);
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("1E3".to_string()),
         NumericProfile::STANDARD,
     )
@@ -266,7 +294,7 @@ fn string_to_int_rejects_exponent_forms() {
 #[test]
 fn string_to_int_reports_overflow_as_out_of_range() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("2147483648".to_string()),
         NumericProfile::STANDARD,
     )
@@ -274,7 +302,7 @@ fn string_to_int_reports_overflow_as_out_of_range() {
     assert_eq!(error.code, BuiltinErrorCode::IntParseOutOfRange);
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("-2147483649".to_string()),
         NumericProfile::STANDARD,
     )
@@ -285,7 +313,7 @@ fn string_to_int_reports_overflow_as_out_of_range() {
 #[test]
 fn string_to_int_accepts_i32_max_boundary() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String(i32::MAX.to_string()),
         NumericProfile::STANDARD,
     )
@@ -296,7 +324,7 @@ fn string_to_int_accepts_i32_max_boundary() {
 #[test]
 fn string_to_int_rejects_one_above_i32_max() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String((i64::from(i32::MAX) + 1).to_string()),
         NumericProfile::STANDARD,
     )
@@ -307,7 +335,7 @@ fn string_to_int_rejects_one_above_i32_max() {
 #[test]
 fn string_to_int_accepts_i32_min_boundary() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String(i32::MIN.to_string()),
         NumericProfile::STANDARD,
     )
@@ -318,7 +346,7 @@ fn string_to_int_accepts_i32_min_boundary() {
 #[test]
 fn string_to_int_rejects_one_below_i32_min() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String((i64::from(i32::MIN) - 1).to_string()),
         NumericProfile::STANDARD,
     )
@@ -334,7 +362,7 @@ fn string_to_int_accepts_wider_values_under_int64() {
     };
 
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         &BuiltinCastLiteral::String("3000000000".to_string()),
         int64_profile,
     )
@@ -345,7 +373,7 @@ fn string_to_int_accepts_wider_values_under_int64() {
 #[test]
 fn string_to_float_rejects_nan_and_infinity_as_invalid_format() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &BuiltinCastLiteral::String("NaN".to_string()),
         NumericProfile::STANDARD,
     )
@@ -353,7 +381,7 @@ fn string_to_float_rejects_nan_and_infinity_as_invalid_format() {
     assert_eq!(error.code, BuiltinErrorCode::FloatParseInvalidFormat);
 
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &BuiltinCastLiteral::String("Infinity".to_string()),
         NumericProfile::STANDARD,
     )
@@ -364,7 +392,7 @@ fn string_to_float_rejects_nan_and_infinity_as_invalid_format() {
 #[test]
 fn string_to_float_parses_ordinary_decimal_text() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &BuiltinCastLiteral::String("3.5e2".to_string()),
         NumericProfile::STANDARD,
     )
@@ -386,7 +414,7 @@ fn string_to_float_uses_shared_numeric_text_grammar() {
 
     for (source, expected) in valid_cases {
         let result = apply_builtin_cast_policy(
-            BuiltinCastPolicyId::StringToFloat,
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
             &BuiltinCastLiteral::String(source.to_string()),
             NumericProfile::STANDARD,
         )
@@ -412,7 +440,7 @@ fn string_to_float_uses_shared_numeric_text_grammar() {
 
     for source in invalid_format_cases {
         let error = apply_builtin_cast_policy(
-            BuiltinCastPolicyId::StringToFloat,
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
             &BuiltinCastLiteral::String(source.to_string()),
             NumericProfile::STANDARD,
         )
@@ -425,7 +453,7 @@ fn string_to_float_uses_shared_numeric_text_grammar() {
     }
 
     let out_of_range_error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &BuiltinCastLiteral::String("1e10000".to_string()),
         NumericProfile::STANDARD,
     )
@@ -439,7 +467,7 @@ fn string_to_float_uses_shared_numeric_text_grammar() {
 #[test]
 fn string_to_float_rejects_surrounding_whitespace() {
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &BuiltinCastLiteral::String(" 1.0 ".to_string()),
         NumericProfile::STANDARD,
     )
@@ -453,10 +481,14 @@ fn int_to_float_rounds_at_float32_precision() {
         int_width: IntWidth::Bits32,
         float_precision: FloatPrecision::Bits32,
     };
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Int,
+        target: NumericScalar::Float,
+    };
 
     // 16777217 is not representable in f32; single rounding gives 16777216.
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::IntToFloat,
+        policy,
         &BuiltinCastLiteral::Int(16_777_217),
         float32_profile,
     )
@@ -464,7 +496,7 @@ fn int_to_float_rounds_at_float32_precision() {
     assert_eq!(result, BuiltinCastLiteral::Float(16_777_216.0));
 
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::IntToFloat,
+        policy,
         &BuiltinCastLiteral::Int(16_777_217),
         NumericProfile::STANDARD,
     )
@@ -524,7 +556,7 @@ fn string_to_char_rejects_empty_with_invalid_format_code() {
 #[test]
 fn int_to_string_uses_signed_base_10() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::IntToString,
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         &BuiltinCastLiteral::Int(-42),
         NumericProfile::STANDARD,
     )
@@ -535,7 +567,7 @@ fn int_to_string_uses_signed_base_10() {
 #[test]
 fn float_to_string_uses_stable_decimal() {
     let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToString,
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
         &BuiltinCastLiteral::Float(1.5),
         NumericProfile::STANDARD,
     )
@@ -556,7 +588,7 @@ fn float_to_string_follows_moth_contract() {
 
     for (value, expected) in cases {
         let result = apply_builtin_cast_policy(
-            BuiltinCastPolicyId::FloatToString,
+            BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
             &BuiltinCastLiteral::Float(*value),
             NumericProfile::STANDARD,
         )
@@ -567,6 +599,30 @@ fn float_to_string_follows_moth_contract() {
             "Float -> String for {value}"
         );
     }
+}
+
+#[test]
+fn float_to_string_uses_profile_precision_for_f32_exact_carrier() {
+    let policy = BuiltinCastPolicyId::NumericToString(NumericScalar::Float);
+    let carrier = BuiltinCastLiteral::Float(f64::from(0.1_f32));
+    let float32_profile = NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits32,
+    };
+
+    let float32_result = apply_builtin_cast_policy(policy, &carrier, float32_profile)
+        .expect("Float -> String should fold under Float32");
+    assert_eq!(
+        float32_result,
+        BuiltinCastLiteral::String("0.1".to_string())
+    );
+
+    let standard_result = apply_builtin_cast_policy(policy, &carrier, NumericProfile::STANDARD)
+        .expect("Float -> String should fold under the standard profile");
+    assert_eq!(
+        standard_result,
+        BuiltinCastLiteral::String("0.10000000149011612".to_string())
+    );
 }
 
 #[test]
@@ -631,6 +687,469 @@ fn error_to_string_returns_error_message_only() {
 fn const_foldable_policy_marker_excludes_error_materialization_policies() {
     assert!(!BuiltinCastPolicyId::StringToError.is_const_foldable());
     assert!(!BuiltinCastPolicyId::ErrorToString.is_const_foldable());
-    assert!(BuiltinCastPolicyId::StringToInt.is_const_foldable());
-    assert!(BuiltinCastPolicyId::IntToString.is_const_foldable());
+    assert!(BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int).is_const_foldable());
+    assert!(BuiltinCastPolicyId::NumericToString(NumericScalar::Int).is_const_foldable());
+}
+
+#[test]
+fn u64_to_f32_rounds_once_above_f64_double_rounding_midpoint() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    // One above the F32 midpoint rounds up directly; F64 drops the final +1 and makes it a tie.
+    let value = (1_u64 << 60) + (1_u64 << 36) + 1;
+    let source = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::unsigned(FixedScalar::U64, value).expect("the test value fits U64"),
+    );
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::U64),
+            target: NumericScalar::Fixed(FixedScalar::F32),
+        },
+        &source,
+        NumericProfile::STANDARD,
+    )
+    .expect("U64 -> F32 should fold");
+
+    // The exact upper neighbor is 2^60 + 2^37, independent of either cast path below.
+    let direct_result =
+        FixedScalarValue::binary_float(FixedScalar::F32, ((1_u64 << 60) + (1_u64 << 37)) as f64)
+            .expect("the direct F32 result is finite");
+    let double_rounded_result =
+        FixedScalarValue::binary_float(FixedScalar::F32, f64::from((value as f64) as f32))
+            .expect("the double-rounded F32 result is finite");
+
+    assert_ne!(direct_result, double_rounded_result);
+    assert_eq!(result, BuiltinCastLiteral::Fixed(direct_result));
+    assert_ne!(result, BuiltinCastLiteral::Fixed(double_rounded_result));
+}
+
+#[test]
+fn two_pow_53_plus_one_to_f64_rounds_to_two_pow_53() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let value = (1u64 << 53) + 1;
+    let source = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::unsigned(FixedScalar::U64, value).expect("2^53+1 fits U64"),
+    );
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::U64),
+            target: NumericScalar::Fixed(FixedScalar::F64),
+        },
+        &source,
+        NumericProfile::STANDARD,
+    )
+    .expect("2^53+1 -> F64 should fold");
+    let expected = FixedScalarValue::binary_float(FixedScalar::F64, 9_007_199_254_740_992.0)
+        .expect("2^53 is finite");
+    assert_eq!(result, BuiltinCastLiteral::Fixed(expected));
+}
+
+#[test]
+fn integer_to_integer_rejects_out_of_range_with_dedicated_code() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::I64),
+            target: NumericScalar::Fixed(FixedScalar::U64),
+        },
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64::MIN fits I64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("I64::MIN -> U64 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::IntCastOutOfRange);
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::U64),
+            target: NumericScalar::Fixed(FixedScalar::I64),
+        },
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("U64::MAX -> I64 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::IntCastOutOfRange);
+}
+
+#[test]
+fn float64_to_f32_rejects_non_finite_result() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::F64),
+            target: NumericScalar::Fixed(FixedScalar::F32),
+        },
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, 1e39).expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("1e39 -> F32 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastNonFinite);
+}
+
+#[test]
+fn integer_to_f16_checks_finite_magnitude() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Int,
+        target: NumericScalar::Fixed(FixedScalar::F16),
+    };
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Int(65_519),
+        NumericProfile::STANDARD,
+    )
+    .expect("65519 -> F16 should fold");
+    let expected = FixedScalarValue::binary_float(FixedScalar::F16, round_f64_to_f16(65_519.0))
+        .expect("65519 rounds finite");
+    assert_eq!(result, BuiltinCastLiteral::Fixed(expected));
+    assert_eq!(
+        expected.as_f64().expect("F16 reads as f64").to_bits(),
+        65_504.0_f64.to_bits()
+    );
+
+    let error = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Int(65_520),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("65520 -> F16 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastNonFinite);
+}
+
+#[test]
+fn float_to_f16_rounds_once_and_rejects_non_finite() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Fixed(FixedScalar::F64),
+        target: NumericScalar::Fixed(FixedScalar::F16),
+    };
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, 65_519.0).expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect("65519.0 -> F16 should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F16, round_f64_to_f16(65_519.0))
+                .expect("finite F16")
+        )
+    );
+
+    let error = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, 65_520.0).expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("65520.0 -> F16 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastNonFinite);
+}
+
+#[test]
+fn float64_to_f16_rounds_directly_without_f32_intermediate() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+
+    // Deterministic witness: 1.000488281251 sits just above the F16
+    // midpoint between 1.0 and 1.0009765625. The hair (~1e-12) survives the
+    // `f64` carrier but collapses in the `f32` intermediate, so direct
+    // rounding goes up while F64 -> F32 -> F16 ties-to-even rounds down.
+    let value = 1.000488281251_f64;
+    let direct = round_f64_to_f16(value);
+    let via_f32 = round_f64_to_f16(f64::from(value as f32));
+    assert_ne!(
+        direct.to_bits(),
+        via_f32.to_bits(),
+        "test needs a direct-vs-intermediate rounding witness"
+    );
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::F64),
+            target: NumericScalar::Fixed(FixedScalar::F16),
+        },
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, value).expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect("witness -> F16 should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F16, direct).expect("finite F16")
+        )
+    );
+}
+
+#[test]
+fn float_to_int_boundary_cases() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let i64_policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Fixed(FixedScalar::F64),
+        target: NumericScalar::Fixed(FixedScalar::I64),
+    };
+    let result = apply_builtin_cast_policy(
+        i64_policy,
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, -9_223_372_036_854_775_808.0)
+                .expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect("-2^63 -> I64 should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64::MIN fits")
+        )
+    );
+
+    let error = apply_builtin_cast_policy(
+        i64_policy,
+        &BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F64, 9_223_372_036_854_775_808.0)
+                .expect("finite F64"),
+        ),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("2^63 -> I64 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Fixed(FixedScalar::U8),
+        },
+        &BuiltinCastLiteral::Float(f64::NAN),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("NaN -> U8 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
+
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Fixed(FixedScalar::U8),
+        },
+        &BuiltinCastLiteral::Float(-0.9),
+        NumericProfile::STANDARD,
+    )
+    .expect("-0.9 -> U8 should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::unsigned(FixedScalar::U8, 0).expect("0 fits U8")
+        )
+    );
+}
+
+#[test]
+fn byte_u8_round_trip_preserves_value() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let byte = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::unsigned(FixedScalar::Byte, 255).expect("255 fits Byte"),
+    );
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::ByteToU8,
+        &byte,
+        NumericProfile::STANDARD,
+    )
+    .expect("Byte 255 -> U8 should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::unsigned(FixedScalar::U8, 255).expect("255 fits U8")
+        )
+    );
+
+    let back = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::U8ToByte,
+        &result,
+        NumericProfile::STANDARD,
+    )
+    .expect("U8 255 -> Byte should fold");
+    assert_eq!(back, byte);
+}
+
+#[test]
+fn numeric_to_string_formats_each_domain_at_its_own_precision() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    // Integers use exact decimal text, including values above the `Int` range and the signed
+    // minimum, which no `Int` or `Float` intermediate could carry.
+    let cases = [
+        (
+            NumericScalar::Fixed(FixedScalar::U64),
+            BuiltinCastLiteral::Fixed(
+                FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("u64::MAX fits U64"),
+            ),
+            "18446744073709551615",
+        ),
+        (
+            NumericScalar::Fixed(FixedScalar::I64),
+            BuiltinCastLiteral::Fixed(
+                FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("i64::MIN fits I64"),
+            ),
+            "-9223372036854775808",
+        ),
+        (NumericScalar::Int, BuiltinCastLiteral::Int(-42), "-42"),
+    ];
+
+    for (scalar, source, expected) in cases {
+        let result = apply_builtin_cast_policy(
+            BuiltinCastPolicyId::NumericToString(scalar),
+            &source,
+            NumericProfile::STANDARD,
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} -> String should fold: {error:?}"));
+        assert_eq!(result, BuiltinCastLiteral::String(expected.to_string()));
+    }
+
+    // A binary float formats at its own precision: `F32` prints the shortest f32 text and `F16`
+    // prints the shortest text that reads back at binary16 precision.
+    let float_cases = [
+        (
+            NumericScalar::Fixed(FixedScalar::F32),
+            BuiltinCastLiteral::Fixed(
+                FixedScalarValue::binary_float(FixedScalar::F32, f64::from(0.1_f32))
+                    .expect("0.1f32 is F32-exact"),
+            ),
+            "0.1",
+        ),
+        (
+            NumericScalar::Fixed(FixedScalar::F16),
+            BuiltinCastLiteral::Fixed(
+                FixedScalarValue::binary_float(FixedScalar::F16, 0.099_975_585_937_5)
+                    .expect("nearest binary16 to 0.1"),
+            ),
+            "0.1",
+        ),
+        (NumericScalar::Float, BuiltinCastLiteral::Float(1.5), "1.5"),
+    ];
+
+    for (scalar, source, expected) in float_cases {
+        let result = apply_builtin_cast_policy(
+            BuiltinCastPolicyId::NumericToString(scalar),
+            &source,
+            NumericProfile::STANDARD,
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} -> String should fold: {error:?}"));
+        assert_eq!(result, BuiltinCastLiteral::String(expected.to_string()));
+    }
+}
+
+#[test]
+fn string_to_numeric_parses_fixed_destinations_at_their_own_ranges() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let scalar = NumericScalar::Fixed(FixedScalar::U8);
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(scalar),
+        &BuiltinCastLiteral::String("255".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect("255 fits U8");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(FixedScalarValue::unsigned(FixedScalar::U8, 255).unwrap())
+    );
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(scalar),
+        &BuiltinCastLiteral::String("256".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("256 does not fit U8");
+    assert_eq!(error.code, BuiltinErrorCode::IntParseOutOfRange);
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(scalar),
+        &BuiltinCastLiteral::String("-1".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("a negative spelling has no unsigned reading");
+    assert_eq!(error.code, BuiltinErrorCode::IntParseOutOfRange);
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(scalar),
+        &BuiltinCastLiteral::String("abc".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("non-numeric text is a format failure");
+    assert_eq!(error.code, BuiltinErrorCode::IntParseInvalidFormat);
+
+    // A `U64` destination accepts its full range, which no `Int`-bounded parse could.
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::U64)),
+        &BuiltinCastLiteral::String(u64::MAX.to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect("u64::MAX fits U64");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).unwrap())
+    );
+}
+
+#[test]
+fn string_to_binary_float_rounds_at_the_destination_and_reports_its_own_failures() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let f16 = NumericScalar::Fixed(FixedScalar::F16);
+    let result = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(f16),
+        &BuiltinCastLiteral::String("0.1".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect("0.1 rounds to a finite binary16");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::binary_float(FixedScalar::F16, 0.099_975_585_937_5).unwrap()
+        )
+    );
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(f16),
+        &BuiltinCastLiteral::String("70000".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("70000 is beyond the largest finite binary16");
+    assert_eq!(error.code, BuiltinErrorCode::FloatParseOutOfRange);
+
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(f16),
+        &BuiltinCastLiteral::String("1.5.5".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("malformed text is a format failure");
+    assert_eq!(error.code, BuiltinErrorCode::FloatParseInvalidFormat);
+
+    // `NaN` spelling is rejected by the grammar for every runtime parse, matching the `Float` row.
+    let error = apply_builtin_cast_policy(
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::F64)),
+        &BuiltinCastLiteral::String("NaN".to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("NaN is not Moth numeric text");
+    assert_eq!(error.code, BuiltinErrorCode::FloatParseInvalidFormat);
 }

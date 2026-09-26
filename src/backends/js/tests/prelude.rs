@@ -195,7 +195,7 @@ fn runtime_prelude_contains_cast_helpers() {
 
     assert!(
         source.contains("function __moth_cast_int("),
-        "prelude must contain __moth_cast_int when StringToInt is used"
+        "prelude must contain __moth_cast_int when the String -> Int numeric text parse is used"
     );
     assert!(
         source.contains("function __moth_cast_int_in_range(value)"),

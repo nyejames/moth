@@ -1,11 +1,11 @@
 //! Pure builtin cast policy implementations.
 //!
-//! WHAT: implements every initial builtin evidence row from the cast plan as a
-//!      pure function over a `BuiltinCastLiteral` input and the compilation boundary's
-//!      `NumericProfile`. The helpers return
-//!      either a folded `BuiltinCastLiteral` value or a `BuiltinCastError` that
-//!      carries the stable `BuiltinErrorCode` so diagnostic and runtime layers
-//!      can render the same code path.
+//! WHAT: implements every builtin cast policy as a pure function over a
+//!      `BuiltinCastLiteral` input and the compilation boundary's
+//!      `NumericProfile`. The helpers return either a folded
+//!      `BuiltinCastLiteral` value or a `BuiltinCastError` that carries the
+//!      stable `BuiltinErrorCode` so diagnostic and runtime layers can render
+//!      the same code path.
 //! WHY: the policy owner is the single source of truth for the actual rules.
 //!      The constant folder and later backend phases can ask the policy owner
 //!      for the same answer instead of duplicating per-cast ad hoc match logic.
@@ -15,10 +15,14 @@
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::numeric_text::parse::{
-    parse_numeric_text_to_float, parse_numeric_text_to_int,
+    parse_numeric_text_to_fixed_scalar, parse_numeric_text_to_float, parse_numeric_text_to_int,
 };
 
 /// A literal scalar value in policy space.
@@ -36,7 +40,12 @@ pub(crate) enum BuiltinCastLiteral {
     Float(f64),
     String(String),
     Char(char),
-    Error { message: String, code: i32 },
+    Error {
+        message: String,
+        code: i32,
+    },
+    /// One materialised fixed-width scalar or `Byte` value.
+    Fixed(FixedScalarValue),
 }
 
 impl BuiltinCastLiteral {
@@ -49,6 +58,7 @@ impl BuiltinCastLiteral {
             BuiltinCastLiteral::String(_) => "String",
             BuiltinCastLiteral::Char(_) => "Char",
             BuiltinCastLiteral::Error { .. } => "Error",
+            BuiltinCastLiteral::Fixed(value) => value.scalar().name(),
         }
     }
 }
@@ -76,80 +86,285 @@ pub(crate) fn apply_builtin_cast_policy(
     numeric_profile: NumericProfile,
 ) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     match policy {
-        BuiltinCastPolicyId::IntToFloat => int_to_float(source, numeric_profile),
-        BuiltinCastPolicyId::IntToString => int_to_string(source),
-        BuiltinCastPolicyId::FloatToString => float_to_string(source, numeric_profile),
+        BuiltinCastPolicyId::NumericConversion {
+            source: from,
+            target,
+        } => numeric_conversion(from, target, source, numeric_profile),
+        BuiltinCastPolicyId::ByteToU8 => retag_octet(source, FixedScalar::Byte, FixedScalar::U8),
+        BuiltinCastPolicyId::U8ToByte => retag_octet(source, FixedScalar::U8, FixedScalar::Byte),
+        BuiltinCastPolicyId::NumericToString(scalar) => {
+            numeric_to_string(scalar, source, numeric_profile)
+        }
         BuiltinCastPolicyId::BoolToString => bool_to_string(source),
         BuiltinCastPolicyId::CharToString => char_to_string(source),
         BuiltinCastPolicyId::CharToInt => char_to_int(source),
         BuiltinCastPolicyId::StringToError => string_to_error(source),
         BuiltinCastPolicyId::ErrorToString => error_to_string(source),
-        BuiltinCastPolicyId::FloatToInt => float_to_int(source, numeric_profile),
         BuiltinCastPolicyId::IntToChar => int_to_char(source),
-        BuiltinCastPolicyId::StringToInt => string_to_int(source, numeric_profile),
-        BuiltinCastPolicyId::StringToFloat => string_to_float(source, numeric_profile),
+        BuiltinCastPolicyId::StringToNumeric(scalar) => {
+            string_to_numeric(scalar, source, numeric_profile)
+        }
         BuiltinCastPolicyId::StringToBool => string_to_bool(source),
         BuiltinCastPolicyId::StringToChar => string_to_char(source),
     }
 }
 
 // -----------------------------------------------------------
+//  Numeric conversions
+// -----------------------------------------------------------
+
+/// One numeric source value in exact policy space.
+#[derive(Clone, Copy)]
+enum ExactNumericValue {
+    /// Any integer domain, widened so `U64` and signed values compare exactly.
+    Integer(i128),
+    /// Any binary-float domain in its exact `f64` carrier.
+    BinaryFloat(f64),
+}
+
+impl std::fmt::Display for ExactNumericValue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExactNumericValue::Integer(value) => write!(formatter, "{value}"),
+            ExactNumericValue::BinaryFloat(value) => write!(formatter, "{value}"),
+        }
+    }
+}
+
+/// Implements every numeric-to-numeric conversion.
+///
+/// WHAT: an integer keeps its exact value and must fit an integer target (`IntCastOutOfRange`).
+///       A binary-float target rounds once, ties-to-even, directly from the source value and
+///       fails only on a non-finite result (`FloatCastNonFinite`). A float source truncates
+///       toward zero before an integer target's range check (`FloatCastToIntInvalidValue` for a
+///       non-finite source, `FloatCastToIntOutOfRange` otherwise).
+/// WHY: casts permit exactly this rounding and truncation, so one owner implements the rules
+///      the evidence classifier promises.
+fn numeric_conversion(
+    source_scalar: NumericScalar,
+    target_scalar: NumericScalar,
+    source: &BuiltinCastLiteral,
+    numeric_profile: NumericProfile,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+    let source_name = source_scalar.name();
+    let target_name = target_scalar.name();
+
+    let Some(value) = exact_numeric_value(source_scalar, source) else {
+        return Err(BuiltinCastError::new(
+            BuiltinErrorCode::Unsupported,
+            format!(
+                "{source_name} -> {target_name} requires a {source_name} source, found {}",
+                source.type_name()
+            ),
+        ));
+    };
+
+    let failure = |code: BuiltinErrorCode, reason: &str| {
+        BuiltinCastError::new(
+            code,
+            format!("{source_name} -> {target_name} source {value} {reason}"),
+        )
+    };
+
+    if let Some(precision) = target_scalar.binary_float_precision(numeric_profile) {
+        let rounded = match value {
+            ExactNumericValue::Integer(integer) => precision.round_integer(integer),
+            ExactNumericValue::BinaryFloat(float) => precision.round(float),
+        };
+
+        return binary_float_literal(target_scalar, rounded).ok_or_else(|| {
+            failure(
+                BuiltinErrorCode::FloatCastNonFinite,
+                "produced a non-finite value",
+            )
+        });
+    }
+
+    let (integer, out_of_range_code) = match value {
+        ExactNumericValue::Integer(integer) => (integer, BuiltinErrorCode::IntCastOutOfRange),
+
+        ExactNumericValue::BinaryFloat(float) => {
+            if !float.is_finite() {
+                return Err(failure(
+                    BuiltinErrorCode::FloatCastToIntInvalidValue,
+                    "is not finite",
+                ));
+            }
+
+            // `as` saturates at the `i128` bounds, far outside every target range, so any
+            // saturated value still fails the range check below.
+            (
+                float.trunc() as i128,
+                BuiltinErrorCode::FloatCastToIntOutOfRange,
+            )
+        }
+    };
+
+    integer_literal(target_scalar, integer, numeric_profile)
+        .ok_or_else(|| failure(out_of_range_code, &format!("is out of {target_name} range")))
+}
+
+/// Reads one numeric literal of `scalar` into exact policy space.
+fn exact_numeric_value(
+    scalar: NumericScalar,
+    literal: &BuiltinCastLiteral,
+) -> Option<ExactNumericValue> {
+    match (scalar, literal) {
+        (NumericScalar::Int, BuiltinCastLiteral::Int(value)) => {
+            Some(ExactNumericValue::Integer(i128::from(*value)))
+        }
+
+        (NumericScalar::Float, BuiltinCastLiteral::Float(value)) => {
+            Some(ExactNumericValue::BinaryFloat(*value))
+        }
+
+        (NumericScalar::Fixed(expected), BuiltinCastLiteral::Fixed(value))
+            if value.scalar() == expected =>
+        {
+            match expected.class() {
+                FixedScalarClass::SignedInteger => value
+                    .as_i64()
+                    .map(|v| ExactNumericValue::Integer(i128::from(v))),
+                FixedScalarClass::UnsignedInteger => value
+                    .as_u64()
+                    .map(|v| ExactNumericValue::Integer(i128::from(v))),
+                FixedScalarClass::BinaryFloat => value.as_f64().map(ExactNumericValue::BinaryFloat),
+                FixedScalarClass::Octet => None,
+            }
+        }
+
+        _ => None,
+    }
+}
+
+/// Materialises an exact integer in an integer domain, or `None` when it is out of range.
+fn integer_literal(
+    scalar: NumericScalar,
+    value: i128,
+    numeric_profile: NumericProfile,
+) -> Option<BuiltinCastLiteral> {
+    match scalar {
+        NumericScalar::Int => i64::try_from(value)
+            .ok()
+            .filter(|value| numeric_profile.int_width.contains(*value))
+            .map(BuiltinCastLiteral::Int),
+
+        NumericScalar::Fixed(fixed) => match fixed.class() {
+            FixedScalarClass::SignedInteger => i64::try_from(value)
+                .ok()
+                .and_then(|value| FixedScalarValue::signed(fixed, value)),
+            FixedScalarClass::UnsignedInteger => u64::try_from(value)
+                .ok()
+                .and_then(|value| FixedScalarValue::unsigned(fixed, value)),
+            FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
+        }
+        .map(BuiltinCastLiteral::Fixed),
+
+        NumericScalar::Float => None,
+    }
+}
+
+/// Wraps a value already rounded to a binary-float domain, or `None` when it is non-finite.
+fn binary_float_literal(scalar: NumericScalar, rounded: f64) -> Option<BuiltinCastLiteral> {
+    match scalar {
+        NumericScalar::Float => rounded
+            .is_finite()
+            .then_some(BuiltinCastLiteral::Float(rounded)),
+        NumericScalar::Fixed(fixed) => {
+            FixedScalarValue::binary_float(fixed, rounded).map(BuiltinCastLiteral::Fixed)
+        }
+        NumericScalar::Int => None,
+    }
+}
+
+/// Re-tags one octet between `Byte` and `U8`, which share every value.
+fn retag_octet(
+    source: &BuiltinCastLiteral,
+    from: FixedScalar,
+    to: FixedScalar,
+) -> Result<BuiltinCastLiteral, BuiltinCastError> {
+    match source {
+        BuiltinCastLiteral::Fixed(value) if value.scalar() == from => value
+            .as_u64()
+            .and_then(|octet| FixedScalarValue::unsigned(to, octet))
+            .map(BuiltinCastLiteral::Fixed),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        BuiltinCastError::new(
+            BuiltinErrorCode::Unsupported,
+            format!(
+                "{} -> {} requires a {} source, found {}",
+                from.name(),
+                to.name(),
+                from.name(),
+                source.type_name()
+            ),
+        )
+    })
+}
+
+// -----------------------------------------------------------
 //  Infallible policies
 // -----------------------------------------------------------
 
-fn int_to_float(
+/// Implements every numeric-to-text conversion.
+///
+/// WHAT: integer domains format with Rust's decimal integer formatting, which is already the Moth
+///       contract; binary-float domains format through the Moth finite-float formatter at their own
+///       precision, so `Float` follows the profile while fixed widths follow theirs.
+/// WHY: one policy owns the numeric text contract for every numeric domain, so `F32` and `Float`
+///      under `Float32` cannot drift apart, and each domain formats without an `Int`/`Float`
+///      intermediate that could lose a `U64` or round a wide fixed value.
+fn numeric_to_string(
+    scalar: NumericScalar,
     source: &BuiltinCastLiteral,
     numeric_profile: NumericProfile,
 ) -> Result<BuiltinCastLiteral, BuiltinCastError> {
-    let BuiltinCastLiteral::Int(value) = source else {
+    let Some(value) = exact_numeric_value(scalar, source) else {
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
             format!(
-                "Int -> Float requires an Int source, found {}",
+                "{} -> String requires a {} source, found {}",
+                scalar.name(),
+                scalar.name(),
                 source.type_name()
             ),
         ));
     };
 
-    // Single direct rounding at the destination precision, never via an f64 intermediate.
-    Ok(BuiltinCastLiteral::Float(
-        numeric_profile.float_precision.round_int(*value),
-    ))
+    match value {
+        ExactNumericValue::Integer(integer) => Ok(BuiltinCastLiteral::String(integer.to_string())),
+        ExactNumericValue::BinaryFloat(float) => {
+            // Every scalar that reads back as a binary float has a precision, so this arm only
+            // guards the shared reader against a future domain that does not.
+            let Some(precision) = scalar.binary_float_precision(numeric_profile) else {
+                return Err(BuiltinCastError::new(
+                    BuiltinErrorCode::Unsupported,
+                    format!(
+                        "{} -> String requires a numeric binary-float domain",
+                        scalar.name()
+                    ),
+                ));
+            };
+
+            format_numeric_to_string(float, precision, scalar.name())
+        }
+    }
 }
 
-fn int_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
-    let BuiltinCastLiteral::Int(value) = source else {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::Unsupported,
-            format!(
-                "Int -> String requires an Int source, found {}",
-                source.type_name()
-            ),
-        ));
-    };
-    Ok(BuiltinCastLiteral::String(value.to_string()))
-}
-
-fn float_to_string(
-    source: &BuiltinCastLiteral,
-    numeric_profile: NumericProfile,
+/// Formats one finite binary-float value as Moth numeric text.
+fn format_numeric_to_string(
+    value: f64,
+    precision: BinaryFloatPrecision,
+    scalar_name: &str,
 ) -> Result<BuiltinCastLiteral, BuiltinCastError> {
-    let BuiltinCastLiteral::Float(value) = source else {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::Unsupported,
-            format!(
-                "Float -> String requires a Float source, found {}",
-                source.type_name()
-            ),
-        ));
-    };
-
-    // Moth `Float` is finite, so a non-finite value reaching the cast
+    // Moth binary floats are finite, so a non-finite value reaching the cast
     // policy is a defensive invariant failure rather than ordinary user input.
-    let text = format_finite_float(*value, numeric_profile.float_precision).map_err(|error| {
+    let text = format_finite_float(value, precision).map_err(|error| {
         BuiltinCastError::new(
             BuiltinErrorCode::FloatFormatInvariant,
-            format!("Float -> String formatting failed: {error}"),
+            format!("{scalar_name} -> String formatting failed: {error}"),
         )
     })?;
 
@@ -228,53 +443,6 @@ fn error_to_string(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Bu
 //  Fallible policies
 // -----------------------------------------------------------
 
-fn float_to_int(
-    source: &BuiltinCastLiteral,
-    numeric_profile: NumericProfile,
-) -> Result<BuiltinCastLiteral, BuiltinCastError> {
-    let BuiltinCastLiteral::Float(value) = source else {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::Unsupported,
-            format!(
-                "Float -> Int requires a Float source, found {}",
-                source.type_name()
-            ),
-        ));
-    };
-
-    if !value.is_finite() {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::FloatCastToIntInvalidValue,
-            format!("Float -> Int source {value} is not finite"),
-        ));
-    }
-
-    // Truncate toward zero, then require the result to fit the boundary Int width.
-    let truncated = value.trunc();
-
-    // Guard the f64-to-i64 narrowing below: an out-of-i64 truncated value would
-    // saturate the `as` cast, so reject it in the f64 domain first. The bounds are
-    // exact: `i64::MIN` is representable as f64, and `2^63` (one above `i64::MAX`)
-    // is the first integral f64 that no longer fits.
-    if truncated < (i64::MIN as f64) || truncated >= 9_223_372_036_854_775_808.0 {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::FloatCastToIntOutOfRange,
-            format!("Float -> Int source {value} is out of Int range"),
-        ));
-    }
-
-    // The guard above rules out saturation, so this narrowing cast is exact.
-    let candidate = truncated as i64;
-    if !numeric_profile.int_width.contains(candidate) {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::FloatCastToIntOutOfRange,
-            format!("Float -> Int source {value} is out of Int range"),
-        ));
-    }
-
-    Ok(BuiltinCastLiteral::Int(candidate))
-}
-
 fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, BuiltinCastError> {
     let BuiltinCastLiteral::Int(value) = source else {
         return Err(BuiltinCastError::new(
@@ -325,7 +493,18 @@ fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Builti
     Ok(BuiltinCastLiteral::Char(scalar))
 }
 
-fn string_to_int(
+/// Implements every text-to-numeric conversion.
+///
+/// WHAT: parses the complete text at the destination domain: `Int` and `Float` follow the profile,
+///       fixed integers materialise inside their own range, and fixed binary floats round once at
+///       their own precision. Integer destinations report out-of-range text as
+///       `IntParseOutOfRange` and every other failure as `IntParseInvalidFormat`; binary-float
+///       destinations report overflow and non-finite results as `FloatParseOutOfRange` and every
+///       other failure as `FloatParseInvalidFormat`.
+/// WHY: the destination domain owns the accepted range and rounding, so `U64` accepts exactly the
+///      `u64` range and `F16` rounds exactly once rather than through `Float`.
+fn string_to_numeric(
+    scalar: NumericScalar,
     source: &BuiltinCastLiteral,
     numeric_profile: NumericProfile,
 ) -> Result<BuiltinCastLiteral, BuiltinCastError> {
@@ -333,51 +512,72 @@ fn string_to_int(
         return Err(BuiltinCastError::new(
             BuiltinErrorCode::Unsupported,
             format!(
-                "String -> Int requires a String source, found {}",
+                "String -> {} requires a String source, found {}",
+                scalar.name(),
                 source.type_name()
             ),
         ));
     };
 
-    match parse_numeric_text_to_int(text, numeric_profile.int_width) {
-        Ok(value) => Ok(BuiltinCastLiteral::Int(value)),
-        Err(NumberLiteralErrorReason::OutsideIntRange) => Err(BuiltinCastError::new(
-            BuiltinErrorCode::IntParseOutOfRange,
-            format!("Cannot parse Int from {text:?}"),
-        )),
-        Err(_) => Err(BuiltinCastError::new(
-            BuiltinErrorCode::IntParseInvalidFormat,
-            format!("Cannot parse Int from {text:?}"),
-        )),
-    }
+    let parsed = match scalar {
+        NumericScalar::Int => {
+            parse_numeric_text_to_int(text, numeric_profile.int_width).map(BuiltinCastLiteral::Int)
+        }
+        NumericScalar::Float => parse_numeric_text_to_float(text, numeric_profile.float_precision)
+            .map(BuiltinCastLiteral::Float),
+        NumericScalar::Fixed(fixed) => {
+            parse_numeric_text_to_fixed_scalar(text, fixed).map(BuiltinCastLiteral::Fixed)
+        }
+    };
+
+    parsed.map_err(|reason| numeric_parse_error(scalar, reason, text))
 }
 
-fn string_to_float(
-    source: &BuiltinCastLiteral,
-    numeric_profile: NumericProfile,
-) -> Result<BuiltinCastLiteral, BuiltinCastError> {
-    let BuiltinCastLiteral::String(text) = source else {
-        return Err(BuiltinCastError::new(
-            BuiltinErrorCode::Unsupported,
-            format!(
-                "String -> Float requires a String source, found {}",
-                source.type_name()
-            ),
-        ));
+/// Maps one numeric text parse failure onto the destination domain's parse error code.
+///
+/// WHAT: integer destinations collapse out-of-range reasons into `IntParseOutOfRange` and every
+///       other reason into `IntParseInvalidFormat`; binary-float destinations collapse non-finite
+///       and overflow reasons into `FloatParseOutOfRange` and every other reason into
+///       `FloatParseInvalidFormat`.
+/// WHY: the parse grammar reports the same failure in more than one place (a negative spelling for
+///      an unsigned destination, a whole part beyond the destination's precision), so one mapping
+///      keeps the integer destinations and the binary-float destinations reporting consistent
+///      codes.
+fn numeric_parse_error(
+    scalar: NumericScalar,
+    reason: NumberLiteralErrorReason,
+    text: &str,
+) -> BuiltinCastError {
+    let message = format!("Cannot parse {} from {text:?}", scalar.name());
+
+    // The destination's class, not the boundary profile, chooses the error family: `Float` and the
+    // fixed binary floats report float parse codes, and every integer destination, including `Int`,
+    // reports integer parse codes.
+    let is_binary_float = match scalar {
+        NumericScalar::Int => false,
+        NumericScalar::Float => true,
+        NumericScalar::Fixed(fixed) => fixed.class() == FixedScalarClass::BinaryFloat,
     };
 
-    match parse_numeric_text_to_float(text, numeric_profile.float_precision) {
-        Ok(value) => Ok(BuiltinCastLiteral::Float(value)),
-        Err(NumberLiteralErrorReason::NonFiniteFloat | NumberLiteralErrorReason::ParseOverflow) => {
-            Err(BuiltinCastError::new(
-                BuiltinErrorCode::FloatParseOutOfRange,
-                format!("Cannot parse Float from {text:?}"),
-            ))
+    if is_binary_float {
+        match reason {
+            NumberLiteralErrorReason::NonFiniteFloat
+            | NumberLiteralErrorReason::NonFiniteFixedFloat(_)
+            | NumberLiteralErrorReason::ParseOverflow => {
+                BuiltinCastError::new(BuiltinErrorCode::FloatParseOutOfRange, message)
+            }
+            _ => BuiltinCastError::new(BuiltinErrorCode::FloatParseInvalidFormat, message),
         }
-        Err(_) => Err(BuiltinCastError::new(
-            BuiltinErrorCode::FloatParseInvalidFormat,
-            format!("Cannot parse Float from {text:?}"),
-        )),
+    } else {
+        match reason {
+            NumberLiteralErrorReason::OutsideIntRange
+            | NumberLiteralErrorReason::OutsideFixedScalarRange(_)
+            | NumberLiteralErrorReason::NegativeUnsignedLiteral(_)
+            | NumberLiteralErrorReason::ParseOverflow => {
+                BuiltinCastError::new(BuiltinErrorCode::IntParseOutOfRange, message)
+            }
+            _ => BuiltinCastError::new(BuiltinErrorCode::IntParseInvalidFormat, message),
+        }
     }
 }
 

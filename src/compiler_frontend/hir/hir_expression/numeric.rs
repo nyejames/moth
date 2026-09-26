@@ -552,8 +552,9 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: mixed `Int`/`Float` arithmetic and `Int / Int` real division convert `Int` operands to
     ///       `Float` explicitly so the backend sees a uniform `Float` checked operation.
-    /// WHY: HIR already owns the `IntToFloat` cast policy and JS lowering treats it as identity,
-    ///      so reusing it avoids inventing a new conversion expression shape.
+    /// WHY: HIR already owns the numeric-conversion cast policy and JS lowering treats
+    ///      `Int -> Float` as identity, so reusing it avoids inventing a new conversion
+    ///      expression shape.
     fn convert_int_to_float_if_needed(
         &mut self,
         value: HirExpression,
@@ -570,7 +571,10 @@ impl<'a> HirBuilder<'a> {
             &no_span,
             HirExpressionKind::Cast {
                 source: Box::new(value),
-                policy: BuiltinCastPolicyId::IntToFloat,
+                policy: BuiltinCastPolicyId::NumericConversion {
+                    source: NumericScalar::Int,
+                    target: NumericScalar::Float,
+                },
             },
             float_type,
             ValueKind::RValue,

@@ -1,0 +1,3 @@
+raw #Byte = 200
+
+[: byte text: [raw]]

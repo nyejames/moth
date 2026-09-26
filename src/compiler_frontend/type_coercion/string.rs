@@ -7,7 +7,11 @@
 //! the policy explicit and reusable without touching template mechanics.
 
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
+use crate::compiler_frontend::builtins::casts::policies::{
+    BuiltinCastLiteral, apply_builtin_cast_policy,
+};
+use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -19,11 +23,13 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// compile time. Template values are handled by the TIR fold owner because
 /// their classification requires the module-local store.
 /// WHY: centralises the "what can fold to a string" decision that was
-/// previously inlined in `template_folding::fold_plan`.
+/// previously inlined in `template_folding::fold_plan`, and sends fixed numeric
+/// scalars through the same numeric text policy the runtime cast uses so template
+/// content and explicit casts cannot disagree.
 pub(crate) fn fold_expression_kind_to_string(
     kind: &ExpressionKind,
     string_table: &StringTable,
-    float_precision: FloatPrecision,
+    numeric_profile: NumericProfile,
 ) -> Option<String> {
     match kind {
         ExpressionKind::StringSlice(string) => Some(string_table.resolve(*string).to_owned()),
@@ -31,16 +37,32 @@ pub(crate) fn fold_expression_kind_to_string(
             // Compile-time Float values are finite by language contract, but the
             // formatter still returns a Result. Fold non-finite values away from
             // the compile-time path rather than panicking on an internal invariant.
-            format_finite_float(*value, float_precision).ok()
+            format_finite_float(*value, numeric_profile.float_precision.into()).ok()
         }
         ExpressionKind::Int(value) => Some(value.to_string()),
+        ExpressionKind::FixedScalar(value) => {
+            // `Byte` is outside the numeric vocabulary, so it has no text policy and folds away
+            // here; the template renderability check reports it before this point.
+            let scalar = BuiltinCastTarget::Fixed(value.scalar()).numeric_scalar()?;
+            let BuiltinCastLiteral::String(text) = apply_builtin_cast_policy(
+                BuiltinCastPolicyId::NumericToString(scalar),
+                &BuiltinCastLiteral::Fixed(*value),
+                numeric_profile,
+            )
+            .ok()?
+            else {
+                return None;
+            };
+
+            Some(text)
+        }
         ExpressionKind::Bool(value) => Some(value.to_string()),
         ExpressionKind::Char(value) => Some(value.to_string()),
         ExpressionKind::Coerced { value, .. } => {
             // Contextual coercion nodes do not change the rendered scalar value;
             // delegate to the inner expression so coerced literals fold the same
             // way as their unwrapped counterparts.
-            fold_expression_kind_to_string(&value.kind, string_table, float_precision)
+            fold_expression_kind_to_string(&value.kind, string_table, numeric_profile)
         }
         _ => None,
     }

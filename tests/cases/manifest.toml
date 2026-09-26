@@ -7007,6 +7007,111 @@ contract = "language.casts.no_evidence_rejected"
 role = "primary"
 
 [[case]]
+id = "cast_numeric_fixed_chain_success"
+path = "cast_numeric_fixed_chain_success"
+tags = ["integration","language","cast","numeric"]
+contract = "language.casts.numeric_fixed_chain_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_fixed_const_catch_success"
+path = "cast_numeric_fixed_const_catch_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_fixed_const_catch_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_const_fold_failure_rejected"
+path = "cast_numeric_const_fold_failure_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_const_fold_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_plain_fallible_rejected"
+path = "cast_numeric_plain_fallible_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_plain_fallible_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_infallible_bang_rejected"
+path = "cast_numeric_infallible_bang_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_infallible_with_bang_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_byte_no_evidence_rejected"
+path = "cast_numeric_byte_no_evidence_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_byte_no_evidence_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_byte_render_rejected"
+path = "cast_numeric_text_byte_render_rejected"
+tags = ["integration","diagnostics","cast","numeric","templates"]
+contract = "language.casts.numeric_byte_not_template_renderable"
+role = "boundary"
+
+[[case]]
+id = "cast_numeric_text_fixed_render_unsupported"
+path = "cast_numeric_text_fixed_render_unsupported"
+tags = ["integration","diagnostics","cast","numeric","templates"]
+contract = "backend.target_gate.fixed_width_template_value_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_fixed_to_string_success"
+path = "cast_numeric_text_fixed_to_string_success"
+tags = ["integration","language","cast","numeric"]
+contract = "language.casts.numeric_fixed_text_cast_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_string_parse_success"
+path = "cast_numeric_text_string_parse_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_string_parse_catch_success"
+path = "cast_numeric_text_string_parse_catch_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_catch_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_const_fold_failure_rejected"
+path = "cast_numeric_text_const_fold_failure_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_text_const_fold_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_plain_fallible_rejected"
+path = "cast_numeric_text_plain_fallible_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_plain_fallible_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_infallible_bang_rejected"
+path = "cast_numeric_text_infallible_bang_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_infallible_with_bang_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_byte_no_evidence_rejected"
+path = "cast_numeric_text_byte_no_evidence_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_byte_no_evidence_rejected"
+role = "primary"
+
+[[case]]
 id = "cast_condition_target_rejected"
 path = "cast_condition_target_rejected"
 tags = ["integration","diagnostics","cast"]

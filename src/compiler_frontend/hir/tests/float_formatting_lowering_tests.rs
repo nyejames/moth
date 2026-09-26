@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -91,7 +92,7 @@ fn has_plain_float_to_string_cast(builder: &HirBuilder<'_>) -> bool {
             matches!(
                 &statement.kind,
                 HirStatementKind::CastOp {
-                    policy: BuiltinCastPolicyId::FloatToString,
+                    policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
                     ..
                 }
             )
@@ -109,7 +110,7 @@ fn has_plain_float_to_string_cast(builder: &HirBuilder<'_>) -> bool {
                 matches!(
                     &value.kind,
                     HirExpressionKind::Cast {
-                        policy: BuiltinCastPolicyId::FloatToString,
+                        policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
                         ..
                     }
                 )
@@ -119,7 +120,7 @@ fn has_plain_float_to_string_cast(builder: &HirBuilder<'_>) -> bool {
 fn expression_contains_float_to_string_cast(expression: &HirExpression) -> bool {
     match &expression.kind {
         HirExpressionKind::Cast { source, policy } => {
-            *policy == BuiltinCastPolicyId::FloatToString
+            *policy == BuiltinCastPolicyId::NumericToString(NumericScalar::Float)
                 || expression_contains_float_to_string_cast(source)
         }
 
@@ -143,7 +144,7 @@ fn make_float_to_string_cast(
         target: BuiltinCastTarget::String,
         requires_optional_wrap_after_cast: false,
         evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::FloatToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
         },
         handling: CastHandling::Infallible,
         span,
@@ -429,7 +430,7 @@ fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
         target: BuiltinCastTarget::String,
         requires_optional_wrap_after_cast: true,
         evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::FloatToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
         },
         handling: CastHandling::Infallible,
         span: loc,

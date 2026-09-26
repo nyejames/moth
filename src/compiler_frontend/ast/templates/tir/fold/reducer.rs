@@ -957,7 +957,7 @@ fn fold_tir_dynamic_expression(
     match fold_expression_kind_to_string(
         &expression_ref.kind,
         fold_context.string_table,
-        fold_context.numeric_profile.float_precision,
+        fold_context.numeric_profile,
     ) {
         Some(text) => {
             output_state.append_text(&text);

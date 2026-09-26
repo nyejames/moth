@@ -4,7 +4,7 @@
 //! Rendering is kept deliberately separate from validation so a caller only receives a complete
 //! `String` on success; a failure never exposes the private output buffer.
 
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
+use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 
 use super::schema::{PreparedType, validate_and_complete_value};
@@ -372,7 +372,7 @@ impl<'a> Writer<'a> {
             "-0.0".to_owned()
         } else {
             // MON is compiled at STANDARD until Phase 6, so Float precision stays fixed here.
-            format_finite_float(value, FloatPrecision::Bits64).map_err(|_| {
+            format_finite_float(value, BinaryFloatPrecision::Binary64).map_err(|_| {
                 MonError::new(
                     MonErrorCode::NonFiniteFloat,
                     None,

@@ -199,14 +199,20 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
     assert!(matches!(
         left.kind,
         HirExpressionKind::Cast {
-            policy: BuiltinCastPolicyId::IntToFloat,
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Int,
+                target: NumericScalar::Float,
+            },
             ..
         }
     ));
     assert!(matches!(
         right.kind,
         HirExpressionKind::Cast {
-            policy: BuiltinCastPolicyId::IntToFloat,
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Int,
+                target: NumericScalar::Float,
+            },
             ..
         }
     ));
@@ -255,7 +261,10 @@ fn mixed_int_float_addition_converts_int_operand() {
     assert!(matches!(
         left.kind,
         HirExpressionKind::Cast {
-            policy: BuiltinCastPolicyId::IntToFloat,
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Int,
+                target: NumericScalar::Float,
+            },
             ..
         }
     ));

@@ -153,7 +153,10 @@ fn provenance_preserved_through_cast() {
         target: BuiltinCastTarget::Float,
         requires_optional_wrap_after_cast: false,
         evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::IntToFloat,
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+            },
         },
         handling: CastHandling::Infallible,
         span: None,

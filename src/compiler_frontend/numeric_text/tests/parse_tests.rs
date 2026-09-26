@@ -6,7 +6,9 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
@@ -462,6 +464,165 @@ fn parse_numeric_text_to_float_rejects_invalid_grammar_cases() {
             "{source} should fail as invalid grammar, not as non-finite"
         );
     }
+}
+
+#[test]
+fn parse_numeric_text_to_fixed_scalar_accepts_each_class() {
+    // Whole-string fixed parsing is the `String -> fixed` policy's grammar, so it must accept the
+    // same spellings a source literal at the destination would: separators for integers, an
+    // optional leading minus, and decimal or exponent text only for binary floats.
+    // Exact payloads pin both integer endpoints and destination-precision float rounding.
+    let cases = [
+        (
+            FixedScalar::U8,
+            "255",
+            FixedScalarValue::unsigned(FixedScalar::U8, 255).expect("255 fits U8"),
+        ),
+        (
+            FixedScalar::I8,
+            "-128",
+            FixedScalarValue::signed(FixedScalar::I8, -128).expect("-128 fits I8"),
+        ),
+        (
+            FixedScalar::U64,
+            "18446744073709551615",
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64"),
+        ),
+        (
+            FixedScalar::I64,
+            "-9223372036854775808",
+            FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64::MIN fits I64"),
+        ),
+        (
+            FixedScalar::F16,
+            "0.1",
+            FixedScalarValue::binary_float(FixedScalar::F16, 0.099_975_585_937_5)
+                .expect("0.1 rounds to a finite F16"),
+        ),
+        (
+            FixedScalar::F32,
+            "3.5e2",
+            FixedScalarValue::binary_float(FixedScalar::F32, 350.0)
+                .expect("350 is exactly representable as F32"),
+        ),
+    ];
+
+    for (scalar, text, expected) in cases {
+        let value = parse_numeric_text_to_fixed_scalar(text, scalar)
+            .unwrap_or_else(|reason| panic!("{text:?} into {}: {reason:?}", scalar.name()));
+
+        assert_eq!(value, expected, "{text}");
+    }
+
+    // Separators are part of the grammar, not decoration.
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("1_000", FixedScalar::U16)
+            .unwrap()
+            .as_u64(),
+        Some(1000)
+    );
+}
+
+#[test]
+fn parse_numeric_text_to_fixed_scalar_rejects_out_of_range_and_wrong_families() {
+    let cases = [
+        // A whole number beyond the destination range.
+        (
+            "256",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U8),
+        ),
+        (
+            "128",
+            FixedScalar::I8,
+            NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
+        ),
+        // A negative spelling has no unsigned or signed-zero reading.
+        (
+            "-1",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U8),
+        ),
+        (
+            "-0",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U8),
+        ),
+        // Decimal and exponent spelling never reaches an integer destination.
+        (
+            "1.0",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            "1e3",
+            FixedScalar::U16,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        // A magnitude at or above the binary16 overflow threshold is non-finite at F16.
+        (
+            "70000",
+            FixedScalar::F16,
+            NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F16),
+        ),
+        // Sign and whitespace rules match the source grammar.
+        (
+            "+42",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            " 42",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            "42 ",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            "",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            "-",
+            FixedScalar::I8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+        (
+            "1__0",
+            FixedScalar::U8,
+            NumberLiteralErrorReason::InvalidSeparatorPlacement,
+        ),
+    ];
+
+    for (text, scalar, expected) in cases {
+        let reason = parse_numeric_text_to_fixed_scalar(text, scalar).expect_err(&format!(
+            "{text:?} into {} should be rejected",
+            scalar.name()
+        ));
+        assert_eq!(reason, expected, "{text:?} into {}", scalar.name());
+    }
+}
+
+#[test]
+fn parse_numeric_text_to_fixed_scalar_rounds_binary_floats_at_the_destination() {
+    // `0.1` has no exact binary16 form, so the parse must round once at `F16` instead of
+    // materialising at `Float` and narrowing afterwards.
+    let rounded = parse_numeric_text_to_fixed_scalar("0.1", FixedScalar::F16).unwrap();
+
+    assert_eq!(rounded.as_f64(), Some(0.099_975_585_937_5));
+    assert_ne!(rounded.as_f64(), Some(0.1));
+
+    // A whole number that is exact at F32 and F64 stays exact in both.
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("1000000", FixedScalar::F32)
+            .unwrap()
+            .as_f64(),
+        Some(1000000.0)
+    );
 }
 
 #[test]

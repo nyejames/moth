@@ -39,6 +39,7 @@ fn infallible_traits_use_to_requirement_prefix() {
                     BuiltinCastTarget::Char => "char",
                     BuiltinCastTarget::Float => "float",
                     BuiltinCastTarget::Error => "error",
+                    BuiltinCastTarget::Fixed(_) => continue,
                 }
             );
             assert_eq!(
@@ -49,7 +50,6 @@ fn infallible_traits_use_to_requirement_prefix() {
         }
     }
 }
-
 #[test]
 fn fallible_traits_use_try_to_requirement_prefix() {
     for row in BUILTIN_CAST_TRAIT_ROWS {
@@ -63,6 +63,7 @@ fn fallible_traits_use_try_to_requirement_prefix() {
                     BuiltinCastTarget::Char => "char",
                     BuiltinCastTarget::Float => "float",
                     BuiltinCastTarget::Error => "error",
+                    BuiltinCastTarget::Fixed(_) => continue,
                 }
             );
             assert_eq!(

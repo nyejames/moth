@@ -147,8 +147,10 @@ implicit receiving boundary never narrows an already typed numeric value.
 
 This reference owns the accepted contract for the complete numeric family.
 @../progress (Progress) owns current compiler and backend support. The Alpha
-compiler implements the default profile's `Int` and `Float` only. It does not
-execute the fixed-width, `Byte` or `Number` families yet.
+compiler accepts every numeric profile, recognises the fixed-width and `Byte`
+types, materialises their literals and folds their constant casts and text.
+HTML-JS and HTML-Wasm execute the standard profile's `Int` and `Float` only, and
+the `Number` family is not implemented yet.
 
 ### MON data boundary
 

@@ -8,15 +8,16 @@
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use std::collections::HashSet;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits the cast runtime helpers used by the generated JS.
     ///
     /// WHAT: walks the used cast policies in a fixed, deterministic order and emits exactly the
-    ///      helpers that the reachable code needs. `Int -> Float` is a JS identity and never
-    ///      emits a helper; numeric parsing helpers are only emitted when at least one parsing
-    ///      helper is reached.
+    ///      helpers that the reachable code needs. `Int -> Float` numeric conversion is a JS
+    ///      identity and never emits a helper; numeric parsing helpers are only emitted when at
+    ///      least one parsing helper is reached.
     /// WHY: demand-driven emission keeps the prelude minimal. Modules that only use the identity
     ///      `Int -> Float` cast should not pay for numeric parsing helpers they never call, and
     ///      modules that only use a single numeric cast should still see only the helpers they
@@ -26,12 +27,23 @@ impl<'hir> JsEmitter<'hir> {
 
         // Walk policies in a fixed dependency-aware order so shared helpers
         // are emitted before their callers and prelude output stays stable.
+        // Only `Float -> Int` numeric conversion reaches the JS runtime; every
+        // other numeric conversion and `Byte` conversion is rejected earlier by
+        // the backend target gate.
+        if self
+            .used_cast_policies
+            .contains(&BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Float,
+                target: NumericScalar::Int,
+            })
+        {
+            self.emit_cast_float_to_int(&mut emitted);
+        }
         for policy in [
-            BuiltinCastPolicyId::StringToInt,
-            BuiltinCastPolicyId::StringToFloat,
-            BuiltinCastPolicyId::FloatToInt,
-            BuiltinCastPolicyId::IntToString,
-            BuiltinCastPolicyId::FloatToString,
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
+            BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+            BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
             BuiltinCastPolicyId::BoolToString,
             BuiltinCastPolicyId::CharToString,
             BuiltinCastPolicyId::CharToInt,
@@ -44,13 +56,19 @@ impl<'hir> JsEmitter<'hir> {
             if !self.used_cast_policies.contains(&policy) {
                 continue;
             }
-
             match policy {
-                BuiltinCastPolicyId::StringToInt => self.emit_cast_int(&mut emitted),
-                BuiltinCastPolicyId::StringToFloat => self.emit_cast_float(&mut emitted),
-                BuiltinCastPolicyId::FloatToInt => self.emit_cast_float_to_int(&mut emitted),
-                BuiltinCastPolicyId::IntToString => self.emit_cast_int_to_string(&mut emitted),
-                BuiltinCastPolicyId::FloatToString => self.emit_cast_float_to_string(&mut emitted),
+                BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => {
+                    self.emit_cast_int(&mut emitted);
+                }
+                BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => {
+                    self.emit_cast_float(&mut emitted);
+                }
+                BuiltinCastPolicyId::NumericToString(NumericScalar::Int) => {
+                    self.emit_cast_int_to_string(&mut emitted);
+                }
+                BuiltinCastPolicyId::NumericToString(NumericScalar::Float) => {
+                    self.emit_cast_float_to_string(&mut emitted);
+                }
                 BuiltinCastPolicyId::BoolToString => self.emit_cast_bool_to_string(&mut emitted),
                 BuiltinCastPolicyId::CharToString => self.emit_cast_char_to_string(&mut emitted),
                 BuiltinCastPolicyId::CharToInt => self.emit_cast_char_to_int(&mut emitted),
@@ -59,7 +77,11 @@ impl<'hir> JsEmitter<'hir> {
                 BuiltinCastPolicyId::IntToChar => self.emit_cast_int_to_char(&mut emitted),
                 BuiltinCastPolicyId::StringToBool => self.emit_cast_string_to_bool(&mut emitted),
                 BuiltinCastPolicyId::StringToChar => self.emit_cast_string_to_char(&mut emitted),
-                BuiltinCastPolicyId::IntToFloat => {}
+                BuiltinCastPolicyId::NumericConversion { .. }
+                | BuiltinCastPolicyId::ByteToU8
+                | BuiltinCastPolicyId::U8ToByte
+                | BuiltinCastPolicyId::NumericToString(_)
+                | BuiltinCastPolicyId::StringToNumeric(_) => {}
             }
         }
     }

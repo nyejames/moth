@@ -574,7 +574,10 @@ fn cast_float_to_int_uses_i32_range_helper() {
         2,
         HirStatementKind::CastOp {
             policy:
-                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::FloatToInt,
+                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+            },
             source: source_expr,
             result: Some(LocalId(0)),
         },

@@ -1,0 +1,6 @@
+parsed #U8 = cast "255" catch:
+    then 0
+;
+n #Int = cast parsed
+
+[: parsed text: [n]]

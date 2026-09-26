@@ -1,0 +1,3 @@
+hidden |raw Byte|:
+    label String = cast raw
+;

@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier,
 };
@@ -165,7 +166,7 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Cast { source, policy } => {
                 let lowered_source = self.lower_expr(source)?;
-                match js_cast_helper_for_policy(*policy) {
+                match js_cast_helper_for_policy(*policy)? {
                     Some(helper) => Ok(format!("{helper}({lowered_source})")),
                     None => Ok(lowered_source),
                 }
@@ -719,23 +720,57 @@ pub(crate) fn escape_js_string(value: &str) -> String {
 }
 
 /// Returns the JS runtime helper name for a builtin cast policy, or `None` when the
-/// cast is a pure JS identity (e.g. `Int -> Float`).
-pub(super) fn js_cast_helper_for_policy(policy: BuiltinCastPolicyId) -> Option<&'static str> {
+/// cast is a pure JS identity (`Int -> Float` numeric conversion).
+pub(super) fn js_cast_helper_for_policy(
+    policy: BuiltinCastPolicyId,
+) -> Result<Option<&'static str>, CompilerError> {
     match policy {
-        BuiltinCastPolicyId::IntToFloat => None,
-        BuiltinCastPolicyId::IntToString => Some("__moth_cast_int_to_string"),
-        BuiltinCastPolicyId::FloatToString => Some("__moth_cast_float_to_string"),
-        BuiltinCastPolicyId::BoolToString => Some("__moth_cast_bool_to_string"),
-        BuiltinCastPolicyId::CharToString => Some("__moth_cast_char_to_string"),
-        BuiltinCastPolicyId::CharToInt => Some("__moth_cast_char_to_int"),
-        BuiltinCastPolicyId::StringToError => Some("__moth_cast_string_to_error"),
-        BuiltinCastPolicyId::ErrorToString => Some("__moth_cast_error_to_string"),
-        BuiltinCastPolicyId::FloatToInt => Some("__moth_cast_float_to_int"),
-        BuiltinCastPolicyId::IntToChar => Some("__moth_cast_int_to_char"),
-        BuiltinCastPolicyId::StringToInt => Some("__moth_cast_int"),
-        BuiltinCastPolicyId::StringToFloat => Some("__moth_cast_float"),
-        BuiltinCastPolicyId::StringToBool => Some("__moth_cast_string_to_bool"),
-        BuiltinCastPolicyId::StringToChar => Some("__moth_cast_string_to_char"),
+        BuiltinCastPolicyId::NumericConversion { source, target }
+            if source == NumericScalar::Int && target == NumericScalar::Float =>
+        {
+            Ok(None)
+        }
+        BuiltinCastPolicyId::NumericConversion { source, target }
+            if source == NumericScalar::Float && target == NumericScalar::Int =>
+        {
+            Ok(Some("__moth_cast_float_to_int"))
+        }
+        BuiltinCastPolicyId::NumericConversion { source, target } => {
+            Err(CompilerError::compiler_error(format!(
+                "JavaScript backend received a fixed-width numeric conversion {source:?} -> {target:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
+            )))
+        }
+        BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => {
+            Err(CompilerError::compiler_error(
+                "JavaScript backend received a Byte conversion; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
+            ))
+        }
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Int) => {
+            Ok(Some("__moth_cast_int_to_string"))
+        }
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Float) => {
+            Ok(Some("__moth_cast_float_to_string"))
+        }
+        BuiltinCastPolicyId::NumericToString(scalar) => {
+            Err(CompilerError::compiler_error(format!(
+                "JavaScript backend received a fixed-width numeric text conversion for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
+            )))
+        }
+        BuiltinCastPolicyId::BoolToString => Ok(Some("__moth_cast_bool_to_string")),
+        BuiltinCastPolicyId::CharToString => Ok(Some("__moth_cast_char_to_string")),
+        BuiltinCastPolicyId::CharToInt => Ok(Some("__moth_cast_char_to_int")),
+        BuiltinCastPolicyId::StringToError => Ok(Some("__moth_cast_string_to_error")),
+        BuiltinCastPolicyId::ErrorToString => Ok(Some("__moth_cast_error_to_string")),
+        BuiltinCastPolicyId::IntToChar => Ok(Some("__moth_cast_int_to_char")),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => Ok(Some("__moth_cast_int")),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => Ok(Some("__moth_cast_float")),
+        BuiltinCastPolicyId::StringToNumeric(scalar) => {
+            Err(CompilerError::compiler_error(format!(
+                "JavaScript backend received a fixed-width numeric text parse for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
+            )))
+        }
+        BuiltinCastPolicyId::StringToBool => Ok(Some("__moth_cast_string_to_bool")),
+        BuiltinCastPolicyId::StringToChar => Ok(Some("__moth_cast_string_to_char")),
     }
 }
 

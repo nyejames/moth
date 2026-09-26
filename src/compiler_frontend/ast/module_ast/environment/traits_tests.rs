@@ -189,7 +189,9 @@ fn register_core_cast_traits_populates_every_canonical_name() {
 }
 
 #[test]
-fn register_builtin_cast_evidence_registers_initial_14_rows() {
+fn register_builtin_cast_evidence_registers_trait_family_rows() {
+    use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
@@ -212,12 +214,23 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
         &type_environment,
         &mut string_table,
         &mut path_fork,
+        NumericProfile::STANDARD,
     )
     .expect("builtin evidence registration should succeed");
 
-    // 14 distinct (source, target) rows from the plan.
-    let rows = crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_rows();
-    for &row in rows {
+    // Every profile-complete row whose target carries a core cast trait family
+    // must have registered builtin evidence; fixed targets are skipped.
+    let rows =
+        crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_rows_for_profile(
+            NumericProfile::STANDARD,
+        );
+    for row in rows {
+        let Ok(trait_kind) =
+            crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
+                .ok_or(())
+        else {
+            continue;
+        };
         let source_type_id =
             crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target(
                 row.source,
@@ -226,8 +239,6 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
                 &mut path_fork,
             )
             .expect("source builtin type must resolve to a TypeId");
-        let trait_kind = crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
-            .expect("every builtin evidence row must map to a core cast trait");
         let trait_name =
             crate::compiler_frontend::builtins::casts::traits::builtin_cast_trait_name(trait_kind);
         let trait_id = trait_environment

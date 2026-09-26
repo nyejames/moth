@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -1202,7 +1203,7 @@ fn cast_expression(id: u32) -> HirExpression {
         id: HirValueId(id),
         kind: HirExpressionKind::Cast {
             source: Box::new(int_expression(id + 1)),
-            policy: BuiltinCastPolicyId::IntToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         ty: builtin_type_ids::STRING,
         value_kind: ValueKind::RValue,

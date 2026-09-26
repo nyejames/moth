@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1198,7 +1199,10 @@ fn fold_int_cast_rejects_out_of_range_float_with_dedicated_code() {
 
     let source = BuiltinCastLiteral::Float(9_223_372_036_854_775_808.0);
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &source,
         NumericProfile::STANDARD,
     )
@@ -1216,7 +1220,10 @@ fn fold_int_cast_rejects_non_finite_float_with_dedicated_code() {
 
     let source = BuiltinCastLiteral::Float(f64::INFINITY);
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
         &source,
         NumericProfile::STANDARD,
     )
@@ -1231,22 +1238,18 @@ fn fold_int_cast_truncates_toward_zero() {
         BuiltinCastLiteral, apply_builtin_cast_policy,
     };
 
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Int,
+    };
     let source = BuiltinCastLiteral::Float(1.9);
-    let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
-        &source,
-        NumericProfile::STANDARD,
-    )
-    .expect("float to int cast should fold");
+    let result = apply_builtin_cast_policy(policy, &source, NumericProfile::STANDARD)
+        .expect("float to int cast should fold");
     assert_eq!(result, BuiltinCastLiteral::Int(1));
 
     let source = BuiltinCastLiteral::Float(-1.9);
-    let result = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::FloatToInt,
-        &source,
-        NumericProfile::STANDARD,
-    )
-    .expect("negative float to int cast should fold");
+    let result = apply_builtin_cast_policy(policy, &source, NumericProfile::STANDARD)
+        .expect("negative float to int cast should fold");
     assert_eq!(result, BuiltinCastLiteral::Int(-1));
 }
 
@@ -1261,7 +1264,7 @@ fn fold_float_cast_rejects_non_finite_string_value() {
     let huge = format!("{}.0", "9".repeat(400));
     let source = BuiltinCastLiteral::String(huge);
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         &source,
         NumericProfile::STANDARD,
     )
@@ -1284,7 +1287,7 @@ fn fold_string_to_int_cast_uses_string_policy_row() {
         BuiltinCastTarget::Int,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToInt,
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
         CastHandling::Propagate,
         false,
@@ -1319,7 +1322,7 @@ fn fold_string_to_float_cast_uses_string_policy_row() {
         BuiltinCastTarget::Float,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToFloat,
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         },
         CastHandling::Propagate,
         false,
@@ -1629,7 +1632,7 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
         BuiltinCastTarget::String,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::IntToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         CastHandling::Infallible,
         false,
@@ -1669,7 +1672,7 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
         BuiltinCastTarget::Int,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToInt,
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
         CastHandling::Propagate,
         false,
@@ -1706,7 +1709,7 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
         BuiltinCastTarget::String,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::IntToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         CastHandling::Infallible,
         true,
@@ -1753,7 +1756,7 @@ fn fold_cast_fallible_string_to_int_success_folds_to_int() {
         BuiltinCastTarget::Int,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToInt,
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
         CastHandling::Propagate,
         false,
@@ -1788,7 +1791,7 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
         BuiltinCastTarget::Int,
         target_type_id,
         ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToInt,
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
         CastHandling::Propagate,
         false,
@@ -1957,7 +1960,7 @@ fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
         source,
         BuiltinCastTarget::Int,
         target_type_id,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         catch_handler_body(handler_value),
         &mut type_environment,
     );
@@ -2008,7 +2011,7 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
         source,
         BuiltinCastTarget::Int,
         target_type_id,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         catch_handler_body(handler_value),
         &mut type_environment,
     );
@@ -2053,7 +2056,7 @@ fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() 
         source,
         BuiltinCastTarget::Int,
         target_type_id,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         catch_handler_body(handler_value),
         &mut type_environment,
     );
@@ -2084,7 +2087,7 @@ fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
         source,
         BuiltinCastTarget::Int,
         target_type_id,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         Vec::new(),
         &mut type_environment,
     );
@@ -2129,7 +2132,7 @@ fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
         source,
         BuiltinCastTarget::Int,
         target_type_id,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         branching_handler,
         &mut type_environment,
     );

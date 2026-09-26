@@ -591,11 +591,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
         self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
 
-        // Register compiler-owned builtin evidence rows for every initial
-        // (source, target) row in the cast plan. Must run before
-        // `validate_trait_evidence` so user-declared conformances that would
-        // override builtin evidence or conflict with incompatible builtin
-        // evidence are rejected while trait ids are already stable.
+        // Register compiler-owned builtin evidence rows for the profile-complete
+        // cast plan. Must run before `validate_trait_evidence` so user-declared
+        // conformances that would override builtin evidence or conflict with
+        // incompatible builtin evidence are rejected while trait ids are already
+        // stable.
         let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
         Self::register_builtin_cast_evidence(
             &trait_environment,
@@ -603,6 +603,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.type_environment,
             string_table,
             self.path_fork,
+            self.context.numeric_profile,
         )?;
         self.project_imported_trait_evidence(
             &trait_environment,

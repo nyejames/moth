@@ -37,6 +37,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
@@ -990,8 +991,9 @@ impl<'a> HirBuilder<'a> {
 
         // `Float -> String` is infallible at the source level because valid Moth `Float` is
         // finite, but it must still lower through the shared `FormatFloat` statement so casts and
-        // templates use the same Moth-owned formatter.
-        if policy == BuiltinCastPolicyId::FloatToString {
+        // templates use the same Moth-owned formatter. Fixed binary floats take the ordinary cast
+        // path: their string conversion is a numeric text policy the backends lower or reject.
+        if policy == BuiltinCastPolicyId::NumericToString(NumericScalar::Float) {
             for prelude_statement in prelude.drain(..) {
                 self.emit_statement_to_current_block(prelude_statement, span)?;
             }

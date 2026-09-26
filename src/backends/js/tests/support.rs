@@ -419,7 +419,9 @@ fn lower_minimal_module_with_cast(
 pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(
+            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+        ),
         |types, region| string_expression(1, "0", types.string, region),
         |types| types.int,
     )
@@ -432,7 +434,10 @@ pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> 
 pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::IntToFloat,
+        BuiltinCastPolicyId::NumericConversion {
+            source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+            target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+        },
         |types, region| int_expression(1, 0, types.int, region),
         |types| types.float,
     )
@@ -445,7 +450,9 @@ pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -
 pub(super) fn lower_minimal_module_with_string_float_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::StringToFloat,
+        BuiltinCastPolicyId::StringToNumeric(
+            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+        ),
         |types, region| string_expression(1, "0.5", types.string, region),
         |types| types.float,
     )
@@ -458,7 +465,9 @@ pub(super) fn lower_minimal_module_with_string_float_cast(function_name: &str) -
 pub(super) fn lower_minimal_module_with_float_string_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::FloatToString,
+        BuiltinCastPolicyId::NumericToString(
+            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+        ),
         |types, region| float_expression(1, 1.5, types.float, region),
         |types| types.string,
     )

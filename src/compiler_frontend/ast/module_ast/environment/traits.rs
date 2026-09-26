@@ -14,7 +14,8 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::resolve_function_signature;
 use crate::compiler_frontend::builtins::casts::evidence::{
-    builtin_evidence_rows, builtin_evidence_trait_kind_for_row, type_id_for_builtin_target,
+    builtin_evidence_rows_for_profile, builtin_evidence_trait_kind_for_row,
+    type_id_for_builtin_target,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
@@ -272,11 +273,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Registers the compiler-owned builtin evidence rows for every core
     /// cast trait row.
     ///
-    /// WHAT: walks the static builtin evidence table and inserts one
+    /// WHAT: walks the profile-complete builtin evidence rows and inserts one
     ///      `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for
-    ///      every (source, target) row whose trait id resolves through the
-    ///      trait environment. Reject rows whose trait id is missing because
-    ///      registration order was somehow violated.
+    ///      every (source, target) row whose target carries a source-authorable
+    ///      core cast trait family. Fixed targets carry compiler-owned builtin
+    ///      evidence only and are skipped. Rejects rows whose trait id is
+    ///      missing because registration order was somehow violated.
     /// WHY: builtin evidence must satisfy static generic-bound checks via
     pub(in crate::compiler_frontend::ast) fn register_builtin_cast_evidence(
         trait_environment: &TraitEnvironment,
@@ -284,14 +286,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
+        numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
     ) -> Result<(), CompilerMessages> {
         use crate::compiler_frontend::traits::evidence::environment::{
             TraitEvidenceDefinition, TraitEvidenceKind,
         };
 
-        for &row in builtin_evidence_rows() {
+        for row in builtin_evidence_rows_for_profile(numeric_profile) {
             let source = row.source;
-            let _target = row.target;
+            // Fixed targets carry compiler-owned builtin evidence only: no
+            // source-authorable core cast trait family exists for them.
+            if matches!(row.target, BuiltinCastTarget::Fixed(_)) {
+                continue;
+            }
             let Some(trait_kind) = builtin_evidence_trait_kind_for_row(row) else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(

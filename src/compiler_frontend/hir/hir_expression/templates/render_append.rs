@@ -20,10 +20,11 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch,
     OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -1019,7 +1020,7 @@ impl<'a> HirBuilder<'a> {
                 span_ref,
                 HirExpressionKind::Cast {
                     source: Box::new(expression),
-                    policy: BuiltinCastPolicyId::FloatToString,
+                    policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
                 },
                 string_ty,
                 ValueKind::RValue,
@@ -1445,6 +1446,26 @@ impl<'a> HirBuilder<'a> {
         // Template chunk formatting is generated scaffolding: the `FormatFloat` stays spanless.
         if expression.ty == self.type_environment.builtins().float {
             return self.emit_formatted_float_value(expression, span_ref);
+        }
+
+        // Fixed numeric chunks render through the same numeric text policy as explicit casts, so a
+        // chunk never reaches `StringAppend` as a raw number. `Byte` is not numeric and keeps the
+        // append path; template validation rejects it before lowering.
+        if let Some(numeric) = self
+            .type_environment
+            .fixed_scalar_of(expression.ty)
+            .and_then(|scalar| BuiltinCastTarget::Fixed(scalar).numeric_scalar())
+        {
+            return Ok(self.make_expression(
+                span_ref,
+                HirExpressionKind::Cast {
+                    source: Box::new(expression),
+                    policy: BuiltinCastPolicyId::NumericToString(numeric),
+                },
+                string_ty,
+                ValueKind::RValue,
+                region,
+            ));
         }
 
         let empty = self.make_expression(

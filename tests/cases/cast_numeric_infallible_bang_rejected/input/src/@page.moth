@@ -1,0 +1,3 @@
+widen |small U8| -> U16, Error!:
+    return cast! small
+;

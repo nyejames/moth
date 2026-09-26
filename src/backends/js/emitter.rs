@@ -10,6 +10,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -143,7 +144,7 @@ impl<'hir> JsEmitter<'hir> {
         self.collect_used_cast_policies(&functions)?;
         if self
             .used_cast_policies
-            .contains(&BuiltinCastPolicyId::FloatToString)
+            .contains(&BuiltinCastPolicyId::NumericToString(NumericScalar::Float))
         {
             emitted_code_uses_numeric_helpers.format_float = true;
         }

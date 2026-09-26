@@ -1,0 +1,6 @@
+recovered #U8 = cast "300" catch:
+    then 7
+;
+n #Int = cast recovered
+
+[: parsed text recovery: [n]]

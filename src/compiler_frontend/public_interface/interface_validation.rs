@@ -486,6 +486,7 @@ fn canonical_builtin_for_cast_target(target: BuiltinCastTarget) -> CanonicalBuil
         BuiltinCastTarget::Char => CanonicalBuiltinType::Char,
         BuiltinCastTarget::Float => CanonicalBuiltinType::Float,
         BuiltinCastTarget::Error => CanonicalBuiltinType::Error,
+        BuiltinCastTarget::Fixed(scalar) => CanonicalBuiltinType::FixedScalar(scalar),
     }
 }
 

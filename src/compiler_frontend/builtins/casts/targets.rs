@@ -13,10 +13,14 @@
 //!      without adding broad context-dependent APIs.
 
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
 /// The set of builtin types that may be a cast source or target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastTarget {
@@ -26,6 +30,39 @@ pub(crate) enum BuiltinCastTarget {
     Char,
     Float,
     Error,
+    /// An explicit-width scalar or the `Byte` octet type.
+    ///
+    /// WHAT: covers every `FixedScalar` identity, including `Byte`, as a builtin cast
+    ///      source or target. `Int`/`Float` never alias a matching-width fixed type.
+    /// WHY: numeric conversions between `Int`, `Float` and fixed scalars resolve through
+    ///      this one classification so evidence and policy owners share the same vocabulary.
+    Fixed(FixedScalar),
+}
+
+impl BuiltinCastTarget {
+    /// The numeric domain of this target: `Int`, `Float` or a non-`Byte` fixed scalar.
+    pub(crate) fn numeric_scalar(self) -> Option<NumericScalar> {
+        match self {
+            BuiltinCastTarget::Int => Some(NumericScalar::Int),
+            BuiltinCastTarget::Float => Some(NumericScalar::Float),
+            BuiltinCastTarget::Fixed(FixedScalar::Byte) => None,
+            BuiltinCastTarget::Fixed(scalar) => Some(NumericScalar::Fixed(scalar)),
+            BuiltinCastTarget::Bool
+            | BuiltinCastTarget::String
+            | BuiltinCastTarget::Char
+            | BuiltinCastTarget::Error => None,
+        }
+    }
+}
+
+impl From<NumericScalar> for BuiltinCastTarget {
+    fn from(scalar: NumericScalar) -> Self {
+        match scalar {
+            NumericScalar::Int => BuiltinCastTarget::Int,
+            NumericScalar::Float => BuiltinCastTarget::Float,
+            NumericScalar::Fixed(scalar) => BuiltinCastTarget::Fixed(scalar),
+        }
+    }
 }
 
 /// Whether a builtin cast is infallible or fallible.
@@ -45,18 +82,38 @@ pub(crate) enum BuiltinCastFallibility {
 ///      source/target combinations inline at AST or folding time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BuiltinCastPolicyId {
-    IntToFloat,
-    IntToString,
-    FloatToString,
+    /// Numeric-to-numeric conversion between `Int`, `Float` and fixed scalars.
+    ///
+    /// WHAT: carries the complete source and target numeric domains. Never holds `Byte`.
+    /// WHY: evidence classifies by the complete source/target pair, so the policy must carry
+    ///      both to apply exact range and rounding rules.
+    NumericConversion {
+        source: NumericScalar,
+        target: NumericScalar,
+    },
+    /// Infallible `Byte` to `U8` conversion.
+    ByteToU8,
+    /// Infallible `U8` to `Byte` conversion.
+    U8ToByte,
+    /// Infallible numeric text conversion for `Int`, `Float` and the fixed numeric scalars.
+    ///
+    /// WHAT: carries the numeric domain whose canonical text the value formats to. Never holds
+    ///       `Byte`, whose text conversion composes through `U8`.
+    /// WHY: every numeric type shares one text contract, so the policy carries the domain and the
+    ///      policy owner applies that domain's formatting rules.
+    NumericToString(NumericScalar),
+    /// Fallible numeric text parse for `Int`, `Float` and the fixed numeric scalars.
+    ///
+    /// WHAT: carries the numeric domain the text must materialise at. Never holds `Byte`.
+    /// WHY: the destination domain owns the accepted integer range or binary-float rounding, so
+    ///      parsing must know it instead of materialising through an `Int` or `Float` intermediate.
+    StringToNumeric(NumericScalar),
     BoolToString,
     CharToString,
     CharToInt,
     StringToError,
     ErrorToString,
-    FloatToInt,
     IntToChar,
-    StringToInt,
-    StringToFloat,
     StringToBool,
     StringToChar,
 }
@@ -94,8 +151,10 @@ pub(crate) struct CastTargetResolution {
 /// cast source or target.
 ///
 /// WHAT: maps `Bool`, `Int`, `String`, `Char`, and `Float` to their builtin target
-///      variants using `TypeEnvironment::builtins()`. Resolves `Error` by matching
+///      variants using `TypeEnvironment::builtins()`, fixed scalars (including `Byte`)
+///      through the seeded fixed-scalar identities, and `Error` by matching
 ///      the type's nominal path against the preseeded builtin error path.
+///      `Int`/`Float` never alias a matching-width fixed type.
 /// WHY: classification is shared between cast target resolution and evidence
 ///      construction. Centralising it here means the policy table can stay
 ///      table-driven while still relying on one well-defined mapping rule.
@@ -121,6 +180,14 @@ pub(crate) fn builtin_cast_target_for_type(
     }
     if type_id == builtins.float {
         return Some(BuiltinCastTarget::Float);
+    }
+
+    // Fixed scalars (including `Byte`) are distinct seeded identities. A direct
+    // definition check keeps optional unwrapping in the receiving-type caller below.
+    if let Some(TypeDefinition::Builtin(builtin)) = type_environment.get(type_id)
+        && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
+    {
+        return Some(BuiltinCastTarget::Fixed(scalar));
     }
 
     let path = type_environment.nominal_path(type_id)?;

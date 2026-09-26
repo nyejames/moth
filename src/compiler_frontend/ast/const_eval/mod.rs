@@ -700,6 +700,7 @@ fn builtin_cast_literal_from_expression(
         ExpressionKind::Bool(value) => Ok(Some(BuiltinCastLiteral::Bool(*value))),
         ExpressionKind::Int(int) => Ok(Some(BuiltinCastLiteral::Int(*int))),
         ExpressionKind::Float(float) => Ok(Some(BuiltinCastLiteral::Float(*float))),
+        ExpressionKind::FixedScalar(fixed) => Ok(Some(BuiltinCastLiteral::Fixed(*fixed))),
         ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
             let Some(string) =
                 require_concrete_text(value, ConstStringRequirement::CastOrParse, string_table)?
@@ -739,6 +740,11 @@ fn builtin_cast_expression_from_literal(
         BuiltinCastLiteral::Char(value) => {
             Some(Expression::char(*value, span, ValueMode::ImmutableOwned))
         }
+        BuiltinCastLiteral::Fixed(value) => Some(Expression::fixed_scalar(
+            *value,
+            span,
+            ValueMode::ImmutableOwned,
+        )),
         BuiltinCastLiteral::Error { .. } => None,
     }
 }

@@ -9,7 +9,9 @@
 - Delivered: Slice 1b. `I8`..`U64`, `F16`/`F32`/`F64` and `Byte` are builtin type keywords with distinct canonical identities (`FixedScalar`), preserved through generic instances, sidecars and import projection. Both HTML-JS and HTML-Wasm reject any reachable value whose type contains one (`unsupported_backend_feature.fixed_width_scalar_values`) until Phases 4 and 5. Lowercase spellings such as `byte` and `u8` join the existing keyword-shadow reservation.
 - Known Phase 5 gap: Wasm `IntMod` still applies a Euclidean correction, while folding and JS follow the dividend's sign.
 - Delivered: Slice 1c. Numeric literals keep their source spelling until evaluation. A direct fixed-scalar or option-of-fixed receiving boundary (declarations, constants, assignment, returns, call arguments, struct and parameter defaults, typed collections, map values, then/else arms and multi-bind slots) materialises a lone literal in its destination with exact range checks, signed minima, `U64` maxima and single-rounded `F16`/`F32` bits. Parentheses stay transparent for a lone literal and never make an operand direct. Fixed values keep exact bits through constants, public folded values, import projection and HIR. Every other literal and diagnostic is unchanged.
-- Phase 3 owns the remaining literal typing: immediate numeric peers, match-pattern literals and generic inference where a fixed type argument meets a literal (`Box(200)` into `Box of U8` still reports two inferred types). Fixed-value template interpolation waits for Phase 3 numeric formatting. Fixed-width map keys stay rejected until Phase 6.
+- Delivered: Slice 3a. HIR checked numeric operations record an operator plus a canonical `NumericScalar` domain.
+- Delivered: Slice 3b. Cast evidence covers every `Int`/`Float`/fixed-width numeric pair with range-derived fallibility, `Byte <-> U8`, and `String` parsing and formatting for every numeric domain (`Byte` text composes through `U8`). Const casts fold at the destination with single rounding; binary floats format as the shortest round-tripping text at their own precision, so `F16` 65504 prints `65500`. Template heads accept non-`Byte` fixed numeric values and format them through the same text policy; runtime fixed values stay behind the backend gates until Phases 4 and 5.
+- Phase 3 still owns the remaining literal typing: immediate numeric peers, match-pattern literals and generic inference where a fixed type argument meets a literal (`Box(200)` into `Box of U8` still reports two inferred types). Fixed-width map keys stay rejected until Phase 6.
 - Next action: Phase 3, the promotion and operator compatibility matrix.
 
 ## Goal and delivery order
@@ -509,7 +511,7 @@ runtime values escaping target validation.
 
 - [ ] Implement the promotion/compatibility matrix, unsigned-negation rejection,
   fixed integer `/ -> F64`, integer division/remainder and fixed float precision.
-- [ ] Extend cast evidence and shared numeric folding, including target-aware
+- [x] Extend cast evidence and shared numeric folding, including target-aware
   String parsing and formatting. Test conversion policy independently of codegen.
 - [ ] Replace width-duplicating HIR arithmetic with canonical domain/operator/
   failure facts. Linearise casts and compound assignments with one evaluation and

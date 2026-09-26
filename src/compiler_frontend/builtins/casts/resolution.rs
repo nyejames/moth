@@ -7,7 +7,7 @@
 //! WHY: centralising evidence selection and cast-specific diagnostics prevents
 //!      boundary callers from duplicating trait/evidence lookup logic.
 
-use super::evidence::lookup_builtin_evidence;
+use super::evidence::{BuiltinCastEvidenceRow, lookup_builtin_evidence};
 use super::targets::{BuiltinCastFallibility, BuiltinCastTarget, builtin_cast_target_for_type};
 use super::traits::{BUILTIN_CAST_TRAIT_ROWS, CoreCastTrait, builtin_cast_trait_metadata};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
@@ -20,6 +20,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -46,6 +47,7 @@ pub(crate) struct CastResolutionInput<'a> {
     pub(crate) target: BuiltinCastTarget,
     pub(crate) requires_optional_wrap_after_cast: bool,
     pub(crate) handling: CastHandling,
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) trait_environment: &'a TraitEnvironment,
     pub(crate) trait_evidence_environment: &'a TraitEvidenceEnvironment,
     pub(crate) type_environment: &'a mut TypeEnvironment,
@@ -72,6 +74,7 @@ pub(crate) fn resolve_cast_expression(
         target,
         requires_optional_wrap_after_cast,
         handling,
+        numeric_profile,
         trait_environment,
         trait_evidence_environment,
         type_environment,
@@ -101,12 +104,15 @@ pub(crate) fn resolve_cast_expression(
         ));
     }
 
-    let source_target =
-        builtin_cast_target_for_type(source_type_id, type_environment, string_table, path_fork);
+    let builtin_row =
+        builtin_cast_target_for_type(source_type_id, type_environment, string_table, path_fork)
+            .and_then(|source_target| {
+                lookup_builtin_evidence(source_target, target, numeric_profile)
+            });
 
     let selection = select_cast_evidence(
         source_type_id,
-        source_target,
+        builtin_row,
         target,
         trait_environment,
         trait_evidence_environment,
@@ -182,16 +188,14 @@ struct CastEvidenceSelection {
 
 fn select_cast_evidence(
     source_type_id: TypeId,
-    source_target: Option<BuiltinCastTarget>,
+    builtin_row: Option<BuiltinCastEvidenceRow>,
     target: BuiltinCastTarget,
     trait_environment: &TraitEnvironment,
     trait_evidence_environment: &TraitEvidenceEnvironment,
     type_environment: &TypeEnvironment,
     active_generic_type_context: Option<&ActiveGenericTypeContext>,
 ) -> CastEvidenceSelection {
-    if let Some(source_target) = source_target
-        && let Some(row) = lookup_builtin_evidence(source_target, target)
-    {
+    if let Some(row) = builtin_row {
         let evidence = ResolvedCastEvidence::Builtin { policy: row.policy };
         return match row.fallibility {
             BuiltinCastFallibility::Infallible => CastEvidenceSelection {
@@ -202,6 +206,16 @@ fn select_cast_evidence(
                 infallible: None,
                 fallible: Some(evidence),
             },
+        };
+    }
+
+    // Fixed and `Byte` targets carry compiler-owned builtin evidence only: there is
+    // no source-authorable core cast trait family for them, so user-defined and
+    // generic-bound lookups must return no evidence rather than an error.
+    if matches!(target, BuiltinCastTarget::Fixed(_)) {
+        return CastEvidenceSelection {
+            infallible: None,
+            fallible: None,
         };
     }
 

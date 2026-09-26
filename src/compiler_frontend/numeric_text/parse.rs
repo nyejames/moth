@@ -449,6 +449,63 @@ pub(crate) fn parse_numeric_text_to_float(
     materialize_float_text_with_sign(&parsed.normalized_text, negative, precision)
 }
 
+/// Parse signed numeric text into one fixed scalar using the Moth whole-string grammar.
+///
+/// WHAT: applies the shared numeric text grammar to an entire input string, including an optional
+///       leading `-`, then materialises the value directly at the destination scalar. Integer
+///       destinations accept whole-number spelling only and check their own exact range, unsigned
+///       destinations reject every negative spelling including `-0`, and binary-float destinations
+///       accept a whole number or a decimal/exponent and round once at their own precision.
+/// WHY: `String -> U8` and the other fixed text conversions must agree with source literals on
+///      separator, sign, and whitespace rules, and must stay exact above `2^53` rather than
+///      passing through an `Int` or `Float` intermediate.
+pub(crate) fn parse_numeric_text_to_fixed_scalar(
+    source: &str,
+    scalar: FixedScalar,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    if source.is_empty() {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    }
+
+    let (sign, unsigned) = if let Some(rest) = source.strip_prefix('-') {
+        (NumericLiteralSign::Negative, rest)
+    } else if source.starts_with('+') {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    } else {
+        (NumericLiteralSign::Positive, source)
+    };
+
+    if unsigned.is_empty() {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    }
+
+    let parsed = parse_numeric_literal(unsigned)?;
+
+    match scalar.class() {
+        // An integer destination requires whole-number text, so a decimal point or exponent is a
+        // spelling failure rather than a range failure.
+        FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
+            if parsed.kind != NumericLiteralKind::WholeNumber {
+                return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+            }
+
+            if scalar.class() == FixedScalarClass::SignedInteger {
+                materialize_signed_fixed_scalar(&parsed.normalized_text, sign, scalar)
+            } else {
+                materialize_unsigned_fixed_scalar(&parsed.normalized_text, sign, scalar)
+            }
+        }
+
+        FixedScalarClass::BinaryFloat => {
+            materialize_binary_float_fixed_scalar(&parsed.normalized_text, sign, scalar)
+        }
+
+        // `Byte` is outside the numeric vocabulary, so no text conversion reaches it; the format
+        // reason keeps this routine total without a panic path.
+        FixedScalarClass::Octet => Err(NumberLiteralErrorReason::InvalidSeparatorPlacement),
+    }
+}
+
 // -----------------------------------------------------------
 //  Fixed Scalar Materialization
 // -----------------------------------------------------------

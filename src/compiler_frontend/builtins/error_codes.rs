@@ -22,6 +22,8 @@ pub(crate) enum BuiltinErrorCode {
     StringParseCharInvalidFormat = 230,
     FloatCastToIntInvalidValue = 240,
     FloatCastToIntOutOfRange = 241,
+    IntCastOutOfRange = 242,
+    FloatCastNonFinite = 243,
     IntCastToCharInvalidCodepoint = 250,
     /// Checked numeric operations use this when division or modulo receives a zero divisor.
     DivideByZero = 300,
@@ -67,6 +69,8 @@ impl BuiltinErrorCode {
             BuiltinErrorCode::StringParseCharInvalidFormat => "Cannot parse Char from text",
             BuiltinErrorCode::FloatCastToIntInvalidValue => "Float value cannot be cast to Int",
             BuiltinErrorCode::FloatCastToIntOutOfRange => "Float value is out of Int range",
+            BuiltinErrorCode::IntCastOutOfRange => "Integer value is out of the target range",
+            BuiltinErrorCode::FloatCastNonFinite => "Float conversion produced a non-finite value",
             BuiltinErrorCode::IntCastToCharInvalidCodepoint => {
                 "Int value is not a valid Unicode scalar"
             }

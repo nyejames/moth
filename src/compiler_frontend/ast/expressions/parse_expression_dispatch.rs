@@ -1218,6 +1218,7 @@ fn parse_cast_expression(
         target,
         requires_optional_wrap_after_cast,
         handling,
+        numeric_profile: context.numeric_profile,
         trait_environment: context.trait_environment(),
         trait_evidence_environment: context.trait_evidence_environment(),
         type_environment: type_interner.environment_mut_for_derived_types(),
