@@ -90,7 +90,7 @@ pub(crate) fn lower_statement(
             "Wasm lowering does not yet support cast operations",
         )),
         HirStatementKind::NumericOp { op, .. } => Err(lir_transformation_error(format!(
-            "Wasm lowering does not yet support checked numeric operations: {op:?}"
+            "Wasm lowering does not yet support checked numeric operations: {op}"
         ))),
         HirStatementKind::FormatFloat { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support Float formatting",

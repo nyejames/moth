@@ -8,11 +8,12 @@ use crate::backends::js::js_expr::{escape_js_string, js_cast_helper_for_policy};
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -213,11 +214,11 @@ impl<'hir> JsEmitter<'hir> {
 
     /// Lower a `HirStatementKind::NumericOp` into the appropriate checked runtime helper call.
     ///
-    /// WHAT: dispatches `Int*` and `Float*` operations to their `__moth_int_*` / `__moth_float_*`
-    ///       helpers, validates operand arity against the HIR contract, and emits the result
-    ///       assignment. Trap mode wraps the helper's fallible carrier in `__moth_numeric_trap` so
-    ///       the result local receives only the scalar success value; ReturnError mode assigns the
-    ///       carrier directly.
+    /// WHAT: dispatches `Int` and `Float` operator+domain pairs to their `__moth_int_*` /
+    ///       `__moth_float_*` helpers, validates operand arity against the HIR contract, and emits
+    ///       the result assignment. Trap mode wraps the helper's fallible carrier in
+    ///       `__moth_numeric_trap` so the result local receives only the scalar success value;
+    ///       ReturnError mode assigns the carrier directly.
     /// WHY: numeric operations are compiler-owned builtins with explicit failure modes; the backend
     ///      must map them to the JS helpers that enforce Alpha `Int = i32` and `Float = finite f64`
     ///      semantics.
@@ -233,7 +234,7 @@ impl<'hir> JsEmitter<'hir> {
         let operands_are_unary = matches!(operands, HirNumericOperands::Unary { .. });
         if is_unary != operands_are_unary {
             return Err(CompilerError::compiler_error(format!(
-                "JS backend received NumericOp::{op:?} with operand arity that does not match the operation"
+                "JS backend received NumericOp::{op} with operand arity that does not match the operation"
             )));
         }
 
@@ -246,7 +247,7 @@ impl<'hir> JsEmitter<'hir> {
         };
 
         // Select the JS helper name for this operation.
-        let helper_name = js_numeric_helper_for_op(op);
+        let helper_name = js_numeric_helper_for_op(op)?;
 
         // Assemble the helper call.
         let helper_call = format!("{helper_name}({})", lowered_args.join(", "));
@@ -833,25 +834,32 @@ impl<'hir> JsEmitter<'hir> {
 
 /// Returns the JS runtime helper name for a checked numeric HIR operation.
 ///
-/// WHAT: maps each `HirNumericOp` to the `__moth_int_*` or `__moth_float_*` helper emitted by
-///       `emit_runtime_numeric_helpers`.
+/// WHAT: maps each `Int`/`Float` operator+domain pair to the `__moth_int_*` or `__moth_float_*`
+///       helper emitted by `emit_runtime_numeric_helpers`. Fixed domains and invalid pairs are
+///       unreachable: target validation rejects reachable fixed values and HIR validation rejects
+///       invalid operator/domain combinations.
 /// WHY: keeps the helper name decision in one place so statement lowering and runtime emission
 ///      cannot drift.
-fn js_numeric_helper_for_op(op: HirNumericOp) -> &'static str {
-    match op {
-        HirNumericOp::IntAdd => "__moth_int_add",
-        HirNumericOp::IntSub => "__moth_int_sub",
-        HirNumericOp::IntMul => "__moth_int_mul",
-        HirNumericOp::IntDiv => "__moth_int_div",
-        HirNumericOp::IntMod => "__moth_int_mod",
-        HirNumericOp::IntPow => "__moth_int_pow",
-        HirNumericOp::IntNeg => "__moth_int_neg",
-        HirNumericOp::FloatAdd => "__moth_float_add",
-        HirNumericOp::FloatSub => "__moth_float_sub",
-        HirNumericOp::FloatMul => "__moth_float_mul",
-        HirNumericOp::FloatDiv => "__moth_float_div",
-        HirNumericOp::FloatMod => "__moth_float_mod",
-        HirNumericOp::FloatPow => "__moth_float_pow",
-        HirNumericOp::FloatNeg => "__moth_float_neg",
+fn js_numeric_helper_for_op(op: HirNumericOp) -> Result<&'static str, CompilerError> {
+    let HirNumericOp { operator, domain } = op;
+
+    match (operator, domain) {
+        (HirNumericOperator::Add, NumericScalar::Int) => Ok("__moth_int_add"),
+        (HirNumericOperator::Subtract, NumericScalar::Int) => Ok("__moth_int_sub"),
+        (HirNumericOperator::Multiply, NumericScalar::Int) => Ok("__moth_int_mul"),
+        (HirNumericOperator::IntegerDivide, NumericScalar::Int) => Ok("__moth_int_div"),
+        (HirNumericOperator::Remainder, NumericScalar::Int) => Ok("__moth_int_mod"),
+        (HirNumericOperator::Power, NumericScalar::Int) => Ok("__moth_int_pow"),
+        (HirNumericOperator::Negate, NumericScalar::Int) => Ok("__moth_int_neg"),
+        (HirNumericOperator::Add, NumericScalar::Float) => Ok("__moth_float_add"),
+        (HirNumericOperator::Subtract, NumericScalar::Float) => Ok("__moth_float_sub"),
+        (HirNumericOperator::Multiply, NumericScalar::Float) => Ok("__moth_float_mul"),
+        (HirNumericOperator::Divide, NumericScalar::Float) => Ok("__moth_float_div"),
+        (HirNumericOperator::Remainder, NumericScalar::Float) => Ok("__moth_float_mod"),
+        (HirNumericOperator::Power, NumericScalar::Float) => Ok("__moth_float_pow"),
+        (HirNumericOperator::Negate, NumericScalar::Float) => Ok("__moth_float_neg"),
+        _ => Err(CompilerError::compiler_error(format!(
+            "JS backend received unreachable numeric operation {op}"
+        ))),
     }
 }

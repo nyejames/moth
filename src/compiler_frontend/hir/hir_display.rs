@@ -38,7 +38,6 @@ use crate::compiler_frontend::hir::ids::{
 };
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOp;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -388,7 +387,7 @@ impl<'a> HirDisplayContext<'a> {
                 let _ = write!(
                     out,
                     "numeric_{}_{}(",
-                    op.source_name(),
+                    op,
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
@@ -1220,11 +1219,5 @@ impl Display for HirUnaryOp {
             HirUnaryOp::Neg => write!(f, "-"),
             HirUnaryOp::Not => write!(f, "!"),
         }
-    }
-}
-
-impl Display for HirNumericOp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.source_name())
     }
 }

@@ -9,6 +9,7 @@
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
 //! - `fixed_scalar.rs` — the explicit-width builtin scalar identities (`I8`..`F64`, `Byte`).
+//! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (`Int`, `Float`, fixed).
 //! - `parsed.rs` — parsed type syntax before resolution (no semantic identity).
 //! - `display.rs` — type name rendering through `StringTable`.
 //! - `queries.rs` — semantic fact queries over `TypeId + TypeEnvironment`.
@@ -32,6 +33,7 @@ pub mod generic_identity_bridge;
 pub mod generic_parameters;
 pub mod ids;
 pub mod numeric_profile;
+pub(crate) mod numeric_scalar;
 pub mod parsed;
 pub mod queries;
 

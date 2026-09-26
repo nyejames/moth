@@ -19,6 +19,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
@@ -29,7 +30,7 @@ use crate::compiler_frontend::hir::ids::{
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::reachability::{
     ReachableFloatStatementKind, collect_module_function_link_facts,
@@ -117,7 +118,7 @@ fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(10, HirNumericOp::IntAdd, span)],
+            vec![numeric_op_statement(10, int_add_op(), span)],
             HirTerminator::Return(unit_expression(0)),
         )],
     );
@@ -155,7 +156,7 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
             ),
             block(
                 BlockId(1),
-                vec![numeric_op_statement(10, HirNumericOp::IntMul, span)],
+                vec![numeric_op_statement(10, int_mul_op(), span)],
                 HirTerminator::Return(unit_expression(1)),
             ),
         ],
@@ -911,6 +912,20 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, span: Option<SourceSpan>) -> 
             result,
         },
         span,
+    }
+}
+
+fn int_add_op() -> HirNumericOp {
+    HirNumericOp {
+        operator: HirNumericOperator::Add,
+        domain: NumericScalar::Int,
+    }
+}
+
+fn int_mul_op() -> HirNumericOp {
+    HirNumericOp {
+        operator: HirNumericOperator::Multiply,
+        domain: NumericScalar::Int,
     }
 }
 

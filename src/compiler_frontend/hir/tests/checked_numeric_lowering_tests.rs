@@ -8,12 +8,13 @@
 use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_builder::{register_local, setup_builder};
 use crate::compiler_frontend::hir::ids::{FunctionId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -113,7 +114,12 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
 
     let (op, failure_mode) = find_single_numeric_op(&builder)
         .expect("int addition should emit exactly one NumericOp statement");
-    assert!(matches!(op, HirNumericOp::IntAdd));
+    assert!(
+        op == HirNumericOp {
+            operator: HirNumericOperator::Add,
+            domain: NumericScalar::Int
+        }
+    );
     assert!(matches!(failure_mode, NumericFailureMode::Trap));
 }
 
@@ -139,7 +145,12 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
         .expect("int subtraction lowering should succeed");
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
-    assert!(matches!(op, HirNumericOp::IntSub));
+    assert!(
+        op == HirNumericOp {
+            operator: HirNumericOperator::Subtract,
+            domain: NumericScalar::Int
+        }
+    );
 }
 
 #[test]
@@ -166,7 +177,12 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
     assert_eq!(lowered.value.ty, builtin_type_ids::FLOAT);
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
-    assert!(matches!(op, HirNumericOp::FloatDiv));
+    assert!(
+        op == HirNumericOp {
+            operator: HirNumericOperator::Divide,
+            domain: NumericScalar::Float
+        }
+    );
 
     // Both Int operands must have been explicitly converted to Float before the division.
     let numeric_op = builder
@@ -178,7 +194,7 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
         })
         .expect("NumericOp statement should exist");
     let HirNumericOperands::Binary { left, right } = numeric_op else {
-        panic!("FloatDiv should be binary");
+        panic!("Float divide should be binary");
     };
     assert!(matches!(
         left.kind,
@@ -218,7 +234,12 @@ fn mixed_int_float_addition_converts_int_operand() {
         .expect("mixed addition lowering should succeed");
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
-    assert!(matches!(op, HirNumericOp::FloatAdd));
+    assert!(
+        op == HirNumericOp {
+            operator: HirNumericOperator::Add,
+            domain: NumericScalar::Float
+        }
+    );
 
     let numeric_op = builder
         .test_current_block_statements()
@@ -229,7 +250,7 @@ fn mixed_int_float_addition_converts_int_operand() {
         })
         .expect("NumericOp statement should exist");
     let HirNumericOperands::Binary { left, right } = numeric_op else {
-        panic!("FloatAdd should be binary");
+        panic!("Float add should be binary");
     };
     assert!(matches!(
         left.kind,
@@ -280,7 +301,12 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     assert_eq!(lowered.value.ty, builtin_type_ids::INT);
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
-    assert!(matches!(op, HirNumericOp::IntNeg));
+    assert!(
+        op == HirNumericOp {
+            operator: HirNumericOperator::Negate,
+            domain: NumericScalar::Int
+        }
+    );
 }
 
 #[test]

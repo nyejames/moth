@@ -11,11 +11,12 @@ use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_tar
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
@@ -348,37 +349,25 @@ impl<'a> HirBuilder<'a> {
             return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, span)?;
+        let success_type = self.checked_numeric_result_type(op, &no_span)?;
         let success_value =
             self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
         self.emit_assign_local_statement(target, success_value, span)
     }
 
     /// Returns the scalar success type for a checked numeric operation.
-    pub(crate) fn checked_numeric_result_type(
+    ///
+    /// WHAT: derives the result type from the operation domain instead of matching every
+    ///       operator/variant pair.
+    /// WHY: the domain already owns the canonical type, so one derivation covers Int, Float
+    ///      and later fixed-width domains.
+    fn checked_numeric_result_type(
         &mut self,
         op: HirNumericOp,
         span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
-        let int_type = self.lower_type_id(self.type_environment.builtins().int, span)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
-        Ok(match op {
-            HirNumericOp::IntAdd
-            | HirNumericOp::IntSub
-            | HirNumericOp::IntMul
-            | HirNumericOp::IntDiv
-            | HirNumericOp::IntMod
-            | HirNumericOp::IntPow
-            | HirNumericOp::IntNeg => int_type,
-
-            HirNumericOp::FloatAdd
-            | HirNumericOp::FloatSub
-            | HirNumericOp::FloatMul
-            | HirNumericOp::FloatDiv
-            | HirNumericOp::FloatMod
-            | HirNumericOp::FloatPow
-            | HirNumericOp::FloatNeg => float_type,
-        })
+        let domain_type = op.domain.type_id(&self.type_environment);
+        self.lower_type_id(domain_type, span)
     }
 
     /// Selects the numeric failure mode for the current function context.
@@ -444,8 +433,9 @@ impl<'a> HirBuilder<'a> {
         left: &HirExpression,
         right: &HirExpression,
     ) -> Option<(HirNumericOp, TypeId)> {
-        let int_type = self.type_environment.builtins().int;
-        let float_type = self.type_environment.builtins().float;
+        let builtins = self.type_environment.builtins();
+        let int_type = builtins.int;
+        let float_type = builtins.float;
 
         let left_is_int = left.ty == int_type;
         let left_is_float = left.ty == float_type;
@@ -458,33 +448,47 @@ impl<'a> HirBuilder<'a> {
             return None;
         }
 
+        let int_domain = NumericScalar::Int;
+        let float_domain = NumericScalar::Float;
+
+        let make_op = |operator: HirNumericOperator, domain: NumericScalar| {
+            let result_type = if domain == NumericScalar::Int {
+                int_type
+            } else {
+                float_type
+            };
+            (HirNumericOp { operator, domain }, result_type)
+        };
+
         match op {
-            Operator::Add if left_is_int && right_is_int => Some((HirNumericOp::IntAdd, int_type)),
+            Operator::Add if left_is_int && right_is_int => {
+                Some(make_op(HirNumericOperator::Add, int_domain))
+            }
             Operator::Subtract if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntSub, int_type))
+                Some(make_op(HirNumericOperator::Subtract, int_domain))
             }
             Operator::Multiply if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntMul, int_type))
+                Some(make_op(HirNumericOperator::Multiply, int_domain))
             }
             Operator::IntDivide if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntDiv, int_type))
+                Some(make_op(HirNumericOperator::IntegerDivide, int_domain))
             }
             Operator::Modulus if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntMod, int_type))
+                Some(make_op(HirNumericOperator::Remainder, int_domain))
             }
             Operator::Exponent if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntPow, int_type))
+                Some(make_op(HirNumericOperator::Power, int_domain))
             }
 
-            // Real division always lowers to FloatDiv; operands are converted below.
-            Operator::Divide => Some((HirNumericOp::FloatDiv, float_type)),
+            // Real division always lowers to Float divide; operands are converted below.
+            Operator::Divide => Some(make_op(HirNumericOperator::Divide, float_domain)),
 
             // Mixed or pure Float arithmetic for the remaining binary operators.
-            Operator::Add => Some((HirNumericOp::FloatAdd, float_type)),
-            Operator::Subtract => Some((HirNumericOp::FloatSub, float_type)),
-            Operator::Multiply => Some((HirNumericOp::FloatMul, float_type)),
-            Operator::Modulus => Some((HirNumericOp::FloatMod, float_type)),
-            Operator::Exponent => Some((HirNumericOp::FloatPow, float_type)),
+            Operator::Add => Some(make_op(HirNumericOperator::Add, float_domain)),
+            Operator::Subtract => Some(make_op(HirNumericOperator::Subtract, float_domain)),
+            Operator::Multiply => Some(make_op(HirNumericOperator::Multiply, float_domain)),
+            Operator::Modulus => Some(make_op(HirNumericOperator::Remainder, float_domain)),
+            Operator::Exponent => Some(make_op(HirNumericOperator::Power, float_domain)),
 
             _ => None,
         }
@@ -492,9 +496,9 @@ impl<'a> HirBuilder<'a> {
 
     /// Converts `Int` operands to `Float` for mixed arithmetic and real division.
     ///
-    /// WHAT: given a classified float-family `HirNumericOp`, any `Int` operand is wrapped in an
+    /// WHAT: given a classified float-domain `HirNumericOp`, any `Int` operand is wrapped in an
     ///       infallible `Int -> Float` cast. Pure `Float` operands pass through unchanged.
-    /// WHY: the backend expects uniform `Float*` checked operations and `Int / Int` is real
+    /// WHY: the backend expects uniform `Float` checked operations and `Int / Int` is real
     ///      division.
     pub(crate) fn lower_checked_numeric_binary_operands(
         &mut self,
@@ -502,22 +506,11 @@ impl<'a> HirBuilder<'a> {
         left: HirExpression,
         right: HirExpression,
     ) -> Result<(HirExpression, HirExpression), CompilerError> {
-        let float_type = self.type_environment.builtins().float;
-
-        let needs_float = matches!(
-            op,
-            HirNumericOp::FloatAdd
-                | HirNumericOp::FloatSub
-                | HirNumericOp::FloatMul
-                | HirNumericOp::FloatDiv
-                | HirNumericOp::FloatMod
-                | HirNumericOp::FloatPow
-        );
-
-        if !needs_float {
+        if op.domain != NumericScalar::Float {
             return Ok((left, right));
         }
 
+        let float_type = self.type_environment.builtins().float;
         let left = self.convert_int_to_float_if_needed(left, float_type)?;
         let right = self.convert_int_to_float_if_needed(right, float_type)?;
         Ok((left, right))
@@ -535,9 +528,21 @@ impl<'a> HirBuilder<'a> {
         let float_type = self.type_environment.builtins().float;
 
         if operand.ty == int_type {
-            Some((HirNumericOp::IntNeg, int_type))
+            Some((
+                HirNumericOp {
+                    operator: HirNumericOperator::Negate,
+                    domain: NumericScalar::Int,
+                },
+                int_type,
+            ))
         } else if operand.ty == float_type {
-            Some((HirNumericOp::FloatNeg, float_type))
+            Some((
+                HirNumericOp {
+                    operator: HirNumericOperator::Negate,
+                    domain: NumericScalar::Float,
+                },
+                float_type,
+            ))
         } else {
             None
         }
@@ -546,7 +551,7 @@ impl<'a> HirBuilder<'a> {
     /// Wraps an `Int` operand in an infallible `Int -> Float` cast when needed.
     ///
     /// WHAT: mixed `Int`/`Float` arithmetic and `Int / Int` real division convert `Int` operands to
-    ///       `Float` explicitly so the backend sees a uniform `Float*` checked operation.
+    ///       `Float` explicitly so the backend sees a uniform `Float` checked operation.
     /// WHY: HIR already owns the `IntToFloat` cast policy and JS lowering treats it as identity,
     ///      so reusing it avoids inventing a new conversion expression shape.
     fn convert_int_to_float_if_needed(

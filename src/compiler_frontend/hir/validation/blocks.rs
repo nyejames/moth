@@ -11,7 +11,9 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
-use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOperands, HirNumericOperator, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
@@ -226,42 +228,95 @@ impl<'a> HirValidator<'a> {
             } => {
                 if op.is_unary() != matches!(operands, HirNumericOperands::Unary { .. }) {
                     return Err(self.error_with_hir(
-                        format!(
-                            "NumericOp::{op:?} operand shape does not match the operation arity"
-                        ),
+                        format!("NumericOp::{op} operand shape does not match the operation arity"),
                         anchor,
                     ));
                 }
 
+                // Every operand must already carry the domain type; Int/Float conversion is
+                // explicit HIR, so a mismatched operand means the lowering forgot its cast.
+                let domain_type = op.domain.type_id(self.type_environment);
+
                 match operands {
                     HirNumericOperands::Unary { operand } => {
                         self.validate_expression(operand, anchor)?;
+
+                        if operand.ty != domain_type {
+                            return Err(self.error_with_hir(
+                                format!(
+                                    "NumericOp::{op} operand type does not match the domain type"
+                                ),
+                                anchor,
+                            ));
+                        }
                     }
                     HirNumericOperands::Binary { left, right } => {
                         self.validate_expression(left, anchor)?;
                         self.validate_expression(right, anchor)?;
+
+                        if left.ty != domain_type || right.ty != domain_type {
+                            return Err(self.error_with_hir(
+                                format!(
+                                    "NumericOp::{op} operand type does not match the domain type"
+                                ),
+                                anchor,
+                            ));
+                        }
                     }
+                }
+
+                // Real division needs a binary-float domain; truncating integer division needs
+                // an integer domain. Fixed domains inherit the same operator contract.
+                let operator_domain_valid = match op.operator {
+                    HirNumericOperator::Divide => op.domain.is_binary_float(),
+                    HirNumericOperator::IntegerDivide => op.domain.is_integer(),
+                    _ => true,
+                };
+
+                if !operator_domain_valid {
+                    return Err(self.error_with_hir(
+                        format!("NumericOp::{op} operator does not match the domain"),
+                        anchor,
+                    ));
                 }
 
                 self.require_local_id(*result, anchor)?;
 
-                if *failure_mode == NumericFailureMode::ReturnError {
-                    let Some(result_type) = self.local_types.get(result).copied() else {
-                        return Err(self.error_with_hir(
-                            "NumericOp result local has no registered type",
-                            anchor,
-                        ));
-                    };
+                let Some(result_type) = self.local_types.get(result).copied() else {
+                    return Err(self
+                        .error_with_hir("NumericOp result local has no registered type", anchor));
+                };
 
-                    if self
-                        .type_environment
-                        .fallible_carrier_slots(result_type)
-                        .is_none()
-                    {
-                        return Err(self.error_with_hir(
-                            "NumericOp ReturnError result local must have an internal fallible carrier type",
-                            anchor,
-                        ));
+                match failure_mode {
+                    NumericFailureMode::Trap => {
+                        if result_type != domain_type {
+                            return Err(self.error_with_hir(
+                                format!(
+                                    "NumericOp::{op} Trap result local has the wrong success type"
+                                ),
+                                anchor,
+                            ));
+                        }
+                    }
+
+                    NumericFailureMode::ReturnError => {
+                        let Some((carrier_success_type, _)) =
+                            self.type_environment.fallible_carrier_slots(result_type)
+                        else {
+                            return Err(self.error_with_hir(
+                                "NumericOp ReturnError result local must have an internal fallible carrier type",
+                                anchor,
+                            ));
+                        };
+
+                        if carrier_success_type != domain_type {
+                            return Err(self.error_with_hir(
+                                format!(
+                                    "NumericOp::{op} ReturnError carrier has the wrong success type"
+                                ),
+                                anchor,
+                            ));
+                        }
                     }
                 }
             }

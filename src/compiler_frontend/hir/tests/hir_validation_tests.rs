@@ -13,6 +13,7 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId, builtin_type_ids,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expressions::{
@@ -30,7 +31,7 @@ use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
 };
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, HirNumericOperator, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
@@ -306,7 +307,10 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
-            op: HirNumericOp::IntNeg,
+            op: HirNumericOp {
+                operator: HirNumericOperator::Negate,
+                domain: NumericScalar::Int,
+            },
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
             result: result_local,
@@ -326,6 +330,132 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
             .msg
             .contains("operand shape does not match the operation arity")
     );
+}
+
+#[test]
+fn validator_rejects_numeric_op_operand_domain_mismatch() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let int_type = type_environment.builtins().int;
+    let float_type = type_environment.builtins().float;
+    let result_local = LocalId(9000);
+
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: result_local,
+        ty: int_type,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+
+    // Int-domain addition fed Float operands: lowering must convert explicitly, so a
+    // mismatched operand type is a builder bug the validator has to catch.
+    let left = float_expression(
+        HirValueId(9000),
+        1.0,
+        float_type,
+        entry_region,
+        &span,
+        &mut module,
+    );
+    let right = float_expression(
+        HirValueId(9001),
+        2.0,
+        float_type,
+        entry_region,
+        &span,
+        &mut module,
+    );
+
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::NumericOp {
+            op: HirNumericOp {
+                operator: HirNumericOperator::Add,
+                domain: NumericScalar::Int,
+            },
+            failure_mode: NumericFailureMode::Trap,
+            operands: HirNumericOperands::Binary { left, right },
+            result: result_local,
+        },
+        span,
+    };
+
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject NumericOp operands outside the domain type");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("operand type does not match the domain type")
+    );
+}
+
+#[test]
+fn validator_rejects_integer_divide_on_float_domain() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let float_type = type_environment.builtins().float;
+    let result_local = LocalId(9000);
+
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: result_local,
+        ty: float_type,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+
+    let left = float_expression(
+        HirValueId(9000),
+        1.0,
+        float_type,
+        entry_region,
+        &span,
+        &mut module,
+    );
+    let right = float_expression(
+        HirValueId(9001),
+        2.0,
+        float_type,
+        entry_region,
+        &span,
+        &mut module,
+    );
+
+    // Truncating `//` needs an integer domain; real `/` is the only division on Float.
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::NumericOp {
+            op: HirNumericOp {
+                operator: HirNumericOperator::IntegerDivide,
+                domain: NumericScalar::Float,
+            },
+            failure_mode: NumericFailureMode::Trap,
+            operands: HirNumericOperands::Binary { left, right },
+            result: result_local,
+        },
+        span,
+    };
+
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject IntegerDivide on a Float domain");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("operator does not match the domain"));
 }
 
 #[test]

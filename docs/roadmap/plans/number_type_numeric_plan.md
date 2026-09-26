@@ -447,10 +447,11 @@ introducing one descriptor, parser or statement family per numeric type.
 | `src/compiler_frontend/mon/`, `src/lib.rs`, public MON consumer tests | Reuse the delivered service and extend schema/value materialisation and budgets. |
 | `builtins/error_type.rs`, `builtins/error_codes.rs`, JS/Wasm error helpers | Final U32 runtime Error.code migration, separate from diagnostic IDs. |
 
-The existing HIR enum still enumerates IntAdd/FloatAdd-style operations. Replace
-it with the accepted backend-neutral domain/operator/failure description rather
-than multiplying enum variants by every width. Keep canonical TypeId as the type
-authority. No numeric type implements a new trait-object or overload framework.
+HIR checked numeric operations record a backend-neutral operator plus a canonical
+`NumericScalar` domain (`hir/numeric.rs`, `datatypes/numeric_scalar.rs`). Extend
+that domain rather than multiplying enum variants by every width. Keep canonical
+TypeId as the type authority. No numeric type implements a new trait-object or
+overload framework.
 
 ## Implementation phases
 

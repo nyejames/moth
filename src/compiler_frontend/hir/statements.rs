@@ -123,7 +123,7 @@ pub enum HirStatementKind {
     ///   carrier (success value or builtin `Error`). A later lowering helper is expected to branch
     ///   with `HirTerminator::FallibleBranch` and unwrap success/error before borrow validation.
     NumericOp {
-        /// The specific checked numeric operation (e.g. `IntAdd`, `FloatDiv`).
+        /// The checked numeric operation (operator plus canonical numeric domain).
         op: HirNumericOp,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
