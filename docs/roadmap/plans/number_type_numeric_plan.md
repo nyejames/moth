@@ -3,7 +3,7 @@
 ## Status
 
 - Status: active on numeric-type-expanding.
-- Current slice: Phase 3, operators, conversions and checked HIR.
+- Current slice: Phase 4, JavaScript fixed numeric and Byte execution.
 - Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.40 against the n^1.70 budget).
 - Delivered: Slice 1a. The builder-selected `NumericProfile` is threaded through the config, module, single-file, template and backend boundaries. Profile-width `Int`/`Float` literals, folds, casts, struct defaults, capacities and const ranges are covered for all four combinations. JS and Wasm lowering reject non-standard profiles until Phases 4 and 5, and MON materialises at the standard profile until Phase 6.
 - Delivered: Slice 1b. `I8`..`U64`, `F16`/`F32`/`F64` and `Byte` are builtin type keywords with distinct canonical identities (`FixedScalar`), preserved through generic instances, sidecars and import projection. Both HTML-JS and HTML-Wasm reject any reachable value whose type contains one (`unsupported_backend_feature.fixed_width_scalar_values`) until Phases 4 and 5. Lowercase spellings such as `byte` and `u8` join the existing keyword-shadow reservation.
@@ -13,7 +13,9 @@
 - Delivered: Slice 3b. Cast evidence covers every `Int`/`Float`/fixed-width numeric pair with range-derived fallibility, `Byte <-> U8`, and `String` parsing and formatting for every numeric domain (`Byte` text composes through `U8`). Const casts fold at the destination with single rounding; binary floats format as the shortest round-tripping text at their own precision, so `F16` 65504 prints `65500`. Template heads accept non-`Byte` fixed numeric values and format them through the same text policy; runtime fixed values stay behind the backend gates until Phases 4 and 5.
 - Delivered: Slice 3c. Fixed integers use range-based promotion and compatibility; unsigned negation is rejected; fixed integer `/` produces `F64`, while `//` and `%` use checked integer semantics; fixed binary floats promote at their defined precision. Fixed comparisons remain exact. Literals in immediate typed-peer expressions and match patterns now type against fixed-width types and `Byte`; operator constant folding and pattern literal typing are represented in the frontend/HIR. JS/Wasm runtime gates remain unchanged.
 - Delivered: generic nominal literal arguments. Struct and choice constructors bind generic parameters from the expected result before parsing arguments, so a field fixed by that context is the literal's receiving boundary (`Box(200)` into `Box of U8` materialises a U8, and `Box(300)` reports the U8 range error). Unbound parameters and generic function calls keep argument-driven inference. Fixed-width map keys remain deferred until Phase 6.
-- Next action: Slice 3d, cast/compound-assignment linearisation and numeric failure contracts.
+- Delivered: Slice 3d. Compound assignment computes `target op rhs` in the promoted domain, with a lone fixed-target literal typed as its peer. A numeric result that is not assignment-compatible converts back through builtin cast evidence. Fallible pairs lower as a compiler-owned store conversion (`CastHandling::StoreConversion`) through the existing `CastOp` carrier and branch, so the single store happens only on success. Failure uses the enclosing numeric failure mode: builtin `Error!` returns it, and every other context traps through `RuntimeFailure`. Integer `/=` now converts its `Float` result back with truncation toward zero. HIR validation ties numeric `CastOp` policies to their source and carrier types. Compile-time numeric failure (including inside builtin `Error!` functions), dynamic `Error!` recovery, trap-mode selection across fixed domains and range-proof-independent source validity have separate coverage. Runtime fixed-width compound atomicity executes in Phase 4.
+- Deferred observation: a `#` constant referenced from a runtime expression is not folded, so `maximum + 1` with `maximum #Int = 2147483647` fails at runtime rather than at compile time. Decide during the Phase 8 range-proof work or the documentation closeout.
+- Next action: Phase 4, JS integer and float scalar execution.
 
 ## Goal and delivery order
 
@@ -514,10 +516,10 @@ runtime values escaping target validation.
   fixed integer `/ -> F64`, integer division/remainder and fixed float precision.
 - [x] Extend cast evidence and shared numeric folding, including target-aware
   String parsing and formatting. Test conversion policy independently of codegen.
-- [ ] Replace width-duplicating HIR arithmetic with canonical domain/operator/
+- [x] Replace width-duplicating HIR arithmetic with canonical domain/operator/
   failure facts. Linearise casts and compound assignments with one evaluation and
   success-only writes. Update validation, display, remapping and link facts.
-- [ ] Test compile-time failures separately from dynamic Error! and trap paths.
+- [x] Test compile-time failures separately from dynamic Error! and trap paths.
   Keep source validity independent of optional range-analysis proofs.
 
 Exit: one backend-neutral executable numeric contract and no old Int/Float-only

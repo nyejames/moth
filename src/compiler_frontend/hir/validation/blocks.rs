@@ -6,6 +6,10 @@
 //! infrastructure errors.
 
 use super::HirValidator;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, negation_domain};
@@ -212,10 +216,32 @@ impl<'a> HirValidator<'a> {
                 self.validate_expression(value, anchor)?;
             }
 
-            HirStatementKind::CastOp { source, result, .. } => {
+            HirStatementKind::CastOp {
+                policy,
+                source,
+                result,
+            } => {
                 self.validate_expression(source, anchor)?;
+                let expected_result_type =
+                    self.validate_numeric_cast_source_type(*policy, source, anchor)?;
+
                 if let Some(local_id) = result {
                     self.require_local_id(*local_id, anchor)?;
+
+                    if let Some(expected_result_type) = expected_result_type {
+                        let Some(result_type) = self.local_types.get(local_id).copied() else {
+                            return Err(self.error_with_hir(
+                                "CastOp result local has no registered type",
+                                anchor,
+                            ));
+                        };
+                        self.validate_numeric_cast_result_type(
+                            *policy,
+                            result_type,
+                            expected_result_type,
+                            anchor,
+                        )?;
+                    }
                 }
             }
 
@@ -350,6 +376,101 @@ impl<'a> HirValidator<'a> {
                     anchor,
                 )?;
             }
+        }
+
+        Ok(())
+    }
+
+    /// WHAT: checks numeric cast inputs against their policy and returns the policy's target type.
+    /// WHY: the cast policy owns source/target identity, so validation must reject HIR whose
+    ///      expression types drift from that contract before borrow analysis or backend lowering.
+    pub(super) fn validate_numeric_cast_source_type(
+        &self,
+        policy: BuiltinCastPolicyId,
+        source: &HirExpression,
+        anchor: Option<HirLocation>,
+    ) -> Result<Option<TypeId>, CompilerError> {
+        let builtins = self.type_environment.builtins();
+        let (policy_source_type, policy_target_type) = match policy {
+            BuiltinCastPolicyId::NumericConversion { source, target } => (
+                source.type_id(self.type_environment),
+                target.type_id(self.type_environment),
+            ),
+            BuiltinCastPolicyId::NumericToString(source) => {
+                (source.type_id(self.type_environment), builtins.string)
+            }
+            BuiltinCastPolicyId::StringToNumeric(target) => {
+                (builtins.string, target.type_id(self.type_environment))
+            }
+            _ => return Ok(None),
+        };
+
+        if source.ty != policy_source_type {
+            return Err(self.error_with_hir(
+                format!("Cast policy {policy:?} source type does not match the policy source type"),
+                anchor,
+            ));
+        }
+
+        Ok(Some(policy_target_type))
+    }
+
+    fn validate_numeric_cast_result_type(
+        &self,
+        policy: BuiltinCastPolicyId,
+        result_type: TypeId,
+        expected_success_type: TypeId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        match policy {
+            BuiltinCastPolicyId::NumericConversion { .. }
+            | BuiltinCastPolicyId::StringToNumeric(_) => {
+                let Some((carrier_success_type, carrier_error_type)) =
+                    self.type_environment.fallible_carrier_slots(result_type)
+                else {
+                    return Err(self.error_with_hir(
+                        format!(
+                            "CastOp {policy:?} result local must have an internal fallible carrier type"
+                        ),
+                        anchor,
+                    ));
+                };
+
+                if carrier_success_type != expected_success_type {
+                    return Err(self.error_with_hir(
+                        format!("CastOp {policy:?} carrier has the wrong success type"),
+                        anchor,
+                    ));
+                }
+
+                let builtin_error_identity =
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+                let Some(builtin_error_type) = self
+                    .type_environment
+                    .type_id_for_canonical_identity(&builtin_error_identity)
+                else {
+                    return Err(self.error_with_hir(
+                        format!("CastOp {policy:?} carrier requires the builtin Error type"),
+                        anchor,
+                    ));
+                };
+
+                if carrier_error_type != builtin_error_type {
+                    return Err(self.error_with_hir(
+                        format!("CastOp {policy:?} carrier has the wrong error type"),
+                        anchor,
+                    ));
+                }
+            }
+
+            BuiltinCastPolicyId::NumericToString(_) if result_type != expected_success_type => {
+                return Err(self.error_with_hir(
+                    format!("CastOp {policy:?} result local has the wrong target type"),
+                    anchor,
+                ));
+            }
+
+            _ => {}
         }
 
         Ok(())

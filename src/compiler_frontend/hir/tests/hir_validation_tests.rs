@@ -6,6 +6,10 @@
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -274,6 +278,85 @@ fn validate_numeric_op_for_test(
     validate_module_for_tests(&module, &string_table, &type_environment)
 }
 
+fn builtin_error_type_id(type_environment: &mut TypeEnvironment) -> TypeId {
+    let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+    if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
+        return error_type_id;
+    }
+
+    let (_, error_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Vec::new().into_boxed_slice(),
+        generic_parameters: None,
+        const_record: false,
+    });
+    type_environment
+        .register_canonical_identity(error_identity, error_type_id)
+        .expect("test builtin Error identity should register");
+    error_type_id
+}
+
+fn validate_cast_op_for_test(
+    policy: BuiltinCastPolicyId,
+    source_type: TypeId,
+    result_success_type: TypeId,
+    result_error_override: Option<TypeId>,
+) -> Result<(), CompilerError> {
+    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let source_local_id = LocalId(9001);
+    let result_local_id = LocalId(9000);
+    let source_value_id = HirValueId(9000);
+    let builtin_error_type = builtin_error_type_id(&mut type_environment);
+    let result_error_type = result_error_override.unwrap_or(builtin_error_type);
+    let result_type =
+        type_environment.intern_fallible_carrier(result_success_type, result_error_type);
+
+    module.blocks[entry_block_index].locals.extend([
+        HirLocal {
+            id: result_local_id,
+            ty: result_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        },
+        HirLocal {
+            id: source_local_id,
+            ty: source_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        },
+    ]);
+
+    module.side_table.map_value(span, source_value_id, span);
+    let source = HirExpression {
+        id: source_value_id,
+        kind: HirExpressionKind::Load(HirPlace::Local(source_local_id)),
+        ty: source_type,
+        value_kind: ValueKind::RValue,
+        region: entry_region,
+        span: None,
+    };
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::CastOp {
+            policy,
+            source,
+            result: Some(result_local_id),
+        },
+        span,
+    };
+
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+}
+
 fn fixed_type(scalar: FixedScalar) -> TypeId {
     builtin_type_ids::fixed_scalar(scalar)
 }
@@ -463,6 +546,61 @@ fn validator_accepts_valid_fixed_numeric_ops() {
         u32_type,
     )
     .expect("valid fixed integer division should pass HIR validation");
+}
+
+#[test]
+fn validator_rejects_numeric_conversion_cast_source_policy_mismatch() {
+    let error = validate_cast_op_for_test(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Float,
+            target: NumericScalar::Int,
+        },
+        builtin_type_ids::INT,
+        builtin_type_ids::INT,
+        None,
+    )
+    .expect_err("validator should reject a CastOp source that disagrees with its policy");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("source type does not match the policy source type")
+    );
+}
+
+#[test]
+fn validator_rejects_numeric_conversion_cast_carrier_success_type_mismatch() {
+    let error = validate_cast_op_for_test(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Int,
+            target: NumericScalar::Int,
+        },
+        builtin_type_ids::INT,
+        fixed_type(FixedScalar::U8),
+        None,
+    )
+    .expect_err("validator should reject a CastOp carrier with the wrong success type");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("carrier has the wrong success type"));
+}
+
+#[test]
+fn validator_rejects_numeric_conversion_cast_carrier_error_type_mismatch() {
+    let error = validate_cast_op_for_test(
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Int,
+            target: NumericScalar::Int,
+        },
+        builtin_type_ids::INT,
+        builtin_type_ids::INT,
+        Some(builtin_type_ids::STRING),
+    )
+    .expect_err("validator should reject a CastOp carrier with a non-builtin error slot");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("carrier has the wrong error type"));
 }
 
 #[test]

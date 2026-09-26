@@ -380,7 +380,7 @@ impl<'a> HirBuilder<'a> {
     ///       and custom error channels all use `Trap`.
     /// WHY: only builtin `Error!` can represent numeric failures as user-recoverable values; other
     ///      contexts have no channel for the failure.
-    fn select_numeric_failure_mode(
+    pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {

@@ -96,7 +96,7 @@ pub(crate) enum ResolvedCastEvidence {
     },
 }
 
-/// User-visible handling form for a cast.
+/// Handling form recorded on a resolved cast.
 #[derive(Clone, Debug)]
 pub(crate) enum CastHandling {
     /// Plain `cast expression` — requires infallible evidence.
@@ -110,6 +110,13 @@ pub(crate) enum CastHandling {
     /// WHAT: records only that the cast recovers locally. The handler body is owned by
     /// `ValueCatchBlock` so expression variants stay bodyless.
     Recover,
+
+    /// Compiler-inserted checked conversion at a compound-assignment store.
+    ///
+    /// WHAT: converts the promoted arithmetic result back to the destination numeric scalar.
+    /// WHY: failure follows the enclosing function's numeric failure mode (builtin `Error!`
+    ///      returns it, otherwise it traps); this is not a user-visible `cast!` expression.
+    StoreConversion,
 }
 
 /// Bodyless fallible handling stored by expression variants.

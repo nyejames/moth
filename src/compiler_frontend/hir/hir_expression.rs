@@ -966,6 +966,9 @@ impl<'a> HirBuilder<'a> {
                 CastHandling::Propagate | CastHandling::Recover => {
                     self.lower_fallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
                 }
+                CastHandling::StoreConversion => {
+                    self.lower_store_conversion_cast_expression(cast, *policy, expr_type_id, span)
+                }
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => {
                 self.lower_user_defined_cast_expression(cast, method_path, expr_type_id, span)
@@ -1023,7 +1026,7 @@ impl<'a> HirBuilder<'a> {
         Ok(LoweredExpression { prelude, value })
     }
 
-    /// Emits the fallible builtin-cast carrier used by propagation and catch recovery.
+    /// Emits the fallible builtin-cast carrier used by propagation, recovery, and store conversion.
     fn emit_builtin_cast_carrier(
         &mut self,
         cast: &ResolvedCastExpression,
@@ -1063,6 +1066,35 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
+    /// Lowers a compiler-inserted numeric conversion at a compound-assignment store.
+    ///
+    /// WHAT: emits the checked builtin cast carrier and selects the enclosing function's numeric
+    ///       failure edge before returning the success payload.
+    /// WHY: this conversion is part of the store contract, not source `cast!` propagation; the
+    ///      assignment statement that consumes it must only be reached on success.
+    fn lower_store_conversion_cast_expression(
+        &mut self,
+        cast: &ResolvedCastExpression,
+        policy: BuiltinCastPolicyId,
+        expr_type_id: FrontendTypeId,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredExpression, CompilerError> {
+        let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let success_value = self.lower_fallible_carrier_to_success_value_with_runtime_failure(
+            carrier,
+            failure_mode,
+            "Compound assignment conversion failed",
+            span,
+        )?;
+        let value = self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
+
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
+    }
+
     /// Lowers a fallible builtin cast through an explicit carrier statement and branches.
     fn lower_fallible_builtin_cast_expression(
         &mut self,
@@ -1085,6 +1117,10 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering builtin cast reached HIR outside a value catch block",
+                self.hir_error_location(span)
+            ),
+            CastHandling::StoreConversion => return_hir_transformation_error!(
+                "Store conversion cast bypassed compound-assignment lowering",
                 self.hir_error_location(span)
             ),
             CastHandling::Infallible => Err(CompilerError::new(
@@ -1136,6 +1172,11 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering user-defined cast reached HIR outside a value catch block",
+                self.hir_error_location(span)
+            ),
+
+            CastHandling::StoreConversion => return_hir_transformation_error!(
+                "Store conversion cast reached HIR with non-builtin evidence",
                 self.hir_error_location(span)
             ),
         }

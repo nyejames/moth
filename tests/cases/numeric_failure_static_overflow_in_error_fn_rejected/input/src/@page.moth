@@ -1,0 +1,8 @@
+overflow || -> Int, Error!:
+    return 2147483647 + 1
+;
+
+recovered = overflow() catch:
+    then 0
+;
+[: [recovered]]

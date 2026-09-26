@@ -143,6 +143,9 @@ fn classify_expression(
             EnclosingExitEffect::OptionPropagation(expression.span),
         )),
         ExpressionKind::Cast(cast) => {
+            // Only user-authored `cast!` is an expression-level error-propagation effect.
+            // `StoreConversion` belongs to a statement assignment; its HIR error edge is not part
+            // of an assertion-message expression.
             if matches!(cast.handling, CastHandling::Propagate) {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(cast.span)));
             }

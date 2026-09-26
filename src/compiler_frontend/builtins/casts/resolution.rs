@@ -138,22 +138,24 @@ pub(crate) fn resolve_cast_expression(
             }
         },
 
-        CastHandling::Propagate | CastHandling::Recover => match selection.fallible {
-            Some(evidence) => evidence,
-            None => {
-                let reason = if selection.infallible.is_some() {
-                    InvalidCastReason::InfallibleEvidenceCannotUseFallibleForm
-                } else {
-                    InvalidCastReason::NoEvidence
-                };
-                return Err(CompilerDiagnostic::invalid_cast(
-                    reason,
-                    Some(source_type_id),
-                    Some(target_type_id),
-                    source.span,
-                ));
+        CastHandling::Propagate | CastHandling::Recover | CastHandling::StoreConversion => {
+            match selection.fallible {
+                Some(evidence) => evidence,
+                None => {
+                    let reason = if selection.infallible.is_some() {
+                        InvalidCastReason::InfallibleEvidenceCannotUseFallibleForm
+                    } else {
+                        InvalidCastReason::NoEvidence
+                    };
+                    return Err(CompilerDiagnostic::invalid_cast(
+                        reason,
+                        Some(source_type_id),
+                        Some(target_type_id),
+                        source.span,
+                    ));
+                }
             }
-        },
+        }
     };
 
     let cast = ResolvedCastExpression {

@@ -5,11 +5,12 @@
 //!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a place
 //!     expression has been resolved.
 //!   - Validates mutability and type compatibility for the target.
-//!   - Desugars compound operators into `target = target op rhs` for
-//!     uniform type checking and constant folding.
+//!   - Parses compound RHSs with a direct-literal peer hint for fixed-scalar
+//!     targets, evaluates `target op rhs` in its promoted domain and converts
+//!     incompatible numeric results back through builtin cast evidence.
 //!
 //! WHY:  Mutation is a distinct expression kind in the AST; centralising
-//!       the parsing, validation, and compound-operator expansion here
+//!       the parsing, validation, and compound-value construction here
 //!       keeps the main expression dispatch logic free of assignment-
 //!       specific rules.
 //!
@@ -30,9 +31,13 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::eval_expression::evaluate_expression;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
+use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CastHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression, create_expression_with_trailing_newline_policy,
@@ -48,13 +53,16 @@ use crate::compiler_frontend::ast::field_access::parse_field_access;
 use crate::compiler_frontend::ast::statements::value_production::receiver::try_parse_value_block_at_receiver;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::builtins::casts::evidence::lookup_builtin_evidence;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, builtin_cast_target_for_type,
+};
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
     TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -66,28 +74,23 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 
-/// Check that an expression's type is compatible with the assignment target.
+/// Build the existing assignment mismatch diagnostic for a compound store.
 ///
-/// WHAT: compares the RHS expression type against the target type using the
-///       declaration-compatibility relation.
-/// WHY: assignments are rejected when the value type cannot be coerced to the
-///      target type; this helper emits the appropriate diagnostic.
-fn validate_assignment_value_type(
+/// WHAT: reports the same incompatibility as a simple assignment when a promoted operation
+///       result has no permitted receiving conversion.
+/// WHY: compound assignment narrows only through builtin evidence between numeric scalars; all
+///       other type pairs retain the assignment boundary's established diagnostic.
+fn assignment_type_mismatch(
     expected_type_id: TypeId,
     actual_value: &Expression,
-    type_environment: &TypeEnvironment,
-) -> Result<(), ExpressionParseError> {
-    if is_declaration_compatible(expected_type_id, actual_value.type_id, type_environment) {
-        return Ok(());
-    }
-
-    Err(CompilerDiagnostic::type_mismatch(
+) -> ExpressionParseError {
+    CompilerDiagnostic::type_mismatch(
         expected_type_id,
         actual_value.type_id,
         TypeMismatchContext::Assignment,
         actual_value.span,
     )
-    .into())
+    .into()
 }
 
 /// Map a canonical compound-assignment tag to its arithmetic operator and label.
@@ -124,13 +127,12 @@ struct CompoundAssignmentInput<'a> {
     operator: Operator,
 }
 
-/// Build the RHS value for a compound assignment by evaluating `target op rhs`.
+/// Build the value stored by a compound assignment.
 ///
-/// WHAT: parses the RHS expression, then evaluates `target op rhs` through the
-///       normal expression evaluator so that type checking and constant folding
-///       apply to the desugared arithmetic.
-/// WHY: compound assignments must behave exactly as the equivalent binary
-///      expression for type rules and for constant propagation.
+/// WHAT: gives a fixed-scalar target as a direct-literal peer hint, then evaluates
+///       `target op rhs` in the promoted domain.
+/// WHY: an incompatible numeric result must convert back through builtin cast
+///      evidence, infallibly or with a checked `CastHandling::StoreConversion`.
 fn evaluate_compound_assignment_value(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -145,7 +147,17 @@ fn evaluate_compound_assignment_value(
         target_type_id,
         operator,
     } = input;
-    let mut expr_type = ExpectedType::Infer;
+    let mut expr_type = if type_interner
+        .environment()
+        .fixed_scalar(target_type_id)
+        .is_some()
+    {
+        // Ordinary binary evaluation peers a pending fixed-scalar literal against its immediate
+        // typed operand. This direct hint gives a lone RHS literal that same materialisation.
+        ExpectedType::DirectLiteral(target_type_id)
+    } else {
+        ExpectedType::Infer
+    };
 
     // -----------------------
     //  Parse the RHS operand
@@ -167,8 +179,8 @@ fn evaluate_compound_assignment_value(
     )?;
 
     // -------------------------------------------
-    //  Build `target op rhs` and validate the
-    //  result type against the declared type
+    //  Evaluate `target op rhs` in its promoted
+    //  domain before applying the store conversion
     // -------------------------------------------
     let target_expression = expression_from_place_expression(target);
 
@@ -191,9 +203,62 @@ fn evaluate_compound_assignment_value(
         path_fork,
     )?;
 
-    validate_assignment_value_type(target_type_id, &value, type_interner.environment())?;
+    if is_declaration_compatible(target_type_id, value.type_id, type_interner.environment()) {
+        return Ok(value);
+    }
 
-    Ok(value)
+    let type_environment = type_interner.environment();
+    let cast_targets =
+        builtin_cast_target_for_type(value.type_id, type_environment, string_table, path_fork)
+            .filter(|target| target.numeric_scalar().is_some())
+            .zip(
+                builtin_cast_target_for_type(
+                    target_type_id,
+                    type_environment,
+                    string_table,
+                    path_fork,
+                )
+                .filter(|target| target.numeric_scalar().is_some()),
+            );
+    let evidence = cast_targets.and_then(|(source, target)| {
+        lookup_builtin_evidence(source, target, context.numeric_profile)
+            .map(|evidence| (target, evidence))
+    });
+    let Some((target, evidence)) = evidence else {
+        return Err(assignment_type_mismatch(target_type_id, &value));
+    };
+
+    let source_type_id = value.type_id;
+    let cast_span = value.span;
+    let handling = match evidence.fallibility {
+        BuiltinCastFallibility::Infallible => CastHandling::Infallible,
+        BuiltinCastFallibility::Fallible => CastHandling::StoreConversion,
+    };
+    let cast = ResolvedCastExpression {
+        source: Box::new(value),
+        source_type_id,
+        target_type_id,
+        target,
+        requires_optional_wrap_after_cast: false,
+        evidence: ResolvedCastEvidence::Builtin {
+            policy: evidence.policy,
+        },
+        handling,
+        span: cast_span,
+    };
+    let cast_value = Expression::cast(cast, target_type_id, type_interner.environment());
+    let mut inferred = ExpectedType::Infer;
+    let converted_value = evaluate_expression(
+        context,
+        vec![ExpressionRpnItem::Operand(cast_value)],
+        type_interner,
+        &mut inferred,
+        &variable_declaration.value.value_mode,
+        string_table,
+        path_fork,
+    )?;
+
+    Ok(converted_value)
 }
 
 /// Parse and validate a mutation given an already-resolved place target.
@@ -264,10 +329,8 @@ fn build_mutation_from_target(
 
     let value = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
-            // Simple mutation: variable = new_value. Parse-time context is
-            // preserved only for context-sensitive literals. Compound
-            // assignments below use Inferred because that context does not
-            // apply to arithmetic operators.
+            // Simple assignment keeps the receiver hint for context-sensitive values. Compound
+            // RHSs use a direct-literal peer hint for fixed scalars before promoted evaluation.
             token_stream.advance();
 
             let mut expr_type =

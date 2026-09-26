@@ -1,0 +1,12 @@
+divide |value ~Int, divisor Int| -> Int, Error!:
+    value /= divisor
+    return value
+;
+
+target ~= -2147483648
+error_code ~Int = 0
+result = divide(~target, -1) catch |conversion_error|:
+    error_code = conversion_error.code
+    then target
+;
+[: compound assignment conversion: error=[error_code], result=[result], target=[target] ]

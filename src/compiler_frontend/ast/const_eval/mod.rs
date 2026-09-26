@@ -487,8 +487,7 @@ pub fn fold_compile_time_expression(
     }
 }
 
-/// Folds a resolved explicit `ExpressionKind::Cast` when its source has folded to
-/// a supported builtin literal.
+/// Folds a resolved cast expression when its source has folded to a supported builtin literal.
 ///
 /// WHAT: builtin evidence is evaluated here; user-defined or generic-bound
 ///      evidence is rejected in const-required contexts because the compiler

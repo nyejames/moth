@@ -563,11 +563,22 @@ impl<'a> HirValidator<'a> {
                 }
             }
 
-            // Unwrap and cast: validate the source sub-expression.
             HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result }
-            | HirExpressionKind::Cast { source: result, .. } => {
+            | HirExpressionKind::FallibleUnwrapError { result } => {
                 self.validate_expression(result, anchor)?;
+            }
+
+            HirExpressionKind::Cast { source, policy } => {
+                self.validate_expression(source, anchor)?;
+                if let Some(policy_target_type) =
+                    self.validate_numeric_cast_source_type(*policy, source, anchor)?
+                    && expression.ty != policy_target_type
+                {
+                    return Err(self.error_with_hir(
+                        "Cast expression type does not match the policy target type",
+                        anchor,
+                    ));
+                }
             }
         }
 

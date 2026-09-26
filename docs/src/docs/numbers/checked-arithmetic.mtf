@@ -75,4 +75,7 @@ path.
 Range-loop counter updates use the same checked numeric operations.
 
 Conversions that may lose information, such as `Float -> Int`, belong to the
-Casts documentation rather than implicit arithmetic coercion.
+Casts documentation rather than implicit arithmetic coercion. Compound
+assignment is the one receiving-context exception: it converts its promoted
+result back to the left-hand type through the same checked conversion. See
+@./#operators (Operators).

@@ -7315,10 +7315,24 @@ contract = "language.arithmetic.compound_assignment_division_acceptance"
 role = "primary"
 
 [[case]]
-id = "compound_assignment_int_divide_assign_rejected"
-path = "compound_assignment_int_divide_assign_rejected"
-tags = ["integration", "diagnostics"]
-contract = "language.arithmetic.compound_assignment_real_divide_to_int_rejected"
+id = "compound_assignment_int_divide_assign_success"
+path = "compound_assignment_int_divide_assign_success"
+tags = ["integration", "language", "mutation"]
+contract = "language.arithmetic.compound_real_division_to_int_store_conversion"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_runtime_conversion_failure_caught"
+path = "compound_assignment_runtime_conversion_failure_caught"
+tags = ["integration", "language", "mutation", "error-handling"]
+contract = "language.arithmetic.compound_store_conversion_error_and_success_only_write"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_u8_literal_range_rejected"
+path = "compound_assignment_u8_literal_range_rejected"
+tags = ["integration", "language", "diagnostics", "mutation"]
+contract = "language.arithmetic.compound_rhs_literal_uses_peer_fixed_scalar_range"
 role = "primary"
 
 [[case]]
@@ -11892,6 +11906,48 @@ path = "checked_numeric_unreachable_helper_ignored"
 tags = ["integration", "language", "numeric", "html-wasm"]
 contract = "backend.html_wasm.unreachable_numeric_helper_ignored"
 role = "backend"
+
+[[case]]
+id = "numeric_failure_static_overflow_in_error_fn_rejected"
+path = "numeric_failure_static_overflow_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_overflow_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_static_division_by_zero_in_error_fn_rejected"
+path = "numeric_failure_static_division_by_zero_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_division_by_zero_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_static_remainder_by_zero_in_error_fn_rejected"
+path = "numeric_failure_static_remainder_by_zero_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_remainder_by_zero_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_runtime_error_fn_recovered"
+path = "numeric_failure_runtime_error_fn_recovered"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numeric.runtime_error_fn_recovered"
+role = "primary"
+
+[[case]]
+id = "numeric_range_proof_does_not_widen_validity_rejected"
+path = "numeric_range_proof_does_not_widen_validity_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numeric.range_proof_does_not_widen_validity"
+role = "primary"
+
+[[case]]
+id = "numeric_range_proof_runtime_narrowing_rejected"
+path = "numeric_range_proof_runtime_narrowing_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numeric.runtime_range_proof_does_not_widen_validity"
+role = "primary"
 
 [[case]]
 id = "int_remainder_signed_minimum_by_negative_one_runtime"

@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0008"]
+message_contains = ["outside the U8 range"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+reason = "invalid_number_literal.outside_fixed_scalar_range"
+path = "input/@page.moth"
+line = 3
+column = 10

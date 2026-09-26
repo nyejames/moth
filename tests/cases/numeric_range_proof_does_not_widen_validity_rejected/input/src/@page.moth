@@ -1,0 +1,4 @@
+small #U8 = 1
+total U8 = small + 1
+
+[:[total]]

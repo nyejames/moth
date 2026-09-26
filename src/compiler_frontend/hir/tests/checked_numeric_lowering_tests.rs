@@ -5,8 +5,14 @@
 //! WHY: the checked numeric path is new HIR surface; dedicated tests guard against regressions back
 //!      to plain `BinOp`/`UnaryOp` arithmetic and against wrong failure-mode wiring.
 
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CastHandling, ResolvedCastEvidence,
+};
+use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -27,7 +33,9 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    assignment_target, node, reference_expr_with_type_id,
+};
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     runtime_expr, runtime_operand_item, runtime_operator_item,
 };
@@ -190,6 +198,310 @@ fn set_current_function_return_type(
     builder.test_set_current_function(function_id);
 }
 
+fn lower_u8_compound_add_assignment(
+    builder: &mut HirBuilder<'_>,
+    target_name: PathId,
+    right_name: PathId,
+) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+    let u8_type = fixed_type(FixedScalar::U8);
+    let u32_type = fixed_type(FixedScalar::U32);
+    let source = runtime_expr(
+        vec![
+            runtime_operand_item(reference_expr_with_type_id(
+                target_name,
+                u8_type,
+                None,
+                ValueMode::ImmutableReference,
+            )),
+            runtime_operand_item(reference_expr_with_type_id(
+                right_name,
+                u8_type,
+                None,
+                ValueMode::ImmutableReference,
+            )),
+            runtime_operator_item(Operator::Add, None),
+        ],
+        u32_type,
+        None,
+        ValueMode::MutableOwned,
+    );
+    let value = Expression::cast(
+        ResolvedCastExpression {
+            source: Box::new(source),
+            source_type_id: u32_type,
+            target_type_id: u8_type,
+            target: BuiltinCastTarget::Fixed(FixedScalar::U8),
+            requires_optional_wrap_after_cast: false,
+            evidence: ResolvedCastEvidence::Builtin {
+                policy: BuiltinCastPolicyId::NumericConversion {
+                    source: NumericScalar::Fixed(FixedScalar::U32),
+                    target: NumericScalar::Fixed(FixedScalar::U8),
+                },
+            },
+            handling: CastHandling::StoreConversion,
+            span: None,
+        },
+        u8_type,
+        &builder.type_environment,
+    );
+    builder.lower_statement_node(&node(
+        NodeKind::Assignment {
+            target: assignment_target(target_name, DataType::Inferred, u8_type, None),
+            value,
+        },
+        None,
+    ))
+}
+
+fn store_conversion_branch(
+    builder: &HirBuilder<'_>,
+) -> (
+    crate::compiler_frontend::hir::ids::BlockId,
+    crate::compiler_frontend::hir::ids::BlockId,
+) {
+    let cast_block = builder
+        .module
+        .blocks
+        .iter()
+        .find(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::CastOp {
+                        policy: BuiltinCastPolicyId::NumericConversion {
+                            source: NumericScalar::Fixed(FixedScalar::U32),
+                            target: NumericScalar::Fixed(FixedScalar::U8),
+                        },
+                        ..
+                    }
+                )
+            })
+        })
+        .expect("compound U8 narrowing should emit one CastOp");
+    match &cast_block.terminator {
+        HirTerminator::FallibleBranch {
+            success_block,
+            error_block,
+            ..
+        } => (*success_block, *error_block),
+        _ => panic!("compound U8 conversion must branch on its fallible carrier"),
+    }
+}
+
+fn compound_assignment_store_value<'a>(
+    builder: &'a HirBuilder<'_>,
+    target_local: LocalId,
+    expected_block: crate::compiler_frontend::hir::ids::BlockId,
+) -> &'a HirExpression {
+    let assignment_blocks: Vec<_> = builder
+        .module
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Assign {
+                        target: HirPlace::Local(local),
+                        ..
+                    } if *local == target_local
+                )
+            })
+        })
+        .map(|block| block.id)
+        .collect();
+    assert_eq!(
+        assignment_blocks,
+        vec![expected_block],
+        "the compound assignment store must occur exactly once on the success continuation"
+    );
+
+    let success_block = &builder.module.blocks[expected_block.0 as usize];
+    success_block
+        .statements
+        .iter()
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                value,
+            } if *local == target_local => Some(value),
+            _ => None,
+        })
+        .expect("success continuation should assign the compound result")
+}
+
+#[test]
+fn compound_u8_store_conversion_traps_before_writing_target() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let function_name = symbol(
+        "__test_compound_store_trap",
+        &mut path_fork,
+        &mut string_table,
+    );
+    let target_name = symbol("target", &mut path_fork, &mut string_table);
+    let right_name = symbol("right", &mut path_fork, &mut string_table);
+    let u8_type = fixed_type(FixedScalar::U8);
+
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    builder.test_register_builtin_error_type();
+    set_current_function_return_type(&mut builder, FunctionId(1), u8_type, function_name);
+    register_local(&mut builder, target_name, LocalId(10), u8_type, None);
+    register_local(&mut builder, right_name, LocalId(11), u8_type, None);
+    lower_u8_compound_add_assignment(&mut builder, target_name, right_name)
+        .expect("compound U8 store lowering should succeed");
+    let (op, failure_mode) =
+        find_single_numeric_op(&builder).expect("compound U8 addition should emit a NumericOp");
+    assert_eq!(
+        op,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        }
+    );
+    assert_eq!(failure_mode, NumericFailureMode::Trap);
+
+    let (success_block, error_block) = store_conversion_branch(&builder);
+    let error_block = &builder.module.blocks[error_block.0 as usize];
+    assert!(
+        matches!(
+            &error_block.terminator,
+            HirTerminator::RuntimeFailure { message }
+                if message == "Compound assignment conversion failed"
+        ),
+        "non-fallible conversion failure must trap"
+    );
+    let stored_value = compound_assignment_store_value(&builder, LocalId(10), success_block);
+    assert!(
+        matches!(
+            &stored_value.kind,
+            HirExpressionKind::FallibleUnwrapSuccess { .. }
+        ),
+        "the store must consume the successful conversion payload"
+    );
+}
+
+#[test]
+fn compound_u8_store_conversion_returns_error_before_writing_target() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let function_name = symbol(
+        "__test_compound_store_error",
+        &mut path_fork,
+        &mut string_table,
+    );
+    let target_name = symbol("target", &mut path_fork, &mut string_table);
+    let right_name = symbol("right", &mut path_fork, &mut string_table);
+    let u8_type = fixed_type(FixedScalar::U8);
+
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let error_type = builder.test_register_builtin_error_type();
+    let return_type = builder
+        .type_environment
+        .intern_fallible_carrier(u8_type, error_type);
+    set_current_function_return_type(&mut builder, FunctionId(1), return_type, function_name);
+    register_local(&mut builder, target_name, LocalId(10), u8_type, None);
+    register_local(&mut builder, right_name, LocalId(11), u8_type, None);
+    lower_u8_compound_add_assignment(&mut builder, target_name, right_name)
+        .expect("compound U8 store lowering should succeed");
+    let (op, failure_mode) =
+        find_single_numeric_op(&builder).expect("compound U8 addition should emit a NumericOp");
+    assert_eq!(
+        op,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        }
+    );
+    assert_eq!(failure_mode, NumericFailureMode::ReturnError);
+
+    let (success_block, error_block) = store_conversion_branch(&builder);
+    let error_block = &builder.module.blocks[error_block.0 as usize];
+    assert!(
+        matches!(&error_block.terminator, HirTerminator::ReturnError(_)),
+        "builtin Error! conversion failure must return through the error edge"
+    );
+    let stored_value = compound_assignment_store_value(&builder, LocalId(10), success_block);
+    assert!(
+        matches!(
+            &stored_value.kind,
+            HirExpressionKind::FallibleUnwrapSuccess { .. }
+        ),
+        "the store must consume the successful conversion payload"
+    );
+}
+
+#[test]
+fn equal_type_compound_store_emits_no_conversion_carrier() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let function_name = symbol(
+        "__test_compound_store_equal_type",
+        &mut path_fork,
+        &mut string_table,
+    );
+    let target_name = symbol("target", &mut path_fork, &mut string_table);
+    let right_name = symbol("right", &mut path_fork, &mut string_table);
+    let u32_type = fixed_type(FixedScalar::U32);
+
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    set_current_function_return_type(&mut builder, FunctionId(1), u32_type, function_name);
+    register_local(&mut builder, target_name, LocalId(10), u32_type, None);
+    register_local(&mut builder, right_name, LocalId(11), u32_type, None);
+    let value = runtime_expr(
+        vec![
+            runtime_operand_item(reference_expr_with_type_id(
+                target_name,
+                u32_type,
+                None,
+                ValueMode::ImmutableReference,
+            )),
+            runtime_operand_item(reference_expr_with_type_id(
+                right_name,
+                u32_type,
+                None,
+                ValueMode::ImmutableReference,
+            )),
+            runtime_operator_item(Operator::Add, None),
+        ],
+        u32_type,
+        None,
+        ValueMode::MutableOwned,
+    );
+    builder
+        .lower_statement_node(&node(
+            NodeKind::Assignment {
+                target: assignment_target(target_name, DataType::Inferred, u32_type, None),
+                value,
+            },
+            None,
+        ))
+        .expect("same-type compound assignment lowering should succeed");
+
+    assert!(
+        !builder
+            .module
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .any(|statement| matches!(&statement.kind, HirStatementKind::CastOp { .. })),
+        "an assignment-compatible result should not emit a cast carrier"
+    );
+    assert!(
+        !builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| matches!(&block.terminator, HirTerminator::FallibleBranch { .. })),
+        "same-type arithmetic should not emit a conversion branch"
+    );
+    let _stored_value = compound_assignment_store_value(
+        &builder,
+        LocalId(10),
+        crate::compiler_frontend::hir::ids::BlockId(0),
+    );
+}
+
 #[test]
 fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -205,6 +517,11 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let two = int_expr(2, loc);
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    assert_eq!(
+        builder.module.start_function,
+        Some(FunctionId(0)),
+        "the checked addition test is lowered in the top-level start function"
+    );
     register_local(
         &mut builder,
         x_name,
@@ -785,4 +1102,69 @@ fn unsupported_numeric_negation_is_an_internal_lowering_error() {
         crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation
     );
     assert!(error.msg.contains("without a valid numeric domain"));
+}
+
+// WHAT: verifies that fixed-width numeric HIR keeps the builtin Error! failure mode.
+// WHY: operation-domain coverage alone would not catch a regression in failure-channel selection.
+#[test]
+fn fixed_u32_addition_uses_return_error_failure_mode() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let loc = None;
+    let function_name = symbol("__test_fixed_u32_error", &mut path_fork, &mut string_table);
+    let left_name = symbol("left", &mut path_fork, &mut string_table);
+    let right_name = symbol("right", &mut path_fork, &mut string_table);
+    let u32_type = fixed_type(FixedScalar::U32);
+    let left = reference_expr_with_type_id(left_name, u32_type, loc, ValueMode::ImmutableReference);
+    let right =
+        reference_expr_with_type_id(right_name, u32_type, loc, ValueMode::ImmutableReference);
+    let expression = runtime_expr(
+        vec![
+            runtime_operand_item(left),
+            runtime_operand_item(right),
+            runtime_operator_item(Operator::Add, loc),
+        ],
+        u32_type,
+        loc,
+        ValueMode::MutableOwned,
+    );
+
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let error_type_id = builder.test_register_builtin_error_type();
+    let return_type = builder
+        .type_environment
+        .intern_fallible_carrier(u32_type, error_type_id);
+    set_current_function_return_type(&mut builder, FunctionId(1), return_type, function_name);
+    register_local(&mut builder, left_name, LocalId(10), u32_type, loc);
+    register_local(&mut builder, right_name, LocalId(11), u32_type, loc);
+
+    let lowered = builder
+        .lower_expression(&expression)
+        .expect("U32 addition in a builtin Error! function should lower");
+
+    let (op, failure_mode) =
+        find_single_numeric_op(&builder).expect("expected a fixed-width NumericOp");
+    assert_eq!(
+        op,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
+        }
+    );
+    assert!(
+        matches!(failure_mode, NumericFailureMode::ReturnError),
+        "fixed-width numeric failures in builtin Error! functions should use ReturnError"
+    );
+    assert!(matches!(
+        lowered.value.kind,
+        HirExpressionKind::FallibleUnwrapSuccess { .. }
+    ));
+    assert!(
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator, HirTerminator::ReturnError(_))),
+        "fixed-width numeric failure should return through the builtin Error slot"
+    );
 }
