@@ -1471,6 +1471,28 @@ impl TypeEnvironment {
         }
     }
 
+    /// Returns the fixed scalar when the type (or an option's inner type) is one.
+    ///
+    /// WHAT: maps a direct destination or `Option(scalar)` to its `FixedScalar` identity.
+    /// WHY: destination-aware literal materialisation shares one option-unwrapping rule
+    ///      between the parse-expectation owner and the evaluator's pending-literal resolver.
+    pub(crate) fn fixed_scalar_of(&self, id: TypeId) -> Option<FixedScalar> {
+        if let Some(TypeDefinition::Builtin(builtin)) = self.get(id)
+            && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
+        {
+            return Some(scalar);
+        }
+
+        let inner = self.option_inner_type(id)?;
+        if let Some(TypeDefinition::Builtin(builtin)) = self.get(inner)
+            && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
+        {
+            return Some(scalar);
+        }
+
+        None
+    }
+
     /// Interns a tuple type with the given field types.
     ///
     /// WHAT: creates a canonical `TypeId` for a tuple/multi-return type.

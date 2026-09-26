@@ -432,6 +432,8 @@ fn fold_runtime_expression_with_bindings<'a>(
                 }
             }
             ExpressionRpnItem::Operator { .. } => item.clone(),
+            // Resolution removes pending literals before this stage.
+            ExpressionRpnItem::PendingNumericLiteral { .. } => item.clone(),
         };
         substituted.push(new_item);
     }

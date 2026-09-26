@@ -1,0 +1,5 @@
+hidden ||:
+    x U8 = (5) + 1
+;
+
+[:unreachable]

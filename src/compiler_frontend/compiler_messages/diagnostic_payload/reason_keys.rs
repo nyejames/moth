@@ -843,6 +843,7 @@ define_stable_reason_keys! {
     },
 
     NumberLiteralErrorReason => {
+    @delegate(&NumberLiteralErrorReason::NonFiniteFixedFloat(_) => "invalid_number_literal.non_finite_float");
     &NumberLiteralErrorReason::SeparatorNotBetweenDigits => "invalid_number_literal.separator_not_between_digits",
     &NumberLiteralErrorReason::MultipleDecimalPoints => "invalid_number_literal.multiple_decimal_points",
     &NumberLiteralErrorReason::DecimalPointNotAfterDigit => "invalid_number_literal.decimal_point_not_after_digit",
@@ -853,10 +854,11 @@ define_stable_reason_keys! {
     &NumberLiteralErrorReason::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
     &NumberLiteralErrorReason::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
     &NumberLiteralErrorReason::OutsideIntRange => "invalid_number_literal.outside_int_range",
+    &NumberLiteralErrorReason::OutsideFixedScalarRange(_) => "invalid_number_literal.outside_fixed_scalar_range",
+    &NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => "invalid_number_literal.negative_unsigned_literal",
     &NumberLiteralErrorReason::NonFiniteFloat => "invalid_number_literal.non_finite_float",
     &NumberLiteralErrorReason::ParseOverflow => "invalid_number_literal.parse_overflow",
     },
-
     InvalidStringEscapeReason => {
     &InvalidStringEscapeReason::UnsupportedEscape { .. } => "invalid_string_escape.unsupported_escape",
     &InvalidStringEscapeReason::PhysicalNewline => "invalid_string_escape.physical_newline",

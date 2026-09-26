@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::paths::module_resources::ResourceId;
@@ -178,6 +179,8 @@ pub(crate) enum ConstStringPiece {
 pub(crate) enum ConstValuePayload {
     Int(i64),
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     String(ConstStringValue),
@@ -215,6 +218,7 @@ pub(crate) struct ConstValue {
 pub(crate) enum ConstValueVisit<'a, T> {
     Int(i64),
     Float(f64),
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     String(&'a ConstStringValue),
@@ -455,6 +459,12 @@ impl ConstValueStore {
             ),
             ExpressionKind::Float(value) => (
                 ConstValuePayload::Float(*value),
+                ConstValueKind::Literal,
+                true,
+                None,
+            ),
+            ExpressionKind::FixedScalar(value) => (
+                ConstValuePayload::FixedScalar(*value),
                 ConstValueKind::Literal,
                 true,
                 None,
@@ -750,6 +760,9 @@ impl ConstValueStore {
             ConstValuePayload::Float(scalar) => {
                 visitor(&value.metadata, ConstValueVisit::Float(*scalar))
             }
+            ConstValuePayload::FixedScalar(scalar) => {
+                visitor(&value.metadata, ConstValueVisit::FixedScalar(*scalar))
+            }
             ConstValuePayload::Bool(scalar) => {
                 visitor(&value.metadata, ConstValueVisit::Bool(*scalar))
             }
@@ -882,6 +895,7 @@ impl ConstValueStore {
         let kind = match &value.payload {
             ConstValuePayload::Int(value) => ExpressionKind::Int(*value),
             ConstValuePayload::Float(value) => ExpressionKind::Float(*value),
+            ConstValuePayload::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
             ConstValuePayload::Bool(value) => ExpressionKind::Bool(*value),
             ConstValuePayload::Char(value) => ExpressionKind::Char(*value),
             ConstValuePayload::String(string) => match string {

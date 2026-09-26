@@ -590,6 +590,7 @@ impl<'hir> JsEmitter<'hir> {
             | HirExpressionKind::Copy(_)
             | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -736,6 +737,7 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -915,6 +917,7 @@ fn collect_expression_cast_policies(
 
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

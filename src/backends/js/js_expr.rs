@@ -58,6 +58,9 @@ impl<'hir> JsEmitter<'hir> {
         //      semantic mapping from each variant to the exact JS runtime helper sequence it needs.
         match &expression.kind {
             HirExpressionKind::Int(value) => Ok(value.to_string()),
+            HirExpressionKind::FixedScalar(_) => Err(CompilerError::compiler_error(
+                "JavaScript backend received a fixed-width scalar value; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
+            )),
             HirExpressionKind::VariantConstruct {
                 carrier,
                 variant_index,

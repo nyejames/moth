@@ -1,0 +1,5 @@
+hidden ||:
+    v U64 = 18_000_000_000 + 1
+;
+
+[:unreachable]

@@ -1067,6 +1067,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             // Leaf values: nothing to record.
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)

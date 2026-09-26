@@ -667,7 +667,8 @@ fn fixed_build_value_from_metadata(
             BuildInputType::Optional(canonical_option_primitive(&field.type_identity)?),
             None,
         )),
-        PublicFoldedValue::ConstTemplate(_)
+        PublicFoldedValue::FixedScalar(_)
+        | PublicFoldedValue::ConstTemplate(_)
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
@@ -684,7 +685,8 @@ fn primitive_build_value_from_metadata(value: &PublicFoldedValue) -> Option<Prim
         PublicFoldedValue::String(value) => {
             Some(PrimitiveBuildValue::String(value.clone().into_text()?))
         }
-        PublicFoldedValue::ConstTemplate(_)
+        PublicFoldedValue::FixedScalar(_)
+        | PublicFoldedValue::ConstTemplate(_)
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }

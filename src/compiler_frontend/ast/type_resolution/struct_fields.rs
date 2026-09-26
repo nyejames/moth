@@ -535,5 +535,7 @@ fn inline_visible_constant_references_in_rpn_item(
             )?,
         )),
         ExpressionRpnItem::Operator { .. } => Ok(item.clone()),
+        // Resolution removes pending literals before this stage.
+        ExpressionRpnItem::PendingNumericLiteral { .. } => Ok(item.clone()),
     }
 }

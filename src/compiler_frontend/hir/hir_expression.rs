@@ -166,6 +166,12 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::Float(*value),
             ),
 
+            ExpressionKind::FixedScalar(value) => self.lower_literal_expression(
+                &expr.span,
+                expr.type_id,
+                HirExpressionKind::FixedScalar(*value),
+            ),
+
             ExpressionKind::Bool(value) => self.lower_literal_expression(
                 &expr.span,
                 expr.type_id,
@@ -768,6 +774,8 @@ impl<'a> HirBuilder<'a> {
                     self.expression_needs_current_block_lowering(expression)
                 }
                 ExpressionRpnItem::Operator { .. } => false,
+                // Resolution removes pending literals before this stage.
+                ExpressionRpnItem::PendingNumericLiteral { .. } => false,
             }),
             ExpressionKind::Template(_) => true,
             ExpressionKind::RuntimeTemplateHandoff(_)
@@ -776,6 +784,7 @@ impl<'a> HirBuilder<'a> {
 
             ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_)
             | ExpressionKind::StringSlice(_)

@@ -41,6 +41,12 @@ pub(super) fn order_expression_nodes(
         match &node {
             ExpressionRpnItem::Operand(..) => output_queue.push(node),
 
+            ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                return Err(super::evaluator::pending_numeric_literal_bug(
+                    "expression ordering",
+                ));
+            }
+
             ExpressionRpnItem::Operator { operator, .. } => {
                 let current_precedence = operator.precedence();
                 let left_associative = operator.is_left_associative();
@@ -117,7 +123,10 @@ pub(super) fn extract_expression_span(
 
     // Skip operator nodes and return the span of the first expression node.
     for node in nodes {
-        if matches!(node, ExpressionRpnItem::Operand(_)) {
+        if matches!(
+            node,
+            ExpressionRpnItem::Operand(_) | ExpressionRpnItem::PendingNumericLiteral { .. }
+        ) {
             return Ok(node.source_span());
         }
     }

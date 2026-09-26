@@ -2,13 +2,18 @@
 //!
 //! WHAT: parses an unsigned numeric literal text into a structured token payload and
 //!       provides small materialization helpers that type numbers under a caller-supplied
-//!       `IntWidth` or `FloatPrecision`.
+//!       `IntWidth` or `FloatPrecision`, or materialise one literal directly at a fixed-width
+//!       scalar destination.
 //! WHY: the tokenizer and string casts must share one grammar owner so separator,
 //!      exponent, and sign rules stay consistent, while the compilation boundary profile
 //!      owns every range and rounding decision.
 
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
+use crate::compiler_frontend::numeric_text::binary16::decimal_to_f16;
 use crate::compiler_frontend::numeric_text::grammar::{
     is_digit_separator, is_exponent_marker, is_exponent_sign, is_numeric_digit,
 };
@@ -442,6 +447,164 @@ pub(crate) fn parse_numeric_text_to_float(
     let parsed = parse_numeric_literal(unsigned)?;
 
     materialize_float_text_with_sign(&parsed.normalized_text, negative, precision)
+}
+
+// -----------------------------------------------------------
+//  Fixed Scalar Materialization
+// -----------------------------------------------------------
+
+/// True when a literal of `kind` may initialise `scalar` at a direct receiving boundary.
+///
+/// WHAT: whole-number literals initialise every fixed scalar; decimal-point and exponent literals
+///       initialise only binary floats.
+/// WHY:  destination-aware materialisation must not turn integral decimal spelling such as `1.0`
+///       into an integer or `Byte`, while a whole literal may still initialise a binary float.
+///
+/// When this returns `false` the caller keeps the default `Float` materialisation and the receiving
+/// boundary reports the ordinary type mismatch.
+pub(crate) fn literal_kind_initialises(kind: NumericLiteralKind, scalar: FixedScalar) -> bool {
+    match kind {
+        NumericLiteralKind::WholeNumber => true,
+
+        NumericLiteralKind::DecimalPoint | NumericLiteralKind::Exponent => {
+            scalar.class() == FixedScalarClass::BinaryFloat
+        }
+    }
+}
+
+/// Materialise one literal at a fixed scalar destination.
+///
+/// WHAT: reads the token's unsigned normalized text and produces the destination's own value:
+///       signed widths from their exact range, unsigned widths and `Byte` from a zero-extended
+///       magnitude, and binary floats from a single rounding at the destination precision.
+/// WHY:  a direct typed boundary materialises the literal in its requested numeric type, so a value
+///       such as a `U64` above the profile's `Int` range never passes through an `Int` or `Float`
+///       intermediate.
+///
+/// Callers only reach this once [`literal_kind_initialises`] accepted the token's kind, so a
+/// rejected spelling can still report a range failure but never panics.
+pub(crate) fn materialize_fixed_scalar(
+    token: &NumericLiteralToken,
+    sign: NumericLiteralSign,
+    scalar: FixedScalar,
+    string_table: &StringTable,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    let text = string_table.resolve(token.normalized_text);
+
+    // Each class materialises straight from the unsigned magnitude, because the fixed scalars own
+    // their own ranges and rounding rather than the boundary `Int` width and `Float` precision.
+    match scalar.class() {
+        FixedScalarClass::SignedInteger => materialize_signed_fixed_scalar(text, sign, scalar),
+
+        FixedScalarClass::UnsignedInteger | FixedScalarClass::Octet => {
+            materialize_unsigned_fixed_scalar(text, sign, scalar)
+        }
+
+        FixedScalarClass::BinaryFloat => materialize_binary_float_fixed_scalar(text, sign, scalar),
+    }
+}
+
+/// Materialise a whole-number magnitude into one signed fixed scalar.
+///
+/// WHAT: positive magnitudes parse as `i64`, and negative magnitudes parse as `u64` and negate by
+///       wrapping so the exact minimum (whose magnitude exceeds the maximum by one) is accepted
+///       without overflow; the constructor then applies the scalar's own inclusive range.
+/// WHY:  `I8`..`I64` literals must not be range-checked against the profile `Int` width first, and
+///       `-0` must materialise as a plain zero.
+fn materialize_signed_fixed_scalar(
+    text: &str,
+    sign: NumericLiteralSign,
+    scalar: FixedScalar,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    let value = match sign {
+        NumericLiteralSign::Positive => text
+            .parse::<i64>()
+            .map_err(|_| NumberLiteralErrorReason::OutsideFixedScalarRange(scalar))?,
+
+        NumericLiteralSign::Negative => {
+            let magnitude = text
+                .parse::<u64>()
+                .map_err(|_| NumberLiteralErrorReason::OutsideFixedScalarRange(scalar))?;
+
+            // Wrapping negation is exact for the one magnitude with no positive counterpart.
+            // Larger magnitudes cannot be negated into any signed fixed scalar at all.
+            if magnitude > i64::MIN.unsigned_abs() {
+                return Err(NumberLiteralErrorReason::OutsideFixedScalarRange(scalar));
+            }
+
+            (magnitude as i64).wrapping_neg()
+        }
+    };
+
+    FixedScalarValue::signed(scalar, value)
+        .ok_or(NumberLiteralErrorReason::OutsideFixedScalarRange(scalar))
+}
+
+/// Materialise a whole-number magnitude into one unsigned fixed scalar or `Byte`.
+///
+/// WHAT: any literal carrying a negative sign is rejected, including `-0`; accepted magnitudes parse
+///       as `u64` and range-check against the scalar's own inclusive maximum.
+/// WHY:  negative values cannot initialise `U*` or `Byte`, and parsing as `u64` keeps `U64` values
+///       above `2^53` exact instead of narrowing them through a binary float.
+fn materialize_unsigned_fixed_scalar(
+    text: &str,
+    sign: NumericLiteralSign,
+    scalar: FixedScalar,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    // The sign is part of the literal spelling, so `-0` is refused like any other negative literal
+    // rather than being normalised away.
+    if sign == NumericLiteralSign::Negative {
+        return Err(NumberLiteralErrorReason::NegativeUnsignedLiteral(scalar));
+    }
+
+    let value = text
+        .parse::<u64>()
+        .map_err(|_| NumberLiteralErrorReason::OutsideFixedScalarRange(scalar))?;
+
+    FixedScalarValue::unsigned(scalar, value)
+        .ok_or(NumberLiteralErrorReason::OutsideFixedScalarRange(scalar))
+}
+
+/// Materialise a literal magnitude into one binary float scalar.
+///
+/// WHAT: `F16` rounds through the binary16 owner, which owns its double-rounding guard, while `F32`
+///       and `F64` parse once at their own precision through the shared profile-precision parser.
+/// WHY:  each binary float literal must round exactly once, at its destination precision, so no
+///       value is produced through a wider intermediate; a non-finite rounded result is rejected
+///       instead of entering the `FixedScalarValue` carrier.
+fn materialize_binary_float_fixed_scalar(
+    text: &str,
+    sign: NumericLiteralSign,
+    scalar: FixedScalar,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    let negative = sign == NumericLiteralSign::Negative;
+
+    let magnitude = match scalar {
+        FixedScalar::F16 => decimal_to_f16(text, negative)
+            .ok_or(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar))?,
+
+        FixedScalar::F32 | FixedScalar::F64 => {
+            let precision = if scalar == FixedScalar::F32 {
+                FloatPrecision::Bits32
+            } else {
+                FloatPrecision::Bits64
+            };
+            materialize_float_text_with_sign(text, negative, precision).map_err(|reason| {
+                if reason == NumberLiteralErrorReason::NonFiniteFloat {
+                    NumberLiteralErrorReason::NonFiniteFixedFloat(scalar)
+                } else {
+                    reason
+                }
+            })?
+        }
+
+        // Only binary floats reach this helper, so the remaining arms cannot occur; returning the
+        // non-finite reason keeps this routine total without a panic path.
+        _ => return Err(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar)),
+    };
+
+    FixedScalarValue::binary_float(scalar, magnitude)
+        .ok_or(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar))
 }
 
 #[cfg(test)]

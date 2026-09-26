@@ -14,10 +14,11 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidBuiltinCallReason,
-    TypeDiagnosticKind,
+    NumberLiteralErrorReason, TypeDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -553,4 +554,295 @@ fn function_result_string_concatenation_is_rejected() {
         "f || -> String:\n    return \"a\"\n;\nvalue = f() + \"b\"\n",
         DiagnosticOperator::Add,
     );
+}
+#[test]
+fn direct_fixed_literal_materialises_signed_minimum_from_token_sign() {
+    let value = first_start_declaration_expression("small I8 = -128\n");
+
+    assert_eq!(
+        value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I8)
+    );
+    assert_eq!(
+        value.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I8)
+    );
+    assert!(
+        matches!(
+            value.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::signed(FixedScalar::I8, -128).expect("I8 minimum should materialise")
+        ),
+        "expected I8(-128), got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_rejects_parser_negation_as_operator_result() {
+    let diagnostic = parse_single_file_ast_diagnostic("small I8 = 0 - 128\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::Declaration,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn direct_fixed_literal_materialises_u64_max() {
+    let value = first_start_declaration_expression("large U64 = 18_446_744_073_709_551_615\n");
+    assert_eq!(
+        value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U64)
+    );
+    assert!(
+        matches!(
+            value.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum should materialise")
+        ),
+        "expected U64 max, got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_materialises_default_profile_large_u64() {
+    let value = first_start_declaration_expression("large U64 = 18_000_000_000\n");
+
+    assert_eq!(
+        value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U64)
+    );
+    assert!(
+        matches!(
+            value.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U64, 18_000_000_000).expect("default-profile U64 literal should materialise")
+        ),
+        "expected U64(18000000000), got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_materialises_byte_endpoints() {
+    let low = first_start_declaration_expression("raw Byte = 0\n");
+    assert!(
+        matches!(
+            low.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::Byte, 0).expect("Byte zero should materialise")
+        ),
+        "expected Byte(0), got {:?}",
+        low.kind
+    );
+
+    let high = first_start_declaration_expression("raw Byte = 255\n");
+    assert!(
+        matches!(
+            high.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::Byte, 255).expect("Byte maximum should materialise")
+        ),
+        "expected Byte(255), got {:?}",
+        high.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_materialises_f16_and_f32_bits() {
+    let half = first_start_declaration_expression("half F16 = 0.1\n");
+    assert_eq!(
+        half.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F16)
+    );
+    assert!(
+        matches!(
+            half.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value.to_bits() == crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16(0.1).to_bits())
+        ),
+        "expected F16(0.1) bits, got {:?}",
+        half.kind
+    );
+
+    let single = first_start_declaration_expression("single F32 = 0.1\n");
+    assert_eq!(
+        single.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F32)
+    );
+    assert!(
+        matches!(
+            single.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value == f64::from(0.1f32))
+        ),
+        "expected F32(0.1) bits, got {:?}",
+        single.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_materialises_whole_literal_into_f64() {
+    let value = first_start_declaration_expression("wide F64 = 2\n");
+
+    assert_eq!(
+        value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F64)
+    );
+    assert!(
+        matches!(
+            value.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar.as_f64() == Some(2.0)
+        ),
+        "expected F64(2.0), got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn direct_fixed_literal_materialises_option_of_fixed() {
+    let value = nth_start_declaration_expression("maybe U8? = 200\n", 0);
+
+    let ExpressionKind::Coerced { value: inner, .. } = &value.kind else {
+        panic!(
+            "option-of-fixed should wrap the materialised literal, got {:?}",
+            value.kind
+        );
+    };
+    assert!(
+        matches!(
+            inner.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("U8 literal should materialise before wrapping")
+        ),
+        "expected U8(200) inside the option wrap, got {:?}",
+        inner.kind
+    );
+}
+
+#[test]
+fn operator_result_into_fixed_reports_declaration_mismatch() {
+    let diagnostic = parse_single_file_ast_diagnostic("small U8 = 1 + 1\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::Declaration,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn large_operator_result_into_u64_reports_int_range_error() {
+    let diagnostic = parse_single_file_ast_diagnostic("large U64 = 18_000_000_000 + 1\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideIntRange,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn decimal_spelling_into_integer_fixed_reports_declaration_mismatch() {
+    for source in ["small U8 = 1.0\n", "raw Byte = 1.0\n"] {
+        let diagnostic = parse_single_file_ast_diagnostic(source);
+        assert!(
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::TypeMismatch {
+                    context: TypeMismatchContext::Declaration,
+                    ..
+                }
+            ),
+            "expected a Declaration mismatch for {source:?}"
+        );
+    }
+}
+
+#[test]
+fn grouped_literal_into_fixed_materialises_destination() {
+    let value = first_start_declaration_expression("small U8 = (5)\n");
+
+    assert!(
+        matches!(
+            value.kind,
+            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U8, 5).expect("grouped U8 literal should materialise")
+        ),
+        "expected U8(5), got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn grouped_operator_result_into_fixed_is_not_retagged() {
+    let diagnostic = parse_single_file_ast_diagnostic("small U8 = (5) + 1\n");
+
+    assert!(
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::Declaration,
+                ..
+            }
+        ),
+        "grouped operator result must keep the Declaration mismatch, got {:?}",
+        diagnostic.payload
+    );
+}
+
+#[test]
+fn parser_negation_into_signed_minimum_reports_declaration_mismatch() {
+    let diagnostic = parse_single_file_ast_diagnostic("small I8 = -(128)\n");
+
+    assert!(
+        !matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidNumberLiteral { .. }
+        ),
+        "parser-owned negation is an operator result, not a fixed range error: {:?}",
+        diagnostic.payload
+    );
+    assert!(
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::Declaration,
+                ..
+            }
+        ),
+        "expected a Declaration mismatch, got {:?}",
+        diagnostic.payload
+    );
+}
+
+#[test]
+fn curly_literal_into_fixed_reports_baseline_mismatch() {
+    let diagnostic = parse_single_file_ast_diagnostic("small U8 = {1}\n");
+
+    let DiagnosticPayload::TypeMismatch {
+        expected,
+        found,
+        context,
+    } = diagnostic.payload
+    else {
+        panic!("expected a type mismatch, got {:?}", diagnostic.payload);
+    };
+
+    assert_eq!(context, TypeMismatchContext::Declaration);
+    assert_ne!(found, builtin_type_ids::STRING);
+    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U8));
+}
+
+#[test]
+fn unannotated_overflow_keeps_default_int_range_error() {
+    let diagnostic = parse_single_file_ast_diagnostic("value = 3_000_000_000\n");
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideIntRange,
+            ..
+        }
+    ));
 }

@@ -45,6 +45,12 @@ pub(super) fn resolve_expression_result_type(
                 stack.push(expression.type_id);
             }
 
+            ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                return Err(super::evaluator::pending_numeric_literal_bug(
+                    "expression result typing",
+                )
+                .into());
+            }
             // Operators consume operand types from the stack and push the result type.
             ExpressionRpnItem::Operator { operator, span } => match operator.required_values() {
                 1 => {

@@ -10,15 +10,14 @@ mod ordering;
 mod result_type;
 mod typing_error;
 
-pub use evaluator::evaluate_expression;
-pub(crate) use typing_error::ExpressionTypingError;
-
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::ast::expressions::expression::Expression;
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::value_mode::ValueMode;
+pub use evaluator::evaluate_expression;
+pub(crate) use typing_error::ExpressionTypingError;
 
 #[cfg(test)]
 #[path = "../tests/eval_expression_tests.rs"]

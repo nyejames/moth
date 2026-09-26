@@ -542,6 +542,50 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
 }
 
 #[test]
+fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
+    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let start_function = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+
+    let u64_max =
+        FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
+    let const_name = super::symbol("BIG", &mut path_fork, &mut string_table);
+    add_test_module_constant(
+        &mut ast,
+        make_test_variable(
+            const_name,
+            Expression::fixed_scalar(u64_max, None, ValueMode::ImmutableOwned),
+        ),
+    );
+
+    let (module, _type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    assert_eq!(module.module_constants.len(), 1);
+    let constant = &module.module_constants[0];
+    assert_eq!(
+        constant.ty,
+        builtin_type_ids::fixed_scalar(FixedScalar::U64)
+    );
+    assert!(matches!(
+        constant.value,
+        HirConstValue::FixedScalar(value) if value == u64_max
+    ));
+}
+
+#[test]
 fn extracts_ast_doc_fragments_into_module_metadata() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -915,6 +959,7 @@ fn nested_structural_piece_lists<'value>(
 
         HirConstValue::Int(_)
         | HirConstValue::Float(_)
+        | HirConstValue::FixedScalar(_)
         | HirConstValue::Bool(_)
         | HirConstValue::Char(_)
         | HirConstValue::String(_)

@@ -12745,3 +12745,94 @@ path = "html_wasm_unreachable_fixed_width_value"
 tags = ["integration", "numeric", "html-wasm", "reachability"]
 contract = "backend.target_gate.unreachable_fixed_width_value_ignored"
 role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_literal_contexts"
+path = "html_wasm_unreachable_fixed_width_literal_contexts"
+tags = ["integration", "numeric", "html-wasm", "reachability"]
+contract = "backend.target_gate.unreachable_fixed_width_literal_contexts_ignored"
+role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_cross_module_constant"
+path = "html_wasm_unreachable_fixed_width_cross_module_constant"
+tags = ["integration", "numeric", "html-wasm", "reachability", "dependencies"]
+contract = "backend.target_gate.unreachable_fixed_width_cross_module_constant_ignored"
+role = "backend"
+
+[[case]]
+id = "html_wasm_fixed_width_reachable_value_unsupported"
+path = "html_wasm_fixed_width_reachable_value_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.target_gate.fixed_width_reachable_value_rejected"
+role = "backend"
+
+[[case]]
+id = "fixed_width_literal_out_of_range_u8"
+path = "fixed_width_literal_out_of_range_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_out_of_range_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_negative_byte"
+path = "fixed_width_literal_negative_byte"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_negative_byte_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_nonfinite_f16"
+path = "fixed_width_literal_nonfinite_f16"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_nonfinite_f16_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_decimal_into_u8"
+path = "fixed_width_literal_decimal_into_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_decimal_into_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_operator_result_u8"
+path = "fixed_width_literal_operator_result_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_operator_result_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_int_range_u64"
+path = "fixed_width_literal_int_range_u64"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_int_range_u64_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_grouped_operand_u8"
+path = "fixed_width_literal_grouped_operand_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_grouped_operand_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_option_default_wrong_type"
+path = "fixed_width_option_default_wrong_type"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_option_default_wrong_type_rejected"
+role = "primary"
+
+[[case]]
+id = "html_wasm_fixed_width_imported_constant_reachable_unsupported"
+path = "html_wasm_fixed_width_imported_constant_reachable_unsupported"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability", "dependencies"]
+contract = "backend.target_gate.fixed_width_imported_constant_reachable_rejected"
+role = "backend"
+
+[[case]]
+id = "grouped_numeric_literal_member_access_rejected"
+path = "grouped_numeric_literal_member_access_rejected"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.grouped_literal_member_access_keeps_default_type"
+role = "primary"

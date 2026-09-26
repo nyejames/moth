@@ -24,6 +24,7 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -79,9 +80,16 @@ pub enum ExpressionKind {
     /// WHY: operands are `Expression` values, not general `AstNode` fragments, so runtime
     ///      RPN cannot smuggle statement bodies into value contexts.
     Runtime(ExpressionRpn),
-
     Int(i64),
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value.
+    ///
+    /// WHAT: carries the scalar identity plus the exact-bit payload from
+    ///       `FixedScalarValue`, so `U64` values above `i64::MAX` and signed zero
+    ///       survive without an `Int`/`Float` intermediate.
+    /// WHY: literal materialisation owns destination-aware rounding and range checks;
+    ///      later stages consume the already-materialised value through this one variant.
+    FixedScalar(FixedScalarValue),
     StringSlice(StringId),
     Bool(bool),
     Char(char),
@@ -316,6 +324,7 @@ impl ExpressionKind {
             self,
             ExpressionKind::Int(_)
                 | ExpressionKind::Float(_)
+                | ExpressionKind::FixedScalar(_)
                 | ExpressionKind::Bool(_)
                 | ExpressionKind::StringSlice(_)
                 | ExpressionKind::Char(_)

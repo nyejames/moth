@@ -754,6 +754,8 @@ fn annotate_expression(
                         annotate_expression(expression, flows, value_environment, store)?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // Resolution removes pending literals before this stage.
+                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
                 }
             }
         }
@@ -808,6 +810,7 @@ fn annotate_expression(
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::FixedScalar(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)

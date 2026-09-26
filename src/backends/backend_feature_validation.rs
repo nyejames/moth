@@ -682,6 +682,7 @@ fn first_unsupported_expression_occurrence(
         }),
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

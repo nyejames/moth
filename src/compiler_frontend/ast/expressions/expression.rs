@@ -32,6 +32,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
@@ -531,6 +532,25 @@ impl Expression {
             ExpressionKind::Float(value),
             builtin_type_ids::FLOAT,
             DataType::Float,
+            span,
+            value_mode,
+        )
+    }
+    /// Constructs one materialised fixed-width scalar or `Byte` literal expression.
+    ///
+    /// WHAT: carries the already-materialised `FixedScalarValue` with the seeded builtin
+    ///       `TypeId` and `DataType` for its scalar identity.
+    /// WHY: the literal parser owns destination-aware materialisation; every later stage
+    ///      consumes the value through this one constructor instead of re-deriving identity.
+    pub fn fixed_scalar(
+        value: FixedScalarValue,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Self {
+        Self::scalar_literal(
+            ExpressionKind::FixedScalar(value),
+            builtin_type_ids::fixed_scalar(value.scalar()),
+            DataType::FixedScalar(value.scalar()),
             span,
             value_mode,
         )
@@ -1326,6 +1346,7 @@ impl Expression {
         let kind = match &self.kind {
             ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)

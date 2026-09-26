@@ -13,6 +13,7 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -128,6 +129,7 @@ impl HirExpression {
             }
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => {}
@@ -204,6 +206,12 @@ pub enum HirExpressionKind {
     // -------------------------
     Int(i64),
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    ///
+    /// WHY: HIR carries the value through to the backend gate, which rejects every
+    ///      reachable fixed-scalar type before lowering; backends never emit code for it.
+    #[allow(dead_code)] // Numeric plan Phases 4-5: backend lowering reads the payload.
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     StringLiteral(String),

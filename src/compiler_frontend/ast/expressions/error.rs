@@ -19,18 +19,6 @@ pub(crate) enum ExpressionParseError {
     Infrastructure(Box<CompilerError>),
 }
 
-impl ExpressionParseError {
-    /// Returns the contained user-facing diagnostic, or `None` if this is an infrastructure
-    /// failure.
-    #[cfg(test)]
-    pub(super) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
-        match self {
-            ExpressionParseError::Diagnostic(diagnostic) => Some(diagnostic),
-            ExpressionParseError::Infrastructure(_) => None,
-        }
-    }
-}
-
 impl From<CompilerDiagnostic> for ExpressionParseError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
         ExpressionParseError::Diagnostic(diagnostic)

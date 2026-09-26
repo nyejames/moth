@@ -487,6 +487,8 @@ impl<'a> ConstFactCollector<'a> {
                             self.walk_expression_for_body_local(expression, env)?;
                         }
                         ExpressionRpnItem::Operator { .. } => {}
+                        // Resolution removes pending literals before this stage.
+                        ExpressionRpnItem::PendingNumericLiteral { .. } => {}
                     }
                 }
             }
@@ -603,6 +605,7 @@ impl<'a> ConstFactCollector<'a> {
             | ExpressionKind::OptionNone
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)

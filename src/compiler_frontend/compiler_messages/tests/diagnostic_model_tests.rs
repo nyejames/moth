@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -2181,6 +2182,9 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
     let literal = string_table.intern("1.");
+    let fixed_unsigned_literal = string_table.intern("300");
+    let fixed_negative_literal = string_table.intern("-1");
+    let fixed_signed_literal = string_table.intern("-129");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
     let declaration_name = string_table.intern("Card");
@@ -2205,6 +2209,33 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             ),
             "Can't have more than one decimal point in numeric literal '1.'",
             "MultipleDecimalPoints",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_unsigned_literal,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U8),
+                span(source_path),
+            ),
+            "Integer literal '300' is outside the U8 range 0 to 255.",
+            "OutsideFixedScalarRange",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_signed_literal,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
+                span(source_path),
+            ),
+            "Integer literal '-129' is outside the I8 range -128 to 127.",
+            "OutsideFixedScalarRange",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_negative_literal,
+                NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::Byte),
+                span(source_path),
+            ),
+            "Numeric literal '-1' is negative, but Byte cannot hold negative values.",
+            "NegativeUnsignedLiteral",
         ),
         (
             CompilerDiagnostic::invalid_style_directive(

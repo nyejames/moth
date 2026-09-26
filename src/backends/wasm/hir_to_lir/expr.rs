@@ -36,6 +36,9 @@ pub(crate) fn lower_expression(
                 prefer_move: false,
             })
         }
+        HirExpressionKind::FixedScalar(_) => Err(lir_transformation_error(
+            "Wasm lowering received a fixed-width scalar value; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
+        )),
         HirExpressionKind::VariantConstruct {
             carrier,
             variant_index,

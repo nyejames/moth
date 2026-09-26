@@ -1,0 +1,9 @@
+take |v U8? = "s"|:
+    sink = v
+;
+
+hidden ||:
+    x = 1
+;
+
+[:unreachable]

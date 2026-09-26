@@ -39,7 +39,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
-    CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
+    CastTargetContext, ExpectedType, cast_target_context_for_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -305,22 +305,31 @@ pub(crate) enum CallArgumentSyntaxContext {
 ///
 /// WHAT: passes an optional parameter type into expression parsing so a call argument such as
 ///      `message = none` can resolve its inner type before ordinary call validation runs.
+///      A bare `none` keeps the baseline option slot; any other argument into a
+///      fixed-scalar (bare or option-of-fixed) slot carries a direct-literal hint.
+///      The evaluator materialises a lone literal in that scalar, and every other
+///      shape behaves exactly as inference.
 /// WHY: call arguments otherwise parse with natural-type inference, which is correct for most
 ///      values but rejects context-sensitive `none` literals before the receiving slot is known.
-///      Collection and map targets remain inferred here so their type diagnostics stay owned by
-///      call validation rather than moving into the generic expression parser.
+///      Call validation keeps owning every argument type diagnostic.
 fn expected_type_for_parameter_expectation(
     expectation: &ParameterExpectation,
     type_environment: &TypeEnvironment,
+    token_stream: &AstCursor,
 ) -> ExpectedType {
-    match expectation.expected_type {
-        ExpectedParameterType::Known(type_id) if type_environment.is_option(type_id) => {
-            parse_expectation_for_type_id(type_id, type_environment)
-        }
-        ExpectedParameterType::Known(_) | ExpectedParameterType::UnknownExternal => {
-            ExpectedType::Infer
-        }
+    let ExpectedParameterType::Known(type_id) = expectation.expected_type else {
+        return ExpectedType::Infer;
+    };
+
+    if type_environment.is_option(type_id) && argument_is_bare_none(token_stream) {
+        return ExpectedType::Known(type_id);
     }
+
+    if type_environment.fixed_scalar_of(type_id).is_some() {
+        return ExpectedType::DirectLiteral(type_id);
+    }
+
+    ExpectedType::Infer
 }
 
 /// Builds a `CastTargetContext` from a single parameter expectation.
@@ -572,20 +581,15 @@ fn parse_call_arguments_inner(
 
         let parameter_expectation = parameter_slot
             .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
-        // Only a bare `none` needs the receiving option slot during parsing. Ordinary values
-        // retain natural inference so call validation owns their type diagnostics.
-        let mut inferred = if argument_is_bare_none(token_stream) {
-            parameter_expectation
-                .map(|expectation| {
-                    expected_type_for_parameter_expectation(
-                        expectation,
-                        type_interner.environment(),
-                    )
-                })
-                .unwrap_or(ExpectedType::Infer)
-        } else {
-            ExpectedType::Infer
-        };
+        let mut inferred = parameter_expectation
+            .map(|expectation| {
+                expected_type_for_parameter_expectation(
+                    expectation,
+                    type_interner.environment(),
+                    token_stream,
+                )
+            })
+            .unwrap_or(ExpectedType::Infer);
         let cast_target_context = parameter_expectation
             .map(|expectation| {
                 cast_target_context_for_parameter_expectation(
@@ -701,6 +705,7 @@ fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
     lookahead_tag_at(token_stream, next_index)
         .is_some_and(|tag| matches!(tag, TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS))
 }
+
 /// Apply a receiving value policy after ordinary expression parsing has established the value.
 ///
 /// WHAT: const-required receivers reuse the canonical expression const classifier and module-local

@@ -233,6 +233,7 @@ impl<'a> HirValidator<'a> {
         match &expression.kind {
             // Leaf literals carry no sub-expressions; no further validation needed.
             HirExpressionKind::Int(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)

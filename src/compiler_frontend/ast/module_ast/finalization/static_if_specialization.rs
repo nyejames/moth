@@ -424,6 +424,7 @@ impl StaticIfSpecializer<'_> {
             | ExpressionKind::OptionNone
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)

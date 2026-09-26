@@ -3,12 +3,14 @@
 ## Status
 
 - Status: active on numeric-type-expanding.
-- Current slice: Phase 2, canonical types, profile and materialisation.
+- Current slice: Phase 3, operators, conversions and checked HIR.
 - Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.40 against the n^1.70 budget).
 - Delivered: Slice 1a. The builder-selected `NumericProfile` is threaded through the config, module, single-file, template and backend boundaries. Profile-width `Int`/`Float` literals, folds, casts, struct defaults, capacities and const ranges are covered for all four combinations. JS and Wasm lowering reject non-standard profiles until Phases 4 and 5, and MON materialises at the standard profile until Phase 6.
 - Delivered: Slice 1b. `I8`..`U64`, `F16`/`F32`/`F64` and `Byte` are builtin type keywords with distinct canonical identities (`FixedScalar`), preserved through generic instances, sidecars and import projection. Both HTML-JS and HTML-Wasm reject any reachable value whose type contains one (`unsupported_backend_feature.fixed_width_scalar_values`) until Phases 4 and 5. Lowercase spellings such as `byte` and `u8` join the existing keyword-shadow reservation.
 - Known Phase 5 gap: Wasm `IntMod` still applies a Euclidean correction, while folding and JS follow the dividend's sign.
-- Next action: Slice 1c, destination-aware fixed-width literal, fold and public-value materialisation.
+- Delivered: Slice 1c. Numeric literals keep their source spelling until evaluation. A direct fixed-scalar or option-of-fixed receiving boundary (declarations, constants, assignment, returns, call arguments, struct and parameter defaults, typed collections, map values, then/else arms and multi-bind slots) materialises a lone literal in its destination with exact range checks, signed minima, `U64` maxima and single-rounded `F16`/`F32` bits. Parentheses stay transparent for a lone literal and never make an operand direct. Fixed values keep exact bits through constants, public folded values, import projection and HIR. Every other literal and diagnostic is unchanged.
+- Phase 3 owns the remaining literal typing: immediate numeric peers, match-pattern literals and generic inference where a fixed type argument meets a literal (`Box(200)` into `Box of U8` still reports two inferred types). Fixed-value template interpolation waits for Phase 3 numeric formatting. Fixed-width map keys stay rejected until Phase 6.
+- Next action: Phase 3, the promotion and operator compatibility matrix.
 
 ## Goal and delivery order
 
@@ -461,14 +463,14 @@ and boundary tests execute.
 
 ### Phase 0: Activation inventory
 
-- [ ] Record revision/worktree state, read authorities and run baseline validation
+- [x] Record revision/worktree state, read authorities and run baseline validation
   and non-recording `just bench-check`.
-- [ ] Trace numeric literals through source, constants, public interfaces, generic
+- [x] Trace numeric literals through source, constants, public interfaces, generic
   materialisation, HIR, JS/Wasm and MON. Inventory profile-sensitive inputs and
   existing error/formatting helpers. Classify extend, replace, reuse and delete.
-- [ ] Inventory every queued plan recursively for affected numeric assumptions.
+- [x] Inventory every queued plan recursively for affected numeric assumptions.
   Preserve unrelated serial order and the package lane's explicit parallel state.
-- [ ] Locate current runtime/artefact parity harnesses and public MON tests. Write
+- [x] Locate current runtime/artefact parity harnesses and public MON tests. Write
   the type/operator/cast expectation matrix from the contract, covering all four
   profiles. Establish how each Wasm scalar claim will be executed and inspected.
 
@@ -489,13 +491,13 @@ than treating this temporary file as a second language specification.
 
 ### Phase 2: Canonical types, profile and materialisation
 
-- [ ] Add canonical fixed widths, binary precisions and non-numeric Byte. Thread
+- [x] Add canonical fixed widths, binary precisions and non-numeric Byte. Thread
   NumericProfile through the compiler service boundaries, bootstrap and typed
   inputs before any folding. Cover defaults and all four combinations.
-- [ ] Extend destination-aware literal/folded-value materialisation, signed minima,
+- [x] Extend destination-aware literal/folded-value materialisation, signed minima,
   U64 maxima, F16/F32 bit-exact values, public projection and generic identities.
   Preserve the source-local lexical store and MON lossless data.
-- [ ] Add explicit target gates for newly reachable forms until their lowerings
+- [x] Add explicit target gates for newly reachable forms until their lowerings
   exist. Exercise fields, options, collection elements, returns and generated
   functions rather than gating only visible arithmetic expressions.
 

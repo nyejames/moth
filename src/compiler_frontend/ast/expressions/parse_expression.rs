@@ -217,8 +217,39 @@ pub(crate) fn create_expression_without_boundary_catch(
 // WHY: callers parsing comma-separated lists outside parentheses (for example
 //      fallback/return lists) must preserve line boundaries between statements.
 pub(crate) fn create_expression_with_trailing_newline_policy(
-    input: ExpressionParseInput<'_, '_, '_>,
+    mut input: ExpressionParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
+    let nodes = match collect_expression_fragment(&mut input)? {
+        ExpressionFragment::Value(value) => return Ok(*value),
+        ExpressionFragment::Nodes(nodes) => nodes,
+    };
+
+    evaluate_expression(
+        input.scope_context,
+        nodes,
+        input.type_interner,
+        input.expected_type,
+        input.value_mode,
+        input.string_table,
+        input.path_fork,
+    )
+    .map_err(ExpressionParseError::from)
+}
+
+/// One parsed expression before evaluation.
+pub(super) enum ExpressionFragment {
+    /// The flat infix fragment that `evaluate_expression` still has to order, type and fold.
+    Nodes(Vec<ExpressionRpnItem>),
+    /// A value returned early by a template or `is:` guard; it never reaches evaluation.
+    Value(Box<Expression>),
+}
+
+// WHAT: collects the flat infix AST fragment without evaluating it.
+// WHY: a parenthesised group must see whether it is exactly one pending literal
+//      before evaluation, so it can defer that literal to the outer fragment.
+pub(super) fn collect_expression_fragment(
+    input: &mut ExpressionParseInput<'_, '_, '_>,
+) -> Result<ExpressionFragment, ExpressionParseError> {
     let mut expression: Vec<ExpressionRpnItem> = Vec::new();
 
     ast_log!(
@@ -234,7 +265,9 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
     while input.token_stream.position() < input.token_stream.length() {
         let token = input.token_stream.current_tag();
         if input.stop_at_named_entry
-            && matches!(expression.last(), Some(ExpressionRpnItem::Operand(_)))
+            && expression
+                .last()
+                .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal)
             && token == TokenTag::SYMBOL
             && input.token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
         {
@@ -263,7 +296,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
             ExpressionTokenStep::Continue => continue,
             ExpressionTokenStep::Advance => input.token_stream.advance(),
             ExpressionTokenStep::Break => break,
-            ExpressionTokenStep::Return(value) => return Ok(*value),
+            ExpressionTokenStep::Return(value) => return Ok(ExpressionFragment::Value(value)),
         }
     }
 
@@ -271,16 +304,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.token_stream.skip_newlines();
     }
 
-    evaluate_expression(
-        input.scope_context,
-        expression,
-        input.type_interner,
-        input.expected_type,
-        input.value_mode,
-        input.string_table,
-        input.path_fork,
-    )
-    .map_err(ExpressionParseError::from)
+    Ok(ExpressionFragment::Nodes(expression))
 }
 
 // WHAT: parses an expression from a bounded token slice without consuming the stop token.

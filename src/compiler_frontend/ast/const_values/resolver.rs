@@ -335,6 +335,10 @@ impl<'a> ConstValueResolver<'a> {
                     self.resolve_runtime_rvalue_operand(expression, environment)?
                 }
                 operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
+                // Resolution removes pending literals before this stage.
+                ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+                }
             };
             substituted.push(new_item);
         }

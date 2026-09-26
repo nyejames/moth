@@ -931,7 +931,9 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
             }
             Some(PublicFoldedValue::Record(converted))
         }
-        PublicFoldedValue::Choice { .. } | PublicFoldedValue::Range { .. } => None,
+        PublicFoldedValue::FixedScalar(_)
+        | PublicFoldedValue::Choice { .. }
+        | PublicFoldedValue::Range { .. } => None,
     }
 }
 

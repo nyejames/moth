@@ -161,6 +161,8 @@ fn substitute_source_consts_in_rpn_item(
             substitute_source_consts_in_expression(expression.clone(), context, string_table),
         ),
         operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
+        // Resolution removes pending literals before this stage.
+        pending @ ExpressionRpnItem::PendingNumericLiteral { .. } => pending.clone(),
     }
 }
 

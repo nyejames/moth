@@ -25,6 +25,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -227,6 +228,11 @@ impl Hash for FiniteFloat {
 pub(crate) enum PublicFoldedValue {
     Int(i64),
     Float(FiniteFloat),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    ///
+    /// WHY: `FixedScalarValue` is `Copy` with exact-bit `Eq`/`Hash`, so `U64` maxima,
+    ///      signed minima, `-0.0` and `F16` subnormals round-trip without lossy conversion.
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     /// A folded template string or plain string literal, retaining structural pieces when
@@ -299,6 +305,7 @@ impl PublicFoldedValue {
             Self::OptionSome(value) => value.visit_type_identities(visitor),
             Self::Int(_)
             | Self::Float(_)
+            | Self::FixedScalar(_)
             | Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)
@@ -416,6 +423,7 @@ pub(crate) fn convert_expression_to_folded_value(
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
         ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
+        ExpressionKind::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(*value)),
         ExpressionKind::Bool(value) => Ok(PublicFoldedValue::Bool(*value)),
         ExpressionKind::Char(value) => Ok(PublicFoldedValue::Char(*value)),
         ExpressionKind::StringSlice(string_id) => Ok(PublicFoldedValue::String(
@@ -563,6 +571,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
         match visit {
             ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
             ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
+            ConstValueVisit::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(value)),
             ConstValueVisit::Bool(value) => Ok(PublicFoldedValue::Bool(value)),
             ConstValueVisit::Char(value) => Ok(PublicFoldedValue::Char(value)),
             ConstValueVisit::String(value) => match value {

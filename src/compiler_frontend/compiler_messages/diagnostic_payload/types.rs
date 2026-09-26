@@ -5,6 +5,7 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 
 // -------------------------------
 //  Diagnostic Payload Supporting Types
@@ -547,6 +548,12 @@ pub enum NumberLiteralErrorReason {
     InvalidExponentSignPlacement,
     InvalidSeparatorPlacement,
     OutsideIntRange,
+    /// A literal is outside the inclusive range of the fixed scalar it initialises.
+    OutsideFixedScalarRange(FixedScalar),
+    /// A negative literal cannot initialise an unsigned fixed scalar or `Byte`.
+    NegativeUnsignedLiteral(FixedScalar),
+    /// A fixed binary float literal rounded to a non-finite value at its destination.
+    NonFiniteFixedFloat(FixedScalar),
     NonFiniteFloat,
     ParseOverflow,
 }

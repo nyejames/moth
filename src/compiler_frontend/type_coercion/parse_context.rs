@@ -6,10 +6,12 @@
 //! WHY: most types should be resolved strictly by the expression parser with
 //! no expected-type hint (`Inferred`), so that `eval_expression` operates in
 //! `Exact` context and callers own their own post-parse coercion. However, some
-//! literals are parse-context-sensitive: `none` needs an `Option(_)` target, and
-//! empty collection literals need an explicit `Collection(T)` target. Without
+//! literals are parse-context-sensitive: `none` needs an `Option(_)` target, empty
+//! collection literals need an explicit `Collection(T)` target, and numeric literals
+//! need a fixed-scalar target for destination-aware materialisation. Without
 //! those hints the parser must reject the literal immediately, because there is
-//! no post-parse coercion that can "invent" a missing inner type.
+//! no post-parse coercion that can "invent" a missing inner type or recover a
+//! literal that already overflowed its default `Int`/`Float` materialisation.
 //!
 //! ## Rule
 //!
@@ -17,6 +19,9 @@
 //!   extract its inner type at parse time.
 //! - Explicit `Collection(T)` targets: pass the collection type through so
 //!   empty collection literals can resolve their element type.
+//! - Bare fixed-scalar targets: pass a direct-literal hint so a direct numeric
+//!   literal can materialise in its destination type with no `Int` intermediate.
+//!   In every other respect the hint behaves like `Infer`.
 //! - All other targets: pass `Inferred` so the expression resolves its own
 //!   natural type and the call site validates/coerces after the fact.
 
@@ -30,11 +35,15 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-/// Parse-time expected type for context-sensitive literals such as `none` and
-/// empty collection literals.
+/// Parse-time expected type for context-sensitive literals such as `none`,
+/// empty collection literals, and direct fixed-width numeric literals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpectedType {
     Known(TypeId),
+    /// A direct numeric-literal destination: the evaluator may materialise one
+    /// pending literal in the fixed scalar `TypeId`, and in every other respect
+    /// this behaves exactly like `Infer`.
+    DirectLiteral(TypeId),
     Infer,
 }
 
@@ -42,6 +51,13 @@ impl ExpectedType {
     pub(crate) fn known_type_id(self) -> Option<TypeId> {
         match self {
             Self::Known(type_id) => Some(type_id),
+            Self::DirectLiteral(_) | Self::Infer => None,
+        }
+    }
+
+    pub(crate) fn literal_destination_type_id(self) -> Option<TypeId> {
+        match self {
+            Self::Known(type_id) | Self::DirectLiteral(type_id) => Some(type_id),
             Self::Infer => None,
         }
     }
@@ -89,6 +105,10 @@ pub(crate) fn parse_expectation_for_type_id(
 ) -> ExpectedType {
     if type_environment.is_option(target_id) {
         return ExpectedType::Known(target_id);
+    }
+
+    if type_environment.fixed_scalar_of(target_id).is_some() {
+        return ExpectedType::DirectLiteral(target_id);
     }
 
     if type_environment.is_collection(target_id) {

@@ -129,6 +129,7 @@ pub(crate) fn extract_html_page_metadata(
             // Every remaining constant shape genuinely holds a non-string value.
             HirConstValue::Int(_)
             | HirConstValue::Float(_)
+            | HirConstValue::FixedScalar(_)
             | HirConstValue::Bool(_)
             | HirConstValue::Char(_)
             | HirConstValue::Collection(_)

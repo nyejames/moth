@@ -287,6 +287,8 @@ fn debug_validate_expression_type_id_with_context(
                         debug_validate_expression_type_id(expression, context);
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // Resolution removes pending literals before this stage.
+                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
                 }
             }
         }
@@ -517,6 +519,7 @@ fn debug_validate_expression_type_id_with_context(
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::FixedScalar(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)

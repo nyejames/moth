@@ -1,7 +1,7 @@
 //! Shared numeric text grammar for the Moth frontend.
 //!
-//! WHAT: classifies and parses numeric literal text without depending on AST, HIR,
-//!       or backend concepts.
+//! WHAT: classifies and parses numeric literal text, and owns the binary16 rounding `F16`
+//!       destinations need, without depending on AST, HIR, or backend concepts.
 //! WHY: source literals and future string casts must agree on separator, exponent,
 //!      sign, and digit-count rules.
 
@@ -10,4 +10,5 @@ pub mod parse;
 pub mod store;
 pub mod token;
 
+pub(crate) mod binary16;
 pub(crate) mod grammar;

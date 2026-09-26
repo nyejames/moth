@@ -17,6 +17,7 @@ pub(crate) fn rewrite_expression_bottom_up(
     let kind = match &expression.kind {
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

@@ -80,6 +80,13 @@ impl<'a> HirBuilder<'a> {
                 ExpressionRpnItem::Operand(expression) => {
                     stack.push(RuntimeRpnTree::Leaf(Box::new(expression.to_owned())));
                 }
+                // Resolution removes pending literals before this stage.
+                ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                    return_hir_transformation_error!(
+                        "Pending numeric literal reached HIR lowering; evaluate_expression must resolve it first.",
+                        self.hir_error_location(&item.source_span())
+                    );
+                }
             }
         }
 

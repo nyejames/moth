@@ -194,6 +194,7 @@ impl<'a> HirValidator<'a> {
             // text and pieces must not be flattened to provide one.
             HirConstValue::Int(_)
             | HirConstValue::Float(_)
+            | HirConstValue::FixedScalar(_)
             | HirConstValue::Bool(_)
             | HirConstValue::Char(_)
             | HirConstValue::String(_)

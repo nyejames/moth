@@ -134,6 +134,7 @@ impl<'a> HirBuilder<'a> {
             match visit {
                 ConstValueVisit::Int(value) => Ok(HirConstValue::Int(value)),
                 ConstValueVisit::Float(value) => Ok(HirConstValue::Float(value)),
+                ConstValueVisit::FixedScalar(value) => Ok(HirConstValue::FixedScalar(value)),
                 ConstValueVisit::Bool(value) => Ok(HirConstValue::Bool(value)),
                 ConstValueVisit::Char(value) => Ok(HirConstValue::Char(value)),
                 ConstValueVisit::String(value) => match value {
@@ -227,6 +228,13 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Float(value) => self.make_expression(
                     span,
                     HirExpressionKind::Float(value),
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::FixedScalar(value) => self.make_expression(
+                    span,
+                    HirExpressionKind::FixedScalar(value),
                     ty,
                     ValueKind::Const,
                     region,

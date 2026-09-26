@@ -1390,6 +1390,7 @@ fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut im
         }
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

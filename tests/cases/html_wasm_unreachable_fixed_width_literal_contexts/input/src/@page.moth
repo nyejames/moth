@@ -1,0 +1,135 @@
+hide_i8 ||:
+    lo I8 = -128
+    hi I8 = 127
+;
+
+hide_i16 ||:
+    lo I16 = -32768
+    hi I16 = 32767
+;
+
+hide_i32 ||:
+    lo I32 = -2147483648
+    hi I32 = 2147483647
+;
+
+hide_i64 ||:
+    lo I64 = -9_223_372_036_854_775_808
+    hi I64 = 9_223_372_036_854_775_807
+;
+
+hide_u ||:
+    z8 U8 = 0
+    m8 U8 = 255
+    z16 U16 = 0
+    m16 U16 = 65535
+    z32 U32 = 0
+    m32 U32 = 4294967295
+    z64 U64 = 0
+    big U64 = 18_446_744_073_709_551_615
+;
+
+hide_byte ||:
+    lo Byte = 0
+    hi Byte = 255
+;
+
+hide_float ||:
+    neg16 F16 = -0.0
+    half16 F16 = 0.5
+    neg32 F32 = -0.0
+    frac32 F32 = 0.1
+    neg64 F64 = -0.0
+    whole64 F64 = 42
+;
+
+hide_const ||:
+    limit #U64 = 18_446_744_073_709_551_615
+    tiny #I8 = -128
+    frac #F32 = 0.1
+    got U64 = limit
+;
+
+take_u8 |v U8|:
+    sink = v
+;
+
+take_i16 |v I16|:
+    sink = v
+;
+
+hide_call ||:
+    take_u8(200)
+    take_u8(v = 0)
+    take_u8(v = 255)
+    take_i16(-32768)
+    take_i16(-5)
+;
+
+hide_reassign ||:
+    slot ~U8 = 0
+    slot = 200
+;
+
+hide_return_u8 || -> U8:
+    return 200
+;
+
+hide_pair || -> U8, U16:
+    return 200, 60000
+;
+
+hide_multi ||:
+    a, b = hide_pair()
+;
+
+hide_opt ||:
+    present U8? = 200
+    absent U8? = none
+;
+
+hide_coll ||:
+    got {U8} = {1, 200, 255}
+;
+
+hide_map ||:
+    by_name ~{String = U8} = {"k" = 200}
+    by_id ~{Int = U64} = {1 = 18_446_744_073_709_551_615}
+;
+
+hide_if ||:
+    picked U8 = if true then 5 else 6
+;
+
+hide_if_multi ||:
+    a U8, b U16 = if true:
+        then 1, 2
+    else
+        then 3, 4
+    ;
+;
+
+hide_paren ||:
+    v U8 = (5)
+;
+
+Holder = |
+    first U8,
+    second U8 = 9,
+|
+
+hide_struct ||:
+    made = Holder(1, second = 2)
+;
+
+hide_pdef |v U8 = 7|:
+    sink = v
+;
+
+hide_pcall ||:
+    hide_pdef()
+    hide_pdef(200)
+    hide_pdef(v = 255)
+;
+
+[:unreachable fixed width literal contexts]

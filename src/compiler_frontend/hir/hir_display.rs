@@ -556,6 +556,7 @@ impl<'a> HirDisplayContext<'a> {
         match kind {
             HirExpressionKind::Int(value) => value.to_string(),
             HirExpressionKind::Float(value) => value.to_string(),
+            HirExpressionKind::FixedScalar(value) => value.to_string(),
             HirExpressionKind::Bool(value) => value.to_string(),
             HirExpressionKind::Char(value) => format!("'{}'", value.escape_debug()),
             HirExpressionKind::StringLiteral(value) => {

@@ -271,6 +271,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     let kind = match folded {
         PublicFoldedValue::Int(value) => ExpressionKind::Int(*value),
         PublicFoldedValue::Float(value) => ExpressionKind::Float(value.value()),
+        PublicFoldedValue::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
         PublicFoldedValue::Bool(value) => ExpressionKind::Bool(*value),
         PublicFoldedValue::Char(value) => ExpressionKind::Char(*value),
         PublicFoldedValue::String(value) => {

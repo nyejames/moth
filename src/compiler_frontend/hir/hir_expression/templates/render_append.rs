@@ -1691,6 +1691,8 @@ fn runtime_template_append_candidate_for_expression(
                 runtime_template_append_candidate_for_expression(expression)
             }
             ExpressionRpnItem::Operator { .. } => None,
+            // Resolution removes pending literals before this stage.
+            ExpressionRpnItem::PendingNumericLiteral { .. } => None,
         },
 
         _ => None,
