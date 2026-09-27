@@ -1,0 +1,11 @@
+readings || -> {U8}, U8:
+    first U8 = 7
+    return {first, 8}, first
+;
+
+render_collection || -> String:
+    values, first = readings()
+    return [:fixed width collection return first=[first]]
+;
+
+[:[render_collection()]]

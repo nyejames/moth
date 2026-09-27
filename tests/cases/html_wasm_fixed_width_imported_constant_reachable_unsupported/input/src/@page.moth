@@ -1,9 +1,0 @@
-@limits limit
-
-take_u64 |v U64|:
-    sink = v
-;
-
-take_u64(limit)
-
-[:reachable]

@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["fixed float runtime f32=0.3 f32-folded=true f16-sum=0.75 f16-folded=true max-half=65500 direct-half=1.001 via-f32-half=1 string-tie=1 i64-to-f32=9007199000000000 negative-zero-equal=true negative-zero-text=0"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"

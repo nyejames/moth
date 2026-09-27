@@ -72,11 +72,11 @@ No modulo, wrapping or saturating conversion is added to the language.
 
 This reference owns the accepted cast contract. @../progress (Progress) owns
 current compiler and backend support. The Alpha compiler resolves the `Bool`,
-`Int`, `String`, `Char`, `Float` and `Error` targets, plus the fixed-width
+`Int`, `Float`, `String`, `Char` and `Error` targets, plus the fixed-width
 integer, fixed binary float and `Byte` targets for numeric and text conversions.
-Fixed-width casts fold at compile time; HTML-JS and HTML-Wasm reject runtime
-fixed-width values until their lowerings land. `Number` and `NumberN` targets
-remain accepted design.
+Fixed-width casts fold at compile time. HTML-JS executes fixed-width numeric and
+`Byte` runtime values; HTML-Wasm still rejects them until its lowerings land.
+`Number` and `NumberN` targets remain accepted design.
 
 ### Target source
 

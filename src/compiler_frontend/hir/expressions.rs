@@ -208,9 +208,8 @@ pub enum HirExpressionKind {
     Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
-    /// WHY: HIR carries the value through to the backend gate, which rejects every
-    ///      reachable fixed-scalar type before lowering; backends never emit code for it.
-    #[allow(dead_code)] // Numeric plan Phases 4-5: backend lowering reads the payload.
+    /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`, while HTML-Wasm
+    ///      rejects reachable fixed values until Phase 5.
     FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),

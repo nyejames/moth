@@ -198,8 +198,8 @@ fn runtime_prelude_contains_cast_helpers() {
         "prelude must contain __moth_cast_int when the String -> Int numeric text parse is used"
     );
     assert!(
-        source.contains("function __moth_cast_int_in_range(value)"),
-        "prelude must contain the profile-selected Int range predicate"
+        source.contains("function __moth_cast_integer_in_range("),
+        "prelude must contain the integer range helper required by a numeric text parse"
     );
     assert!(
         !source.contains("function __moth_normalize_numeric_text("),

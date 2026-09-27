@@ -163,7 +163,7 @@ fn numeric_evidence_row(
 ///
 /// WHY: the numeric conversion matrix and both numeric text matrices cover exactly the same
 ///      domains, so one iterator owns that domain list instead of three parallel spellings.
-fn numeric_scalars() -> impl Iterator<Item = NumericScalar> {
+pub(crate) fn numeric_scalars() -> impl Iterator<Item = NumericScalar> {
     [NumericScalar::Int, NumericScalar::Float]
         .into_iter()
         .chain(

@@ -1,0 +1,110 @@
+add_u8 |left U8, right U8| -> U32:
+    return left + right
+;
+
+add_i8_i16 |left I8, right I16| -> I32:
+    return left + right
+;
+
+increment_i64 |value I64| -> I64, Error!:
+    return value + 1
+;
+
+decrement_u64 |value U64| -> U64, Error!:
+    return value - 1
+;
+
+divide_by_three |value I32| -> I32, Error!:
+    return value // 3
+;
+
+remainder_by_three |value I32| -> I32, Error!:
+    return value % 3
+;
+
+divide_by_negative_three |value I32| -> I32, Error!:
+    return value // -3
+;
+
+remainder_by_negative_three |value I32| -> I32, Error!:
+    return value % -3
+;
+
+divide_fixed |value U8| -> F64, Error!:
+    return value / 2
+;
+
+equal_u8_i64 |left U8, right I64| -> Bool:
+    return left is right
+;
+
+less_i64_u64 |left I64, right U64| -> Bool:
+    return left < right
+;
+
+less_u32_u64 |left U32, right U64| -> Bool:
+    return left < right
+;
+
+trap_i64_add |run Bool, value I64|:
+    if run:
+        ignored = value + 1
+    ;
+;
+
+u8_left #U8 = 200
+u8_right #U8 = 100
+u8_sum = add_u8(u8_left, u8_right)
+u8_folded #U32 = u8_left + u8_right
+u8_matches_folded = u8_sum is u8_folded
+
+signed_left #I8 = -120
+signed_right #I16 = -300
+signed_sum = add_i8_i16(signed_left, signed_right)
+signed_folded #I32 = signed_left + signed_right
+signed_matches_folded = signed_sum is signed_folded
+
+i64_min #I64 = -9223372036854775808
+i64_next = increment_i64(i64_min) catch:
+    then 0
+;
+i64_expected #I64 = i64_min + 1
+
+a_u64_max #U64 = 18446744073709551615
+u64_previous = decrement_u64(a_u64_max) catch:
+    then 0
+;
+
+negative_quotient = divide_by_three(-7) catch:
+    then 0
+;
+negative_remainder = remainder_by_three(-7) catch:
+    then 0
+;
+positive_quotient = divide_by_negative_three(7) catch:
+    then 0
+;
+positive_remainder = remainder_by_negative_three(7) catch:
+    then 0
+;
+fixed_quotient = divide_fixed(7) catch:
+    then 0.0
+;
+
+mixed_equal = equal_u8_i64(255, 255)
+negative_i64_less = less_i64_u64(-1, a_u64_max)
+u32_less = less_u32_u64(4294967295, 4294967296)
+
+trap_i64_add(false, 9223372036854775807)
+
+u8_text String = cast u8_sum
+signed_text String = cast signed_sum
+i64_text String = cast i64_next
+u64_text String = cast u64_previous
+negative_quotient_text String = cast negative_quotient
+negative_remainder_text String = cast negative_remainder
+positive_quotient_text String = cast positive_quotient
+positive_remainder_text String = cast positive_remainder
+fixed_quotient_text String = cast fixed_quotient
+
+[:fixed integer runtime u8=[u8_text] promoted=[u8_matches_folded] signed=[signed_text] promotion=[signed_matches_folded] i64=[i64_text] u64=[u64_text] signed-div=[negative_quotient_text]/[negative_remainder_text]/[positive_quotient_text]/[positive_remainder_text] fixed-div=[fixed_quotient_text] mixed=[mixed_equal]/[negative_i64_less]/[u32_less]]

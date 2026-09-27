@@ -321,7 +321,7 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
 }
 
 #[test]
-fn backend_feature_validation_rejects_fixed_width_scalars_through_type_structure() {
+fn backend_feature_validation_rejects_fixed_width_scalars_only_for_wasm() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();
     // `{U16}?` reaches a fixed-width scalar through option and collection structure.
@@ -335,26 +335,48 @@ fn backend_feature_validation_rejects_fixed_width_scalars_through_type_structure
 
     for span in [spanful, None] {
         let module = module_returning_expression(optional_entries, span);
+        let reachability = test_reachability(&module);
 
         for target in [BackendTarget::Wasm, BackendTarget::Js] {
-            let diagnostic = feature_validation_diagnostic(
-                &module,
-                &type_environment,
+            let result = validate_hir_backend_feature_support(
+                BackendFeatureValidationInput {
+                    hir: &module,
+                    reachability: &reachability,
+                    target,
+                    type_environment: Some(&type_environment),
+                    numeric_profile: NumericProfile::STANDARD,
+                    external_package_registry: None,
+                },
                 &mut string_table,
-                target,
-                "both targets should reject a reachable optional collection of fixed-width values",
             );
 
-            assert_unsupported_feature_for_target(
-                &diagnostic,
-                &mut string_table,
-                target,
-                UnsupportedBackendFeatureReason::FixedWidthScalarValues,
-            );
-            assert_eq!(
-                diagnostic.primary_span, span,
-                "fixed-width rejection should preserve optional source provenance"
-            );
+            match target {
+                BackendTarget::Wasm => {
+                    let error = result.expect_err(
+                        "Wasm should reject a reachable optional collection of fixed-width values",
+                    );
+                    let diagnostic = match error {
+                        BackendFeatureValidationError::Diagnostic(diagnostic) => diagnostic,
+                        BackendFeatureValidationError::Infrastructure(_) => {
+                            panic!("expected a user-facing Wasm Rule diagnostic")
+                        }
+                    };
+                    assert_unsupported_feature_for_target(
+                        &diagnostic,
+                        &mut string_table,
+                        target,
+                        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+                    );
+                    assert_eq!(
+                        diagnostic.primary_span, span,
+                        "fixed-width rejection should preserve optional source provenance"
+                    );
+                }
+                BackendTarget::Js => assert!(
+                    result.is_ok(),
+                    "JS validation should accept fixed-width values after lowering support"
+                ),
+            }
         }
     }
 }

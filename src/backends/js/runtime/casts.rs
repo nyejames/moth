@@ -5,7 +5,10 @@
 //!      structured error result instead of inheriting JavaScript's implicit conversions.
 
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::numeric_carrier::{
+    JsNumericCarrier, JsNumericConversion, JsNumericRuntimeHelper, binary_float_precision_bits,
+};
+use crate::compiler_frontend::builtins::casts::evidence::numeric_scalars;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
@@ -15,32 +18,77 @@ impl<'hir> JsEmitter<'hir> {
     /// Emits the cast helpers selected by reachable HIR policies.
     pub(crate) fn emit_runtime_cast_helpers(&mut self) {
         let mut emitted = HashSet::<&'static str>::new();
+        let profile = self.config.numeric_profile;
+        let scalars = numeric_scalars().collect::<Vec<_>>();
+        let mut float_parse_precisions = [false; 3];
 
-        if self
-            .used_cast_policies
-            .contains(&BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Int,
-                target: NumericScalar::Float,
-            })
-        {
-            self.emit_int_to_float32_helper(&mut emitted);
+        for scalar in &scalars {
+            if self
+                .used_cast_policies
+                .contains(&BuiltinCastPolicyId::StringToNumeric(*scalar))
+            {
+                if scalar.is_integer() {
+                    self.emit_cast_int(&mut emitted);
+                } else if let Some(precision) = scalar.binary_float_precision(profile) {
+                    float_parse_precisions[float_precision_index(precision)] = true;
+                }
+            }
+
+            if self
+                .used_cast_policies
+                .contains(&BuiltinCastPolicyId::NumericToString(*scalar))
+            {
+                if scalar.is_integer() {
+                    self.emit_cast_int_to_string(&mut emitted);
+                } else if scalar.is_binary_float() {
+                    self.emit_cast_float_to_string(&mut emitted);
+                }
+            }
+
+            for target in &scalars {
+                let policy = BuiltinCastPolicyId::NumericConversion {
+                    source: *scalar,
+                    target: *target,
+                };
+                if !self.used_cast_policies.contains(&policy) {
+                    continue;
+                }
+
+                let conversion = JsNumericConversion::classify(*scalar, *target, profile)
+                    .expect("numeric cast policies contain supported numeric scalars");
+                for helper in conversion.required_helpers() {
+                    match helper {
+                        JsNumericRuntimeHelper::CastIntegerInRange => {
+                            self.emit_cast_integer_in_range_helper(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::CastIntegerToInteger => {
+                            self.emit_cast_integer_to_integer(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::BigIntToBinaryFloat => {
+                            self.emit_bigint_to_binary_float_helper(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::CastIntegerToFloat => {
+                            self.emit_cast_integer_to_float(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::NumericValueDisplay => {
+                            self.emit_cast_numeric_value_display_helper(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::CastFloatToInteger => {
+                            self.emit_cast_float_to_int(&mut emitted);
+                        }
+                        JsNumericRuntimeHelper::CastFloatToFloat => {
+                            self.emit_cast_float_to_float(&mut emitted);
+                        }
+                    }
+                }
+            }
         }
 
-        if self
-            .used_cast_policies
-            .contains(&BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Float,
-                target: NumericScalar::Int,
-            })
-        {
-            self.emit_cast_float_to_int(&mut emitted);
+        if float_parse_precisions.iter().any(|used| *used) {
+            self.emit_cast_float(&mut emitted, float_parse_precisions);
         }
 
         for policy in [
-            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
-            BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
-            BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
             BuiltinCastPolicyId::BoolToString,
             BuiltinCastPolicyId::CharToString,
             BuiltinCastPolicyId::CharToInt,
@@ -55,18 +103,6 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             match policy {
-                BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => {
-                    self.emit_cast_int(&mut emitted);
-                }
-                BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => {
-                    self.emit_cast_float(&mut emitted);
-                }
-                BuiltinCastPolicyId::NumericToString(NumericScalar::Int) => {
-                    self.emit_cast_int_to_string(&mut emitted);
-                }
-                BuiltinCastPolicyId::NumericToString(NumericScalar::Float) => {
-                    self.emit_cast_float_to_string(&mut emitted);
-                }
                 BuiltinCastPolicyId::BoolToString => self.emit_cast_bool_to_string(&mut emitted),
                 BuiltinCastPolicyId::CharToString => self.emit_cast_char_to_string(&mut emitted),
                 BuiltinCastPolicyId::CharToInt => self.emit_cast_char_to_int(&mut emitted),
@@ -84,30 +120,97 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn emit_cast_int_range_helpers(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_cast_int_in_range") {
+    fn emit_cast_integer_in_range_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_cast_integer_in_range") {
             return;
         }
 
-        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        let (min, max) = carrier
-            .integer_bounds_js()
-            .expect("Int carrier always owns integer bounds");
+        self.emit_line("function __moth_cast_integer_in_range(value, min, max) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line("if (typeof value === \"bigint\") {");
+            emitter.with_indent(|em| {
+                em.emit_line("const minimum = typeof min === \"bigint\" ? min : BigInt(min);");
+                em.emit_line("const maximum = typeof max === \"bigint\" ? max : BigInt(max);");
+                em.emit_line("return value >= minimum && value <= maximum;");
+            });
+            emitter.emit_line("}");
+            emitter.emit_line(
+                "if (typeof value !== \"number\" || !Number.isInteger(value)) return false;",
+            );
+            emitter.emit_line("const integer = BigInt(value);");
+            emitter.emit_line("const minimum = typeof min === \"bigint\" ? min : BigInt(min);");
+            emitter.emit_line("const maximum = typeof max === \"bigint\" ? max : BigInt(max);");
+            emitter.emit_line("return integer >= minimum && integer <= maximum;");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+    fn emit_cast_debug_string_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_debug_string") {
+            return;
+        }
 
-        self.emit_line(&format!("const __BS_INT_CAST_MIN = {min};"));
-        self.emit_line(&format!("const __BS_INT_CAST_MAX = {max};"));
-        self.emit_line("function __moth_cast_int_in_range(value) {");
-        self.with_indent(|emitter| match carrier {
-            JsNumericCarrier::ExactInteger { .. } => emitter.emit_line(
-                "return typeof value === \"number\" && Number.isInteger(value) && value >= __BS_INT_CAST_MIN && value <= __BS_INT_CAST_MAX;",
-            ),
-            JsNumericCarrier::BigInteger { .. } => emitter.emit_line(
-                "return typeof value === \"bigint\" && value >= __BS_INT_CAST_MIN && value <= __BS_INT_CAST_MAX;",
-            ),
-            JsNumericCarrier::BinaryFloat { .. } => {
-                unreachable!("Int carrier cannot be a binary float")
-            }
+        self.emit_line("function __moth_debug_string(value) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line("const text = String(value);");
+            emitter.emit_line(r#"let escaped = "\"";"#);
+            emitter.emit_line("for (const character of text) {");
+            emitter.with_indent(|em| {
+                em.emit_line(r#"if (character === "\\") escaped += "\\\\";"#);
+                em.emit_line(r#"else if (character === "\"") escaped += "\\\"";"#);
+                em.emit_line(r#"else if (character === "\0") escaped += "\\0";"#);
+                em.emit_line(r#"else if (character === "\n") escaped += "\\n";"#);
+                em.emit_line(r#"else if (character === "\r") escaped += "\\r";"#);
+                em.emit_line(r#"else if (character === "\t") escaped += "\\t";"#);
+                em.emit_line(
+                    r#"else if (character !== " " && /[\p{C}\p{Z}\p{Grapheme_Extend}\u115F\u1160\u3164\uFFA0]/u.test(character)) escaped += "\\u{" + character.codePointAt(0).toString(16) + "}";"#,
+                );
+                em.emit_line("else escaped += character;");
+            });
+            emitter.emit_line("}");
+            emitter.emit_line(r#"return escaped + "\"";"#);
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn emit_cast_numeric_value_display_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_numeric_value_display") {
+            return;
+        }
+
+        self.emit_line("function __moth_numeric_value_display(value) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line(r#"if (typeof value === "bigint") return value.toString();"#);
+            emitter.emit_line(r#"if (typeof value !== "number") return String(value);"#);
+            emitter.emit_line("if (Number.isNaN(value)) return \"NaN\";");
+            emitter.emit_line("if (value === Infinity) return \"inf\";");
+            emitter.emit_line("if (value === -Infinity) return \"-inf\";");
+            emitter.emit_line("if (Object.is(value, -0)) return \"-0\";");
+            emitter.emit_line("const negative = value < 0;");
+            emitter.emit_line("const text = String(Math.abs(value));");
+            emitter.emit_line("const separator = text.indexOf(\"e\");");
+            emitter.emit_line("if (separator < 0) return (negative ? \"-\" : \"\") + text;");
+            emitter.emit_line("const coefficient = text.slice(0, separator);");
+            emitter.emit_line("const exponent = Number(text.slice(separator + 1));");
+            emitter.emit_line("const point = coefficient.indexOf(\".\");");
+            emitter.emit_line("const digits = coefficient.replace(\".\", \"\");");
+            emitter.emit_line("const decimalPosition = (point < 0 ? coefficient.length : point) + exponent;");
+            emitter.emit_line("let expanded;");
+            emitter.emit_line("if (decimalPosition <= 0) {");
+            emitter.with_indent(|em| {
+                em.emit_line("expanded = \"0.\" + \"0\".repeat(-decimalPosition) + digits;");
+            });
+            emitter.emit_line("} else if (decimalPosition >= digits.length) {");
+            emitter.with_indent(|em| {
+                em.emit_line("expanded = digits + \"0\".repeat(decimalPosition - digits.length);");
+            });
+            emitter.emit_line("} else {");
+            emitter.with_indent(|em| {
+                em.emit_line("expanded = digits.slice(0, decimalPosition) + \".\" + digits.slice(decimalPosition);");
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("return (negative ? \"-\" : \"\") + expanded;");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -118,206 +221,107 @@ impl<'hir> JsEmitter<'hir> {
             return;
         }
 
-        let invalid_format = BuiltinErrorCode::IntParseInvalidFormat;
-        let invalid_format_code = JsNumericCarrier::int_literal(
-            invalid_format.as_i32() as i64,
+        self.emit_cast_integer_in_range_helper(emitted);
+        self.emit_cast_debug_string_helper(emitted);
+        let invalid_format_code = error_code_js(
+            BuiltinErrorCode::IntParseInvalidFormat,
             self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let invalid_format_message = invalid_format.default_message();
-        let out_of_range = BuiltinErrorCode::IntParseOutOfRange;
-        let out_of_range_code = JsNumericCarrier::int_literal(
-            out_of_range.as_i32() as i64,
+        );
+        let out_of_range_code = error_code_js(
+            BuiltinErrorCode::IntParseOutOfRange,
             self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let out_of_range_message = out_of_range.default_message();
-        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        self.emit_cast_int_range_helpers(emitted);
+        );
 
-        self.emit_line("function __moth_cast_int(value) {");
+        self.emit_line("function __moth_cast_int(value, min, max, targetName) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (typeof value === \"bigint\") {");
-            emitter.with_indent(|em| {
-                em.emit_line("if (!__moth_cast_int_in_range(value)) {");
-                em.with_indent(|inner| inner.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                )));
-                em.emit_line("}");
-                em.emit_line("return { tag: \"ok\", value };");
-            });
-            emitter.emit_line("}");
-
-            emitter.emit_line("if (typeof value === \"number\") {");
-            emitter.with_indent(|em| {
-                em.emit_line("if (!Number.isFinite(value)) {");
-                em.with_indent(|inner| inner.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                )));
-                em.emit_line("}");
-                em.emit_line("if (!Number.isInteger(value)) {");
-                em.with_indent(|inner| inner.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};"
-                )));
-                em.emit_line("}");
-                match carrier {
-                    JsNumericCarrier::ExactInteger { .. } => {
-                        em.emit_line("if (!__moth_cast_int_in_range(value)) {");
-                        em.with_indent(|inner| inner.emit_line(&format!(
-                            "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                        )));
-                        em.emit_line("}");
-                        em.emit_line("return { tag: \"ok\", value };");
-                    }
-                    JsNumericCarrier::BigInteger { .. } => {
-                        em.emit_line("const parsed = BigInt(value);");
-                        em.emit_line("if (!__moth_cast_int_in_range(parsed)) {");
-                        em.with_indent(|inner| inner.emit_line(&format!(
-                            "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                        )));
-                        em.emit_line("}");
-                        em.emit_line("return { tag: \"ok\", value: parsed };");
-                    }
-                    JsNumericCarrier::BinaryFloat { .. } => {
-                        unreachable!("Int carrier cannot be a binary float")
-                    }
-                }
-            });
-            emitter.emit_line("}");
-
-            emitter.emit_line("if (typeof value === \"string\") {");
-            emitter.with_indent(|em| {
-                em.emit_line("if (/^-?(?:\\d+(?:_\\d+)*)$/.test(value)) {");
-                em.with_indent(|inner| {
-                    match carrier {
-                        JsNumericCarrier::ExactInteger { .. } => {
-                            inner.emit_line("const parsed = Number.parseInt(value.replace(/_/g, \"\"), 10);");
-                            inner.emit_line("if (!__moth_cast_int_in_range(parsed)) {");
-                            inner.with_indent(|deep| deep.emit_line(&format!(
-                                "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                            )));
-                            inner.emit_line("}");
-                            inner.emit_line("return { tag: \"ok\", value: parsed };");
-                        }
-                        JsNumericCarrier::BigInteger { .. } => {
-                            inner.emit_line("const parsed = BigInt(value.replace(/_/g, \"\"));");
-                            inner.emit_line("if (!__moth_cast_int_in_range(parsed)) {");
-                            inner.with_indent(|deep| deep.emit_line(&format!(
-                                "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                            )));
-                            inner.emit_line("}");
-                            inner.emit_line("return { tag: \"ok\", value: parsed };");
-                        }
-                        JsNumericCarrier::BinaryFloat { .. } => {
-                            unreachable!("Int carrier cannot be a binary float")
-                        }
-                    }
-                });
-                em.emit_line("}");
-                em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};"
-                ));
-            });
-            emitter.emit_line("}");
-
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __moth_make_error(\"Cast to Int only accepts Int, Float, or string values\", {invalid_format_code}, null, null) }};"
+                "const invalidFormat = () => __moth_error_result(\"Cannot parse \" + targetName + \" from \" + __moth_debug_string(value), {invalid_format_code});"
             ));
+            emitter.emit_line(&format!(
+                "const outOfRange = () => __moth_error_result(\"Cannot parse \" + targetName + \" from \" + __moth_debug_string(value), {out_of_range_code});"
+            ));
+            emitter.emit_line("if (!/^-?(?:\\d+(?:_\\d+)*)$/.test(value)) return invalidFormat();");
+            emitter.emit_line("if (min == 0 && value.startsWith(\"-\")) return outOfRange();");
+            emitter.emit_line("const normalized = value.replace(/_/g, \"\");");
+            emitter.emit_line("const parsedValue = typeof min === \"bigint\" ? BigInt(normalized) : Number.parseInt(normalized, 10);");
+            emitter.emit_line("const parsed = Object.is(parsedValue, -0) ? 0 : parsedValue;");
+            emitter.emit_line("if (!__moth_cast_integer_in_range(parsed, min, max)) return outOfRange();");
+            emitter.emit_line("return { tag: \"ok\", value: parsed };");
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
-    fn emit_cast_float(&mut self, emitted: &mut HashSet<&'static str>) {
+    fn emit_cast_float(&mut self, emitted: &mut HashSet<&'static str>, used_precisions: [bool; 3]) {
         if !emitted.insert("__moth_cast_float") {
             return;
         }
 
-        let invalid_format = BuiltinErrorCode::FloatParseInvalidFormat;
-        let invalid_format_code = JsNumericCarrier::int_literal(
-            invalid_format.as_i32() as i64,
-            self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let invalid_format_message = invalid_format.default_message();
-        let out_of_range = BuiltinErrorCode::FloatParseOutOfRange;
-        let out_of_range_code = JsNumericCarrier::int_literal(
-            out_of_range.as_i32() as i64,
-            self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let out_of_range_message = out_of_range.default_message();
-        let precision =
-            JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
-                .and_then(JsNumericCarrier::float_precision)
-                .expect("Float always has a JavaScript binary-float carrier");
-
-        if precision == BinaryFloatPrecision::Binary32 {
-            self.emit_decimal_to_float32_helper(emitted);
+        self.emit_cast_debug_string_helper(emitted);
+        if used_precisions[0] || used_precisions[1] {
+            self.emit_decimal_to_binary_float_helper(emitted);
         }
 
-        self.emit_line("function __moth_cast_float(value) {");
+        let invalid_format_code = error_code_js(
+            BuiltinErrorCode::FloatParseInvalidFormat,
+            self.config.numeric_profile,
+        );
+        let out_of_range_code = error_code_js(
+            BuiltinErrorCode::FloatParseOutOfRange,
+            self.config.numeric_profile,
+        );
+
+        self.emit_line("function __moth_cast_float(value, precision, targetName) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("if (typeof value === \"number\") {");
-            emitter.with_indent(|em| {
-                if precision == BinaryFloatPrecision::Binary32 {
-                    em.emit_line("value = Math.fround(value);");
-                }
-                em.emit_line("if (!Number.isFinite(value)) {");
-                em.with_indent(|inner| inner.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                )));
-                em.emit_line("}");
-                em.emit_line("return { tag: \"ok\", value };");
-            });
-            emitter.emit_line("}");
-
-            emitter.emit_line("if (typeof value === \"string\") {");
-            emitter.with_indent(|em| {
-                em.emit_line("if (/^-?\\d+(?:_\\d+)*(?:\\.\\d+(?:_\\d+)*)?(?:e[+-]?\\d+(?:_\\d+)*)?$/.test(value)) {");
-                em.with_indent(|inner| {
-                    inner.emit_line("const normalized = value.replace(/_/g, \"\");");
-                    match precision {
-                        BinaryFloatPrecision::Binary32 => {
-                            inner.emit_line("const parsed = __moth_decimal_to_float32(normalized);");
-                        }
-                        BinaryFloatPrecision::Binary64 => {
-                            inner.emit_line("const parsed = Number.parseFloat(normalized);");
-                        }
-                        BinaryFloatPrecision::Binary16 => {
-                            unreachable!("the profile Float domain is never binary16")
-                        }
-                    }
-                    inner.emit_line("if (!Number.isFinite(parsed)) {");
-                    inner.with_indent(|deep| deep.emit_line(&format!(
-                        "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                    )));
-                    inner.emit_line("}");
-                    inner.emit_line("return { tag: \"ok\", value: parsed };");
-                });
-                em.emit_line("}");
-                em.emit_line(&format!(
-                    "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_format_message}\", {invalid_format_code}, null, null) }};"
-                ));
-            });
-            emitter.emit_line("}");
-
             emitter.emit_line(&format!(
-                "return {{ tag: \"err\", value: __moth_make_error(\"Cast to Float only accepts Int, Float, or string values\", {invalid_format_code}, null, null) }};"
+                "const invalidFormat = () => __moth_error_result(\"Cannot parse \" + targetName + \" from \" + __moth_debug_string(value), {invalid_format_code});"
             ));
+            emitter.emit_line(&format!(
+                "const outOfRange = () => __moth_error_result(\"Cannot parse \" + targetName + \" from \" + __moth_debug_string(value), {out_of_range_code});"
+            ));
+            emitter.emit_line("if (!/^-?\\d+(?:_\\d+)*(?:\\.\\d+(?:_\\d+)*)?(?:e[+-]?\\d+(?:_\\d+)*)?$/.test(value)) return invalidFormat();");
+            emitter.emit_line("const normalized = value.replace(/_/g, \"\");");
+            emitter.emit_line("let parsed;");
+            let mut first_precision = true;
+            for (precision, used) in [
+                (BinaryFloatPrecision::Binary16, used_precisions[0]),
+                (BinaryFloatPrecision::Binary32, used_precisions[1]),
+                (BinaryFloatPrecision::Binary64, used_precisions[2]),
+            ] {
+                if !used {
+                    continue;
+                }
+                let bits = binary_float_precision_bits(precision);
+                let prefix = if first_precision { "if" } else { "else if" };
+                match precision {
+                    BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32 => emitter
+                        .emit_line(&format!(
+                            "{prefix} (precision === {bits}) parsed = __moth_decimal_to_binary_float(normalized, {bits});"
+                        )),
+                    BinaryFloatPrecision::Binary64 => emitter.emit_line(&format!(
+                        "{prefix} (precision === {bits}) parsed = Number.parseFloat(normalized);"
+                    )),
+                }
+                first_precision = false;
+            }
+            if first_precision {
+                emitter.emit_line("return invalidFormat();");
+            } else {
+                emitter.emit_line("else return invalidFormat();");
+                emitter.emit_line("return Number.isFinite(parsed) ? { tag: \"ok\", value: parsed } : outOfRange();");
+            }
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
-    /// Parses a decimal string as a binary32 value without an intermediate binary64 rounding.
-    fn emit_decimal_to_float32_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        if !emitted.insert("__moth_decimal_to_float32") {
+    /// Parses decimal text directly into binary16 or binary32 without an intermediate binary64.
+    fn emit_decimal_to_binary_float_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_decimal_to_binary_float") {
             return;
         }
 
-        self.emit_line("function __moth_decimal_to_float32(source) {");
+        self.emit_line("function __moth_decimal_to_binary_float(source, precision) {");
         self.with_indent(|emitter| {
             emitter.emit_line("const negative = source.startsWith(\"-\");");
             emitter.emit_line("const unsigned = negative ? source.slice(1) : source;");
@@ -337,41 +341,71 @@ impl<'hir> JsEmitter<'hir> {
             });
             emitter.emit_line("}");
             emitter.emit_line("const decimalOrder = digits.length + powerOfTen - 1;");
-            emitter.emit_line("if (decimalOrder > 38) return negative ? -Infinity : Infinity;");
-            emitter.emit_line("if (decimalOrder < -46) return negative ? -0 : 0;");
+            emitter.emit_line("if (decimalOrder > (precision === 16 ? 4 : 38)) return negative ? -Infinity : Infinity;");
+            emitter.emit_line("if (decimalOrder < (precision === 16 ? -9 : -46)) return negative ? -0 : 0;");
             emitter.emit_line("const numerator = BigInt(digits) * (powerOfTen > 0 ? 10n ** BigInt(powerOfTen) : 1n);");
             emitter.emit_line("const denominator = powerOfTen < 0 ? 10n ** BigInt(-powerOfTen) : 1n;");
+            emitter.emit_line("const fractionBits = precision === 16 ? 10 : 23;");
+            emitter.emit_line("const minimumNormalExponent = precision === 16 ? -14 : -126;");
+            emitter.emit_line("const maximumExponent = precision === 16 ? 15 : 127;");
             emitter.emit_line("let binaryExponent = numerator.toString(2).length - denominator.toString(2).length;");
             emitter.emit_line("if (binaryExponent >= 0 ? numerator < (denominator << BigInt(binaryExponent)) : (numerator << BigInt(-binaryExponent)) < denominator) binaryExponent--;");
             emitter.emit_line("let rounded;");
-            emitter.emit_line("if (binaryExponent >= -126) {");
+            emitter.emit_line("if (binaryExponent >= minimumNormalExponent) {");
             emitter.with_indent(|em| {
-                em.emit_line("const shift = 23 - binaryExponent;");
+                em.emit_line("const shift = fractionBits - binaryExponent;");
                 em.emit_line("const scaledNumerator = shift >= 0 ? numerator << BigInt(shift) : numerator;");
                 em.emit_line("const scaledDenominator = shift < 0 ? denominator << BigInt(-shift) : denominator;");
                 em.emit_line("let significand = scaledNumerator / scaledDenominator;");
                 em.emit_line("const remainder = scaledNumerator % scaledDenominator;");
                 em.emit_line("const halfway = remainder * 2n;");
                 em.emit_line("if (halfway > scaledDenominator || (halfway === scaledDenominator && (significand & 1n) !== 0n)) significand++;");
-                em.emit_line("if (significand === 16_777_216n) {");
+                em.emit_line("if (significand === (1n << BigInt(fractionBits + 1))) {");
                 em.with_indent(|inner| {
                     inner.emit_line("significand >>= 1n;");
                     inner.emit_line("binaryExponent++;");
                 });
                 em.emit_line("}");
-                em.emit_line("rounded = binaryExponent > 127 ? Infinity : Number(significand) * 2 ** (binaryExponent - 23);");
+                em.emit_line("rounded = binaryExponent > maximumExponent ? Infinity : Number(significand) * 2 ** (binaryExponent - fractionBits);");
             });
             emitter.emit_line("} else {");
             emitter.with_indent(|em| {
-                em.emit_line("const scaledNumerator = numerator << 149n;");
+                em.emit_line("const unitExponent = minimumNormalExponent - fractionBits;");
+                em.emit_line("const scaledNumerator = numerator << BigInt(-unitExponent);");
                 em.emit_line("let significand = scaledNumerator / denominator;");
                 em.emit_line("const remainder = scaledNumerator % denominator;");
                 em.emit_line("const halfway = remainder * 2n;");
                 em.emit_line("if (halfway > denominator || (halfway === denominator && (significand & 1n) !== 0n)) significand++;");
-                em.emit_line("rounded = significand === 8_388_608n ? 2 ** -126 : Number(significand) * 2 ** -149;");
+                em.emit_line("rounded = significand === (1n << BigInt(fractionBits)) ? 2 ** minimumNormalExponent : Number(significand) * 2 ** unitExponent;");
             });
             emitter.emit_line("}");
             emitter.emit_line("return negative ? -rounded : rounded;");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn emit_cast_integer_to_integer(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_cast_integer_to_integer") {
+            return;
+        }
+
+        let out_of_range_code = error_code_js(
+            BuiltinErrorCode::IntCastOutOfRange,
+            self.config.numeric_profile,
+        );
+        self.emit_line(
+            "function __moth_cast_integer_to_integer(value, min, max, sourceName, targetName) {",
+        );
+        self.with_indent(|emitter| {
+            emitter.emit_line("if (!__moth_cast_integer_in_range(value, min, max)) {");
+            emitter.with_indent(|em| {
+                em.emit_line("const message = sourceName + \" -> \" + targetName + \" source \" + String(value) + \" is out of \" + targetName + \" range\";");
+                em.emit_line(&format!("return __moth_error_result(message, {out_of_range_code});"));
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("const converted = typeof min === \"bigint\" ? BigInt(value) : Number(value);");
+            emitter.emit_line("return { tag: \"ok\", value: converted };");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -382,81 +416,109 @@ impl<'hir> JsEmitter<'hir> {
             return;
         }
 
-        let invalid_value = BuiltinErrorCode::FloatCastToIntInvalidValue;
-        let invalid_value_code = JsNumericCarrier::int_literal(
-            invalid_value.as_i32() as i64,
+        self.emit_cast_numeric_value_display_helper(emitted);
+        let invalid_value_code = error_code_js(
+            BuiltinErrorCode::FloatCastToIntInvalidValue,
             self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let invalid_value_message = invalid_value.default_message();
-        let out_of_range = BuiltinErrorCode::FloatCastToIntOutOfRange;
-        let out_of_range_code = JsNumericCarrier::int_literal(
-            out_of_range.as_i32() as i64,
+        );
+        let out_of_range_code = error_code_js(
+            BuiltinErrorCode::FloatCastToIntOutOfRange,
             self.config.numeric_profile,
-        )
-        .expect("cast error code always fits the Int numeric profile");
-        let out_of_range_message = out_of_range.default_message();
-        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        self.emit_cast_int_range_helpers(emitted);
-
-        self.emit_line("function __moth_cast_float_to_int(value) {");
+        );
+        self.emit_line(
+            "function __moth_cast_float_to_int(value, min, max, sourceName, targetName) {",
+        );
         self.with_indent(|emitter| {
+            emitter.emit_line("const valueText = __moth_numeric_value_display(value);");
             emitter.emit_line("if (typeof value !== \"number\" || !Number.isFinite(value)) {");
-            emitter.with_indent(|em| em.emit_line(&format!(
-                "return {{ tag: \"err\", value: __moth_make_error(\"{invalid_value_message}\", {invalid_value_code}, null, null) }};"
-            )));
+            emitter.with_indent(|em| {
+                em.emit_line("const message = sourceName + \" -> \" + targetName + \" source \" + valueText + \" is not finite\";");
+                em.emit_line(&format!("return __moth_error_result(message, {invalid_value_code});"));
+            });
             emitter.emit_line("}");
-            emitter.emit_line("const truncated = Math.trunc(value);");
-            match carrier {
-                JsNumericCarrier::ExactInteger { .. } => {
-                    emitter.emit_line("if (!__moth_cast_int_in_range(truncated)) {");
-                    emitter.with_indent(|em| em.emit_line(&format!(
-                        "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                    )));
-                    emitter.emit_line("}");
-                    emitter.emit_line("return { tag: \"ok\", value: truncated };");
-                }
-                JsNumericCarrier::BigInteger { .. } => {
-                    emitter.emit_line("const integer = BigInt(truncated);");
-                    emitter.emit_line("if (!__moth_cast_int_in_range(integer)) {");
-                    emitter.with_indent(|em| em.emit_line(&format!(
-                        "return {{ tag: \"err\", value: __moth_make_error(\"{out_of_range_message}\", {out_of_range_code}, null, null) }};"
-                    )));
-                    emitter.emit_line("}");
-                    emitter.emit_line("return { tag: \"ok\", value: integer };");
-                }
-                JsNumericCarrier::BinaryFloat { .. } => {
-                    unreachable!("Int carrier cannot be a binary float")
-                }
-            }
+            emitter.emit_line("const truncatedValue = Math.trunc(value);");
+            emitter.emit_line("const truncated = Object.is(truncatedValue, -0) ? 0 : truncatedValue;");
+            emitter.emit_line("if (!__moth_cast_integer_in_range(truncated, min, max)) {");
+            emitter.with_indent(|em| {
+                em.emit_line("const message = sourceName + \" -> \" + targetName + \" source \" + valueText + \" is out of \" + targetName + \" range\";");
+                em.emit_line(&format!("return __moth_error_result(message, {out_of_range_code});"));
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("const converted = typeof min === \"bigint\" ? BigInt(truncated) : truncated;");
+            emitter.emit_line("return { tag: \"ok\", value: converted };");
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
-    /// Directly rounds an exact BigInt to binary32; Number(value) first could double-round.
-    fn emit_int_to_float32_helper(&mut self, emitted: &mut HashSet<&'static str>) {
-        let source = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        let target =
-            JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
-                .expect("Float always has a JavaScript numeric carrier");
-        if source.float_precision().is_some()
-            || target.float_precision() != Some(BinaryFloatPrecision::Binary32)
-            || !matches!(source, JsNumericCarrier::BigInteger { .. })
-            || !emitted.insert("__moth_int_to_float32")
-        {
+    fn emit_cast_integer_to_float(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_cast_integer_to_float") {
             return;
         }
 
-        self.emit_line("function __moth_int_to_float32(value) {");
+        let non_finite_code = error_code_js(
+            BuiltinErrorCode::FloatCastNonFinite,
+            self.config.numeric_profile,
+        );
+        self.emit_line(
+            "function __moth_cast_integer_to_float(value, precision, sourceName, targetName) {",
+        );
+        self.with_indent(|emitter| {
+            emitter.emit_line("const rounded = typeof value === \"bigint\" ? __moth_bigint_to_binary_float(value, precision) : precision === 16 ? Math.f16round(value) : Math.fround(value);");
+            emitter.emit_line("if (!Number.isFinite(rounded)) {");
+            emitter.with_indent(|em| {
+                em.emit_line("const message = sourceName + \" -> \" + targetName + \" source \" + String(value) + \" produced a non-finite value\";");
+                em.emit_line(&format!("return __moth_error_result(message, {non_finite_code});"));
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("return { tag: \"ok\", value: rounded };");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn emit_cast_float_to_float(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_cast_float_to_float") {
+            return;
+        }
+
+        self.emit_cast_numeric_value_display_helper(emitted);
+        let non_finite_code = error_code_js(
+            BuiltinErrorCode::FloatCastNonFinite,
+            self.config.numeric_profile,
+        );
+        self.emit_line(
+            "function __moth_cast_float_to_float(value, precision, sourceName, targetName) {",
+        );
+        self.with_indent(|emitter| {
+            emitter.emit_line("const rounded = precision === 16 ? Math.f16round(value) : Math.fround(value);");
+            emitter.emit_line("if (!Number.isFinite(rounded)) {");
+            emitter.with_indent(|em| {
+                em.emit_line("const valueText = __moth_numeric_value_display(value);");
+                em.emit_line("const message = sourceName + \" -> \" + targetName + \" source \" + valueText + \" produced a non-finite value\";");
+                em.emit_line(&format!("return __moth_error_result(message, {non_finite_code});"));
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("return { tag: \"ok\", value: rounded };");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    /// Rounds an exact BigInt directly to binary16 or binary32, avoiding Number double-rounding.
+    fn emit_bigint_to_binary_float_helper(&mut self, emitted: &mut HashSet<&'static str>) {
+        if !emitted.insert("__moth_bigint_to_binary_float") {
+            return;
+        }
+
+        self.emit_line("function __moth_bigint_to_binary_float(value, precision) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (value === 0n) return 0;");
             emitter.emit_line("const negative = value < 0n;");
             emitter.emit_line("const magnitude = negative ? -value : value;");
+            emitter.emit_line("const fractionBits = precision === 16 ? 10 : 23;");
             emitter.emit_line("let exponent = magnitude.toString(2).length - 1;");
-            emitter.emit_line("const shift = exponent - 23;");
+            emitter.emit_line("const shift = exponent - fractionBits;");
             emitter.emit_line("let significand = shift > 0 ? magnitude >> BigInt(shift) : magnitude << BigInt(-shift);");
             emitter.emit_line("if (shift > 0) {");
             emitter.with_indent(|em| {
@@ -465,14 +527,15 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("if (remainder > halfway || (remainder === halfway && (significand & 1n) !== 0n)) significand++;");
             });
             emitter.emit_line("}");
-            emitter.emit_line("if (significand === 16_777_216n) {");
+            emitter.emit_line("if (significand === (1n << BigInt(fractionBits + 1))) {");
             emitter.with_indent(|em| {
                 em.emit_line("significand >>= 1n;");
                 em.emit_line("exponent++;");
             });
             emitter.emit_line("}");
-            emitter.emit_line("const rounded = Number(significand) * 2 ** (exponent - 23);");
-            emitter.emit_line("return negative ? -rounded : rounded;");
+            emitter.emit_line("const rounded = Number(significand) * 2 ** (exponent - fractionBits);");
+            emitter.emit_line("const signed = negative ? -rounded : rounded;");
+            emitter.emit_line("return precision === 16 ? Math.f16round(signed) : Math.fround(signed);");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -492,9 +555,11 @@ impl<'hir> JsEmitter<'hir> {
         if !emitted.insert("__moth_cast_float_to_string") {
             return;
         }
-        self.emit_line("function __moth_cast_float_to_string(value) {");
+        self.emit_line("function __moth_cast_float_to_string(value, precision, targetName) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("return __moth_numeric_trap(__moth_format_float(value));");
+            emitter.emit_line(
+                "return __moth_numeric_trap(__moth_format_float(value, precision, targetName));",
+            );
         });
         self.emit_line("}");
         self.emit_line("");
@@ -680,4 +745,20 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
     }
+}
+
+fn float_precision_index(precision: BinaryFloatPrecision) -> usize {
+    match precision {
+        BinaryFloatPrecision::Binary16 => 0,
+        BinaryFloatPrecision::Binary32 => 1,
+        BinaryFloatPrecision::Binary64 => 2,
+    }
+}
+
+fn error_code_js(
+    code: BuiltinErrorCode,
+    profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+) -> String {
+    JsNumericCarrier::int_literal(code.as_i32() as i64, profile)
+        .expect("builtin error code always fits the Int numeric profile")
 }

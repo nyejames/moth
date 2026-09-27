@@ -10,7 +10,7 @@
 
 use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::numeric_carrier::{JsNumericCarrier, binary_float_precision_bits};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 
@@ -39,8 +39,8 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_float_helpers("float", BinaryFloatPrecision::Binary64);
         }
 
-        if usage.format_float {
-            self.emit_format_float_helper(float_precision);
+        if usage.uses_float_formatter() {
+            self.emit_format_float_helper(usage);
         }
 
         if usage.validate_float {
@@ -313,41 +313,67 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    /// Emits the profile-precision shortest formatter used by both Float casts and templates.
+    /// Emits one precision-parameterised shortest formatter for casts and templates.
     ///
-    /// WHAT: binary32 searches increasing significant-digit counts and verifies each candidate at
-    ///       binary32 precision; binary64 uses the engine's shortest binary64 decimal. Both paths
-    ///       share the exact Moth thresholds and fixed/exponent rendering below.
-    /// WHY: formatting is owned by the value precision, not the wider Number carrier that stores it.
-    fn emit_format_float_helper(&mut self, precision: BinaryFloatPrecision) {
-        let non_finite = self.error_result_call(BuiltinErrorCode::FloatFormatInvariant);
-        self.emit_line("function __moth_format_float(value) {");
+    /// WHAT: binary16/binary32 search shortest round-tripping decimals with exact-distance
+    ///       ties-to-even; binary64 uses the engine's shortest binary64 decimal. All precisions
+    ///       share Moth's exponent thresholds, sign handling and result carrier.
+    /// WHY: fixed floats and profile Float must format according to their semantic precision, not
+    ///      merely the wider Number carrier that stores them.
+    fn emit_format_float_helper(&mut self, usage: NumericRuntimeHelperUsage) {
+        let error_code = JsNumericCarrier::int_literal(
+            BuiltinErrorCode::FloatFormatInvariant.as_i32() as i64,
+            self.config.numeric_profile,
+        )
+        .expect("numeric error code always fits the Int numeric profile");
+        self.emit_line("function __moth_format_float(value, precision, targetName) {");
         self.with_indent(|emitter| {
             emitter.emit_line("if (!Number.isFinite(value)) {");
-            emitter.with_indent(|em| em.emit_line(&non_finite));
+            emitter.with_indent(|em| {
+                em.emit_line("const message = targetName + \" -> String formatting failed: Float value is not finite\";");
+                em.emit_line(&format!("return __moth_error_result(message, {error_code});"));
+            });
             emitter.emit_line("}");
-            // Both zeros print "0"; the exponent threshold below applies to non-zero values only.
-            emitter.emit_line("if (value === 0) {");
-            emitter.with_indent(|em| em.emit_line("return { tag: \"ok\", value: \"0\" };"));
-            emitter.emit_line("}");
+            // Both zero signs normalise before the sign bit is reflected in formatted text.
+            emitter.emit_line("if (value === 0) return { tag: \"ok\", value: \"0\" };");
+            emitter.emit_line("const magnitude = Math.abs(value);");
+            emitter.emit_line("let text;");
 
-            if precision == BinaryFloatPrecision::Binary32 {
-                emitter.emit_line("let text = __moth_float32_shortest(value);");
-            } else {
-                emitter.emit_line("let text = value.toExponential();");
+            let mut first_precision = true;
+            for (precision, used) in [
+                (BinaryFloatPrecision::Binary16, usage.format_binary16),
+                (BinaryFloatPrecision::Binary32, usage.format_binary32),
+                (BinaryFloatPrecision::Binary64, usage.format_binary64),
+            ] {
+                if !used {
+                    continue;
+                }
+                let bits = binary_float_precision_bits(precision);
+                let prefix = if first_precision { "if" } else { "else if" };
+                match precision {
+                    BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32 => {
+                        emitter.emit_line(&format!(
+                            "{prefix} (precision === {bits}) text = __moth_binary_float_shortest(magnitude, {bits});"
+                        ));
+                    }
+                    BinaryFloatPrecision::Binary64 => {
+                        emitter.emit_line(&format!(
+                            "{prefix} (precision === {bits}) text = magnitude.toExponential();"
+                        ));
+                    }
+                }
+                first_precision = false;
             }
-
+            emitter.emit_line("else throw new Error(\"JS formatter received an unselected binary precision\");");
             emitter.emit_line("const separator = text.indexOf(\"e\");");
             emitter.emit_line("const mantissa = separator < 0 ? text : text.slice(0, separator);");
             emitter.emit_line("const exponent = separator < 0 ? 0 : Number(text.slice(separator + 1));");
             emitter.emit_line("const negative = value < 0;");
-            emitter.emit_line("const unsigned = mantissa.startsWith(\"-\") ? mantissa.slice(1) : mantissa;");
-            emitter.emit_line("const point = unsigned.indexOf(\".\");");
-            emitter.emit_line("const fractionalDigits = point < 0 ? 0 : unsigned.length - point - 1;");
-            emitter.emit_line("let digits = unsigned.replace(\".\", \"\");");
+            emitter.emit_line("const point = mantissa.indexOf(\".\");");
+            emitter.emit_line("const fractionalDigits = point < 0 ? 0 : mantissa.length - point - 1;");
+            emitter.emit_line("let digits = mantissa.replace(\".\", \"\");");
             emitter.emit_line("let decimalPosition = digits.length + exponent - fractionalDigits;");
             emitter.emit_line("while (digits.length > 1 && digits.endsWith(\"0\")) digits = digits.slice(0, -1);");
-            emitter.emit_line("const magnitude = Math.abs(value);");
             emitter.emit_line("let rendered;");
             emitter.emit_line("if (magnitude >= 1e21 || magnitude < 1e-6) {");
             emitter.with_indent(|em| {
@@ -375,41 +401,34 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("}");
         self.emit_line("");
 
-        if precision == BinaryFloatPrecision::Binary32 {
-            self.emit_float32_shortest_helper();
+        if usage.format_binary16 || usage.format_binary32 {
+            self.emit_binary_float_shortest_helper();
         }
     }
 
-    /// Emits exact candidate-distance comparisons so decimal midpoint ties
-    /// match the frontend Ryu formatter.
-    fn emit_float32_shortest_helper(&mut self) {
-        self.emit_line("const __moth_float32_view = new DataView(new ArrayBuffer(4));");
+    /// Emits exact decimal-candidate comparisons shared by the binary16 and binary32 formatters.
+    fn emit_binary_float_shortest_helper(&mut self) {
+        self.emit_line("const __moth_binary_float_view = new DataView(new ArrayBuffer(4));");
         self.emit_line("");
-        self.emit_line("function __moth_float32_shortest(value) {");
+        self.emit_line("function __moth_binary_float_shortest(value, precision) {");
         self.with_indent(|emitter| {
-            emitter.emit_line("const magnitude = Math.abs(value);");
-            emitter.emit_line("__moth_float32_view.setFloat32(0, magnitude, false);");
-            emitter.emit_line("const bits = __moth_float32_view.getUint32(0, false);");
+            emitter.emit_line("__moth_binary_float_view.setFloat32(0, value, false);");
+            emitter.emit_line("const bits = __moth_binary_float_view.getUint32(0, false);");
             emitter.emit_line("const exponentBits = (bits >>> 23) & 0xff;");
             emitter.emit_line("const fraction = bits & 0x7fffff;");
-            emitter.emit_line(
-                "const binarySignificand = BigInt(exponentBits === 0 ? fraction : (0x800000 | fraction));",
-            );
+            emitter.emit_line("const binarySignificand = BigInt(exponentBits === 0 ? fraction : (0x800000 | fraction));");
             emitter.emit_line("const binaryExponent = exponentBits === 0 ? -149 : exponentBits - 150;");
             emitter.emit_line("let exactNumerator = binarySignificand;");
             emitter.emit_line("let exactDenominator = 1n;");
             emitter.emit_line("if (binaryExponent >= 0) {");
-            emitter.with_indent(|em| {
-                em.emit_line("exactNumerator <<= BigInt(binaryExponent);");
-            });
+            emitter.with_indent(|em| em.emit_line("exactNumerator <<= BigInt(binaryExponent);"));
             emitter.emit_line("} else {");
-            emitter.with_indent(|em| {
-                em.emit_line("exactDenominator <<= BigInt(-binaryExponent);");
-            });
+            emitter.with_indent(|em| em.emit_line("exactDenominator <<= BigInt(-binaryExponent);"));
             emitter.emit_line("}");
-            emitter.emit_line("for (let digits = 1; digits <= 9; digits++) {");
+            emitter.emit_line("const maximumDigits = precision === 16 ? 5 : 9;");
+            emitter.emit_line("for (let digits = 1; digits <= maximumDigits; digits++) {");
             emitter.with_indent(|em| {
-                em.emit_line("const nearest = magnitude.toExponential(digits - 1);");
+                em.emit_line("const nearest = value.toExponential(digits - 1);");
                 em.emit_line("const [mantissa, exponentText] = nearest.split(\"e\");");
                 em.emit_line("const significand = Number(mantissa.replace(\".\", \"\"));");
                 em.emit_line("const exponent = Number(exponentText) - (digits - 1);");
@@ -417,9 +436,7 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("let bestDistance = 0n;");
                 em.emit_line("let bestDenominator = 1n;");
                 em.emit_line("let bestSignificand = 0n;");
-                em.emit_line(
-                    "for (const candidate of [significand, significand + 1, significand - 1]) {",
-                );
+                em.emit_line("for (const candidate of [significand, significand + 1, significand - 1]) {");
                 em.with_indent(|inner| {
                     inner.emit_line("const candidateSignificand = BigInt(candidate);");
                     inner.emit_line("let candidateDigits = String(candidate);");
@@ -431,7 +448,8 @@ impl<'hir> JsEmitter<'hir> {
                     });
                     inner.emit_line("}");
                     inner.emit_line("const text = candidateDigits + \"e\" + candidateExponent;");
-                    inner.emit_line("if (Math.fround(Number(text)) !== magnitude) continue;");
+                    inner.emit_line("const rounded = precision === 16 ? Math.f16round(Number(text)) : Math.fround(Number(text));");
+                    inner.emit_line("if (rounded !== value) continue;");
                     inner.emit_line("let candidateNumerator = BigInt(candidateDigits);");
                     inner.emit_line("let candidateDenominator = 1n;");
                     inner.emit_line("if (candidateExponent >= 0) {");
@@ -440,14 +458,10 @@ impl<'hir> JsEmitter<'hir> {
                     });
                     inner.emit_line("} else {");
                     inner.with_indent(|deep| {
-                        deep.emit_line(
-                            "candidateDenominator = 10n ** BigInt(-candidateExponent);",
-                        );
+                        deep.emit_line("candidateDenominator = 10n ** BigInt(-candidateExponent);");
                     });
                     inner.emit_line("}");
-                    inner.emit_line(
-                        "const difference = candidateNumerator * exactDenominator - exactNumerator * candidateDenominator;",
-                    );
+                    inner.emit_line("const difference = candidateNumerator * exactDenominator - exactNumerator * candidateDenominator;");
                     inner.emit_line("const distance = difference < 0n ? -difference : difference;");
                     inner.emit_line("let choose = best === null;");
                     inner.emit_line("if (!choose) {");
@@ -476,7 +490,7 @@ impl<'hir> JsEmitter<'hir> {
                 em.emit_line("if (best !== null) return best;");
             });
             emitter.emit_line("}");
-            emitter.emit_line("return magnitude.toExponential();");
+            emitter.emit_line("return value.toExponential();");
         });
         self.emit_line("}");
         self.emit_line("");

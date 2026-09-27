@@ -7056,10 +7056,10 @@ contract = "language.casts.numeric_byte_not_template_renderable"
 role = "boundary"
 
 [[case]]
-id = "cast_numeric_text_fixed_render_unsupported"
-path = "cast_numeric_text_fixed_render_unsupported"
+id = "cast_numeric_text_fixed_render_success"
+path = "cast_numeric_text_fixed_render_success"
 tags = ["integration","diagnostics","cast","numeric","templates"]
-contract = "backend.target_gate.fixed_width_template_value_rejected"
+contract = "backend.fixed_width.html_js_template_render_html_wasm_gate"
 role = "primary"
 
 [[case]]
@@ -12860,44 +12860,44 @@ contract = "language.configuration.project_globals_public_reexport_rejected"
 role = "boundary"
 
 [[case]]
-id = "html_wasm_fixed_width_collection_return_unsupported"
-path = "html_wasm_fixed_width_collection_return_unsupported"
+id = "fixed_width_collection_return_js_runs_wasm_gated"
+path = "fixed_width_collection_return_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.target_gate.fixed_width_collection_return_rejected"
+contract = "backend.fixed_width.collection_return_html_js_success_html_wasm_gate"
 role = "backend"
 [[case]]
-id = "html_wasm_fixed_width_option_none_unsupported"
-path = "html_wasm_fixed_width_option_none_unsupported"
+id = "fixed_width_option_none_js_runs_wasm_gated"
+path = "fixed_width_option_none_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.target_gate.fixed_width_option_none_rejected"
-role = "backend"
-
-[[case]]
-id = "html_wasm_fixed_width_struct_field_unsupported"
-path = "html_wasm_fixed_width_struct_field_unsupported"
-tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.target_gate.fixed_width_struct_field_rejected"
+contract = "backend.fixed_width.option_none_html_js_success_html_wasm_gate"
 role = "backend"
 
 [[case]]
-id = "html_wasm_fixed_width_choice_payload_unsupported"
-path = "html_wasm_fixed_width_choice_payload_unsupported"
+id = "fixed_width_struct_field_js_runs_wasm_gated"
+path = "fixed_width_struct_field_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.target_gate.fixed_width_choice_payload_rejected"
+contract = "backend.fixed_width.struct_field_html_js_success_html_wasm_gate"
 role = "backend"
 
 [[case]]
-id = "html_wasm_fixed_width_generic_instance_unsupported"
-path = "html_wasm_fixed_width_generic_instance_unsupported"
+id = "fixed_width_choice_payload_js_runs_wasm_gated"
+path = "fixed_width_choice_payload_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.fixed_width.choice_payload_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "fixed_width_generic_instance_js_runs_wasm_gated"
+path = "fixed_width_generic_instance_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "generics"]
-contract = "backend.target_gate.fixed_width_generic_instance_rejected"
+contract = "backend.fixed_width.generic_instance_html_js_success_html_wasm_gate"
 role = "backend"
 
 [[case]]
-id = "html_wasm_fixed_width_cross_module_return_unsupported"
-path = "html_wasm_fixed_width_cross_module_return_unsupported"
+id = "fixed_width_cross_module_return_js_runs_wasm_gated"
+path = "fixed_width_cross_module_return_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "dependencies"]
-contract = "backend.target_gate.fixed_width_cross_module_return_rejected"
+contract = "backend.fixed_width.cross_module_return_html_js_success_html_wasm_gate"
 role = "backend"
 
 [[case]]
@@ -12922,10 +12922,10 @@ contract = "backend.target_gate.unreachable_fixed_width_cross_module_constant_ig
 role = "backend"
 
 [[case]]
-id = "html_wasm_fixed_width_reachable_value_unsupported"
-path = "html_wasm_fixed_width_reachable_value_unsupported"
+id = "fixed_width_reachable_value_js_runs_wasm_gated"
+path = "fixed_width_reachable_value_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.target_gate.fixed_width_reachable_value_rejected"
+contract = "backend.fixed_width.reachable_value_html_js_success_html_wasm_gate"
 role = "backend"
 
 [[case]]
@@ -12985,11 +12985,46 @@ contract = "language.numbers.fixed_width_option_default_wrong_type_rejected"
 role = "primary"
 
 [[case]]
-id = "html_wasm_fixed_width_imported_constant_reachable_unsupported"
-path = "html_wasm_fixed_width_imported_constant_reachable_unsupported"
+id = "fixed_width_imported_constant_js_runs_wasm_gated"
+path = "fixed_width_imported_constant_js_runs_wasm_gated"
 tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability", "dependencies"]
-contract = "backend.target_gate.fixed_width_imported_constant_reachable_rejected"
+contract = "backend.fixed_width.imported_constant_html_js_success_html_wasm_gate"
 role = "backend"
+
+[[case]]
+id = "fixed_width_integer_runtime_arithmetic"
+path = "fixed_width_integer_runtime_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_width_integer_runtime_arithmetic"
+role = "primary"
+
+[[case]]
+id = "fixed_width_binary_float_runtime_rounding"
+path = "fixed_width_binary_float_runtime_rounding"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_binary_float_runtime_rounding"
+role = "primary"
+
+[[case]]
+id = "fixed_width_cast_runtime_recovery"
+path = "fixed_width_cast_runtime_recovery"
+tags = ["integration", "numeric", "casts", "runtime", "fixed-width"]
+contract = "language.casts.fixed_numeric_runtime_failure_recovery"
+role = "primary"
+
+[[case]]
+id = "fixed_width_aggregate_byte_runtime"
+path = "fixed_width_aggregate_byte_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "aggregates"]
+contract = "language.numbers.fixed_width_aggregate_and_byte_runtime"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int64_float32_fixed_width_mix"
+path = "numeric_profile_int64_float32_fixed_width_mix"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "fixed-width"]
+contract = "language.numbers.numeric_profile_fixed_width_carriers"
+role = "primary"
 
 [[case]]
 id = "grouped_numeric_literal_member_access_rejected"

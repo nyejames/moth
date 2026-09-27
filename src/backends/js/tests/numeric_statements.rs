@@ -107,7 +107,7 @@ fn trap_mode_format_float_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5, 64, \"Float\")));"
         ),
         "trap-mode FormatFloat must assign the scalar trap result"
     );
@@ -127,7 +127,9 @@ fn return_error_mode_format_float_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_format_float(1.5));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_format_float(1.5, 64, \"Float\"));"
+        ),
         "ReturnError FormatFloat must assign the helper carrier directly"
     );
     assert!(
@@ -765,136 +767,5 @@ fn numeric_op_arity_mismatch_returns_error() {
     assert!(
         result.is_err(),
         "NumericOp arity mismatch must fail lowering with a compiler error"
-    );
-}
-
-// Cast lowering rejection tests [cast]
-// ---------------------------------------------------------------------------
-
-/// Builds and lowers a minimal module containing one `Cast` expression with the given policy.
-///
-/// WHY: fixed-width and `Byte` conversions must fail JS lowering with a compiler error rather
-/// than emitting numeric code; this helper shares the expression-statement scaffolding so each
-/// rejection test names only its policy.
-fn lower_minimal_module_with_numeric_cast_policy(
-    policy: crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId,
-) -> Result<String, crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError> {
-    use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-    use crate::compiler_frontend::tests::hir_fixture_support::expression;
-
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
-
-    let source = int_expression(1, 0, types.int, region);
-    let cast_expression = expression(
-        2,
-        HirExpressionKind::Cast {
-            source: Box::new(source),
-            policy,
-        },
-        types.int,
-        region,
-        ValueKind::RValue,
-    );
-
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![],
-        statements: vec![statement(1, HirStatementKind::Expr(cast_expression))],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
-    };
-
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-
-    let module = build_module(
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[],
-    );
-
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .map(|output| output.source)
-}
-
-/// Verifies that a fixed-width numeric conversion is rejected at JS lowering. [cast]
-#[test]
-fn fixed_numeric_conversion_returns_compiler_error() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-
-    let result = lower_minimal_module_with_numeric_cast_policy(
-        crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Fixed(FixedScalar::U8),
-            target: NumericScalar::Fixed(FixedScalar::U16),
-        },
-    );
-
-    assert!(
-        result.is_err(),
-        "fixed-width U8 -> U16 conversion must fail JS lowering with a compiler error"
-    );
-}
-
-/// Verifies that a `Byte -> U8` conversion is rejected at JS lowering. [cast]
-#[test]
-fn byte_to_u8_conversion_returns_compiler_error() {
-    let result = lower_minimal_module_with_numeric_cast_policy(
-        crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::ByteToU8,
-    );
-
-    assert!(
-        result.is_err(),
-        "Byte -> U8 conversion must fail JS lowering with a compiler error"
-    );
-}
-
-/// Verifies that a fixed-width numeric text conversion is rejected at JS lowering. [cast]
-#[test]
-fn fixed_numeric_to_string_returns_compiler_error() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-
-    let result = lower_minimal_module_with_numeric_cast_policy(
-        crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericToString(
-            NumericScalar::Fixed(FixedScalar::U8),
-        ),
-    );
-
-    assert!(
-        result.is_err(),
-        "fixed-width U8 -> String conversion must fail JS lowering with a compiler error"
-    );
-}
-
-/// Verifies that a fixed-width numeric text parse is rejected at JS lowering. [cast]
-#[test]
-fn fixed_numeric_from_string_returns_compiler_error() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-
-    let result = lower_minimal_module_with_numeric_cast_policy(
-        crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::StringToNumeric(
-            NumericScalar::Fixed(FixedScalar::U8),
-        ),
-    );
-
-    assert!(
-        result.is_err(),
-        "fixed-width String -> U8 parse must fail JS lowering with a compiler error"
     );
 }

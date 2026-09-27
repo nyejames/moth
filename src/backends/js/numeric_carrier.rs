@@ -1,13 +1,17 @@
-//! JavaScript numeric representation policy.
+//! JavaScript numeric carrier and conversion policy.
 //!
-//! WHAT: maps each semantic numeric domain and compilation profile to the exact JS carrier used by
-//!       literals, checked operators, casts and comparisons.
-//! WHY: representation decisions must share one boundary owner so `Int64` never slips through a
-//!      Number-only path and future fixed-width lowering can reuse the same carrier families.
+//! WHAT: maps numeric domains and profiles to JS carriers, then classifies casts into shared
+//!       lowering decisions and demand-driven runtime-helper requirements.
+//! WHY: representation and helper selection must not drift between generated calls and the
+//!      prelude, especially when BigInt and Number carriers meet.
 //!
-//! Exclusions: this only describes scalar representation. Fixed-width runtime values remain gated
-//! before JS lowering in this slice.
+//! Exclusions: frontend evidence owns semantic conversion fallibility. `Byte` is an octet value,
+//! not a numeric domain, though its literal uses the JS Number carrier.
 
+use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
+use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 
@@ -42,9 +46,43 @@ impl JsNumericCarrier {
     /// Formats a profile-selected Moth `Int` literal for JavaScript.
     pub(crate) fn int_literal(value: i64, profile: NumericProfile) -> Option<String> {
         let carrier = Self::for_scalar(NumericScalar::Int, profile)?;
-        let (min, max) = carrier.integer_bounds()?;
-        let value = i128::from(value);
+        Self::integer_literal(carrier, i128::from(value))
+    }
 
+    /// Formats an already-materialised fixed scalar without changing its exact value.
+    ///
+    /// WHAT: integer carriers choose decimal Number or BigInt spelling, binary-float values retain
+    ///       their exact f64 carrier bits (including signed zero), and Byte stays a Number octet.
+    /// WHY: HIR literals must enter the same carrier used by later comparisons, casts and checked
+    ///      operations instead of passing through profile Int or Float.
+    pub(crate) fn fixed_literal(
+        value: FixedScalarValue,
+        profile: NumericProfile,
+    ) -> Option<String> {
+        let scalar = value.scalar();
+
+        match scalar.class() {
+            FixedScalarClass::SignedInteger => {
+                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar), profile)?;
+                Self::integer_literal(carrier, i128::from(value.as_i64()?))
+            }
+            FixedScalarClass::UnsignedInteger => {
+                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar), profile)?;
+                Self::integer_literal(carrier, i128::from(value.as_u64()?))
+            }
+            FixedScalarClass::BinaryFloat => {
+                let number = value.as_f64()?;
+                number.is_finite().then(|| number.to_string())
+            }
+            FixedScalarClass::Octet => {
+                let value = value.as_u64()?;
+                (value <= u64::from(u8::MAX)).then(|| value.to_string())
+            }
+        }
+    }
+
+    fn integer_literal(carrier: Self, value: i128) -> Option<String> {
+        let (min, max) = carrier.integer_bounds()?;
         if value < min || value > max {
             return None;
         }
@@ -97,54 +135,213 @@ impl JsNumericCarrier {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::JsNumericCarrier;
-    use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-    use crate::compiler_frontend::datatypes::numeric_profile::{
-        FloatPrecision, IntWidth, NumericProfile,
-    };
-    use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+/// JavaScript conversion selected for one semantic numeric pair and profile.
+///
+/// WHAT: owns carrier changes, fallibility, range bounds and binary-float rounding decisions, the
+///       rendered JS expression and the runtime helpers that expression needs.
+/// WHY: lowering must never reference a helper that the runtime prelude did not select, so the
+///      call and its helper requirements are decided in one place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JsNumericConversion {
+    Identity,
+    ToBigInt,
+    ToNumber,
+    /// `target` is always an integer carrier.
+    CheckedIntegerToInteger {
+        target: JsNumericCarrier,
+    },
+    RoundExactIntegerToFloat {
+        precision: BinaryFloatPrecision,
+    },
+    CheckedExactIntegerToFloat {
+        precision: BinaryFloatPrecision,
+    },
+    /// Always narrower than binary64; `Number(bigint)` is already correctly rounded.
+    RoundBigIntegerToFloat {
+        precision: BinaryFloatPrecision,
+    },
+    CheckedBigIntegerToFloat {
+        precision: BinaryFloatPrecision,
+    },
+    /// `target` is always an integer carrier.
+    FloatToInteger {
+        target: JsNumericCarrier,
+    },
+    CheckedFloatNarrowing {
+        precision: BinaryFloatPrecision,
+    },
+}
 
-    #[test]
-    fn carrier_selection_follows_profile_and_complete_scalar_range() {
-        let profile = NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
+impl JsNumericConversion {
+    /// Classifies one numeric conversion using the shared frontend evidence and JS carriers.
+    pub(crate) fn classify(
+        source: NumericScalar,
+        target: NumericScalar,
+        profile: NumericProfile,
+    ) -> Result<Self, CompilerError> {
+        let carrier = |scalar: NumericScalar| {
+            JsNumericCarrier::for_scalar(scalar, profile).ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend has no numeric carrier for {scalar:?}"
+                ))
+            })
+        };
+        let source_carrier = carrier(source)?;
+        let target_carrier = carrier(target)?;
+        let fallible = numeric_conversion_fallibility(source, target, profile)
+            == BuiltinCastFallibility::Fallible;
+
+        Ok(match (source_carrier, target_carrier) {
+            (JsNumericCarrier::BinaryFloat { .. }, JsNumericCarrier::BinaryFloat { precision }) => {
+                if fallible {
+                    Self::CheckedFloatNarrowing { precision }
+                } else {
+                    Self::Identity
+                }
+            }
+            (JsNumericCarrier::BinaryFloat { .. }, target) => Self::FloatToInteger { target },
+            (
+                JsNumericCarrier::ExactInteger { .. },
+                JsNumericCarrier::BinaryFloat { precision },
+            ) => {
+                if fallible {
+                    Self::CheckedExactIntegerToFloat { precision }
+                } else {
+                    Self::RoundExactIntegerToFloat { precision }
+                }
+            }
+            (JsNumericCarrier::BigInteger { .. }, JsNumericCarrier::BinaryFloat { precision }) => {
+                if fallible {
+                    Self::CheckedBigIntegerToFloat { precision }
+                } else if precision == BinaryFloatPrecision::Binary64 {
+                    Self::ToNumber
+                } else {
+                    Self::RoundBigIntegerToFloat { precision }
+                }
+            }
+            (_, target) if fallible => Self::CheckedIntegerToInteger { target },
+            (JsNumericCarrier::ExactInteger { .. }, JsNumericCarrier::BigInteger { .. }) => {
+                Self::ToBigInt
+            }
+            (JsNumericCarrier::BigInteger { .. }, JsNumericCarrier::ExactInteger { .. }) => {
+                Self::ToNumber
+            }
+            _ => Self::Identity,
+        })
+    }
+
+    /// Renders the conversion of the JS expression `value` from `source` to `target`.
+    ///
+    /// Checked conversions evaluate to the `{ tag, value }` result carrier; every other
+    /// conversion evaluates to the converted value.
+    pub(crate) fn expression(
+        self,
+        value: &str,
+        source: NumericScalar,
+        target: NumericScalar,
+    ) -> String {
+        let names = || format!("{:?}, {:?}", source.name(), target.name());
+        let bounded = |helper: JsNumericRuntimeHelper, target: JsNumericCarrier| {
+            let (minimum, maximum) = target
+                .integer_bounds_js()
+                .expect("integer conversion targets use an integer carrier");
+            format!(
+                "{}({value}, {minimum}, {maximum}, {})",
+                helper.function_name(),
+                names()
+            )
+        };
+        let rounded = |helper: JsNumericRuntimeHelper, precision: BinaryFloatPrecision| {
+            format!(
+                "{}({value}, {}, {})",
+                helper.function_name(),
+                binary_float_precision_bits(precision),
+                names()
+            )
         };
 
-        assert_eq!(
-            JsNumericCarrier::for_scalar(NumericScalar::Int, profile),
-            Some(JsNumericCarrier::BigInteger {
-                min: i64::MIN as i128,
-                max: i64::MAX as i128,
-            })
-        );
-        assert_eq!(
-            JsNumericCarrier::for_scalar(NumericScalar::Float, profile),
-            Some(JsNumericCarrier::BinaryFloat {
-                precision: crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary32,
-            })
-        );
-        assert!(matches!(
-            JsNumericCarrier::for_scalar(
-                NumericScalar::Fixed(FixedScalar::U32),
-                NumericProfile::STANDARD
+        match self {
+            Self::Identity => value.to_owned(),
+            Self::ToBigInt => format!("BigInt({value})"),
+            Self::ToNumber => format!("Number({value})"),
+            Self::CheckedIntegerToInteger { target } => {
+                bounded(JsNumericRuntimeHelper::CastIntegerToInteger, target)
+            }
+            Self::FloatToInteger { target } => {
+                bounded(JsNumericRuntimeHelper::CastFloatToInteger, target)
+            }
+            Self::RoundExactIntegerToFloat { precision } => match precision {
+                BinaryFloatPrecision::Binary16 => format!("Math.f16round({value})"),
+                BinaryFloatPrecision::Binary32 => format!("Math.fround({value})"),
+                BinaryFloatPrecision::Binary64 => value.to_owned(),
+            },
+            Self::RoundBigIntegerToFloat { precision } => format!(
+                "{}({value}, {})",
+                JsNumericRuntimeHelper::BigIntToBinaryFloat.function_name(),
+                binary_float_precision_bits(precision)
             ),
-            Some(JsNumericCarrier::ExactInteger {
-                min: 0,
-                max: 4_294_967_295
-            })
-        ));
-        assert!(matches!(
-            JsNumericCarrier::for_scalar(
-                NumericScalar::Fixed(FixedScalar::U64),
-                NumericProfile::STANDARD
-            ),
-            Some(JsNumericCarrier::BigInteger {
-                min: 0,
-                max: 18_446_744_073_709_551_615
-            })
-        ));
+            Self::CheckedExactIntegerToFloat { precision }
+            | Self::CheckedBigIntegerToFloat { precision } => {
+                rounded(JsNumericRuntimeHelper::CastIntegerToFloat, precision)
+            }
+            Self::CheckedFloatNarrowing { precision } => {
+                rounded(JsNumericRuntimeHelper::CastFloatToFloat, precision)
+            }
+        }
+    }
+
+    /// Runtime helpers in dependency-first order for deterministic prelude emission.
+    pub(crate) fn required_helpers(self) -> &'static [JsNumericRuntimeHelper] {
+        use JsNumericRuntimeHelper::*;
+
+        match self {
+            Self::CheckedIntegerToInteger { .. } => &[CastIntegerInRange, CastIntegerToInteger],
+            Self::CheckedExactIntegerToFloat { .. } => &[CastIntegerToFloat],
+            Self::CheckedBigIntegerToFloat { .. } => &[BigIntToBinaryFloat, CastIntegerToFloat],
+            Self::RoundBigIntegerToFloat { .. } => &[BigIntToBinaryFloat],
+            Self::FloatToInteger { .. } => {
+                &[CastIntegerInRange, NumericValueDisplay, CastFloatToInteger]
+            }
+            Self::CheckedFloatNarrowing { .. } => &[NumericValueDisplay, CastFloatToFloat],
+            Self::Identity
+            | Self::ToBigInt
+            | Self::ToNumber
+            | Self::RoundExactIntegerToFloat { .. } => &[],
+        }
+    }
+}
+
+/// A helper dependency selected by a `JsNumericConversion`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum JsNumericRuntimeHelper {
+    CastIntegerInRange,
+    CastIntegerToInteger,
+    BigIntToBinaryFloat,
+    CastIntegerToFloat,
+    NumericValueDisplay,
+    CastFloatToInteger,
+    CastFloatToFloat,
+}
+
+impl JsNumericRuntimeHelper {
+    pub(crate) fn function_name(self) -> &'static str {
+        match self {
+            Self::CastIntegerInRange => "__moth_cast_integer_in_range",
+            Self::CastIntegerToInteger => "__moth_cast_integer_to_integer",
+            Self::BigIntToBinaryFloat => "__moth_bigint_to_binary_float",
+            Self::CastIntegerToFloat => "__moth_cast_integer_to_float",
+            Self::NumericValueDisplay => "__moth_numeric_value_display",
+            Self::CastFloatToInteger => "__moth_cast_float_to_int",
+            Self::CastFloatToFloat => "__moth_cast_float_to_float",
+        }
+    }
+}
+
+/// The source-language bit count for a binary-float precision in generated JavaScript.
+pub(crate) fn binary_float_precision_bits(precision: BinaryFloatPrecision) -> u8 {
+    match precision {
+        BinaryFloatPrecision::Binary16 => 16,
+        BinaryFloatPrecision::Binary32 => 32,
+        BinaryFloatPrecision::Binary64 => 64,
     }
 }

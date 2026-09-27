@@ -1,0 +1,13 @@
+Reading ::
+    Empty,
+    Sample | value F32 |,
+;
+
+reading = Reading::Sample(value = 1.5)
+
+selected ~F32 = 0.0
+if reading is:
+    Sample(value) => selected = value
+    Empty => selected = 0.0
+;
+[:fixed width choice payload value=[selected]]

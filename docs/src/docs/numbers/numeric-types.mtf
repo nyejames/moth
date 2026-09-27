@@ -146,12 +146,12 @@ implicit receiving boundary never narrows an already typed numeric value.
 ### Implementation status
 
 This reference owns the accepted contract for the complete numeric family.
-@../progress (Progress) owns current compiler and backend support. The
-frontend recognises fixed-width types and `Byte`, materialises their literals,
+@../progress (Progress) owns current compiler and backend support.
+The frontend recognises fixed-width types and `Byte`, materialises their literals,
 records fixed-width operator facts in HIR, checks their casts, and folds numeric
-operators, casts and text. HTML-JS and HTML-Wasm execute only standard-profile
-`Int` and `Float`; fixed-width and `Byte` runtime values remain gated. The
-`Number` family is not implemented.
+operators, casts and text. HTML-JS executes fixed-width numeric and `Byte` runtime
+values. HTML-Wasm still rejects them until its lowering lands. The `Number`
+family is not implemented.
 
 ### MON data boundary
 

@@ -71,8 +71,8 @@ pub struct BackendFeatureValidationInput<'a> {
 ///       operations, and generic runtime values are legal HIR, but only the JS backend lowers them
 ///       for Alpha. HTML-Wasm must reject reachable unsupported operations; unused functions stay
 ///       type checked but do not block the experimental Wasm build path. Fixed-width numeric and
-///       `Byte` values have no lowering on either target yet, so both targets reject reachable
-///       values of those types before any target-specific operation check.
+///       `Byte` values lower on JS, while Wasm rejects reachable values of those types before its
+///       target-specific operation checks.
 /// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
@@ -81,20 +81,18 @@ pub fn validate_hir_backend_feature_support(
 ) -> Result<(), BackendFeatureValidationError> {
     let reachability = input.reachability;
 
-    // A fixed-width scalar is a type-shape gap rather than an operation gap, so this gate runs
-    // before every other check on both targets and fixes the reason deterministically: a value whose
-    // type carries one reports `FixedWidthScalarValues` even when the same code also triggers an
-    // operation-shaped reason such as a cross-module call or a generic instance.
-    validate_fixed_width_scalar_values(
-        input.hir,
-        input.type_environment,
-        reachability.backend_selection(),
-        input.target,
-        string_table,
-    )?;
-
     match input.target {
         BackendTarget::Wasm => {
+            // Keep the fixed-value type-shape check first so its diagnostic retains priority over
+            // later Wasm operation gates.
+            validate_fixed_width_scalar_values(
+                input.hir,
+                input.type_environment,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+
             // Wasm has no failure-edge message presentation yet. Default and fully folded
             // optional values remain target-neutral and are accepted.
             validate_runtime_assertion_messages(
@@ -328,14 +326,13 @@ fn signature_type_uses_unsupported_numeric_profile(
     }
 }
 
-/// Reports the first reachable fixed-width numeric or `Byte` value for either target.
+/// Reports the first reachable fixed-width numeric or `Byte` value for the Wasm target.
 ///
-/// WHAT: `I8`..`U64`, `F16`..`F64` and `Byte` are canonical frontend identities, but no target has
-///       a runtime representation or lowering for values of those types yet. A reachable local,
-///       expression or function signature whose type carries one is rejected.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of a backend-internal
-///      lowering failure. Unreachable private helpers keep their signatures and stay valid typed
-///      HIR.
+/// WHAT: `I8`..`U64`, `F16`..`F64` and `Byte` are canonical frontend identities supported by JS
+///       lowering, but not by HTML-Wasm. A reachable local, expression or function signature whose
+///       type carries one is rejected.
+/// WHY: reject early with a structured unsupported-backend diagnostic instead of an internal Wasm
+///      lowering error. Unreachable private helpers keep their signatures and stay valid typed HIR.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
     type_environment: Option<&TypeEnvironment>,

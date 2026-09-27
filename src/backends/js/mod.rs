@@ -75,8 +75,7 @@ pub struct JsLoweringConfig {
     /// Compiler-owned numeric widths for this compilation boundary.
     ///
     /// WHAT: controls the JS carrier and precision selected for profile `Int`/`Float` values.
-    /// WHY: literals, operations and casts must preserve the same frontend numeric contract;
-    ///      fixed-width value support remains a separate backend feature-validation decision.
+    /// WHY: literals, operations and casts must preserve the same frontend numeric contract.
     pub numeric_profile: NumericProfile,
 
     /// Automatically invoke the module start function.

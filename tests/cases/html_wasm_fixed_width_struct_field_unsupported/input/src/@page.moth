@@ -1,7 +1,0 @@
-Ledger = |
-    entries {I64} = {},
-|
-
-ledger = Ledger()
-
-[:fixed width struct field]

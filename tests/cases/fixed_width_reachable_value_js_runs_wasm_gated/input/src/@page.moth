@@ -1,0 +1,4 @@
+small U8 = 200
+small_text String = cast small
+
+[:fixed width reachable value=[small_text]]

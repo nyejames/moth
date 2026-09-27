@@ -1,8 +1,0 @@
-Reading ::
-    Empty,
-    Sample | value F32? |,
-;
-
-reading = Reading::Sample(value = none)
-
-[:fixed width choice payload]

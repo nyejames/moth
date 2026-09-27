@@ -1,0 +1,10 @@
+Ledger = |
+    entries {I64} = {},
+    marker I64 = 0,
+|
+amount I64 = 9007199254740993
+ledger = Ledger(entries = {amount}, marker = amount)
+
+marker_text String = cast ledger.marker
+
+[:fixed width struct field marker=[marker_text]]

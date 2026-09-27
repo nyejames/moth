@@ -48,17 +48,36 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) big_integer_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
-    pub(crate) format_float: bool,
+    pub(crate) format_binary16: bool,
+    pub(crate) format_binary32: bool,
+    pub(crate) format_binary64: bool,
     pub(crate) validate_float: bool,
 }
 
 impl NumericRuntimeHelperUsage {
+    pub(crate) fn require_float_formatter(
+        &mut self,
+        precision: crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision,
+    ) {
+        use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+
+        match precision {
+            BinaryFloatPrecision::Binary16 => self.format_binary16 = true,
+            BinaryFloatPrecision::Binary32 => self.format_binary32 = true,
+            BinaryFloatPrecision::Binary64 => self.format_binary64 = true,
+        }
+    }
+
+    pub(crate) fn uses_float_formatter(self) -> bool {
+        self.format_binary16 || self.format_binary32 || self.format_binary64
+    }
+
     pub(crate) fn any(self) -> bool {
         self.number_integer_ops
             || self.big_integer_ops
             || self.binary32_ops
             || self.binary64_ops
-            || self.format_float
+            || self.uses_float_formatter()
             || self.validate_float
     }
 }

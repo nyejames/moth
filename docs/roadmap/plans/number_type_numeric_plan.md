@@ -15,8 +15,9 @@
 - Delivered: generic nominal literal arguments. Struct and choice constructors bind generic parameters from the expected result before parsing arguments, so a field fixed by that context is the literal's receiving boundary (`Box(200)` into `Box of U8` materialises a U8, and `Box(300)` reports the U8 range error). Unbound parameters and generic function calls keep argument-driven inference. Fixed-width map keys remain deferred until Phase 6.
 - Delivered: Slice 3d. Compound assignment computes `target op rhs` in the promoted domain, with a lone fixed-target literal typed as its peer. A numeric result that is not assignment-compatible converts back through builtin cast evidence. Fallible pairs lower as a compiler-owned store conversion (`CastHandling::StoreConversion`) through the existing `CastOp` carrier and branch, so the single store happens only on success. Failure uses the enclosing numeric failure mode: builtin `Error!` returns it, and every other context traps through `RuntimeFailure`. Integer `/=` now converts its `Float` result back with truncation toward zero. HIR validation ties numeric `CastOp` policies to their source and carrier types. Compile-time numeric failure (including inside builtin `Error!` functions), dynamic `Error!` recovery, trap-mode selection across fixed domains and range-proof-independent source validity have separate coverage. Runtime fixed-width compound atomicity executes in Phase 4.
 - Delivered: Slice 4a. HTML-JS executes profile-selected `Int` and `Float` in all four profiles. `JsNumericCarrier` owns the carrier choice (`Int32` as an exact Number, `Int64` as BigInt, `Float32` rounded through `Math.fround` and formatted as the shortest binary32 text with ties to even). Every compiler-owned Int surface (literals, checked operations, casts, collection and map lengths and indices, text counts, `random_int`, `Error.code`, fallible external glue codes) uses that carrier, and mixed `Int`/`Float` comparisons convert the `Int` operand at profile precision as folding does. Integration cases select a profile with the top-level `numeric_profile` key in `expect.toml`. Reachable external module exports whose `Int`/`Float` crosses a BigInt or binary32 carrier are rejected (`unsupported_backend_feature.external_numeric_profile_boundary`) until Phase 6 decouples foreign widths.
+- Delivered: Slice 4b. HTML-JS executes fixed-width numerics and `Byte`; only HTML-Wasm keeps the `fixed_width_scalar_values` gate. `I8`..`U32` and `Byte` use exact Numbers, `I64`/`U64` use BigInt, and `F16`/`F32`/`F64` are Numbers rounded at their own precision (`Math.f16round`, `Math.fround`). Fixed literals keep exact bits, checked operations reuse the int/bigint/float helper families with fixed bounds, and mixed fixed-integer equality stays exact across Number/BigInt carriers. `JsNumericConversion` classifies every numeric cast once, rendering the call and naming its demand-emitted helpers. `BigInt` to `F32`/`F16`, `F64` to `F16` and decimal text to `F16`/`F32` round directly without double rounding. String parsing and shortest formatting cover every numeric scalar with frontend-matching codes and messages.
 - Deferred observation: a `#` constant referenced from a runtime expression is not folded, so `maximum + 1` with `maximum #Int = 2147483647` fails at runtime rather than at compile time. Decide during the Phase 8 range-proof work or the documentation closeout.
-- Next action: Phase 4, Slice 4b (fixed-width scalar and `F16` execution on HTML-JS).
+- Next action: Phase 4, Slice 4c (JS boundary and failure-mode matrix).
 
 ## Goal and delivery order
 
@@ -528,9 +529,9 @@ operation classifier used as a hidden fallback.
 
 ### Phase 4: JavaScript fixed numeric and Byte execution
 
-- [ ] Implement exact integer storage/arithmetic, BigInt I64/U64, profile-selected
+- [x] Implement exact integer storage/arithmetic, BigInt I64/U64, profile-selected
   Int and fixed/profile float boundaries using demand-driven existing helpers.
-- [ ] Implement conversions, finite checks, numeric formatting, equality/copy and
+- [x] Implement conversions, finite checks, numeric formatting, equality/copy and
   generic/aggregate value flow. Preserve Byte's non-arithmetic status.
 - [ ] Execute boundary tests, large products, double-rounding cases, negative zero,
   compound-assignment atomicity and both numeric failure modes.

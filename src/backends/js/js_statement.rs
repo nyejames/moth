@@ -5,12 +5,13 @@
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::js_expr::{escape_js_string, js_cast_expression_for_policy};
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::numeric_carrier::{JsNumericCarrier, binary_float_precision_bits};
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
@@ -248,13 +249,11 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::FormatFloat` into the Moth Float formatting helper call.
+    /// Lower a `HirStatementKind::FormatFloat` into the profile-precision binary-float formatter.
     ///
-    /// WHAT: emits `__moth_format_float(source)` and assigns either the scalar formatted string
-    ///       (trap mode) or the fallible carrier (return-error mode) to the result local.
-    /// WHY: formatting shares the same result-local carrier contract as `NumericOp`; trap mode
-    ///      extracts the success value or throws, while return-error mode keeps the carrier for
-    ///      later `FallibleBranch` lowering.
+    /// WHAT: emits `__moth_format_float(source, precision, "Float")` and assigns either the scalar
+    ///       formatted string (trap mode) or the fallible carrier (return-error mode).
+    /// WHY: template and cast formatting share one precision-aware helper and result contract.
     fn emit_format_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -262,7 +261,9 @@ impl<'hir> JsEmitter<'hir> {
         result: LocalId,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__moth_format_float({source_expr})");
+        let precision =
+            binary_float_precision_bits(self.config.numeric_profile.float_precision.into());
+        let helper_call = format!("__moth_format_float({source_expr}, {precision}, \"Float\")");
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
@@ -664,7 +665,7 @@ impl<'hir> JsEmitter<'hir> {
                         "JavaScript backend: Match terminator has no arms",
                     ));
                 }
-
+                let scrutinee_type = scrutinee.ty;
                 let scrutinee = self.lower_expr(scrutinee)?;
                 let scrutinee_temp = self.next_temp_identifier("__match");
                 self.emit_line(&format!("const {scrutinee_temp} = {scrutinee};"));
@@ -686,7 +687,8 @@ impl<'hir> JsEmitter<'hir> {
                 };
 
                 for (index, arm) in arms.iter().enumerate().take(emit_count) {
-                    let condition = self.lower_match_arm_condition(&scrutinee_temp, arm)?;
+                    let condition =
+                        self.lower_match_arm_condition(&scrutinee_temp, scrutinee_type, arm)?;
                     if index == 0 {
                         self.emit_line(&format!("if ({condition}) {{"));
                     } else {
@@ -698,7 +700,6 @@ impl<'hir> JsEmitter<'hir> {
                     });
                     self.emit_line("}");
                 }
-
                 if has_unconditional_fallback {
                     if let Some(wildcard_arm) = arms.last() {
                         self.emit_line("else {");
@@ -761,22 +762,33 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn lower_match_arm_condition(
         &mut self,
         scrutinee_expression: &str,
+        scrutinee_type: TypeId,
         arm: &HirMatchArm,
     ) -> Result<String, CompilerError> {
         let pattern_condition = match &arm.pattern {
             HirPattern::Literal(value) => {
                 let literal = self.lower_expr(value)?;
-                self.lower_typed_equality(scrutinee_expression.to_owned(), value.ty, literal)
+                self.lower_typed_equality(
+                    scrutinee_expression.to_owned(),
+                    scrutinee_type,
+                    literal,
+                    value.ty,
+                )
             }
             HirPattern::OptionNone => {
                 format!("({scrutinee_expression}).tag === \"none\"")
             }
             HirPattern::OptionValue { value } => {
                 let literal = self.lower_expr(value)?;
+                let inner_type = self
+                    .type_environment
+                    .option_inner_type(scrutinee_type)
+                    .unwrap_or(value.ty);
                 let inner_equality = self.lower_typed_equality(
                     format!("({scrutinee_expression}).value"),
-                    value.ty,
+                    inner_type,
                     literal,
+                    value.ty,
                 );
                 format!("((({scrutinee_expression}).tag === \"some\") && {inner_equality})")
             }

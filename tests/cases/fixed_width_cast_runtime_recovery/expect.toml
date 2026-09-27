@@ -1,0 +1,30 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "fixed cast recovery i64-to-i8 code=242 message=I64 -> I8 source 128 is out of I8 range recovered=0",
+    "f64-to-f16 code=243 message=F64 -> F16 source 70000 produced a non-finite value recovered=0",
+    "f64-to-i64 code=241 message=F64 -> I64 source",
+    "is out of I64 range recovered=0",
+    "u64-parse code=201 message=Cannot parse U64 from",
+    "f16-parse code=210 message=Cannot parse F16 from",
+    "i64-to-i8 bang code=242 message=I64 -> I8 source 128 is out of I8 range",
+    "i64-overflow code=301 message=Int operation overflowed",
+    "recovered=0",
+]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["__moth_numeric_trap(__moth_bigint_add("]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"

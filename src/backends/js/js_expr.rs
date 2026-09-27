@@ -4,11 +4,14 @@
 //! binding and alias helper conventions.
 
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::numeric_carrier::{
+    JsNumericCarrier, JsNumericConversion, binary_float_precision_bits,
+};
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{
@@ -20,7 +23,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 enum OptionComparisonSide {
     Option { inner_type: TypeId },
     NoneLiteral,
-    Other,
+    Other { type_id: TypeId },
 }
 
 impl<'hir> JsEmitter<'hir> {
@@ -68,9 +71,15 @@ impl<'hir> JsEmitter<'hir> {
                     },
                 )
             }
-            HirExpressionKind::FixedScalar(_) => Err(CompilerError::compiler_error(
-                "JavaScript backend received a fixed-width scalar value; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
-            )),
+            HirExpressionKind::FixedScalar(value) => {
+                JsNumericCarrier::fixed_literal(*value, self.config.numeric_profile).ok_or_else(
+                    || {
+                        CompilerError::compiler_error(format!(
+                            "JS backend cannot format fixed scalar literal {value}"
+                        ))
+                    },
+                )
+            }
             HirExpressionKind::VariantConstruct {
                 carrier,
                 variant_index,
@@ -363,14 +372,10 @@ impl<'hir> JsEmitter<'hir> {
         expression.ty == self.type_environment.builtins().none
     }
 
-    /// Whether the expression's resolved type is a nominal choice type.
+    /// Whether a resolved type is a nominal choice type.
     ///
     /// WHY: choice carriers are object literals with a `tag` property, so equality
     /// must compare tags rather than using reference equality.
-    fn is_choice_type(&self, expression: &HirExpression) -> bool {
-        self.type_environment.variants_for(expression.ty).is_some()
-    }
-
     fn is_choice_type_id(&self, type_id: TypeId) -> bool {
         self.type_environment.variants_for(type_id).is_some()
     }
@@ -385,39 +390,12 @@ impl<'hir> JsEmitter<'hir> {
         operator: HirBinOp,
         right: &HirExpression,
     ) -> Result<String, CompilerError> {
+        let left_type = left.ty;
+        let right_type = right.ty;
         let option_equality = if matches!(operator, HirBinOp::Eq | HirBinOp::Ne) {
             self.option_equality_sides(left, right)
         } else {
             None
-        };
-
-        // Unit choice equality compares variant tags because choice carriers are
-        // object literals ({ tag: N }) and reference equality would be incorrect.
-        let is_choice_equality = matches!(operator, HirBinOp::Eq | HirBinOp::Ne)
-            && self.is_choice_type(left)
-            && self.is_choice_type(right);
-
-        let is_string_equality = matches!(operator, HirBinOp::Eq | HirBinOp::Ne)
-            && left.ty == self.type_environment.builtins().string
-            && right.ty == self.type_environment.builtins().string;
-
-        let is_numeric_comparison = matches!(
-            operator,
-            HirBinOp::Eq | HirBinOp::Ne | HirBinOp::Lt | HirBinOp::Le | HirBinOp::Gt | HirBinOp::Ge
-        );
-        let numeric_carriers_differ = if is_numeric_comparison {
-            match (
-                NumericScalar::from_type_id(left.ty, self.type_environment),
-                NumericScalar::from_type_id(right.ty, self.type_environment),
-            ) {
-                (Some(left_scalar), Some(right_scalar)) => {
-                    JsNumericCarrier::for_scalar(left_scalar, self.config.numeric_profile)
-                        != JsNumericCarrier::for_scalar(right_scalar, self.config.numeric_profile)
-                }
-                _ => false,
-            }
-        } else {
-            false
         };
 
         let left = self.lower_expr(left)?;
@@ -427,18 +405,8 @@ impl<'hir> JsEmitter<'hir> {
             return self.lower_option_equality(left, left_side, operator, right, right_side);
         }
 
-        if is_choice_equality {
-            self.used_choice_equality = true;
-            let eq_expr = format!("__moth_choice_eq({left}, {right})");
-            return match operator {
-                HirBinOp::Eq => Ok(eq_expr),
-                HirBinOp::Ne => Ok(format!("(!{eq_expr})")),
-                _ => unreachable!(),
-            };
-        }
-
-        if is_string_equality {
-            let equality = format!("__moth_string_equal({left}, {right})");
+        if matches!(operator, HirBinOp::Eq | HirBinOp::Ne) {
+            let equality = self.lower_typed_equality(left, left_type, right, right_type);
             return match operator {
                 HirBinOp::Eq => Ok(equality),
                 HirBinOp::Ne => Ok(format!("(!{equality})")),
@@ -446,16 +414,11 @@ impl<'hir> JsEmitter<'hir> {
             };
         }
 
-        // Numeric carrier identity governs strict equality. JS's relational operators compare
-        // Number/BigInt operands exactly without coercing either carrier to the other.
-        // StringAppend is compiler-generated for dynamic templates and keeps the ordinary JS
-        // string-concatenation semantics after each value has been rendered.
+        // Relational Number/BigInt operators compare exact integer values directly without
+        // coercing either carrier to the other. StringAppend remains ordinary JS concatenation.
         let js_operator = match operator {
             HirBinOp::StringAppend => "+",
-            HirBinOp::Eq if numeric_carriers_differ => "==",
-            HirBinOp::Eq => "===",
-            HirBinOp::Ne if numeric_carriers_differ => "!=",
-            HirBinOp::Ne => "!==",
+            HirBinOp::Eq | HirBinOp::Ne => unreachable!("equality returned above"),
             HirBinOp::Lt => "<",
             HirBinOp::Le => "<=",
             HirBinOp::Gt => ">",
@@ -489,7 +452,7 @@ impl<'hir> JsEmitter<'hir> {
 
     fn classify_option_comparison_side(&self, type_id: TypeId) -> OptionComparisonSide {
         let Some(inner_type) = self.type_environment.option_inner_type(type_id) else {
-            return OptionComparisonSide::Other;
+            return OptionComparisonSide::Other { type_id };
         };
 
         if inner_type == self.type_environment.builtins().none {
@@ -516,26 +479,48 @@ impl<'hir> JsEmitter<'hir> {
                 format!("(({right}).tag === \"none\")")
             }
 
-            (OptionComparisonSide::Option { inner_type }, OptionComparisonSide::Option { .. }) => {
+            (
+                OptionComparisonSide::Option {
+                    inner_type: left_type,
+                },
+                OptionComparisonSide::Option {
+                    inner_type: right_type,
+                },
+            ) => {
                 let inner_equality = self.lower_typed_equality(
                     format!("({left}).value"),
-                    inner_type,
+                    left_type,
                     format!("({right}).value"),
+                    right_type,
                 );
                 format!(
                     "((({left}).tag === ({right}).tag) && ((({left}).tag === \"none\") || {inner_equality}))"
                 )
             }
 
-            (OptionComparisonSide::Option { inner_type }, OptionComparisonSide::Other) => {
-                let inner_equality =
-                    self.lower_typed_equality(format!("({left}).value"), inner_type, right);
+            (
+                OptionComparisonSide::Option { inner_type },
+                OptionComparisonSide::Other { type_id },
+            ) => {
+                let inner_equality = self.lower_typed_equality(
+                    format!("({left}).value"),
+                    inner_type,
+                    right,
+                    type_id,
+                );
                 format!("((({left}).tag === \"some\") && {inner_equality})")
             }
 
-            (OptionComparisonSide::Other, OptionComparisonSide::Option { inner_type }) => {
-                let inner_equality =
-                    self.lower_typed_equality(left, inner_type, format!("({right}).value"));
+            (
+                OptionComparisonSide::Other { type_id },
+                OptionComparisonSide::Option { inner_type },
+            ) => {
+                let inner_equality = self.lower_typed_equality(
+                    left,
+                    type_id,
+                    format!("({right}).value"),
+                    inner_type,
+                );
                 format!("((({right}).tag === \"some\") && {inner_equality})")
             }
 
@@ -555,28 +540,50 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    /// Lower equality according to the semantic type of both operands.
+    fn numeric_type_uses_bigint_carrier(&self, type_id: TypeId) -> Option<bool> {
+        if self.type_environment.fixed_scalar(type_id) == Some(FixedScalar::Byte) {
+            return Some(false);
+        }
+
+        let scalar = NumericScalar::from_type_id(type_id, self.type_environment)?;
+        let carrier = JsNumericCarrier::for_scalar(scalar, self.config.numeric_profile)?;
+        Some(matches!(carrier, JsNumericCarrier::BigInteger { .. }))
+    }
+
+    /// Lower equality according to the semantic types of both operands.
     ///
-    /// WHAT: selects the language equality helper for String and choice carriers, while
-    /// primitive values retain JavaScript strict equality.
-    /// WHY: String, choice and option carriers need language equality rather than backend
-    /// reference equality.
+    /// WHAT: selects language equality for String and choice carriers and loosens only numeric
+    ///       equality whose JS carriers differ, preserving exact Number/BigInt comparisons.
+    /// WHY: option equality can compare an inner numeric value with a different fixed-width type,
+    ///      so carrier identity must be checked at the actual value boundary.
     pub(crate) fn lower_typed_equality(
         &mut self,
         left: String,
-        inner_type: TypeId,
+        left_type: TypeId,
         right: String,
+        right_type: TypeId,
     ) -> String {
-        if inner_type == self.type_environment.builtins().string {
+        if left_type == self.type_environment.builtins().string
+            && right_type == self.type_environment.builtins().string
+        {
             return format!("__moth_string_equal({left}, {right})");
         }
 
-        if self.is_choice_type_id(inner_type) {
+        if self.is_choice_type_id(left_type) && self.is_choice_type_id(right_type) {
             self.used_choice_equality = true;
             return format!("__moth_choice_eq({left}, {right})");
         }
 
-        format!("({left} === {right})")
+        let numeric_carriers_differ = match (
+            self.numeric_type_uses_bigint_carrier(left_type),
+            self.numeric_type_uses_bigint_carrier(right_type),
+        ) {
+            (Some(left_bigint), Some(right_bigint)) => left_bigint != right_bigint,
+            _ => false,
+        };
+        let equality = if numeric_carriers_differ { "==" } else { "===" };
+
+        format!("({left} {equality} {right})")
     }
 
     // ---------------------------
@@ -745,7 +752,6 @@ pub(crate) fn escape_js_string(value: &str) -> String {
             normal => escaped.push(normal),
         }
     }
-
     escaped.push('"');
     escaped
 }
@@ -757,56 +763,28 @@ pub(super) fn js_cast_expression_for_policy(
     numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
 ) -> Result<String, CompilerError> {
     match policy {
-        BuiltinCastPolicyId::NumericConversion { source, target }
-            if source == NumericScalar::Int && target == NumericScalar::Float =>
-        {
-            let source_carrier = JsNumericCarrier::for_scalar(source, numeric_profile)
-                .ok_or_else(|| CompilerError::compiler_error("Int has no JS carrier"))?;
-            let target_carrier = JsNumericCarrier::for_scalar(target, numeric_profile)
-                .ok_or_else(|| CompilerError::compiler_error("Float has no JS carrier"))?;
-            match (source_carrier, target_carrier.float_precision()) {
-                (JsNumericCarrier::ExactInteger { .. }, Some(
-                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary32,
-                )) => Ok(format!("Math.fround({value})")),
-                (JsNumericCarrier::ExactInteger { .. }, Some(
-                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary64,
-                )) => Ok(value.to_owned()),
-                (JsNumericCarrier::BigInteger { .. }, Some(
-                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary32,
-                )) => Ok(format!("__moth_int_to_float32({value})")),
-                (JsNumericCarrier::BigInteger { .. }, Some(
-                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary64,
-                )) => Ok(format!("Number({value})")),
-                _ => Err(CompilerError::compiler_error(
-                    "JS backend received an unreachable Int-to-Float carrier pair",
-                )),
-            }
-        }
-        BuiltinCastPolicyId::NumericConversion { source, target }
-            if source == NumericScalar::Float && target == NumericScalar::Int =>
-        {
-            Ok(format!("__moth_cast_float_to_int({value})"))
-        }
         BuiltinCastPolicyId::NumericConversion { source, target } => {
-            Err(CompilerError::compiler_error(format!(
-                "JavaScript backend received a fixed-width numeric conversion {source:?} -> {target:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
-            )))
+            JsNumericConversion::classify(source, target, numeric_profile)
+                .map(|conversion| conversion.expression(value, source, target))
         }
-        BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => {
-            Err(CompilerError::compiler_error(
-                "JavaScript backend received a Byte conversion; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
-            ))
-        }
-        BuiltinCastPolicyId::NumericToString(NumericScalar::Int) => {
+        BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => Ok(value.to_owned()),
+        BuiltinCastPolicyId::NumericToString(scalar) if scalar.is_integer() => {
             Ok(format!("__moth_cast_int_to_string({value})"))
         }
-        BuiltinCastPolicyId::NumericToString(NumericScalar::Float) => {
-            Ok(format!("__moth_cast_float_to_string({value})"))
-        }
         BuiltinCastPolicyId::NumericToString(scalar) => {
-            Err(CompilerError::compiler_error(format!(
-                "JavaScript backend received a fixed-width numeric text conversion for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
-            )))
+            let precision = scalar
+                .binary_float_precision(numeric_profile)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JS backend received a non-numeric string formatting policy for {:?}",
+                        scalar
+                    ))
+                })?;
+            Ok(format!(
+                "__moth_cast_float_to_string({value}, {}, {:?})",
+                binary_float_precision_bits(precision),
+                scalar.name()
+            ))
         }
         BuiltinCastPolicyId::BoolToString => Ok(format!("__moth_cast_bool_to_string({value})")),
         BuiltinCastPolicyId::CharToString => Ok(format!("__moth_cast_char_to_string({value})")),
@@ -814,16 +792,36 @@ pub(super) fn js_cast_expression_for_policy(
         BuiltinCastPolicyId::StringToError => Ok(format!("__moth_cast_string_to_error({value})")),
         BuiltinCastPolicyId::ErrorToString => Ok(format!("__moth_cast_error_to_string({value})")),
         BuiltinCastPolicyId::IntToChar => Ok(format!("__moth_cast_int_to_char({value})")),
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => {
-            Ok(format!("__moth_cast_int({value})"))
-        }
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => {
-            Ok(format!("__moth_cast_float({value})"))
+        BuiltinCastPolicyId::StringToNumeric(scalar) if scalar.is_integer() => {
+            let carrier =
+                JsNumericCarrier::for_scalar(scalar, numeric_profile).ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JS backend has no integer carrier for {scalar:?}"
+                    ))
+                })?;
+            let (minimum, maximum) = carrier.integer_bounds_js().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend has no integer bounds for {scalar:?}"
+                ))
+            })?;
+            Ok(format!(
+                "__moth_cast_int({value}, {minimum}, {maximum}, {:?})",
+                scalar.name()
+            ))
         }
         BuiltinCastPolicyId::StringToNumeric(scalar) => {
-            Err(CompilerError::compiler_error(format!(
-                "JavaScript backend received a fixed-width numeric text parse for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
-            )))
+            let precision = scalar
+                .binary_float_precision(numeric_profile)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JS backend received a non-numeric parse policy for {scalar:?}"
+                    ))
+                })?;
+            Ok(format!(
+                "__moth_cast_float({value}, {}, {:?})",
+                binary_float_precision_bits(precision),
+                scalar.name()
+            ))
         }
         BuiltinCastPolicyId::StringToBool => Ok(format!("__moth_cast_string_to_bool({value})")),
         BuiltinCastPolicyId::StringToChar => Ok(format!("__moth_cast_string_to_char({value})")),

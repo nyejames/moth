@@ -103,6 +103,8 @@ The JS backend speaks host values and functions. It leans on the host GC for rea
 
 `greet` in JavaScript form is ordinary host code that preserves Moth contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.
 
+Emitted F16 values use `Math.f16round`, so the host JavaScript runtime must provide it.
+
 ## Wasm lowering
 
 The accepted final Wasm design uses a **structured** path:

@@ -496,18 +496,6 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     );
 }
 
-/// Verifies that `__moth_cast_int` rejects non-numeric strings with a Parse error. [cast]
-#[test]
-fn cast_int_rejects_non_numeric_string() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__moth_cast_int");
-
-    assert!(
-        cast.contains("Cannot parse Int from text") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_int must return a Parse err for non-numeric strings"
-    );
-}
-
 /// Verifies that `__moth_cast_int` applies numeric grammar to the whole string. [cast]
 #[test]
 fn cast_int_does_not_trim_string_input() {
@@ -518,26 +506,6 @@ fn cast_int_does_not_trim_string_input() {
         cast.contains("/^-?(?:\\d+(?:_\\d+)*)$/.test(value)")
             && !cast.contains("__moth_normalize_numeric_text(value)"),
         "__moth_cast_int must reject surrounding whitespace instead of trimming it"
-    );
-}
-
-/// Verifies that `__moth_cast_int` uses the standard profile's Int range helpers. [cast]
-#[test]
-fn cast_int_uses_standard_profile_range_helpers() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-
-    assert!(
-        source.contains("function __moth_cast_int_in_range(value)")
-            && source.contains("const __BS_INT_CAST_MIN = -2147483648")
-            && source.contains("const __BS_INT_CAST_MAX = 2147483647"),
-        "__moth_cast_int must rely on the standard-profile Int range helpers"
-    );
-
-    let cast = helper_source(&source, "__moth_cast_int");
-    assert!(
-        cast.contains("__moth_cast_int_in_range(value)")
-            && cast.contains("__moth_cast_int_in_range(parsed)"),
-        "__moth_cast_int numeric and string branches must use the shared range predicate"
     );
 }
 
@@ -606,34 +574,22 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
 
     let cast = helper_source(&output.source, "__moth_cast_float_to_int");
     assert!(
-        cast.contains("!__moth_cast_int_in_range(truncated)"),
-        "__moth_cast_float_to_int must reject truncated values outside the standard Int range"
+        cast.contains("!__moth_cast_integer_in_range(truncated, min, max)"),
+        "__moth_cast_float_to_int must reject truncated values outside the target range"
     );
 }
 
-/// Verifies that `__moth_cast_float` rejects invalid strings with a Parse error. [cast]
-#[test]
-fn cast_float_rejects_invalid_string() {
-    let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Cannot parse Float from text") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_float must return a Parse err for invalid strings"
-    );
-}
-
-/// Verifies that `__moth_cast_float` rejects non-finite parsed values with an out-of-range
-/// error carrier. [cast]
+/// Verifies that `__moth_cast_float` reports parsed infinity as a Float range failure. [cast]
 #[test]
 fn cast_float_rejects_non_finite_parsed_value() {
     let source = lower_minimal_module_with_string_float_cast("main");
     let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Float value is out of supported range") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_float must return an out-of-range err when Number.parseFloat yields Infinity"
+    let range_code = BuiltinErrorCode::FloatParseOutOfRange.as_i32();
+    let expected_error = format!(
+        "__moth_error_result(\"Cannot parse \" + targetName + \" from \" + __moth_debug_string(value), {range_code})"
     );
+
+    assert!(cast.contains("Number.isFinite(parsed)") && cast.contains(&expected_error));
 }
 
 /// Verifies that `__moth_error_bubble` normalizes the file path and builds a trace frame. [error]
@@ -972,52 +928,30 @@ fn clone_value_deep_copies_map_entries() {
 // Float helper contract tests [float-helper]
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
-enum FloatHelperEmission {
-    Format,
-    Validate,
-}
-
-/// Builds and lowers a minimal module that performs one Float helper statement.
+/// Builds and lowers a minimal module that performs one finite-Float validation statement.
 ///
-/// WHY: Float helper contract tests need modules that emit each focused helper without duplicating
-/// HIR construction in every fixture.
-fn lower_minimal_module_with_float_helper(
-    function_name: &str,
-    helper: FloatHelperEmission,
-) -> String {
+/// WHY: the helper contract test needs to emit this runtime helper without duplicating HIR setup.
+fn lower_minimal_module_with_validate_float(function_name: &str) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let source_expr = float_expression(1, 1.5, types.float, region);
-    let (statement_kind, result_type) = match helper {
-        FloatHelperEmission::Format => (
-            HirStatementKind::FormatFloat {
-                source: source_expr,
-                failure_mode: NumericFailureMode::Trap,
-                result: LocalId(0),
-            },
-            types.string,
-        ),
-        FloatHelperEmission::Validate => (
-            HirStatementKind::ValidateFloat {
-                source: source_expr,
-                failure_mode: NumericFailureMode::Trap,
-                result: LocalId(0),
-            },
-            types.float,
-        ),
-    };
-
-    let float_statement = statement(1, statement_kind);
+    let validate_statement = statement(
+        1,
+        HirStatementKind::ValidateFloat {
+            source: source_expr,
+            failure_mode: NumericFailureMode::Trap,
+            result: LocalId(0),
+        },
+    );
 
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, result_type, region)],
-        statements: vec![float_statement],
+        locals: vec![local(0, types.float, region)],
+        statements: vec![validate_statement],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
     };
 
@@ -1049,14 +983,6 @@ fn lower_minimal_module_with_float_helper(
     .source
 }
 
-fn lower_minimal_module_with_format_float(function_name: &str) -> String {
-    lower_minimal_module_with_float_helper(function_name, FloatHelperEmission::Format)
-}
-
-fn lower_minimal_module_with_validate_float(function_name: &str) -> String {
-    lower_minimal_module_with_float_helper(function_name, FloatHelperEmission::Validate)
-}
-
 /// Verifies that `__moth_float_validate` returns ok for finite values and rejects non-finite values.
 #[test]
 fn float_validate_helper_checks_finite() {
@@ -1077,35 +1003,5 @@ fn float_validate_helper_checks_finite() {
     assert!(
         validate.contains(&expected),
         "__moth_float_validate must use FloatBoundaryNonFinite for non-finite values"
-    );
-}
-
-/// Verifies that `__moth_format_float` rejects non-finite inputs defensively.
-#[test]
-fn format_float_helper_rejects_non_finite() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    let non_finite = BuiltinErrorCode::FloatFormatInvariant;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        non_finite.default_message(),
-        non_finite.as_i32()
-    );
-    assert!(
-        format.contains(&expected),
-        "__moth_format_float must use FloatFormatInvariant for unexpected non-finite values"
-    );
-}
-
-/// Verifies that the expression-level `Float -> String` cast delegates to the shared formatter.
-#[test]
-fn cast_float_to_string_helper_uses_shared_float_formatter() {
-    let source = lower_minimal_module_with_float_string_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float_to_string");
-
-    assert!(
-        cast.contains("__moth_numeric_trap(__moth_format_float(value))"),
-        "__moth_cast_float_to_string must use the Moth Float formatter contract"
     );
 }

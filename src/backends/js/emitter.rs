@@ -11,7 +11,6 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -132,11 +131,12 @@ impl<'hir> JsEmitter<'hir> {
             self.emitted_functions_use_numeric_helpers(&functions)?;
         self.emitted_functions_use_reactivity(&functions)?;
         self.collect_used_cast_policies(&functions)?;
-        if self
-            .used_cast_policies
-            .contains(&BuiltinCastPolicyId::NumericToString(NumericScalar::Float))
-        {
-            emitted_code_uses_numeric_helpers.format_float = true;
+        for policy in &self.used_cast_policies {
+            if let BuiltinCastPolicyId::NumericToString(scalar) = *policy
+                && let Some(precision) = scalar.binary_float_precision(self.config.numeric_profile)
+            {
+                emitted_code_uses_numeric_helpers.require_float_formatter(precision);
+            }
         }
         self.emit_runtime_prelude(
             emitted_code_uses_maps,
@@ -238,7 +238,9 @@ impl<'hir> JsEmitter<'hir> {
                                 }
                             }
                         }
-                        HirStatementKind::FormatFloat { .. } => usage.format_float = true,
+                        HirStatementKind::FormatFloat { .. } => usage.require_float_formatter(
+                            self.config.numeric_profile.float_precision.into(),
+                        ),
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
                         _ => {}
                     }
