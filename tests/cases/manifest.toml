@@ -5537,6 +5537,13 @@ contract = "language.templates.const_range_inclusive_exclusive_edges"
 role = "primary"
 
 [[case]]
+id = "template_const_range_int64_endpoints"
+path = "template_const_range_int64_endpoints"
+tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_int64_endpoints"
+role = "boundary"
+
+[[case]]
 id = "template_const_loop_limit_string_rejected"
 path = "template_const_loop_limit_string_rejected"
 tags = ["integration","templates","diagnostics","config"]

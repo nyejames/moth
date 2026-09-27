@@ -1183,8 +1183,10 @@ fn range_cursor_rounds_float32_step_accumulation() {
 
 #[test]
 fn range_cursor_rejects_non_progressing_float32_mixed_range() {
-    // 16777217 widens to 16777216 at Float32 precision, where a step of 1.0
-    // cannot advance, so construction itself reports the non-progressing range.
+    // 16777217 widens to 16777216 at Float32 precision, and a step of 1.0 rounds
+    // back to 16777216. The source-level bounds diagnostic may occur during
+    // construction or cursor advancement, so consume up to the normal template
+    // iteration limit without pinning its timing.
     let range = RangeLoopSpec {
         start: int_expression(16_777_217),
         end: float_expression(16_777_218.5),
@@ -1197,8 +1199,25 @@ fn range_cursor_rejects_non_progressing_float32_mixed_range() {
         None,
         FloatPrecision::Bits32,
     ) {
-        Ok(_) => panic!("a Float32 step that cannot advance must stall"),
         Err(error) => error,
+        Ok(mut cursor) => {
+            let mut error = None;
+            for _ in
+                0..crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS
+            {
+                match cursor.next_counter() {
+                    Err(next_error) => {
+                        error = Some(next_error);
+                        break;
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        panic!("a stalled Float32 update must not exhaust the range normally")
+                    }
+                }
+            }
+            error.expect("a stalled Float32 update must fail within the template iteration limit")
+        }
     };
     let TemplateError::Diagnostic(diagnostic) = error else {
         panic!("a stalled Float32 range must stay on the source diagnostic lane");
@@ -1207,7 +1226,7 @@ fn range_cursor_rejects_non_progressing_float32_mixed_range() {
         DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
             *reason,
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "a stalled Float32 range must report non-progressing bounds"
+            "a stalled Float32 update must report non-progressing bounds"
         ),
         payload => panic!("expected invalid template structure payload, found {payload:?}"),
     }

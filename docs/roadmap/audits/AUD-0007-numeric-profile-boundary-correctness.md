@@ -90,7 +90,7 @@ AUD-0008-F01 proposes source-diagnostic and direct-scalar template regression co
 
 ### AUD-0007-F02: Int64 const-template ranges require an overflowed terminal successor
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -124,6 +124,12 @@ Run Int64 maximum and minimum singleton/near-end descending cases, equal Float32
 #### Linked findings
 
 AUD-0008-F02 proposes endpoint successes and a meaningful nonterminal-stall control. Both linked findings require triage acceptance before code or tests change. The current `template_const_float_range_non_progress_rejected` input is `1.0 to 1.0` with an exclusive end, so its expected failure conflicts with the empty-range contract.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** The inclusive Int64 maximum singleton attempts an unrepresentable successor after its only valid value. Equal exclusive Float bounds currently fail the constructor's premature progress test. After yielding a counter, decide whether another counter can satisfy the end bound before updating; for a required Float successor, preserve boundary rounding and reject a stalled or non-finite counter. Keep the iteration limit check before every yielded value. Linked Tests finding AUD-0008-F02 is accepted independently: adjust its negative case to require a second iteration, and assert exact endpoint output for both Int64 directions and Float32 equality.
+
+2026-09-27 — **Accepted and resolved.** Const-range folding now checks whether a widened Int successor is still within the selected bound before updating the i64 counter, and tracks completion without an out-of-domain sentinel. Float construction no longer rejects empty/equal bounds; rounded updates only diagnose stalls while another counter is required. An Int64/Float32 integration case renders Int64 maximum/minimum inclusive singletons and both near-end directions exactly once; equal Float32 exclusive and inclusive bounds with a stalled step render zero and one value respectively. A nonterminal stalled Float64 range still reports `MOTH-SYNTAX-0022`, and a mixed Int-to-Float32 unit test checks the diagnostic without pinning which cursor call emits it. Focused cases, direct CLI check and four-profile fixtures passed; `just validate` passed (5475 unit, 2086/2086 integration, docs check, clippy, benchmarks and scaling). Independent semantic review was clean; Tests review's two required gaps were corrected and fresh focused verification was clean. Float64's existing negative fixture asserts diagnostic code but not text/location; the mixed unit checks the stable payload.
 
 ### AUD-0007-F03: Standard-profile external errors admit out-of-domain `Error.code`
 

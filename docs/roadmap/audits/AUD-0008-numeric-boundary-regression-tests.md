@@ -66,7 +66,7 @@ AUD-0007-F01.
 
 ### AUD-0008-F02: Empty Float const range is pinned as a non-progress error
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Tests`
 
 #### Evidence
@@ -100,6 +100,12 @@ Run the focused HTML range cases at both Int widths and Float32; assert determin
 #### Linked findings
 
 AUD-0007-F02.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** The current exclusive `1.0 to 1.0` fixture is empty by the documented range contract and cannot be used as a nonprogress diagnostic owner. Move its far bound beyond the first value to require a stalled update at Float precision. Test equal exclusive and inclusive Float32 ranges and Int64 maximum/minimum inclusive and descending endpoints in real template fixtures, preserving exact output assertions and the current iteration budget. Linked Correctness finding AUD-0007-F02 is accepted independently.
+
+2026-09-27 — **Accepted and resolved.** The existing negative fixture now uses a nonempty `1.0 to 2.0` Float range that needs a stalled successor. The equal-bound edge fixture uses a tiny nonzero Float32 step and checks the exclusive marker is absent and the inclusive marker occurs exactly once. A new Int64/Float32 endpoint fixture checks both i64 extrema and adjacent ascending/descending counters with exact-once HTML assertions; the mixed Float32 cursor unit checks diagnostic kind independently of constructor/advance timing. Focused cases and `just validate` passed (2086/2086 integration); independent Tests review found and required two test-strength corrections, and fresh verification accepted both.
 
 ### AUD-0008-F03: Standard external error-code test pins a permissive expression
 

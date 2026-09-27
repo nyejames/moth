@@ -1,0 +1,24 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_exactly_once = [
+    "int64-max-single-9223372036854775807;",
+    "int64-min-single--9223372036854775808;",
+    "int64-ascending-near-max-9223372036854775805;",
+    "int64-ascending-near-max-9223372036854775806;",
+    "int64-ascending-near-max-9223372036854775807;",
+    "int64-descending-near-min--9223372036854775806;",
+    "int64-descending-near-min--9223372036854775807;",
+    "int64-descending-near-min--9223372036854775808;",
+]
+must_not_contain = [
+    "int64-ascending-near-max--9223372036854775808;",
+    "int64-descending-near-min-9223372036854775807;",
+]

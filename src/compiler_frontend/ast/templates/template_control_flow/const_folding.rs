@@ -47,6 +47,7 @@ pub(crate) struct TemplateFoldBinding {
 pub(crate) struct ConstRangeCursor {
     kind: ConstRangeCursorKind,
     emitted_iterations: usize,
+    finished: bool,
     limit: usize,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
     /// Boundary `Float` precision for mixed/int-widened float iteration.
@@ -56,7 +57,6 @@ pub(crate) struct ConstRangeCursor {
     ///      as Bits32 literals do instead of drifting in f64.
     float_precision: FloatPrecision,
 }
-
 enum ConstRangeCursorKind {
     Int {
         current: i64,
@@ -106,6 +106,7 @@ impl ConstRangeCursor {
                     step: if start <= end { 1 } else { -1 },
                 },
                 emitted_iterations: 0,
+                finished: false,
                 limit,
                 span,
                 float_precision,
@@ -138,6 +139,7 @@ impl ConstRangeCursor {
                         },
                     },
                     emitted_iterations: 0,
+                    finished: false,
                     limit,
                     span,
                     float_precision,
@@ -186,14 +188,6 @@ impl ConstRangeCursor {
                     -step_magnitude
                 };
 
-                if float_precision.round(start + step) == start {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        span,
-                    )
-                    .into());
-                }
-
                 Ok(Self {
                     kind: ConstRangeCursorKind::Float {
                         current: start,
@@ -202,11 +196,13 @@ impl ConstRangeCursor {
                         step,
                     },
                     emitted_iterations: 0,
+                    finished: false,
                     limit,
                     span,
                     float_precision,
                 })
             }
+
         }
     }
     pub(crate) fn iteration_count(&self) -> usize {
@@ -216,6 +212,10 @@ impl ConstRangeCursor {
     pub(crate) fn next_counter(
         &mut self,
     ) -> Result<Option<ConstRangeIterationValue>, TemplateError> {
+        if self.finished {
+            return Ok(None);
+        }
+
         match &mut self.kind {
             ConstRangeCursorKind::Int {
                 current,
@@ -241,12 +241,24 @@ impl ConstRangeCursor {
                 let counter = ConstRangeIterationValue::Int(*current);
                 self.emitted_iterations += 1;
 
-                *current = current.checked_add(*step).ok_or_else(|| {
-                    CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        self.span,
-                    )
-                })?;
+                let next = i128::from(*current) + i128::from(*step);
+                let next_is_in_range = match (ascending, *end_kind) {
+                    (true, RangeEndKind::Exclusive) => next < i128::from(*end),
+                    (true, RangeEndKind::Inclusive) => next <= i128::from(*end),
+                    (false, RangeEndKind::Exclusive) => next > i128::from(*end),
+                    (false, RangeEndKind::Inclusive) => next >= i128::from(*end),
+                };
+
+                if next_is_in_range {
+                    *current = current.checked_add(*step).ok_or_else(|| {
+                        CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+                            self.span,
+                        )
+                    })?;
+                } else {
+                    self.finished = true;
+                }
 
                 Ok(Some(counter))
             }
@@ -275,17 +287,28 @@ impl ConstRangeCursor {
                 let counter = ConstRangeIterationValue::Float(*current);
                 self.emitted_iterations += 1;
 
-                let previous = *current;
+                // An inclusive endpoint has already been emitted; do not try to
+                // advance past it, since a rounded stalled update could look in-range.
+                if *current == *end && *end_kind == RangeEndKind::Inclusive {
+                    self.finished = true;
+                    return Ok(Some(counter));
+                }
+
                 // Round every accumulation at the boundary precision so Bits32 counters
                 // follow f32 stepping (and stall exactly when f32 cannot advance).
-                *current = self.float_precision.round(*current + *step);
-
-                if !current.is_finite() || *current == previous {
-                    return Err(CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        self.span,
-                    )
-                    .into());
+                let previous = *current;
+                let next = self.float_precision.round(*current + *step);
+                if !float_range_contains(next, *end, *end_kind, ascending) {
+                    self.finished = true;
+                } else {
+                    if !next.is_finite() || next == previous {
+                        return Err(CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+                            self.span,
+                        )
+                        .into());
+                    }
+                    *current = next;
                 }
 
                 Ok(Some(counter))

@@ -1,3 +1,5 @@
+numeric_profile = "Int64/Float32"
+
 [backends.html]
 mode = "success"
 warnings = "forbid"
@@ -6,4 +8,6 @@ warnings = "forbid"
 path = "index.html"
 kind = "html"
 must_contain = ["excl-1;", "excl-2;", "incl-1;", "incl-2;", "incl-3;"]
-must_not_contain = ["excl-3;"]
+must_not_contain = ["excl-3;", "float-exclusive-equal-", "float-inclusive-equal-3;"]
+
+must_contain_exactly_once = ["float-inclusive-equal-2;"]

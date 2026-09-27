@@ -5,3 +5,11 @@
 #[loop 1 to & 3 |i|:
     incl-[i];
 ]
+
+#[loop 2.0 to 2.0 by 0.0000000000000001 |i|:
+    float-exclusive-equal-[i];
+]
+
+#[loop 2.0 to & 2.0 by 0.0000000000000001 |i|:
+    float-inclusive-equal-[i];
+]

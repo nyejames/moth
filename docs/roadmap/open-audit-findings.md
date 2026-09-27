@@ -14,13 +14,8 @@ None.
 
 Filed, not yet triaged.
 
-- [AUD-0007-F02: Int64 const-template ranges require an overflowed terminal successor](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f02-int64-const-template-ranges-require-an-overflowed-terminal-successor)
-  - `Correctness` | `contract.numeric_profile.frontend_runtime`
 - [AUD-0007-F03: Standard-profile external errors admit out-of-domain Error.code](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f03-standard-profile-external-errors-admit-out-of-domain-errorcode)
   - `Correctness` | `contract.numeric_profile.frontend_runtime`
-
-- [AUD-0008-F02: Empty Float const range is pinned as a non-progress error](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f02-empty-float-const-range-is-pinned-as-a-non-progress-error)
-  - `Tests` | `contract.numeric_profile.regression_tests`
 - [AUD-0008-F03: Standard external error-code test pins a permissive expression](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f03-standard-external-error-code-test-pins-a-permissive-expression)
   - `Tests` | `contract.numeric_profile.regression_tests`
 
@@ -43,6 +38,14 @@ Waiting on a design decision.
 None.
 
 ## Resolved in this branch
+- AUD-0007-F02 and linked AUD-0008-F02 were accepted and resolved by stopping const-template
+  Int64 counters at their final valid bound before overflow, treating equal/empty Float bounds
+  without an unnecessary progress check, and preserving nonterminal stalled-step diagnostics.
+  Int64 extrema/near-end directions and Float32 equal bounds have exact-output integration
+  assertions; the negative fixture now requires an actual successor. `just validate` passed.
+  See the [Correctness triage record](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f02-int64-const-template-ranges-require-an-overflowed-terminal-successor)
+  and [Tests triage record](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f02-empty-float-const-range-is-pinned-as-a-non-progress-error).
+
 - AUD-0007-F01 and linked AUD-0008-F01 were accepted and resolved by classifying direct fixed
   scalars (not options) in AST template validation and HIR numeric text lowering, removing the
   unused option-unwrapping helper, adding a source-level optional-U8 rejection fixture and
