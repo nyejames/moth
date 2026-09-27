@@ -23,7 +23,7 @@ AUD-0007-F01–F03 are linked correctness candidates; K1 has its own Phase 8 gat
 
 ### AUD-0008-F01: Optional fixed-scalar template interpolation lacks a source-diagnostic owner
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Tests`
 
 #### Evidence
@@ -57,6 +57,12 @@ Run the focused HTML cases and `just validate`; assert actual rendered fixed val
 #### Linked findings
 
 AUD-0007-F01.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** The existing `String?` rejection, Byte rejection and cast-to-String success cases do not exercise `Option<U8>` or direct U8 interpolation. Authorise one integration diagnostic owner with code, reason and source location and a direct-U8 output assertion in the existing fixed-render case. Preserve the Wasm feature gate and Byte case; linked Correctness finding AUD-0007-F01 is accepted independently.
+
+2026-09-27 — **Accepted and resolved.** `cast_numeric_text_optional_u8_render_rejected` asserts source diagnostic code, unsupported-template reason and location. The existing fixed-render case checks direct U8 output alongside explicit casts and retains its HTML-Wasm feature gate at the updated authored expression span. Direct Byte and optional String rejections are unchanged. Focused cases and the complete 2085/2085 integration suite passed under `just validate`; independent Tests review found no required correction.
 
 ### AUD-0008-F02: Empty Float const range is pinned as a non-progress error
 

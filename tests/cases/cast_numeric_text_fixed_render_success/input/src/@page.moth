@@ -2,8 +2,8 @@ u #U64 = 18446744073709551615
 neg #I8 = -128
 half #F16 = 0.1
 single #F32 = 0.1
-
+small #U8 = 200
 [:[render( cast u, cast neg, cast half, cast single)]]
 render |u String, neg String, half String, single String| -> String:
-    return [: fixed text: [u] [neg] [half] [single]]
+    return [: fixed text: [u] [neg] [half] [single] direct: [small]]
 ;

@@ -47,7 +47,7 @@ Original handoff C1/C2 and linked T1/T2, R1/R2 and linked T3, K1/K2; numeric pla
 
 ### AUD-0007-F01: Optional fixed scalars escape template renderability checks
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -81,6 +81,12 @@ Assert a source-level rejection for `Option<U8>` template interpolation and succ
 #### Linked findings
 
 AUD-0008-F01 proposes source-diagnostic and direct-scalar template regression coverage. Both linked findings require triage acceptance before code or tests change. Existing optional `String` and Byte rejection fixtures do not cover this optional fixed-scalar HIR escape.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** The real compiler reports `MOTH-INFRA-0001` for an optional fixed-scalar template chunk; `fixed_scalar_of` unwraps its option in the AST allowlist and HIR cast emission. The direct-scalar `fixed_scalar` accessor already preserves the intended boundary. Correct both owners, keeping Byte excluded and direct numeric rendering intact. Linked Tests finding AUD-0008-F01 is accepted independently; source diagnostics and rendered output must prove the user-visible fix.
+
+2026-09-27 — **Accepted and resolved.** Both AST allowlisting and HIR numeric text lowering now call exact-type `fixed_scalar`, and the unused option-unwrapping `fixed_scalar_of` method was removed. `moth check` reports `MOTH-SYNTAX-0022` on authored optional U8 at `@page.moth:3:19` rather than `MOTH-INFRA-0001`; a disposable optional Byte source likewise reports `MOTH-SYNTAX-0022` at `@page.moth:2:19`. Direct U8 renders `200` through the existing numeric text policy; Byte rejection and HTML-Wasm's `MOTH-RULE-0064` gate remain. Focused integration cases and all four numeric profiles passed; `just validate` passed (5475 unit, 2085/2085 integration, docs check, clippy, benchmarks and scaling). Independent phase reviews of semantic boundaries and regression ownership returned clean.
 
 ### AUD-0007-F02: Int64 const-template ranges require an overflowed terminal successor
 

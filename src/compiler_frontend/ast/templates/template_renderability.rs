@@ -38,6 +38,6 @@ pub(crate) fn is_template_renderable_type(
 
     // `Byte` is an octet, not a number, so it stays out of the numeric text contract.
     type_environment
-        .fixed_scalar_of(type_id)
+        .fixed_scalar(type_id)
         .is_some_and(|scalar| scalar.class() != FixedScalarClass::Octet)
 }

@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1"]
+rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1 direct: 200"]
 
 [backends.html_wasm]
 mode = "failure"
@@ -14,5 +14,5 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.fixed_width_scalar_values"
 path = "input/@page.moth"
-line = 6
-column = 17
+line = 8
+column = 62

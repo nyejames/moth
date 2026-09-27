@@ -14,15 +14,11 @@ None.
 
 Filed, not yet triaged.
 
-- [AUD-0007-F01: Optional fixed scalars escape template renderability checks](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f01-optional-fixed-scalars-escape-template-renderability-checks)
-  - `Correctness` | `contract.numeric_profile.frontend_runtime`
 - [AUD-0007-F02: Int64 const-template ranges require an overflowed terminal successor](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f02-int64-const-template-ranges-require-an-overflowed-terminal-successor)
   - `Correctness` | `contract.numeric_profile.frontend_runtime`
 - [AUD-0007-F03: Standard-profile external errors admit out-of-domain Error.code](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f03-standard-profile-external-errors-admit-out-of-domain-errorcode)
   - `Correctness` | `contract.numeric_profile.frontend_runtime`
 
-- [AUD-0008-F01: Optional fixed-scalar template interpolation lacks a source-diagnostic owner](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f01-optional-fixed-scalar-template-interpolation-lacks-a-source-diagnostic-owner)
-  - `Tests` | `contract.numeric_profile.regression_tests`
 - [AUD-0008-F02: Empty Float const range is pinned as a non-progress error](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f02-empty-float-const-range-is-pinned-as-a-non-progress-error)
   - `Tests` | `contract.numeric_profile.regression_tests`
 - [AUD-0008-F03: Standard external error-code test pins a permissive expression](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f03-standard-external-error-code-test-pins-a-permissive-expression)
@@ -40,7 +36,6 @@ Being fixed now.
 
 None.
 
-
 ## Blocked
 
 Waiting on a design decision.
@@ -48,6 +43,14 @@ Waiting on a design decision.
 None.
 
 ## Resolved in this branch
+- AUD-0007-F01 and linked AUD-0008-F01 were accepted and resolved by classifying direct fixed
+  scalars (not options) in AST template validation and HIR numeric text lowering, removing the
+  unused option-unwrapping helper, adding a source-level optional-U8 rejection fixture and
+  asserting direct U8 output. The authored diagnostic is now `MOTH-SYNTAX-0022`; HTML-Wasm's
+  feature gate and Byte rejection remain. `just validate` passed. See the
+  [Correctness triage record](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f01-optional-fixed-scalars-escape-template-renderability-checks)
+  and [Tests triage record](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f01-optional-fixed-scalar-template-interpolation-lacks-a-source-diagnostic-owner).
+
 - AUD-0005-F01 was accepted and resolved by deleting the generic-angle spacing suppressors so `<`
   and `>` always enforce `MOTH-SYNTAX-0031`. Template-tag suppressions in non-Normal mode remain.
   Tight `identity<Int>(42)` is now a tokenizer spacing error; the dedicated `MOTH-RULE-0057`

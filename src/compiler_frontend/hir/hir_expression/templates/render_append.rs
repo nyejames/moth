@@ -1453,7 +1453,7 @@ impl<'a> HirBuilder<'a> {
         // append path; template validation rejects it before lowering.
         if let Some(numeric) = self
             .type_environment
-            .fixed_scalar_of(expression.ty)
+            .fixed_scalar(expression.ty)
             .and_then(|scalar| BuiltinCastTarget::Fixed(scalar).numeric_scalar())
         {
             return Ok(self.make_expression(
