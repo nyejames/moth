@@ -208,7 +208,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Pattern matching]
             [: Partial]
-            [: Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics and single-predicate value-if coverage. Targeted fixed-width/Byte destination, range, category and HIR coverage for literal-pattern typing.]
+            [: Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics and single-predicate value-if coverage. Targeted fixed-width/Byte destination, range, category and HIR coverage for literal-pattern typing; four-profile negative Float decimal/exponent, relational and optional present-value runtime branches.]
             [: Frontend / HIR / JS / HTML]
             [: Literal patterns, choice variants, payload extraction, relational patterns, guards and [$html:<code>else =&gt;</code>] arms are supported. General bare-name capture has been removed from full-match positions, and [$html:<code>String</code>] relational subjects are rejected. Option [$html:<code>|name|</code>] and declared choice payload captures remain valid. Inline and block option-present and choice-predicate single-predicate value matches are supported at closed receivers, with focused coverage. Full relational overlap analysis and nested choice payload patterns remain deferred. Frontend literal and relational patterns also support fixed-width numeric types and Byte; HTML-JS executes their runtime values, while HTML-Wasm rejects them until its lowering lands.]
         ]

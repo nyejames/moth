@@ -12,6 +12,34 @@ echo_optional_float |value Float?| -> Float?:
     return value
 ;
 
+matches_negative_decimal |value Float| -> Bool:
+    if value is:
+        -1.5 => return true
+        else => return false
+    ;
+;
+
+matches_negative_exponent |value Float| -> Bool:
+    if value is:
+        -15e-1 => return true
+        else => return false
+    ;
+;
+
+matches_negative_threshold |value Float| -> Bool:
+    if value is:
+        >= -1.5 => return true
+        else => return false
+    ;
+;
+
+matches_optional_negative_decimal |value Float?| -> Bool:
+    if value is:
+        -1.5 => return true
+        else => return false
+    ;
+;
+
 return_large_float || -> Float:
     return 18_446_744_073_709_551_615
 ;
@@ -44,6 +72,16 @@ double_value F64 = 16_777_217
 single_control = single_value is 16_777_216
 double_control = double_value is 16_777_217
 
+negative_decimal_pattern_match = matches_negative_decimal(-1.5)
+positive_decimal_pattern_control = matches_negative_decimal(1.5)
+negative_exponent_pattern_match = matches_negative_exponent(-15e-1)
+positive_exponent_pattern_control = matches_negative_exponent(1.5)
+negative_threshold_match = matches_negative_threshold(-1.0)
+below_negative_threshold_control = matches_negative_threshold(-2.0)
+positive_relational_control = matches_negative_threshold(2.0)
+optional_negative_pattern_match = matches_optional_negative_decimal(echo_optional_float(-1.5))
+optional_positive_pattern_control = matches_optional_negative_decimal(echo_optional_float(1.5))
+
 negative_zero Float = -0
 positive_zero Float = 0
 negative_zero_atan2_is_negative = atan2(negative_zero, -1.0) < 0.0
@@ -59,4 +97,4 @@ return_match = returned_value is large_whole
 peer_match = peer_sum is large_whole
 profile_text = format_float(profile_value)
 
-[:profile=[profile_text] fixed-controls=[single_control]/[double_control] surfaces=[large_match]/[optional_present]/[optional_value_match]/[parameter_match]/[optional_parameter_present]/[optional_parameter_value_match]/[field_match]/[return_match]/[peer_match]/[large_compound_match] zero-signs=[negative_zero_atan2_is_negative]/[positive_zero_atan2_is_negative]]
+[:profile=[profile_text] fixed-controls=[single_control]/[double_control] surfaces=[large_match]/[optional_present]/[optional_value_match]/[parameter_match]/[optional_parameter_present]/[optional_parameter_value_match]/[field_match]/[return_match]/[peer_match]/[large_compound_match] zero-signs=[negative_zero_atan2_is_negative]/[positive_zero_atan2_is_negative] negative-patterns=[negative_decimal_pattern_match]/[positive_decimal_pattern_control]/[negative_exponent_pattern_match]/[positive_exponent_pattern_control]/[negative_threshold_match]/[below_negative_threshold_control]/[positive_relational_control]/[optional_negative_pattern_match]/[optional_positive_pattern_control]]

@@ -122,6 +122,45 @@ fn profile_float_subject_patterns_materialise_whole_literals_directly() {
 }
 
 #[test]
+fn profile_float_subject_patterns_apply_attached_numeric_sign_once() {
+    let negative_decimal = parse_numeric_pattern_with_sign(
+        builtin_type_ids::FLOAT,
+        NumericLiteralKind::DecimalPoint,
+        NumericLiteralSign::Negative,
+        "1.5",
+    )
+    .unwrap();
+    assert!(
+        matches!(negative_decimal.kind, ExpressionKind::Float(value) if value == -1.5),
+        "attached negative decimal Float patterns should remain negative"
+    );
+
+    let negative_exponent = parse_numeric_pattern_with_sign(
+        builtin_type_ids::FLOAT,
+        NumericLiteralKind::Exponent,
+        NumericLiteralSign::Negative,
+        "15e-1",
+    )
+    .unwrap();
+    assert!(
+        matches!(negative_exponent.kind, ExpressionKind::Float(value) if value == -1.5),
+        "attached negative exponent Float patterns should remain negative"
+    );
+
+    let negative_zero = parse_numeric_pattern_with_sign(
+        builtin_type_ids::FLOAT,
+        NumericLiteralKind::DecimalPoint,
+        NumericLiteralSign::Negative,
+        "0.0",
+    )
+    .unwrap();
+    assert!(
+        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
+        "attached negative Float zero patterns should preserve the sign bit"
+    );
+}
+
+#[test]
 fn optional_fixed_scalar_literal_pattern_materializes_at_the_inner_type() {
     let pattern = parse_optional_numeric_pattern(
         builtin_type_ids::fixed_scalar(FixedScalar::U8),

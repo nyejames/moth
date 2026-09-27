@@ -35,29 +35,28 @@ use super::types::MatchPattern;
 /// retained payloads stay on the infrastructure lane.
 type LiteralPatternResult<T> = Result<T, ExpressionParseError>;
 
-/// Materialize a `NumericLiteralToken` into an `Expression` with an explicit sign and location.
+/// Materialize a `NumericLiteralToken` into an `Expression` with its resolved sign and location.
 ///
-/// WHAT: naturally materialises whole-number patterns as `Int` and decimal/exponent patterns as
-///       profile `Float`; Float subjects route whole-number tokens through profile Float directly.
-/// WHY: positive and negative pattern arms share the same natural materialisation logic, while
+/// WHAT: naturally materialises whole-number patterns as `Int`, except Float subjects use profile
+///       `Float` for every numeric spelling; decimal/exponent patterns are always profile `Float`.
+/// WHY: positive and negative pattern arms share the same materialisation logic, while
 ///      `parse_literal_pattern` applies receiver-specific materialisation before falling back here.
 fn materialize_numeric_literal(
     token: &NumericLiteralToken,
-    sign: NumericLiteralSign,
     span: Option<SourceSpan>,
     string_table: &StringTable,
     numeric_profile: NumericProfile,
+    float_subject: bool,
 ) -> LiteralPatternResult<Expression> {
-    if token.kind == NumericLiteralKind::WholeNumber {
-        let value = materialize_int(token, sign, numeric_profile.int_width, string_table).map_err(
-            |reason| {
+    if token.kind == NumericLiteralKind::WholeNumber && !float_subject {
+        let value = materialize_int(token, token.sign, numeric_profile.int_width, string_table)
+            .map_err(|reason| {
                 ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
                     token.source_text,
                     reason,
                     span,
                 ))
-            },
-        )?;
+            })?;
 
         Ok(Expression::int(value, span, ValueMode::ImmutableOwned))
     } else {
@@ -70,19 +69,7 @@ fn materialize_numeric_literal(
                 ))
             })?;
 
-        // Negate the float when the sign is negative; the normalised text is unsigned
-        // and always carries the positive magnitude. Negation is exact, so the
-        // materialized precision is preserved.
-        let float_value = match sign {
-            NumericLiteralSign::Negative => -value,
-            NumericLiteralSign::Positive => value,
-        };
-
-        Ok(Expression::float(
-            float_value,
-            span,
-            ValueMode::ImmutableOwned,
-        ))
+        Ok(Expression::float(value, span, ValueMode::ImmutableOwned))
     }
 }
 
@@ -134,26 +121,12 @@ fn materialize_current_numeric_literal(
     fixed_scalar: Option<FixedScalar>,
     float_subject: bool,
 ) -> LiteralPatternResult<Expression> {
-    if let Some(token) = token_stream.current_numeric_literal_in(string_table)? {
+    if let Some(mut token) = token_stream.current_numeric_literal_in(string_table)? {
         let sign = sign_override.unwrap_or(token.sign);
+        token.sign = sign;
 
-        if float_subject && token.kind == NumericLiteralKind::WholeNumber {
-            let mut signed_token = token;
-            signed_token.sign = sign;
-            let value =
-                materialize_float(&signed_token, numeric_profile.float_precision, string_table)
-                    .map_err(|reason| {
-                        ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
-                            signed_token.source_text,
-                            reason,
-                            span,
-                        ))
-                    })?;
-
-            return Ok(Expression::float(value, span, ValueMode::ImmutableOwned));
-        }
-
-        if let Some(scalar) = fixed_scalar
+        if !float_subject
+            && let Some(scalar) = fixed_scalar
             && literal_kind_initialises(token.kind, scalar)
         {
             let value =
@@ -172,7 +145,13 @@ fn materialize_current_numeric_literal(
             ));
         }
 
-        return materialize_numeric_literal(&token, sign, span, string_table, numeric_profile);
+        return materialize_numeric_literal(
+            &token,
+            span,
+            string_table,
+            numeric_profile,
+            float_subject,
+        );
     }
 
     Err(malformed_literal_payload(token_stream).into())
