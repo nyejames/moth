@@ -77,6 +77,8 @@ struct BackendExpectationToml {
     #[serde(default)]
     runtime_error_contains: Option<Vec<String>>,
     #[serde(default)]
+    math_random_samples: Option<Vec<f64>>,
+    #[serde(default)]
     artifacts_must_not_exist: Vec<String>,
 }
 
@@ -231,6 +233,13 @@ fn parse_matrix_expectation_file(
             ))
         })?;
         let context = format!("[backends.{}]", backend_id.as_str());
+        if backend_expectation.math_random_samples.is_some() && backend_id != BackendId::Html {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses 'math_random_samples', which is only supported for the 'html' backend.",
+                path.display(),
+                context
+            )));
+        }
         let warnings = parse_warning_expectation(
             backend_expectation.warnings.as_deref(),
             backend_expectation.warning_codes,
@@ -271,6 +280,16 @@ fn parse_matrix_expectation_file(
             )?;
         }
 
+        if backend_expectation.mode == ExpectationMode::Failure
+            && backend_expectation.math_random_samples.is_some()
+        {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses mode = \"failure\" and must not set 'math_random_samples'.",
+                path.display(),
+                context
+            )));
+        }
+
         if backend_expectation.mode == ExpectationMode::Failure && success_contract.is_some() {
             return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set 'success_contract'.",
@@ -291,6 +310,7 @@ fn parse_matrix_expectation_file(
                 contains_in_order: backend_expectation.rendered_output_contains_in_order,
                 contains_exactly_once: backend_expectation.rendered_output_contains_exactly_once,
                 runtime_error_contains: backend_expectation.runtime_error_contains,
+                math_random_samples: backend_expectation.math_random_samples,
             },
         )?;
 
@@ -299,25 +319,37 @@ fn parse_matrix_expectation_file(
             && (!artifact_assertions.is_empty()
                 || backend_expectation.golden_mode.is_some()
                 || rendered_output.is_present()
+                || rendered_output.math_random_samples.is_some()
                 || !backend_expectation.artifacts_must_not_exist.is_empty()
                 || !diagnostic_assertions.is_empty()
                 || has_authored_expected_warning)
         {
             return Err(FixtureLoadError::expectation_contract(format!(
-                "Expectation file '{}' {} declares success_contract = \"acceptance_only\" and must not combine it with artifact assertions, golden_mode, rendered-output assertions, artifact-absence assertions, or an authored expected-warning contract.",
+                "Expectation file '{}' {} declares success_contract = \"acceptance_only\" and must not combine it with artifact assertions, golden_mode, rendered-output assertions, 'math_random_samples' host inputs, artifact-absence assertions, or an authored expected-warning contract.",
                 path.display(),
                 context
             )));
         }
 
-        // rendered_output_* is only valid for success mode; validate here so the
-        // error message can reference the backend context.
+        // Rendered-output assertions are only valid for success mode; validate
+        // here so the error message can reference the backend context.
         if backend_expectation.mode == ExpectationMode::Failure && rendered_output.is_present() {
             return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
                  'rendered_output_not_contains', 'rendered_output_contains_in_order', \
                  'rendered_output_contains_exactly_once', or 'runtime_error_contains'.",
+                path.display(),
+                context
+            )));
+        }
+
+        if backend_expectation.mode == ExpectationMode::Success
+            && rendered_output.math_random_samples.is_some()
+            && !rendered_output.is_present()
+        {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} sets 'math_random_samples' without a rendered-output assertion; deterministic host inputs do not assert rendered output.",
                 path.display(),
                 context
             )));
@@ -880,6 +912,7 @@ struct AuthoredRenderedOutput {
     contains_in_order: Option<Vec<String>>,
     contains_exactly_once: Option<Vec<String>>,
     runtime_error_contains: Option<Vec<String>>,
+    math_random_samples: Option<Vec<f64>>,
 }
 
 fn parse_rendered_output_expectation(
@@ -894,6 +927,7 @@ fn parse_rendered_output_expectation(
         contains_in_order,
         contains_exactly_once,
         runtime_error_contains,
+        math_random_samples,
     } = authored;
 
     if exact.is_some()
@@ -971,6 +1005,17 @@ fn parse_rendered_output_expectation(
         "runtime_error_contains",
         &runtime_error_contains,
     )?;
+    if let Some(samples) = &math_random_samples {
+        for (index, sample) in samples.iter().enumerate() {
+            if !sample.is_finite() || !(0.0..1.0).contains(sample) {
+                return Err(FixtureLoadError::expectation_contract(format!(
+                    "Expectation file '{}' {} has invalid 'math_random_samples[{index}]' value {sample:?}; samples must be finite values in [0, 1).",
+                    path.display(),
+                    context
+                )));
+            }
+        }
+    }
 
     Ok(RenderedOutputExpectation {
         exact,
@@ -979,6 +1024,7 @@ fn parse_rendered_output_expectation(
         contains_in_order,
         contains_exactly_once,
         runtime_error_contains,
+        math_random_samples,
     })
 }
 

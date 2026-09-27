@@ -21,7 +21,7 @@ pub(super) fn validate_rendered_output(
     index: &BuiltArtifactIndex<'_>,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let rendered = match execute_html_in_node(index) {
+    let rendered = match execute_html_in_node(index, expectation.math_random_samples.as_deref()) {
         Ok(output) => output,
         Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
@@ -367,6 +367,7 @@ impl RenderedOutput {
 /// observe batched reactive flushes queued by the page bundle.
 fn execute_html_in_node(
     index: &BuiltArtifactIndex<'_>,
+    math_random_samples: Option<&[f64]>,
 ) -> Result<RenderedOutput, RenderHarnessError> {
     let html = required_text_artifact(index, "index.html", ArtifactKind::Html)?;
 
@@ -379,7 +380,7 @@ fn execute_html_in_node(
         ));
     }
 
-    let harness = build_node_harness(&scripts);
+    let harness = build_node_harness(&scripts, math_random_samples);
 
     with_harness_workspace(|workspace| {
         let harness_path = workspace.write("harness.js", &harness)?;
@@ -388,7 +389,7 @@ fn execute_html_in_node(
     })
 }
 
-fn build_node_harness(scripts: &[String]) -> String {
+fn build_node_harness(scripts: &[String], math_random_samples: Option<&[f64]>) -> String {
     let prefix = r#"const __moth_events = [];
 const __moth_slot_by_id = new Map();
 console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
@@ -418,6 +419,12 @@ const document = {
 let __moth_finished = false;
 function __moth_write_summary() {
     if (__moth_finished) return;
+    if (__moth_events.__moth_random_samples_exhausted) {
+        __moth_report_harness_failure(
+            new TypeError(__moth_events.__moth_random_samples_exhausted_message)
+        );
+        return;
+    }
     __moth_finished = true;
     process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
 }
@@ -444,12 +451,43 @@ function __moth_handle_runtime_error(error) {
 process.on('uncaughtException', __moth_handle_runtime_error);
 process.on('unhandledRejection', __moth_handle_runtime_error);
 "#;
+    let samples_json = math_random_samples
+        .map(|samples| {
+            serde_json::to_string(samples)
+                .expect("math_random_samples are validated as finite before harness execution")
+        })
+        .unwrap_or_else(|| "null".to_owned());
+    let mut random_setup = String::from(
+        r#"__moth_events.__moth_random_samples_exhausted = false;
+__moth_events.__moth_random_samples_exhausted_message = null;
+{
+    const samples = "#,
+    );
+    random_setup.push_str(&samples_json);
+    random_setup.push_str(
+        r#";
+    if (samples !== null) {
+        let index = 0;
+        Math.random = () => {
+            if (index >= samples.length) {
+                __moth_events.__moth_random_samples_exhausted = true;
+                __moth_events.__moth_random_samples_exhausted_message =
+                    "rendered_output: Math.random sample sequence exhausted after "
+                    + samples.length + " values";
+                throw new TypeError(__moth_events.__moth_random_samples_exhausted_message);
+            }
+            return samples[index++];
+        };
+    }
+}
+"#,
+    );
 
     let suffix = r#"
 setImmediate(__moth_write_summary);
 "#;
 
-    format!("{prefix}{}\n{suffix}", scripts.join("\n"))
+    format!("{prefix}{random_setup}{}\n{suffix}", scripts.join("\n"))
 }
 
 /// HTML-Wasm harness source.

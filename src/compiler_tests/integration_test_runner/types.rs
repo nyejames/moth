@@ -97,7 +97,7 @@ pub(crate) enum ExpectationMode {
     Failure,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct RenderedOutputExpectation {
     pub exact: Option<String>,
     pub contains: Vec<String>,
@@ -105,9 +105,11 @@ pub(crate) struct RenderedOutputExpectation {
     pub contains_in_order: Vec<String>,
     pub contains_exactly_once: Vec<String>,
     pub runtime_error_contains: Vec<String>,
+    pub math_random_samples: Option<Vec<f64>>,
 }
 
 impl RenderedOutputExpectation {
+    // Host inputs such as math_random_samples configure execution, but are not assertions.
     pub(crate) fn is_present(&self) -> bool {
         self.exact.is_some()
             || !self.contains.is_empty()

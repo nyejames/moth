@@ -9660,6 +9660,20 @@ contract = "language.dependencies.core_random_functions_acceptance"
 role = "primary"
 
 [[case]]
+id = "core_random_float_int32_float32_boundary"
+path = "core_random_float_int32_float32_boundary"
+tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float32"]
+contract = "language.numeric.core_random_float32_random_float_half_open_range"
+role = "boundary"
+
+[[case]]
+id = "core_random_float_int32_float64_boundary"
+path = "core_random_float_int32_float64_boundary"
+tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float64"]
+contract = "language.numeric.core_random_float64_random_float_half_open_range"
+role = "boundary"
+
+[[case]]
 id = "core_random_int_edge_cases"
 path = "core_random_int_edge_cases"
 tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm"]

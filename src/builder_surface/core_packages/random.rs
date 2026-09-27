@@ -27,8 +27,8 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                 returns: external_success_returns(ExternalAbiType::F64, ExternalReturnAlias::Fresh),
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
-                    js: Some(ExternalJsLowering::InlineExpression(
-                        "Math.random()".to_owned(),
+                    js: Some(ExternalJsLowering::RuntimeFunction(
+                        "__moth_random_float".to_owned(),
                     )),
                     wasm: None,
                 },
