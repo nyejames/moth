@@ -1,0 +1,93 @@
+format_int |value Int| -> String:
+    return cast value
+;
+
+increment |value Int| -> Int, Error!:
+    return value + 1
+;
+
+negate |value Int| -> Int, Error!:
+    return -value
+;
+
+multiply |left Int, right Int| -> Int, Error!:
+    return left * right
+;
+
+divide |dividend Int, divisor Int| -> Int, Error!:
+    return dividend // divisor
+;
+
+remainder |dividend Int, divisor Int| -> Int, Error!:
+    return dividend % divisor
+;
+
+power |base Int, exponent Int| -> Int, Error!:
+    return base ^ exponent
+;
+
+parse_int |text String| -> Int, Error!:
+    return cast! text
+;
+
+float_to_int |value Float| -> Int, Error!:
+    return cast! value
+;
+
+trap_add_overflow |run Bool, value Int|:
+    if run:
+        ignored = value + 1
+    ;
+;
+
+trap_add_overflow(false, 9223372036854775807)
+
+max_text = format_int(9223372036854775807)
+min_text = format_int(-9223372036854775808)
+product_value = multiply(9007199254740993, 3) catch:
+    then 0
+;
+product_text = format_int(product_value)
+quotient_value = divide(-9223372036854775807, 3) catch:
+    then 0
+;
+quotient_text = format_int(quotient_value)
+remainder_value = remainder(-9223372036854775807, 3) catch:
+    then 0
+;
+remainder_text = format_int(remainder_value)
+power_value = power(2, 62) catch:
+    then 0
+;
+power_text = format_int(power_value)
+add_overflow = increment(9223372036854775807) catch:
+    then -11
+;
+negate_overflow = negate(-9223372036854775808) catch:
+    then -12
+;
+divide_overflow = divide(-9223372036854775808, -1) catch:
+    then -13
+;
+power_overflow = power(2, 63) catch:
+    then -14
+;
+invalid_exponent = power(2, -1) catch:
+    then -15
+;
+parsed_max = parse_int("9223372036854775807") catch:
+    then -97
+;
+parsed_max_text = format_int(parsed_max)
+parse_overflow = parse_int("9223372036854775808") catch:
+    then -98
+;
+float_truncate = float_to_int(42.75) catch:
+    then -100
+;
+float_overflow = float_to_int(9.223372e18) catch:
+    then -101
+;
+
+
+[: int64 max=[max_text] min=[min_text] product=[product_text] quotient=[quotient_text] remainder=[remainder_text] power=[power_text] add-overflow=[add_overflow] negate-min=[negate_overflow] divide-min=[divide_overflow] power-overflow=[power_overflow] invalid-exponent=[invalid_exponent] parse-max=[parsed_max_text] parse-overflow=[parse_overflow] float-truncate=[float_truncate] float-overflow=[float_overflow]]

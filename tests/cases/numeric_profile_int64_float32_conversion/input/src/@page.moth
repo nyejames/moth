@@ -1,0 +1,9 @@
+convert |value Int| -> Float:
+    return cast value
+;
+
+runtime_value = convert(18014399583223809)
+constant_value #Float = cast 18014399583223809
+matches_constant = runtime_value is constant_value
+
+[: int64-to-float32 direct-rounding matches const-fold=[matches_constant]]

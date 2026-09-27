@@ -4,9 +4,11 @@
 //! WHY: generated errors must use the same lowered struct fields as source-authored `Error(...)`
 //! values while still allowing the backend to preserve source context internally.
 
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::{
     JsEmitter, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits canonical builtin error helpers used by collection and cast lowering.
@@ -21,6 +23,18 @@ impl<'hir> JsEmitter<'hir> {
         let code_field = builtin_error_code_js_field_name(release_build);
         let message_field_literal = format!("{message_field:?}");
         let code_field_literal = format!("{code_field:?}");
+        let profile = self.config.numeric_profile;
+        let int_carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, profile)
+            .expect("Int always has a JavaScript numeric carrier");
+        let code_type = match int_carrier {
+            JsNumericCarrier::ExactInteger { .. } => "number",
+            JsNumericCarrier::BigInteger { .. } => "bigint",
+            JsNumericCarrier::BinaryFloat { .. } => {
+                unreachable!("Int carrier cannot be a binary float")
+            }
+        };
+        let zero = JsNumericCarrier::int_literal(0, profile)
+            .expect("zero always fits the Int numeric profile");
 
         self.emit_line("function __moth_error_normalize_file(file) {");
         self.with_indent(|emitter| {
@@ -82,7 +96,9 @@ impl<'hir> JsEmitter<'hir> {
             emitter.emit_line(&format!(
                 "const code = error && error[{code_field_literal}] !== undefined ? error[{code_field_literal}] : error && error.code;",
             ));
-            emitter.emit_line("return typeof code === \"number\" ? code : 0;");
+            emitter.emit_line(&format!(
+                "return typeof code === \"{code_type}\" ? code : {zero};"
+            ));
         });
         self.emit_line("}");
         self.emit_line("");

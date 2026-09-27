@@ -1,0 +1,3 @@
+@external_int.js identity_int
+
+[: [identity_int(5000000000)] ]

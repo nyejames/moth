@@ -4,6 +4,7 @@
 //! WHY: JS is the stable near-term backend and needs deterministic lowering output.
 
 use crate::backends::js::JsModule;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
@@ -35,17 +36,6 @@ pub fn lower_hir_to_js(
     type_environment: &TypeEnvironment,
     path_table: &PathTable,
 ) -> Result<JsModule, CompilerError> {
-    // Numeric plan: temporary lowering gate removed by Phase 4 (JavaScript fixed numeric).
-    // WHY: fixed-width `Int`/`Float` materialisation, arithmetic, folding and formatting are not
-    // implemented yet, so a non-standard boundary profile must fail here rather than silently
-    // lower numbers under the default widths.
-    if !config.numeric_profile.is_standard() {
-        return Err(CompilerError::compiler_error(format!(
-            "The JavaScript backend does not lower NumericProfile {} yet.",
-            config.numeric_profile
-        )));
-    }
-
     let emitter = JsEmitter::new(
         hir,
         borrow_analysis,
@@ -206,13 +196,12 @@ impl<'hir> JsEmitter<'hir> {
         functions
     }
 
-    /// Records which checked numeric helper families are needed by emitted reachable JS bodies.
+    /// Records the carrier families needed by reachable numeric statements.
     ///
-    /// WHAT: scans the same function/block subset that JS lowering will emit and records whether
-    ///      it contains `NumericOp`, `FormatFloat`, or `ValidateFloat` statements.
-    /// WHY: the arithmetic helpers and Float formatting/validation helpers share a trap wrapper
-    ///      but are otherwise independent. Splitting demand keeps existing arithmetic-only bundles
-    ///      from growing unrelated Float helpers.
+    /// WHAT: scans the emitted function/block subset and selects each checked operation family
+    ///       through the same profile-aware carrier owner used by expression and cast lowering.
+    /// WHY: a BigInt operator must not inherit a Number helper merely because both domains are
+    ///      semantically integers.
     fn emitted_functions_use_numeric_helpers(
         &self,
         functions: &[&'hir HirFunction],
@@ -224,21 +213,34 @@ impl<'hir> JsEmitter<'hir> {
             for block_id in reachable_blocks {
                 let block = self.block_by_id(block_id)?;
                 for statement in &block.statements {
-                    match statement.kind {
-                        HirStatementKind::NumericOp { .. } => {
-                            usage.numeric_ops = true;
+                    match &statement.kind {
+                        HirStatementKind::NumericOp { op, .. } => {
+                            let carrier = JsNumericCarrier::for_scalar(
+                                op.domain,
+                                self.config.numeric_profile,
+                            )
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(format!(
+                                    "JS backend has no numeric carrier for {:?}",
+                                    op.domain
+                                ))
+                            })?;
+                            match carrier.helper_family() {
+                                Some("int") => usage.number_integer_ops = true,
+                                Some("bigint") => usage.big_integer_ops = true,
+                                Some("float32") => usage.binary32_ops = true,
+                                Some("float") => usage.binary64_ops = true,
+                                _ => {
+                                    return Err(CompilerError::compiler_error(format!(
+                                        "JS backend received an unreachable numeric operation domain {:?}",
+                                        op.domain
+                                    )));
+                                }
+                            }
                         }
-                        HirStatementKind::FormatFloat { .. } => {
-                            usage.format_float = true;
-                        }
-                        HirStatementKind::ValidateFloat { .. } => {
-                            usage.validate_float = true;
-                        }
+                        HirStatementKind::FormatFloat { .. } => usage.format_float = true,
+                        HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
                         _ => {}
-                    }
-
-                    if usage.numeric_ops && usage.format_float && usage.validate_float {
-                        return Ok(usage);
                     }
                 }
             }

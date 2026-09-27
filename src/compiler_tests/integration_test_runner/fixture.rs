@@ -416,6 +416,7 @@ fn load_canonical_case_specs_at(
             contract: contract.clone(),
             role,
             backend_id: backend_expectation.backend_id,
+            numeric_profile: parsed_expectation.numeric_profile,
             entry_path: entry_path.clone(),
             flags,
             expected,

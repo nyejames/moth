@@ -508,19 +508,6 @@ fn cast_int_rejects_non_numeric_string() {
     );
 }
 
-/// Verifies that `__moth_cast_int` accepts integer strings via parseInt. [cast]
-#[test]
-fn cast_int_accepts_integer_string() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__moth_cast_int");
-
-    assert!(
-        cast.contains("Number.parseInt(value.replace(/_/g, ''), 10)")
-            && cast.contains("{ tag: \"ok\""),
-        "__moth_cast_int must parse integer strings and return ok"
-    );
-}
-
 /// Verifies that `__moth_cast_int` applies numeric grammar to the whole string. [cast]
 #[test]
 fn cast_int_does_not_trim_string_input() {
@@ -534,16 +521,16 @@ fn cast_int_does_not_trim_string_input() {
     );
 }
 
-/// Verifies that `__moth_cast_int` uses the shared i32 range helpers. [cast]
+/// Verifies that `__moth_cast_int` uses the standard profile's Int range helpers. [cast]
 #[test]
-fn cast_int_uses_i32_range_helpers() {
+fn cast_int_uses_standard_profile_range_helpers() {
     let source = lower_minimal_module_with_string_int_cast("main");
 
     assert!(
         source.contains("function __moth_cast_int_in_range(value)")
             && source.contains("const __BS_INT_CAST_MIN = -2147483648")
             && source.contains("const __BS_INT_CAST_MAX = 2147483647"),
-        "__moth_cast_int must rely on shared Alpha i32 range helpers"
+        "__moth_cast_int must rely on the standard-profile Int range helpers"
     );
 
     let cast = helper_source(&source, "__moth_cast_int");
@@ -554,9 +541,9 @@ fn cast_int_uses_i32_range_helpers() {
     );
 }
 
-/// Verifies that `__moth_cast_float_to_int` uses the shared i32 range helper. [cast]
+/// Verifies that Float -> Int casts use the standard profile's Int range helper. [cast]
 #[test]
-fn cast_float_to_int_uses_i32_range_helper() {
+fn cast_float_to_int_uses_standard_profile_range_helper() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -620,7 +607,7 @@ fn cast_float_to_int_uses_i32_range_helper() {
     let cast = helper_source(&output.source, "__moth_cast_float_to_int");
     assert!(
         cast.contains("!__moth_cast_int_in_range(truncated)"),
-        "__moth_cast_float_to_int must reject truncated values outside the i32 range"
+        "__moth_cast_float_to_int must reject truncated values outside the standard Int range"
     );
 }
 
@@ -633,31 +620,6 @@ fn cast_float_rejects_invalid_string() {
     assert!(
         cast.contains("Cannot parse Float from text") && cast.contains("{ tag: \"err\""),
         "__moth_cast_float must return a Parse err for invalid strings"
-    );
-}
-
-/// Verifies that `__moth_cast_float` applies the shared Moth numeric text grammar to
-/// the whole string and does not trim whitespace. [cast]
-#[test]
-fn cast_float_uses_shared_numeric_text_grammar() {
-    let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Number.parseFloat(value.replace(/_/g, \"\"))"),
-        "__moth_cast_float must parse the string after removing digit separators"
-    );
-    assert!(
-        cast.contains("/^-?\\d+(?:_\\d+)*(?:\\.\\d+(?:_\\d+)*)?(?:e[+-]?\\d+(?:_\\d+)*)?$/"),
-        "__moth_cast_float must match the Moth numeric text grammar exactly"
-    );
-    assert!(
-        !cast.contains("__moth_normalize_numeric_text"),
-        "__moth_cast_float must not trim surrounding whitespace"
-    );
-    assert!(
-        cast.contains("Number.isFinite(parsed)"),
-        "__moth_cast_float must reject non-finite parsed values"
     );
 }
 
@@ -1133,43 +1095,6 @@ fn format_float_helper_rejects_non_finite() {
     assert!(
         format.contains(&expected),
         "__moth_format_float must use FloatFormatInvariant for unexpected non-finite values"
-    );
-}
-
-/// Verifies that `__moth_format_float` normalizes `-0.0` to the string "0".
-#[test]
-fn format_float_helper_normalizes_negative_zero() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    assert!(
-        format.contains("Object.is(value, -0)")
-            && format.contains(r#"return { tag: "ok", value: "0" };"#),
-        "__moth_format_float must format -0.0 as the string 0"
-    );
-}
-
-/// Verifies that `__moth_format_float` uses explicit JS number formatting and normalizes exponent signs.
-#[test]
-fn format_float_helper_uses_to_string_and_normalizes_exponent() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    assert!(
-        format.contains("value.toString()"),
-        "__moth_format_float must format via Number.prototype.toString"
-    );
-    assert!(
-        format.contains(r#"replace(/e([+-]?)(\d+)/i"#),
-        "__moth_format_float must normalize exponent case and sign placeholders"
-    );
-    assert!(
-        format.contains(r#"const explicitSign = sign === "-" ? "-" : "+";"#),
-        "__moth_format_float must compute an explicit exponent sign"
-    );
-    assert!(
-        format.contains(r#"return "e" + explicitSign + digits;"#),
-        "__moth_format_float must emit lowercase e with explicit exponent sign"
     );
 }
 

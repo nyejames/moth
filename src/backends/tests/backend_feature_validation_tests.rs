@@ -20,6 +20,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
@@ -170,6 +171,8 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
             reachability: &reachability,
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -216,6 +219,8 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
             reachability: &reachability,
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -303,6 +308,8 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
             reachability: &reachability,
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -527,6 +534,8 @@ fn backend_feature_validation_ignores_unreachable_fixed_width_scalars() {
                 reachability: &reachability,
                 target,
                 type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -557,6 +566,8 @@ fn backend_gate_accepts_default_and_folded_assertion_messages() {
                     reachability: &reachability,
                     target,
                     type_environment: Some(&type_environment),
+                    numeric_profile: NumericProfile::STANDARD,
+                    external_package_registry: None,
                 },
                 &mut string_table,
             );
@@ -581,6 +592,8 @@ fn wasm_gate_rejects_reachable_runtime_assertion_messages() {
             reachability: &test_reachability(&module),
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     ) {
@@ -612,6 +625,8 @@ fn js_gate_accepts_reachable_runtime_assertion_messages() {
             reachability: &test_reachability(&module),
             target: BackendTarget::Js,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -664,6 +679,8 @@ fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
             reachability: &reachability,
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -703,6 +720,8 @@ fn feature_validation_diagnostic(
             reachability: &reachability,
             target,
             type_environment: Some(type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
         },
         string_table,
     )

@@ -22,6 +22,7 @@ use crate::builder_surface::config_schema::{
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -90,26 +91,30 @@ const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 #[derive(Debug)]
 pub struct HtmlProjectBuilder {
     include_test_packages: bool,
+    numeric_profile: NumericProfile,
 }
 
 impl HtmlProjectBuilder {
-    /// Constructs the HTML project builder.
+    /// Constructs the production HTML project builder with the standard numeric profile.
     ///
-    /// WHAT: initializes a stateless builder implementation.
-    /// WHY: builder policy is encoded in methods rather than runtime state.
+    /// WHAT: selects `Int32` and `Float64` for ordinary HTML builds.
+    /// WHY: production numeric types have one default, while the integration harness supplies
+    ///      an explicit profile through its dedicated constructor.
     pub fn new() -> Self {
         Self {
             include_test_packages: false,
+            numeric_profile: NumericProfile::STANDARD,
         }
     }
 
-    /// Constructs a builder that includes integration-test external packages.
+    /// Constructs an HTML builder for an integration case and its selected numeric profile.
     ///
-    /// WHAT: used by the integration test runner so test fixtures can bind
-    ///       `@test/pkg-a` and `@test/pkg-b` symbols.
-    pub fn for_integration_tests() -> Self {
+    /// WHAT: enables integration-test packages and reports the case profile to the build system.
+    /// WHY: every compiler stage must type numeric values under the profile declared by the case.
+    pub fn for_integration_tests(numeric_profile: NumericProfile) -> Self {
         Self {
             include_test_packages: true,
+            numeric_profile,
         }
     }
 }
@@ -117,6 +122,10 @@ impl HtmlProjectBuilder {
 impl BackendBuilder for HtmlProjectBuilder {
     fn builder_kind(&self) -> BuilderKind {
         BuilderKind::Html
+    }
+
+    fn numeric_profile(&self) -> NumericProfile {
+        self.numeric_profile
     }
 
     fn build_backend(
@@ -534,6 +543,10 @@ impl HtmlProjectBuilder {
                 reachability,
                 target: backend_target,
                 type_environment: Some(&module.executable.type_environment),
+                numeric_profile,
+                external_package_registry: Some(
+                    module.link_facts.external_package_registry.as_ref(),
+                ),
             },
             string_table,
         )
@@ -572,6 +585,10 @@ impl HtmlProjectBuilder {
                     reachability: linked.reachability,
                     target: backend_target,
                     type_environment: Some(&linked.module.executable.type_environment),
+                    numeric_profile,
+                    external_package_registry: Some(
+                        linked.module.link_facts.external_package_registry.as_ref(),
+                    ),
                 },
                 string_table,
             )

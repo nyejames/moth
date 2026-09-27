@@ -251,6 +251,7 @@ pub(crate) fn compile_html_module_js(
         input.external_package_registry.as_ref(),
         &route.logical_html_path,
         input.build_profile.is_release(),
+        input.numeric_profile,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 

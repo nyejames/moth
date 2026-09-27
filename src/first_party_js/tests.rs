@@ -28,6 +28,12 @@ fn inventory_includes_runtime_helpers_and_inline_templates() {
     assert!(
         labels
             .iter()
+            .any(|label| label == "core-js-helper:__moth_random_int_bigint"),
+        "BigInt random helper must be inventoried: {labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
             .any(|label| label.contains("inline-js:@core/math")),
         "math inline expressions must be inventoried: {labels:?}"
     );

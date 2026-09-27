@@ -13123,3 +13123,59 @@ path = "generic_fixed_literal_argument_out_of_range_rejected"
 tags = ["integration", "language", "numeric", "diagnostics"]
 contract = "language.numbers.generic_literal_receiving_boundary"
 role = "boundary"
+
+[[case]]
+id = "numeric_profile_int64_arithmetic"
+path = "numeric_profile_int64_arithmetic"
+tags = ["integration", "numeric", "runtime", "int64", "float32"]
+contract = "language.numeric.int64_profile_runtime_arithmetic"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_float32_runtime"
+path = "numeric_profile_float32_runtime"
+tags = ["integration", "numeric", "runtime", "float32"]
+contract = "language.numeric.float32_profile_runtime_arithmetic_and_formatting"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int64_float32_conversion"
+path = "numeric_profile_int64_float32_conversion"
+tags = ["integration", "numeric", "runtime", "casts", "int64", "float32"]
+contract = "language.numeric.int64_to_float32_direct_rounding"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_mixed_float_comparison"
+path = "numeric_profile_mixed_float_comparison"
+tags = ["integration", "numeric", "runtime", "comparison", "float32"]
+contract = "language.numeric.float32_mixed_int_comparison_rounding"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int64_runtime_surfaces"
+path = "numeric_profile_int64_runtime_surfaces"
+tags = ["integration", "numeric", "runtime", "int64", "collections", "casts", "maps"]
+contract = "language.numeric.int64_profile_runtime_surfaces"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int32_float32_runtime"
+path = "numeric_profile_int32_float32_runtime"
+tags = ["integration", "numeric", "runtime", "casts", "int32", "float32"]
+contract = "language.numeric.int32_float32_profile_runtime_and_tie_formatting"
+role = "primary"
+
+[[case]]
+id = "external_numeric_profile_int_boundary"
+path = "external_numeric_profile_int_boundary"
+tags = ["integration", "numeric", "external", "diagnostics", "int64"]
+contract = "backend.html.external_numeric_profile_boundary_rejected"
+role = "backend"
+
+[[case]]
+id = "external_numeric_profile_error_code"
+path = "external_numeric_profile_error_code"
+tags = ["integration", "numeric", "external", "runtime", "int64"]
+contract = "language.numeric.external_error_code_uses_int64_carrier"
+role = "backend"

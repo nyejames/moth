@@ -6,6 +6,8 @@
 
 use super::CoreJsHelper;
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
     CoreJsHelper {
@@ -50,6 +52,32 @@ pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_core_text_helpers(&mut self) {
-        self.emit_referenced_core_helpers(CORE_TEXT_JS_HELPERS);
+        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
+            .expect("Int always has a JavaScript numeric carrier");
+
+        for helper in CORE_TEXT_JS_HELPERS {
+            if !self.referenced_external_runtime_function(helper.name) {
+                continue;
+            }
+
+            if helper.name == "__moth_text_length" {
+                match carrier {
+                    JsNumericCarrier::ExactInteger { .. } => {
+                        self.emit_javascript_source(helper.source);
+                    }
+                    JsNumericCarrier::BigInteger { .. } => {
+                        let source = helper
+                            .source
+                            .replace("return count;", "return BigInt(count);");
+                        self.emit_javascript_source(&source);
+                    }
+                    JsNumericCarrier::BinaryFloat { .. } => {
+                        unreachable!("Int carrier cannot be a binary float")
+                    }
+                }
+            } else {
+                self.emit_javascript_source(helper.source);
+            }
+        }
     }
 }

@@ -1074,6 +1074,50 @@ fn fixed_integer_comparison_keeps_mixed_operand_types() {
 }
 
 #[test]
+fn mixed_int_float_comparison_converts_int_operand_to_float() {
+    let float_type = builtin_type_ids::FLOAT;
+
+    let (int_on_left, numeric_op) = lower_binary_with_types(
+        Operator::LessThan,
+        builtin_type_ids::INT,
+        float_type,
+        builtin_type_ids::BOOL,
+    );
+    assert!(numeric_op.is_none());
+    let HirExpressionKind::BinOp {
+        op: HirBinOp::Lt,
+        left,
+        right,
+    } = int_on_left.kind
+    else {
+        panic!("mixed Int/Float comparison should remain a BinOp");
+    };
+    assert_eq!(
+        numeric_conversion(&left),
+        Some((NumericScalar::Int, NumericScalar::Float))
+    );
+    assert_eq!(left.ty, float_type);
+    assert!(numeric_conversion(&right).is_none());
+
+    let (int_on_right, numeric_op) = lower_binary_with_types(
+        Operator::GreaterThan,
+        float_type,
+        builtin_type_ids::INT,
+        builtin_type_ids::BOOL,
+    );
+    assert!(numeric_op.is_none());
+    let HirExpressionKind::BinOp { left, right, .. } = int_on_right.kind else {
+        panic!("mixed Float/Int comparison should remain a BinOp");
+    };
+    assert!(numeric_conversion(&left).is_none());
+    assert_eq!(
+        numeric_conversion(&right),
+        Some((NumericScalar::Int, NumericScalar::Float))
+    );
+    assert_eq!(right.ty, float_type);
+}
+
+#[test]
 fn unsupported_arithmetic_pair_is_an_internal_lowering_error() {
     let u8_type = fixed_type(FixedScalar::U8);
     let error = try_lower_binary_with_types(

@@ -5,11 +5,14 @@
 //! WHY: the JS backend calls wrappers by stable names; wrappers adapt raw JS return shapes
 //!      to Moth's internal conventions.
 
+use crate::backends::js::JsNumericCarrier;
 use crate::backends::js::{
     builtin_error_code_js_field_name, builtin_error_message_js_field_name,
     external_module_export_glue_function_name,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
 use std::collections::HashMap;
@@ -19,6 +22,7 @@ pub(super) fn generate_glue_module_source(
     exports: &[ReferencedExport],
     package_asset_paths: &HashMap<ExternalPackageId, String>,
     release_build: bool,
+    numeric_profile: NumericProfile,
 ) -> Result<String, CompilerError> {
     let mut source = String::new();
 
@@ -65,6 +69,7 @@ pub(super) fn generate_glue_module_source(
                 &wrapper_name,
                 &export.raw_import_name,
                 release_build,
+                numeric_profile,
             ));
         } else {
             source.push_str(&generate_infallible_wrapper(
@@ -97,16 +102,46 @@ pub(super) fn generate_fallible_wrapper(
     wrapper_name: &str,
     export_name: &str,
     release_build: bool,
+    numeric_profile: NumericProfile,
 ) -> String {
+    let int_carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, numeric_profile)
+        .expect("Int always has a JavaScript numeric carrier");
+    let zero_code = JsNumericCarrier::int_literal(0, numeric_profile)
+        .expect("zero always fits the Int profile");
+    let returned_error_code = match int_carrier {
+        JsNumericCarrier::ExactInteger { .. } if numeric_profile == NumericProfile::STANDARD => {
+            "typeof error.code === \"number\" ? error.code : 0".to_owned()
+        }
+        JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. } => {
+            let (minimum, maximum) = int_carrier
+                .integer_bounds_js()
+                .expect("Int carrier always has integer bounds");
+            let value = match int_carrier {
+                JsNumericCarrier::ExactInteger { .. } => "error.code",
+                JsNumericCarrier::BigInteger { .. } => "BigInt(error.code)",
+                JsNumericCarrier::BinaryFloat { .. } => {
+                    unreachable!("Int carrier cannot be a binary float")
+                }
+            };
+            format!(
+                "Number.isSafeInteger(error.code) && error.code >= {minimum} && error.code <= {maximum} ? {value} : {zero_code}"
+            )
+        }
+        JsNumericCarrier::BinaryFloat { .. } => {
+            unreachable!("Int carrier cannot be a binary float")
+        }
+    };
+
     let invalid_error = internal_error_object_source(
         "\"Invalid result wrapper from external JavaScript function\"",
-        "0",
+        &zero_code,
         release_build,
     );
-    let catch_error = internal_error_object_source("String(e.message || e)", "0", release_build);
+    let catch_error =
+        internal_error_object_source("String(e.message || e)", &zero_code, release_build);
     let returned_error = internal_error_object_source(
         "error.message || \"Unknown error\"",
-        "typeof error.code === \"number\" ? error.code : 0",
+        &returned_error_code,
         release_build,
     );
 

@@ -147,6 +147,7 @@ pub enum UnsupportedBackendFeatureReason {
     ReactiveExternalCallSink,
     CrossModuleCalls,
     RuntimeAssertionMessages,
+    ExternalNumericProfileBoundary,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -164,6 +165,7 @@ impl UnsupportedBackendFeatureReason {
             Self::ReactiveExternalCallSink => "reactive external-call sink",
             Self::CrossModuleCalls => "cross-module calls",
             Self::RuntimeAssertionMessages => "runtime assertion messages",
+            Self::ExternalNumericProfileBoundary => "external numeric-profile boundary",
         }
     }
 }

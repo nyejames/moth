@@ -9,6 +9,9 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -33,6 +36,7 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
 
     let cases = load_canonical_case_specs(&case_root, None)
         .expect("explicit acceptance-only fixture should be accepted");
+    assert_eq!(cases[0].numeric_profile, NumericProfile::STANDARD);
     let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
         panic!("case should have a success expectation");
     };
@@ -40,6 +44,59 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
         expectation.success_contract,
         Some(SuccessContract::AcceptanceOnly)
     );
+}
+
+#[test]
+fn numeric_profile_key_parses_exact_spelling_and_rejects_unknown_values() {
+    let (_root, case_root) = write_fixture(
+        "numeric_profile",
+        "numeric_profile = \"Int64/Float32\"\n\
+         [backends.html]\n\
+         mode = \"success\"\n\
+         warnings = \"forbid\"\n\
+         rendered_output_contains = [\"ok\"]\n",
+    );
+
+    let cases = load_canonical_case_specs(&case_root, None)
+        .expect("Int64/Float32 numeric profile spelling should be accepted");
+    assert_eq!(
+        cases[0].numeric_profile,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        }
+    );
+
+    fs::write(
+        case_root.join(EXPECT_FILE_NAME),
+        "numeric_profile = \"Int32/float64\"\n\
+         [backends.html]\n\
+         mode = \"success\"\n\
+         warnings = \"forbid\"\n\
+         rendered_output_contains = [\"ok\"]\n",
+    )
+    .expect("should replace the expectation file");
+
+    let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
+        panic!("unknown numeric profile spelling should be rejected");
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    for spelling in [
+        "Int32/Float32",
+        "Int32/Float64",
+        "Int64/Float32",
+        "Int64/Float64",
+    ] {
+        assert!(
+            error.message.contains(spelling),
+            "accepted spelling {spelling:?} missing from error: {error}"
+        );
+    }
 }
 
 #[test]

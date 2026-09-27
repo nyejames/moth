@@ -4,12 +4,13 @@
 //! control-flow edges explicit.
 
 use crate::backends::js::JsEmitter;
-use crate::backends::js::js_expr::{escape_js_string, js_cast_helper_for_policy};
+use crate::backends::js::js_expr::{escape_js_string, js_cast_expression_for_policy};
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
@@ -53,17 +54,18 @@ impl<'hir> JsEmitter<'hir> {
                 result,
             } => {
                 let source_expr = self.lower_expr(source)?;
-                let helper = js_cast_helper_for_policy(*policy)?.ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "JavaScript backend: CastOp policy {policy:?} has no runtime helper",
-                    ))
-                })?;
-                let call = format!("{helper}({source_expr})");
+                let cast_expression = js_cast_expression_for_policy(
+                    *policy,
+                    &source_expr,
+                    self.config.numeric_profile,
+                )?;
                 if let Some(result_local) = result {
                     let result_name = self.local_name(*result_local)?;
-                    self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
+                    self.emit_line(&format!(
+                        "__moth_assign_value({result_name}, {cast_expression});"
+                    ));
                 } else {
-                    self.emit_line(&format!("{call};"));
+                    self.emit_line(&format!("{cast_expression};"));
                 }
             }
 
@@ -86,11 +88,9 @@ impl<'hir> JsEmitter<'hir> {
                 operands,
                 result,
             } => {
-                // WHAT: dispatch a checked numeric operation to the JS runtime helper that mirrors
-                //       AST const-eval semantics, then either wrap the carrier for trap mode or
-                //       assign the carrier directly for builtin-Error recovery mode.
-                // WHY: numeric operations are language builtins with explicit failure modes; the
-                //      backend must map them to the helpers that enforce i32/finite-f64 semantics.
+                // WHAT: dispatch a checked operation through the helper family selected from its
+                //       semantic result domain.
+                // WHY: the profile's carrier determines both JS arithmetic and domain bounds.
                 self.emit_numeric_op_statement(*op, *failure_mode, operands, *result)?;
             }
 
@@ -113,12 +113,8 @@ impl<'hir> JsEmitter<'hir> {
                 failure_mode,
                 result,
             } => {
-                // WHAT: dispatch a finite-Float boundary check to the JS runtime helper, then either
-                //       wrap the carrier for trap mode or assign the carrier directly for
-                //       builtin-Error recovery mode.
-                // WHY: Moth `Float` is finite `f64`; values from external/backend boundaries
-                //      must be validated before use, and the backend must expose that check through
-                //      the same carrier contract as other checked numeric operations.
+                // WHAT: validates a finite Float at its selected profile precision.
+                // WHY: external values enter the same finite, rounded carrier as every other Float.
                 self.emit_validate_float_statement(*failure_mode, source, *result)?;
             }
 
@@ -212,16 +208,12 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Lower a `HirStatementKind::NumericOp` into the appropriate checked runtime helper call.
+    /// Lower a checked HIR numeric operation through its profile-selected carrier family.
     ///
-    /// WHAT: dispatches `Int` and `Float` operator+domain pairs to their `__moth_int_*` /
-    ///       `__moth_float_*` helpers, validates operand arity against the HIR contract, and emits
-    ///       the result assignment. Trap mode wraps the helper's fallible carrier in
-    ///       `__moth_numeric_trap` so the result local receives only the scalar success value;
-    ///       ReturnError mode assigns the carrier directly.
-    /// WHY: numeric operations are compiler-owned builtins with explicit failure modes; the backend
-    ///      must map them to the JS helpers that enforce Alpha `Int = i32` and `Float = finite f64`
-    ///      semantics.
+    /// WHAT: validates HIR arity, lowers operands, selects the operation helper and appends
+    ///       semantic integer bounds when that family uses an integer carrier.
+    /// WHY: one helper family covers all domains with the same JS representation without losing
+    ///      each operation result's range.
     fn emit_numeric_op_statement(
         &mut self,
         op: HirNumericOp,
@@ -239,17 +231,19 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         // Lower each HIR operand to a JS expression.
-        let lowered_args = match operands {
+        let mut lowered_args = match operands {
             HirNumericOperands::Unary { operand } => vec![self.lower_expr(operand)?],
             HirNumericOperands::Binary { left, right } => {
                 vec![self.lower_expr(left)?, self.lower_expr(right)?]
             }
         };
 
-        // Select the JS helper name for this operation.
-        let helper_name = js_numeric_helper_for_op(op)?;
+        let (helper_name, bounds) = js_numeric_helper_for_op(op, self.config.numeric_profile)?;
+        if let Some((min, max)) = bounds {
+            lowered_args.push(min);
+            lowered_args.push(max);
+        }
 
-        // Assemble the helper call.
         let helper_call = format!("{helper_name}({})", lowered_args.join(", "));
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
@@ -272,13 +266,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::ValidateFloat` into the finite-Float validation helper call.
-    ///
-    /// WHAT: emits `__moth_float_validate(source)` and assigns either the scalar finite `Float`
-    ///       (trap mode) or the fallible carrier (return-error mode) to the result local.
-    /// WHY: Float boundary validation shares the same result-local carrier contract as
-    ///      `NumericOp`; trap mode extracts the success value or throws, while return-error mode
-    ///      keeps the carrier for later `FallibleBranch` lowering.
+    /// Lower a `HirStatementKind::ValidateFloat` into the profile-aware finite-Float helper call.
     fn emit_validate_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -832,34 +820,69 @@ impl<'hir> JsEmitter<'hir> {
     }
 }
 
-/// Returns the JS runtime helper name for a checked numeric HIR operation.
-///
-/// WHAT: maps each `Int`/`Float` operator+domain pair to the `__moth_int_*` or `__moth_float_*`
-///       helper emitted by `emit_runtime_numeric_helpers`. Fixed domains and invalid pairs are
-///       unreachable: target validation rejects reachable fixed values and HIR validation rejects
-///       invalid operator/domain combinations.
-/// WHY: keeps the helper name decision in one place so statement lowering and runtime emission
-///      cannot drift.
-fn js_numeric_helper_for_op(op: HirNumericOp) -> Result<&'static str, CompilerError> {
-    let HirNumericOp { operator, domain } = op;
+/// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
+fn js_numeric_helper_for_op(
+    op: HirNumericOp,
+    numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+) -> Result<(String, Option<(String, String)>), CompilerError> {
+    let carrier = JsNumericCarrier::for_scalar(op.domain, numeric_profile).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "JS backend has no numeric carrier for {:?}",
+            op.domain
+        ))
+    })?;
 
-    match (operator, domain) {
-        (NumericOperator::Add, NumericScalar::Int) => Ok("__moth_int_add"),
-        (NumericOperator::Subtract, NumericScalar::Int) => Ok("__moth_int_sub"),
-        (NumericOperator::Multiply, NumericScalar::Int) => Ok("__moth_int_mul"),
-        (NumericOperator::IntegerDivide, NumericScalar::Int) => Ok("__moth_int_div"),
-        (NumericOperator::Remainder, NumericScalar::Int) => Ok("__moth_int_mod"),
-        (NumericOperator::Power, NumericScalar::Int) => Ok("__moth_int_pow"),
-        (NumericOperator::Negate, NumericScalar::Int) => Ok("__moth_int_neg"),
-        (NumericOperator::Add, NumericScalar::Float) => Ok("__moth_float_add"),
-        (NumericOperator::Subtract, NumericScalar::Float) => Ok("__moth_float_sub"),
-        (NumericOperator::Multiply, NumericScalar::Float) => Ok("__moth_float_mul"),
-        (NumericOperator::Divide, NumericScalar::Float) => Ok("__moth_float_div"),
-        (NumericOperator::Remainder, NumericScalar::Float) => Ok("__moth_float_mod"),
-        (NumericOperator::Power, NumericScalar::Float) => Ok("__moth_float_pow"),
-        (NumericOperator::Negate, NumericScalar::Float) => Ok("__moth_float_neg"),
-        _ => Err(CompilerError::compiler_error(format!(
-            "JS backend received unreachable numeric operation {op}"
-        ))),
-    }
+    let operation = match (carrier, op.operator) {
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Add,
+        ) => "add",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Subtract,
+        ) => "sub",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Multiply,
+        ) => "mul",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::IntegerDivide,
+        ) => "div",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Remainder,
+        ) => "mod",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Power,
+        ) => "pow",
+        (
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. },
+            NumericOperator::Negate,
+        ) => "neg",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Add) => "add",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Subtract) => "sub",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Multiply) => "mul",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Divide) => "div",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Remainder) => "mod",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Power) => "pow",
+        (JsNumericCarrier::BinaryFloat { .. }, NumericOperator::Negate) => "neg",
+        _ => {
+            return Err(CompilerError::compiler_error(format!(
+                "JS backend received unreachable numeric operation {op}"
+            )));
+        }
+    };
+    let family = carrier.helper_family().ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "JS backend received unreachable numeric operation domain {:?}",
+            op.domain
+        ))
+    })?;
+
+    Ok((
+        format!("__moth_{family}_{operation}"),
+        carrier.integer_bounds_js(),
+    ))
 }

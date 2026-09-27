@@ -10,6 +10,7 @@ mod js_expr;
 mod js_function;
 mod js_statement;
 mod lookups;
+mod numeric_carrier;
 mod output;
 pub(crate) mod package_bindings;
 mod reachability;
@@ -25,6 +26,7 @@ mod tests;
 
 pub(crate) use emitter::JsEmitter;
 pub use emitter::lower_hir_to_js;
+pub(crate) use numeric_carrier::JsNumericCarrier;
 pub(crate) use runtime::collection_javascript_helpers;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
 
@@ -72,8 +74,9 @@ pub struct JsLoweringConfig {
 
     /// Compiler-owned numeric widths for this compilation boundary.
     ///
-    /// WHY: the backend's temporary numeric lowering gate must see the boundary profile, and
-    /// later fixed-numeric lowering reads its widths from here.
+    /// WHAT: controls the JS carrier and precision selected for profile `Int`/`Float` values.
+    /// WHY: literals, operations and casts must preserve the same frontend numeric contract;
+    ///      fixed-width value support remains a separate backend feature-validation decision.
     pub numeric_profile: NumericProfile,
 
     /// Automatically invoke the module start function.

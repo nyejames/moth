@@ -932,6 +932,7 @@ fn absence_test_case(expectation: SuccessExpectation) -> TestCaseSpec {
         tags: Vec::new(),
         contract: None,
         role: None,
+        numeric_profile: Default::default(),
         backend_id: BackendId::Html,
         entry_path: PathBuf::from("."),
         flags: Vec::new(),

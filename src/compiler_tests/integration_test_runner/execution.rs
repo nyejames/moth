@@ -7,12 +7,13 @@
 use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCaseSpec};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub(crate) fn execute_test_case(case: &TestCaseSpec) -> CaseExecutionResult {
-    let builder = backend_builder_for_case(case.backend_id);
+    let builder = backend_builder_for_case(case.backend_id, case.numeric_profile);
     let flags = case.flags.clone();
 
     // `build_project` takes a UTF-8 entry path. Converting lossily would hand the compiler a
@@ -88,10 +89,15 @@ pub(crate) fn panic_case_result(payload: Box<dyn Any + Send>) -> CaseExecutionRe
     }
 }
 
-fn backend_builder_for_case(_backend_id: BackendId) -> ProjectBuilder {
+fn backend_builder_for_case(
+    _backend_id: BackendId,
+    numeric_profile: NumericProfile,
+) -> ProjectBuilder {
     // This backend-builder seam is explicit even though both current backends
     // route through the HTML builder, so future non-HTML backends can slot in cleanly.
-    ProjectBuilder::new(Box::new(HtmlProjectBuilder::for_integration_tests()))
+    ProjectBuilder::new(Box::new(HtmlProjectBuilder::for_integration_tests(
+        numeric_profile,
+    )))
 }
 
 fn format_panic_payload(payload: Box<dyn Any + Send>) -> String {

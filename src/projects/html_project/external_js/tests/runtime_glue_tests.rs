@@ -6,6 +6,7 @@ use super::runtime_modules::emit_build_runtime_modules;
 use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
 use super::*;
 use crate::build_system::build::FileKind;
+use crate::compiler_frontend::datatypes::numeric_profile::{IntWidth, NumericProfile};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
@@ -19,6 +20,7 @@ use crate::projects::html_project::tests::test_support::{
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[test]
 fn relative_url_path_same_directory() {
@@ -71,6 +73,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
         &registry,
         &PathBuf::from("index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("empty glue generation should succeed");
 
@@ -107,6 +110,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
         &registry,
         &PathBuf::from("index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("glue generation should succeed");
 
@@ -141,6 +145,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
         &registry,
         &PathBuf::from("index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("glue generation should succeed");
 
@@ -195,6 +200,7 @@ fn generate_module_glue_nested_html_output_path() {
         &registry,
         &PathBuf::from("a/b/index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("glue generation should succeed");
 
@@ -232,6 +238,7 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
         &registry,
         &PathBuf::from("index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("glue generation should succeed");
 
@@ -273,6 +280,7 @@ fn generate_module_glue_fallible_wrapper_validates_result_shape() {
         &registry,
         &PathBuf::from("index.html"),
         false,
+        NumericProfile::STANDARD,
     )
     .expect("fallible glue generation should succeed");
 
@@ -287,11 +295,21 @@ fn generate_module_glue_fallible_wrapper_validates_result_shape() {
 
 #[test]
 fn fallible_wrapper_handles_invalid_shape_differently_for_debug_and_release() {
-    let debug_source = generate_fallible_wrapper("__moth_glue_fn1", "__moth_external_fn1", false);
+    let debug_source = generate_fallible_wrapper(
+        "__moth_glue_fn1",
+        "__moth_external_fn1",
+        false,
+        NumericProfile::STANDARD,
+    );
     assert!(debug_source.contains("throw new Error("));
     assert!(debug_source.contains("Invalid result wrapper from external function"));
 
-    let release_source = generate_fallible_wrapper("__moth_glue_fn1", "__moth_external_fn1", true);
+    let release_source = generate_fallible_wrapper(
+        "__moth_glue_fn1",
+        "__moth_external_fn1",
+        true,
+        NumericProfile::STANDARD,
+    );
     assert!(!release_source.contains("throw new Error("));
     assert!(
         release_source
@@ -302,7 +320,12 @@ fn fallible_wrapper_handles_invalid_shape_differently_for_debug_and_release() {
 
 #[test]
 fn fallible_wrapper_converts_external_errors_to_internal_error_fields() {
-    let debug_source = generate_fallible_wrapper("__moth_glue_fn1", "__moth_external_fn1", false);
+    let debug_source = generate_fallible_wrapper(
+        "__moth_glue_fn1",
+        "__moth_external_fn1",
+        false,
+        NumericProfile::STANDARD,
+    );
 
     assert!(
         debug_source.contains("moth_field_6d657373616765: String(e.message || e)")
@@ -314,6 +337,53 @@ fn fallible_wrapper_converts_external_errors_to_internal_error_fields() {
             && debug_source
                 .contains("moth_field_636f6465: typeof error.code === \"number\" ? error.code : 0"),
         "external mothErr values must be translated into canonical Moth Error values"
+    );
+}
+
+#[test]
+fn int64_fallible_wrapper_executes_with_bigint_error_code() {
+    let profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        ..NumericProfile::STANDARD
+    };
+    let wrapper = generate_fallible_wrapper("wrapExternal", "failExternal", false, profile);
+    let code_field = crate::backends::js::builtin_error_code_js_field_name(false);
+    let code_field = format!("{code_field:?}");
+    let script = format!(
+        r#"
+import assert from "node:assert/strict";
+let suppliedCode;
+let shouldThrow = false;
+function failExternal() {{
+    if (shouldThrow) throw new Error("thrown failure");
+    return {{ ok: false, error: {{ message: "failure", code: suppliedCode }} }};
+}}
+{wrapper}
+const codeField = {code_field};
+suppliedCode = 500;
+let result = wrapExternal();
+assert.equal(result.tag, "err");
+assert.equal(typeof result.value[codeField], "bigint");
+assert.equal(result.value[codeField] === 500n, true);
+for (const invalidCode of ["500", Number.MAX_SAFE_INTEGER + 1, undefined]) {{
+    suppliedCode = invalidCode;
+    result = wrapExternal();
+    assert.equal(result.value[codeField], 0n);
+}}
+shouldThrow = true;
+result = wrapExternal();
+assert.equal(result.value[codeField], 0n);
+"#
+    );
+
+    let output = Command::new("node")
+        .args(["--input-type=module", "--eval", &script])
+        .output()
+        .expect("Node must be available to execute the generated external glue");
+    assert!(
+        output.status.success(),
+        "generated glue failed in Node:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

@@ -7,7 +7,9 @@
 use std::sync::LazyLock;
 
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 
 /// First renderable instant, `0000-01-01T00:00:00.000Z`.
 const RENDERABLE_MIN_MILLIS: i64 = -62_167_219_200_000;
@@ -15,11 +17,13 @@ const RENDERABLE_MIN_MILLIS: i64 = -62_167_219_200_000;
 const RENDERABLE_MAX_MILLIS: i64 = 253_402_300_799_999;
 
 /// Formats the canonical `__moth_error_result(message, code)` failure lane for one error code.
-fn error_result_source(error: BuiltinErrorCode) -> String {
+fn error_result_source(error: BuiltinErrorCode, profile: NumericProfile) -> String {
+    let code = JsNumericCarrier::int_literal(error.as_i32() as i64, profile)
+        .expect("time error code always fits the Int numeric profile");
     format!(
         "__moth_error_result(\"{}\", {})",
         error.default_message(),
-        error.as_i32()
+        code
     )
 }
 
@@ -31,9 +35,9 @@ fn error_result_source(error: BuiltinErrorCode) -> String {
 ///      matched against an anchored grammar and field ranges here, never delegated to the host.
 ///      Construction goes through `setUTCFullYear` because `Date.UTC` remaps years 0 to 99 into
 ///      the 1900s, which the four-digit grammar accepts.
-fn timestamp_from_iso_string_helper() -> String {
-    let invalid_text = error_result_source(BuiltinErrorCode::TimeInvalidTimestampText);
-    let out_of_range = error_result_source(BuiltinErrorCode::TimeTimestampOutOfRange);
+fn timestamp_from_iso_string_helper(profile: NumericProfile) -> String {
+    let invalid_text = error_result_source(BuiltinErrorCode::TimeInvalidTimestampText, profile);
+    let out_of_range = error_result_source(BuiltinErrorCode::TimeTimestampOutOfRange, profile);
 
     format!(
         r#"function __moth_time_timestamp_from_iso_string(text) {{
@@ -95,9 +99,8 @@ fn timestamp_from_iso_string_helper() -> String {
 ///      published format cannot express, then truncates a fractional millisecond toward zero.
 ///      The range test precedes truncation, so a fractional instant just outside the window is
 ///      rejected rather than pulled in.
-fn to_iso_string_helper() -> String {
-    let out_of_range = error_result_source(BuiltinErrorCode::TimeTimestampOutOfRange);
-
+fn to_iso_string_helper(profile: NumericProfile) -> String {
+    let out_of_range = error_result_source(BuiltinErrorCode::TimeTimestampOutOfRange, profile);
     format!(
         r#"function __moth_time_to_iso_string(millis) {{
     if (!(millis >= {RENDERABLE_MIN_MILLIS} && millis <= {RENDERABLE_MAX_MILLIS})) {{
@@ -111,38 +114,38 @@ fn to_iso_string_helper() -> String {
 /// One compiler-owned `@core/time` helper body.
 ///
 /// WHAT: pairs a helper name with its generated source.
-/// WHY: the source embeds compiler-owned error codes and range bounds, so it is built once
-///      rather than written as a literal.
+/// WHY: the source embeds carrier-correct error codes and range bounds.
 pub(crate) struct TimeJsHelper {
     pub name: &'static str,
     pub source: String,
 }
 
-/// The compiler-owned `@core/time` helper bodies, built once for the process.
-static CORE_TIME_JS_HELPERS: LazyLock<[TimeJsHelper; 2]> = LazyLock::new(|| {
+fn core_time_js_helpers_for_profile(profile: NumericProfile) -> [TimeJsHelper; 2] {
     [
         TimeJsHelper {
             name: "__moth_time_timestamp_from_iso_string",
-            source: timestamp_from_iso_string_helper(),
+            source: timestamp_from_iso_string_helper(profile),
         },
         TimeJsHelper {
             name: "__moth_time_to_iso_string",
-            source: to_iso_string_helper(),
+            source: to_iso_string_helper(profile),
         },
     ]
-});
+}
 
-/// Returns the `@core/time` helpers consumed by emission and first-party validation.
-///
-/// WHY: both consumers need the same generated source, and the numeric codes come from
-/// `BuiltinErrorCode` rather than a literal.
+/// Standard-profile helpers for first-party dependency inventory.
+static CORE_TIME_JS_HELPERS: LazyLock<[TimeJsHelper; 2]> =
+    LazyLock::new(|| core_time_js_helpers_for_profile(NumericProfile::STANDARD));
+
+/// Returns the standard-profile `@core/time` helpers inventoried for dependency validation.
 pub(crate) fn core_time_js_helpers() -> &'static [TimeJsHelper] {
-    &*CORE_TIME_JS_HELPERS
+    &CORE_TIME_JS_HELPERS[..]
 }
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_core_time_helpers(&mut self) {
-        for helper in core_time_js_helpers() {
+        let helpers = core_time_js_helpers_for_profile(self.config.numeric_profile);
+        for helper in helpers {
             if self.referenced_external_runtime_function(helper.name) {
                 self.emit_javascript_source(&helper.source);
             }

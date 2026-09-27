@@ -8,6 +8,7 @@
 
 use super::CoreJsHelper;
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 
 const IO_WRITE_JS: &str = "function __moth_io_write(writer, value) {\n    writer.call(console, __moth_value_to_string(value));\n}";
 
@@ -88,6 +89,9 @@ impl<'hir> JsEmitter<'hir> {
             return;
         }
 
-        self.emit_javascript_source(IO_INPUT_JS);
+        let error_code = JsNumericCarrier::int_literal(500, self.config.numeric_profile)
+            .expect("Core input error code always fits the Int numeric profile");
+        let source = IO_INPUT_JS.replace("__MOTH_ERROR_CODE_500__", &error_code);
+        self.emit_javascript_source(&source);
     }
 }

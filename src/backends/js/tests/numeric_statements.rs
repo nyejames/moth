@@ -4,6 +4,7 @@ use super::support::*;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpression;
@@ -262,6 +263,22 @@ fn lower_minimal_module_with_numeric_op(
     operands: HirNumericOperands,
     result_type: TypeId,
 ) -> String {
+    lower_minimal_module_with_numeric_op_for_profile(
+        op,
+        failure_mode,
+        operands,
+        result_type,
+        NumericProfile::STANDARD,
+    )
+}
+
+fn lower_minimal_module_with_numeric_op_for_profile(
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: HirNumericOperands,
+    result_type: TypeId,
+    numeric_profile: NumericProfile,
+) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -305,7 +322,7 @@ fn lower_minimal_module_with_numeric_op(
         &module,
         &BorrowCheckReport::default(),
         &string_table,
-        default_config(),
+        JsLoweringConfig::direct_js(false, numeric_profile),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -345,9 +362,9 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2, -2147483648, 2147483647)));"
         ),
-        "trap-mode Int addition must assign the scalar trap result"
+        "trap-mode Int addition must assign the checked Number carrier result"
     );
 }
 
@@ -368,7 +385,9 @@ fn return_error_mode_int_add_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_int_add(1, 2));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_int_add(1, 2, -2147483648, 2147483647));"
+        ),
         "ReturnError Int addition must assign the helper carrier directly"
     );
     assert!(
@@ -394,9 +413,9 @@ fn int_neg_lowers_to_unary_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1, -2147483648, 2147483647)));"
         ),
-        "trap-mode Int negation must lower to the unary helper"
+        "trap-mode Int negation must lower to the checked unary helper"
     );
 }
 
@@ -438,8 +457,8 @@ fn numeric_helpers_not_emitted_without_numeric_op() {
         "modules without NumericOp must not emit __moth_numeric_trap"
     );
     assert!(
-        !source.contains("const __BS_INT_MIN ="),
-        "modules without NumericOp must not emit numeric range constants"
+        !source.contains("function __moth_bigint_add("),
+        "modules without a BigInteger-domain operation must not emit that helper family"
     );
 }
 
@@ -472,8 +491,8 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
         "numeric modules must emit __moth_numeric_trap"
     );
     assert!(
-        source.contains("const __BS_INT_MIN ="),
-        "numeric modules must emit numeric range constants"
+        source.contains("__moth_int_add(1, 2, -2147483648, 2147483647)"),
+        "numeric operations must pass the semantic Int bounds to the shared helper"
     );
     assert!(
         !source.contains("function __moth_format_float("),
@@ -540,8 +559,8 @@ fn int_ok_helper_normalizes_negative_zero() {
     );
 }
 
-/// Verifies that the shared `__moth_int_check` helper enforces the i32 range and reports
-/// `IntOverflow` on failure.
+/// Verifies that the shared `__moth_int_check` helper enforces each operation's passed range and
+/// reports `IntOverflow` on failure.
 #[test]
 fn int_check_helper_contains_overflow_error() {
     let region = RegionId(0);
@@ -571,7 +590,7 @@ fn int_check_helper_contains_overflow_error() {
     );
 }
 
-/// Verifies that integer helpers delegate final i32 validation to `__moth_int_check`.
+/// Verifies that exact-Number integer helpers delegate range checking to `__moth_int_check`.
 #[test]
 fn int_helpers_delegate_to_int_check() {
     let region = RegionId(0);
@@ -590,12 +609,12 @@ fn int_helpers_delegate_to_int_check() {
     let add = helper_source(&source, "__moth_int_add");
 
     assert!(
-        add.contains("return __moth_int_check(result);"),
-        "__moth_int_add must delegate i32 validation to __moth_int_check"
+        add.contains("return __moth_int_check(a + b, min, max);"),
+        "__moth_int_add must pass its semantic result range to __moth_int_check"
     );
     assert!(
         !add.contains("Number.isInteger(result)"),
-        "__moth_int_add must not duplicate the i32 range check"
+        "__moth_int_add must not duplicate the integer carrier check"
     );
 }
 

@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
@@ -153,9 +154,8 @@ impl<'a> HirBuilder<'a> {
                     return Ok(LoweredExpression { prelude, value });
                 }
 
-                // Arithmetic always uses checked NumericOp effects. Comparisons and booleans
-                // retain their original operand types; ranges and template appends use dedicated
-                // HIR shapes.
+                // Arithmetic always uses checked NumericOp effects. Mixed Int/Float comparisons
+                // make their profile-precision conversion explicit before plain BinOp lowering.
                 if let Some((numeric_op, numeric_result_ty)) =
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
@@ -190,6 +190,9 @@ impl<'a> HirBuilder<'a> {
                     );
                 }
 
+                let (lowered_left, lowered_right) =
+                    self.lower_numeric_comparison_operands(op, lowered_left, lowered_right, span)?;
+
                 let hir_op = self.lower_bin_op(op, span)?;
                 let result_ty = self.infer_binop_result_type(hir_op);
 
@@ -206,6 +209,44 @@ impl<'a> HirBuilder<'a> {
                 );
                 Ok(LoweredExpression { prelude, value })
             }
+        }
+    }
+
+    /// WHAT: explicitly converts the `Int` side of a mixed comparison to the `Float` domain.
+    /// WHY: constant folding rounds that operand at profile Float precision before comparing.
+    fn lower_numeric_comparison_operands(
+        &mut self,
+        operator: &Operator,
+        left: HirExpression,
+        right: HirExpression,
+        span: &Option<SourceSpan>,
+    ) -> Result<(HirExpression, HirExpression), CompilerError> {
+        if !matches!(
+            operator,
+            Operator::Equality
+                | Operator::NotEqual
+                | Operator::GreaterThan
+                | Operator::GreaterThanOrEqual
+                | Operator::LessThan
+                | Operator::LessThanOrEqual
+        ) {
+            return Ok((left, right));
+        }
+
+        let left_domain = NumericScalar::from_type_id(left.ty, &self.type_environment);
+        let right_domain = NumericScalar::from_type_id(right.ty, &self.type_environment);
+        match (left_domain, right_domain) {
+            (Some(NumericScalar::Int), Some(NumericScalar::Float)) => {
+                let converted =
+                    self.convert_numeric_operand_to_domain(left, NumericScalar::Float, span)?;
+                Ok((converted, right))
+            }
+            (Some(NumericScalar::Float), Some(NumericScalar::Int)) => {
+                let converted =
+                    self.convert_numeric_operand_to_domain(right, NumericScalar::Float, span)?;
+                Ok((left, converted))
+            }
+            _ => Ok((left, right)),
         }
     }
 

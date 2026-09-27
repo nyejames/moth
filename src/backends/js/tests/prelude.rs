@@ -199,7 +199,7 @@ fn runtime_prelude_contains_cast_helpers() {
     );
     assert!(
         source.contains("function __moth_cast_int_in_range(value)"),
-        "prelude must contain the shared i32 range predicate"
+        "prelude must contain the profile-selected Int range predicate"
     );
     assert!(
         !source.contains("function __moth_normalize_numeric_text("),

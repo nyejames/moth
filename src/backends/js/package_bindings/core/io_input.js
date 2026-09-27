@@ -26,7 +26,7 @@ function __moth_io_input_release_all(handle) {
 }
 function __moth_io_input_new() {
     if (typeof window === "undefined" || typeof document === "undefined" || typeof AbortController === "undefined" || typeof window.PointerEvent === "undefined") {
-        const err = __moth_make_error("Browser input APIs unavailable", 500, null, null);
+        const err = __moth_make_error("Browser input APIs unavailable", __MOTH_ERROR_CODE_500__, null, null);
         return { tag: "err", value: err };
     }
     const handle = {

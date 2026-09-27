@@ -38,21 +38,28 @@ pub(crate) use collections::collection_javascript_helpers;
 
 use crate::backends::js::JsEmitter;
 
-/// Describes which checked numeric runtime helper families are required by emitted JS.
+/// Describes which checked numeric carrier families are required by emitted JS.
 ///
-/// WHY: arithmetic helpers, Float formatting, and Float boundary validation share the same
-/// `__moth_numeric_trap` carrier wrapper, but the helper bodies themselves should stay
-/// demand-driven so unrelated programs do not grow extra runtime surface.
+/// WHY: each family is shared by every semantic domain with its carrier, while unreachable carrier
+///      families stay out of the generated prelude.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NumericRuntimeHelperUsage {
-    pub(crate) numeric_ops: bool,
+    pub(crate) number_integer_ops: bool,
+    pub(crate) big_integer_ops: bool,
+    pub(crate) binary32_ops: bool,
+    pub(crate) binary64_ops: bool,
     pub(crate) format_float: bool,
     pub(crate) validate_float: bool,
 }
 
 impl NumericRuntimeHelperUsage {
     pub(crate) fn any(self) -> bool {
-        self.numeric_ops || self.format_float || self.validate_float
+        self.number_integer_ops
+            || self.big_integer_ops
+            || self.binary32_ops
+            || self.binary64_ops
+            || self.format_float
+            || self.validate_float
     }
 }
 
@@ -75,7 +82,7 @@ impl<'hir> JsEmitter<'hir> {
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — canonical String conversion, equality, and map-key handling
     ///   cast helpers            — numeric and string casting with Result-typed errors
-    ///   numeric helpers         — checked i32 and finite f64 arithmetic with trap/Error carriers
+    ///   numeric helpers         — checked Number/BigInt integer and profile-precision Float arithmetic
     ///   choice helpers          — structural equality for nominal choice carriers
     ///   reactivity helpers      — reactive source bindings, scheduler, and template-string values
     ///

@@ -1,74 +1,51 @@
 //! Checked numeric helpers for the JavaScript runtime.
 //!
-//! WHAT: implements Moth Alpha `Int = i32` and `Float = finite f64` arithmetic, Float
-//!       boundary validation, and Moth Float-to-String formatting for the HTML-JS backend.
-//!       Every helper returns an internal fallible carrier (`{ tag, value }`); trap-mode lowering
-//!       wraps that carrier in `__moth_numeric_trap` to extract the scalar success value or throw on
-//!       failure.
-//! WHY: HIR `NumericOp`, `FormatFloat`, and `ValidateFloat` expose explicit checked numeric and
-//!      Float-handling effects; the JS runtime must preserve those semantics without rediscovering
-//!      source operator shapes, failure modes, or formatting contexts.
+//! WHAT: emits carrier-parameterised integer and binary-float operation families, profile-aware
+//!       Float boundary checks and canonical Float-to-String formatting for HTML-JS.
+//! WHY: HIR numeric statements already own operator domains and failure modes; this runtime only
+//!      enforces the selected carrier's bounds and precision at each operation boundary.
+//!
+//! Every checked helper returns `{ tag, value }`. Trap-mode lowering extracts the success value or
+//! throws, while builtin `Error!` lowering keeps the carrier for normal HIR recovery.
 
 use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 
 impl<'hir> JsEmitter<'hir> {
-    /// Emits the checked numeric helper groups needed by reachable HIR statements.
-    ///
-    /// WHAT: emits arithmetic helpers for `NumericOp`, Float formatting for `FormatFloat`, and
-    ///      finite-Float boundary validation for `ValidateFloat`. The trap helper is shared by all
-    ///      three statement families and is emitted only once.
-    /// WHY: demand-driven emission keeps arithmetic-only bundles from growing a Float-formatting
-    ///      prelude while still giving every checked numeric statement one carrier contract.
+    /// Emits only numeric helper families used by reachable HIR and cast statements.
     pub(crate) fn emit_runtime_numeric_helpers(&mut self, usage: NumericRuntimeHelperUsage) {
-        if usage.numeric_ops {
-            self.emit_numeric_int_range_constants();
-        }
+        let float_precision =
+            JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
+                .and_then(JsNumericCarrier::float_precision)
+                .expect("Float always has a JavaScript binary-float carrier");
         self.emit_numeric_trap_helper();
 
-        if usage.numeric_ops {
-            self.emit_int_ok_helper();
-            self.emit_int_check_helper();
+        if usage.number_integer_ops {
+            self.emit_integer_helpers("int", false);
+        }
 
-            // Int helpers
-            self.emit_int_add_helper();
-            self.emit_int_sub_helper();
-            self.emit_int_mul_helper();
-            self.emit_int_div_helper();
-            self.emit_int_mod_helper();
-            self.emit_int_pow_helper();
-            self.emit_int_neg_helper();
+        if usage.big_integer_ops {
+            self.emit_integer_helpers("bigint", true);
+        }
 
-            // Float arithmetic helpers
-            self.emit_float_add_helper();
-            self.emit_float_sub_helper();
-            self.emit_float_mul_helper();
-            self.emit_float_div_helper();
-            self.emit_float_mod_helper();
-            self.emit_float_pow_helper();
-            self.emit_float_neg_helper();
+        if usage.binary32_ops {
+            self.emit_float_helpers("float32", BinaryFloatPrecision::Binary32);
+        }
+
+        if usage.binary64_ops {
+            self.emit_float_helpers("float", BinaryFloatPrecision::Binary64);
         }
 
         if usage.format_float {
-            self.emit_format_float_helper();
+            self.emit_format_float_helper(float_precision);
         }
 
         if usage.validate_float {
-            self.emit_float_validate_helper();
+            self.emit_float_validate_helper(float_precision);
         }
-    }
-
-    fn emit_numeric_int_range_constants(&mut self) {
-        // The lowering gate rejects non-standard profiles, so these bounds are the
-        // Bits32 pair today; reading them from the profile keeps the single owner.
-        let int_width = self.config.numeric_profile.int_width;
-        let min = int_width.min_value();
-        let max = int_width.max_value();
-
-        self.emit_line(&format!("const __BS_INT_MIN = {min};"));
-        self.emit_line(&format!("const __BS_INT_MAX = {max};"));
-        self.emit_line("");
     }
 
     fn emit_numeric_trap_helper(&mut self) {
@@ -90,236 +67,245 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_int_add_helper(&mut self) {
-        self.emit_int_binary_helper("__moth_int_add", "a + b")
-    }
-
-    fn emit_int_sub_helper(&mut self) {
-        self.emit_int_binary_helper("__moth_int_sub", "a - b")
-    }
-
-    fn emit_int_mul_helper(&mut self) {
-        self.emit_int_binary_helper("__moth_int_mul", "a * b")
-    }
-
-    fn emit_int_div_helper(&mut self) {
-        self.emit_line("function __moth_int_div(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (b === 0) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::DivideByZero));
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("if (a === __BS_INT_MIN && b === -1) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::IntOverflow));
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return __moth_int_check(Math.trunc(a / b));");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn emit_int_mod_helper(&mut self) {
-        self.emit_line("function __moth_int_mod(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (b === 0) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::DivideByZero));
-            });
-            emitter.emit_line("}");
-            // Remainder by -1 is zero at every width; the signed-minimum overflow
-            // belongs to the paired quotient only. Return the single Moth Int zero
-            // directly so a JS `-0` from `a % b` is never observable.
-            emitter.emit_line("if (b === -1) {");
-            emitter.with_indent(|em| {
-                em.emit_line("return __moth_int_ok(0);");
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return __moth_int_check(a % b);");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn emit_int_pow_helper(&mut self) {
-        let invalid_exponent_call = Self::error_result_call(BuiltinErrorCode::InvalidExponent);
-
-        self.emit_line("function __moth_int_pow(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (!Number.isInteger(b) || b < 0) {");
-            emitter.with_indent(|em| em.emit_line(&invalid_exponent_call));
-            emitter.emit_line("}");
-            emitter.emit_line("const result = Math.pow(a, b);");
-            emitter.emit_line("return __moth_int_check(result);");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn emit_int_neg_helper(&mut self) {
-        self.emit_line("function __moth_int_neg(a) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (a === __BS_INT_MIN) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::IntOverflow));
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return __moth_int_check(-a);");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn emit_float_add_helper(&mut self) {
-        self.emit_float_binary_helper("__moth_float_add", "a + b")
-    }
-
-    fn emit_float_sub_helper(&mut self) {
-        self.emit_float_binary_helper("__moth_float_sub", "a - b")
-    }
-
-    fn emit_float_mul_helper(&mut self) {
-        self.emit_float_binary_helper("__moth_float_mul", "a * b")
-    }
-
-    fn emit_float_div_helper(&mut self) {
-        self.emit_float_divmod_helper("__moth_float_div", "a / b")
-    }
-
-    fn emit_float_mod_helper(&mut self) {
-        self.emit_float_divmod_helper("__moth_float_mod", "a % b")
-    }
-
-    fn emit_float_pow_helper(&mut self) {
-        self.emit_line("function __moth_float_pow(a, b) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("const result = Math.pow(a, b);");
-            emitter.emit_line("if (!Number.isFinite(result)) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::FloatNonFinite));
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value: result };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn emit_float_neg_helper(&mut self) {
-        self.emit_line("function __moth_float_neg(a) {");
-        self.with_indent(|emitter| {
-            emitter.emit_line("const result = -a;");
-            emitter.emit_line("if (!Number.isFinite(result)) {");
-            emitter.with_indent(|em| {
-                em.emit_line(&Self::error_result_call(BuiltinErrorCode::FloatNonFinite));
-            });
-            emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value: result };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    // Shared helper bodies for the simple int binary ops (add/sub/mul).
-    fn emit_int_binary_helper(&mut self, name: &str, operation: &str) {
-        self.emit_line(&format!("function {name}(a, b) {{"));
-        self.with_indent(|emitter| {
-            emitter.emit_line(&format!("const result = {operation};"));
-            emitter.emit_line("return __moth_int_check(result);");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    // Shared helper body for the simple float binary ops (add/sub/mul).
-    fn emit_float_binary_helper(&mut self, name: &str, operation: &str) {
-        let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatNonFinite);
-
-        self.emit_line(&format!("function {name}(a, b) {{"));
-        self.with_indent(|emitter| {
-            emitter.emit_line(&format!("const result = {operation};"));
-            emitter.emit_line("if (!Number.isFinite(result)) {");
-            emitter.with_indent(|em| em.emit_line(&non_finite_call));
-            emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value: result };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    // Shared helper body for float division and modulo, which check divide-by-zero first.
-    fn emit_float_divmod_helper(&mut self, name: &str, operation: &str) {
-        let divide_by_zero_call = Self::error_result_call(BuiltinErrorCode::DivideByZero);
-        let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatNonFinite);
-
-        self.emit_line(&format!("function {name}(a, b) {{"));
-        self.with_indent(|emitter| {
-            emitter.emit_line("if (b === 0) {");
-            emitter.with_indent(|em| em.emit_line(&divide_by_zero_call));
-            emitter.emit_line("}");
-            emitter.emit_line(&format!("const result = {operation};"));
-            emitter.emit_line("if (!Number.isFinite(result)) {");
-            emitter.with_indent(|em| em.emit_line(&non_finite_call));
-            emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value: result };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    fn error_result_call(code: BuiltinErrorCode) -> String {
-        let message = code.default_message();
-        let code_value = code.as_i32();
-        format!("return __moth_error_result(\"{message}\", {code_value});")
-    }
-
-    fn emit_int_ok_helper(&mut self) {
-        self.emit_line("function __moth_int_ok(value) {");
-        self.with_indent(|emitter| {
-            // Moth `Int` is i32, which has no negative zero. JS arithmetic can create `-0`
-            // through negation, division, and remainder, so normalize it at the helper boundary.
-            emitter.emit_line("return { tag: \"ok\", value: Object.is(value, -0) ? 0 : value };");
-        });
-        self.emit_line("}");
-        self.emit_line("");
-    }
-
-    /// Emits the shared signed i32 validation helper used by integer arithmetic results.
+    /// Emits one integer family shared by every domain with the same JS carrier.
     ///
-    /// WHAT: `__moth_int_check` returns a carrier: it reports `IntOverflow` for any value that is
-    ///      not an integer or lies outside the signed i32 range, and otherwise returns the value
-    ///      through `__moth_int_ok` so JS `-0` is normalized at the success boundary.
-    /// WHY: the i32 range check and `-0` normalization were duplicated across every integer helper;
-    ///      centralising them keeps the helper bodies small and prevents the range logic from drifting.
-    fn emit_int_check_helper(&mut self) {
-        let overflow_call = Self::error_result_call(BuiltinErrorCode::IntOverflow);
+    /// WHY: domain bounds are call arguments rather than duplicated helper bodies, so I8 through
+    ///      U32 share Number arithmetic and I64/U64/profile-Int64 share exact BigInt arithmetic.
+    fn emit_integer_helpers(&mut self, family: &str, uses_bigint: bool) {
+        let zero = if uses_bigint { "0n" } else { "0" };
+        let one = if uses_bigint { "1n" } else { "1" };
+        let minus_one = if uses_bigint { "-1n" } else { "-1" };
+        let check = format!("__moth_{family}_check");
+        let ok = format!("__moth_{family}_ok");
+        let overflow = self.error_result_call(BuiltinErrorCode::IntOverflow);
+        let divide_by_zero = self.error_result_call(BuiltinErrorCode::DivideByZero);
+        let invalid_exponent = self.error_result_call(BuiltinErrorCode::InvalidExponent);
 
-        self.emit_line("function __moth_int_check(value) {");
+        self.emit_line(&format!("function {ok}(value) {{"));
         self.with_indent(|emitter| {
-            // Moth `Int` is signed i32. Any non-integer or out-of-range result from an
-            // operation is reported as an overflow so the trap/error path matches the HIR contract.
-            emitter.emit_line(
-                "if (!Number.isInteger(value) || value < __BS_INT_MIN || value > __BS_INT_MAX) {",
-            );
-            emitter.with_indent(|em| em.emit_line(&overflow_call));
+            if uses_bigint {
+                emitter.emit_line("return { tag: \"ok\", value }; ");
+            } else {
+                emitter
+                    .emit_line("return { tag: \"ok\", value: Object.is(value, -0) ? 0 : value }; ");
+            }
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line(&format!("function {check}(value, min, max) {{"));
+        self.with_indent(|emitter| {
+            if uses_bigint {
+                emitter.emit_line("if (value < min || value > max) {");
+            } else {
+                emitter.emit_line("if (!Number.isInteger(value) || value < min || value > max) {");
+            }
+            emitter.with_indent(|em| em.emit_line(&overflow));
             emitter.emit_line("}");
-            emitter.emit_line("return __moth_int_ok(value);");
+            emitter.emit_line(&format!("return {ok}(value);"));
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        for (operation, expression) in [("add", "a + b"), ("sub", "a - b"), ("mul", "a * b")] {
+            self.emit_line(&format!(
+                "function __moth_{family}_{operation}(a, b, min, max) {{"
+            ));
+            self.with_indent(|emitter| {
+                emitter.emit_line(&format!("return {check}({expression}, min, max);"));
+            });
+            self.emit_line("}");
+            self.emit_line("");
+        }
+
+        self.emit_line(&format!("function __moth_{family}_div(a, b, min, max) {{"));
+        self.with_indent(|emitter| {
+            emitter.emit_line(&format!("if (b === {zero}) {{"));
+            emitter.with_indent(|em| em.emit_line(&divide_by_zero));
+            emitter.emit_line("}");
+            emitter.emit_line(&format!("if (a === min && b === {minus_one}) {{"));
+            emitter.with_indent(|em| em.emit_line(&overflow));
+            emitter.emit_line("}");
+            if uses_bigint {
+                emitter.emit_line(&format!("return {check}(a / b, min, max);"));
+            } else {
+                emitter.emit_line(&format!("return {check}(Math.trunc(a / b), min, max);"));
+            }
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line(&format!("function __moth_{family}_mod(a, b, min, max) {{"));
+        self.with_indent(|emitter| {
+            emitter.emit_line(&format!("if (b === {zero}) {{"));
+            emitter.with_indent(|em| em.emit_line(&divide_by_zero));
+            emitter.emit_line("}");
+            emitter.emit_line(&format!("if (b === {minus_one}) {{"));
+            emitter.with_indent(|em| em.emit_line(&format!("return {ok}({zero});")));
+            emitter.emit_line("}");
+            emitter.emit_line(&format!("return {check}(a % b, min, max);"));
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line(&format!("function __moth_{family}_pow(a, b, min, max) {{"));
+        self.with_indent(|emitter| {
+            if uses_bigint {
+                emitter.emit_line("if (b < 0n) {");
+                emitter.with_indent(|em| em.emit_line(&invalid_exponent));
+                emitter.emit_line("}");
+                emitter.emit_line(&format!("if (b === {zero}) return {ok}({one});"));
+                emitter.emit_line(&format!("if (a === {zero}) return {ok}({zero});"));
+                emitter.emit_line(&format!("if (a === {one}) return {ok}({one});"));
+                emitter.emit_line(&format!(
+                    "if (a === {minus_one}) return {ok}((b & 1n) === 0n ? 1n : -1n);"
+                ));
+                emitter.emit_line(&format!("let result = {one};"));
+                emitter.emit_line("let factor = a;");
+                emitter.emit_line("let exponent = b;");
+                emitter.emit_line("while (exponent > 0n) {");
+                emitter.with_indent(|em| {
+                    em.emit_line("if ((exponent & 1n) !== 0n) {");
+                    em.with_indent(|inner| {
+                        inner.emit_line("result *= factor;");
+                        inner.emit_line("if (result < min || result > max) {");
+                        inner.with_indent(|deep| deep.emit_line(&overflow));
+                        inner.emit_line("}");
+                    });
+                    em.emit_line("}");
+                    em.emit_line("exponent >>= 1n;");
+                    em.emit_line("if (exponent > 0n) {");
+                    em.with_indent(|inner| {
+                        inner.emit_line("factor *= factor;");
+                        inner.emit_line("if (factor < min || factor > max) {");
+                        inner.with_indent(|deep| deep.emit_line(&overflow));
+                        inner.emit_line("}");
+                    });
+                    em.emit_line("}");
+                });
+                emitter.emit_line("}");
+                emitter.emit_line(&format!("return {ok}(result);"));
+            } else {
+                emitter.emit_line("if (!Number.isInteger(b) || b < 0) {");
+                emitter.with_indent(|em| em.emit_line(&invalid_exponent));
+                emitter.emit_line("}");
+                emitter.emit_line(&format!("if (b === {zero}) return {ok}({one});"));
+                emitter.emit_line(&format!("if (a === {zero}) return {ok}({zero});"));
+                emitter.emit_line(&format!("if (a === {one}) return {ok}({one});"));
+                emitter.emit_line(&format!(
+                    "if (a === {minus_one}) return {ok}(b % 2 === 0 ? 1 : -1);"
+                ));
+                emitter.emit_line(&format!("let result = {one};"));
+                emitter.emit_line("let factor = a;");
+                emitter.emit_line("let exponent = b;");
+                emitter.emit_line("while (exponent > 0) {");
+                emitter.with_indent(|em| {
+                    em.emit_line("if (exponent % 2 === 1) {");
+                    em.with_indent(|inner| {
+                        inner.emit_line("result *= factor;");
+                        inner.emit_line(
+                            "if (!Number.isInteger(result) || result < min || result > max) {",
+                        );
+                        inner.with_indent(|deep| deep.emit_line(&overflow));
+                        inner.emit_line("}");
+                    });
+                    em.emit_line("}");
+                    em.emit_line("exponent = Math.floor(exponent / 2);");
+                    em.emit_line("if (exponent > 0) {");
+                    em.with_indent(|inner| {
+                        inner.emit_line("factor *= factor;");
+                        inner.emit_line(
+                            "if (!Number.isInteger(factor) || factor < min || factor > max) {",
+                        );
+                        inner.with_indent(|deep| deep.emit_line(&overflow));
+                        inner.emit_line("}");
+                    });
+                    em.emit_line("}");
+                });
+                emitter.emit_line("}");
+                emitter.emit_line(&format!("return {ok}(result);"));
+            }
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line(&format!("function __moth_{family}_neg(a, min, max) {{"));
+        self.with_indent(|emitter| {
+            emitter.emit_line("if (a === min) {");
+            emitter.with_indent(|em| em.emit_line(&overflow));
+            emitter.emit_line("}");
+            emitter.emit_line(&format!("return {check}(-a, min, max);"));
         });
         self.emit_line("}");
         self.emit_line("");
     }
 
-    fn emit_float_validate_helper(&mut self) {
-        let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatBoundaryNonFinite);
+    /// Emits checked operations for one binary-float precision.
+    fn emit_float_helpers(&mut self, family: &str, precision: BinaryFloatPrecision) {
+        let round = match precision {
+            BinaryFloatPrecision::Binary32 => Some("Math.fround"),
+            BinaryFloatPrecision::Binary64 => None,
+            BinaryFloatPrecision::Binary16 => {
+                unreachable!("binary16 is promoted to binary32 before arithmetic")
+            }
+        };
+        let non_finite = self.error_result_call(BuiltinErrorCode::FloatNonFinite);
+        let divide_by_zero = self.error_result_call(BuiltinErrorCode::DivideByZero);
 
+        for (operation, expression, checks_zero) in [
+            ("add", "a + b", false),
+            ("sub", "a - b", false),
+            ("mul", "a * b", false),
+            ("div", "a / b", true),
+            ("mod", "a % b", true),
+            ("pow", "Math.pow(a, b)", false),
+        ] {
+            self.emit_line(&format!("function __moth_{family}_{operation}(a, b) {{"));
+            self.with_indent(|emitter| {
+                if checks_zero {
+                    emitter.emit_line("if (b === 0) {");
+                    emitter.with_indent(|em| em.emit_line(&divide_by_zero));
+                    emitter.emit_line("}");
+                }
+                if let Some(round) = round {
+                    emitter.emit_line(&format!("const result = {round}({expression});"));
+                } else {
+                    emitter.emit_line(&format!("const result = {expression};"));
+                }
+                emitter.emit_line("if (!Number.isFinite(result)) {");
+                emitter.with_indent(|em| em.emit_line(&non_finite));
+                emitter.emit_line("}");
+                emitter.emit_line("return { tag: \"ok\", value: result };");
+            });
+            self.emit_line("}");
+            self.emit_line("");
+        }
+
+        self.emit_line(&format!("function __moth_{family}_neg(a) {{"));
+        self.with_indent(|emitter| {
+            if let Some(round) = round {
+                emitter.emit_line(&format!("const result = {round}(-a);"));
+            } else {
+                emitter.emit_line("const result = -a;");
+            }
+            emitter.emit_line("if (!Number.isFinite(result)) {");
+            emitter.with_indent(|em| em.emit_line(&non_finite));
+            emitter.emit_line("}");
+            emitter.emit_line("return { tag: \"ok\", value: result };");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn emit_float_validate_helper(&mut self, precision: BinaryFloatPrecision) {
+        let non_finite = self.error_result_call(BuiltinErrorCode::FloatBoundaryNonFinite);
         self.emit_line("function __moth_float_validate(value) {");
         self.with_indent(|emitter| {
-            // Moth `Float` is finite `f64`; values entering from external/backend boundaries
-            // must be checked explicitly rather than trusted implicitly.
+            if precision == BinaryFloatPrecision::Binary32 {
+                emitter.emit_line("value = Math.fround(value);");
+            }
             emitter.emit_line("if (!Number.isFinite(value)) {");
-            emitter.with_indent(|em| em.emit_line(&non_finite_call));
+            emitter.with_indent(|em| em.emit_line(&non_finite));
             emitter.emit_line("}");
             emitter.emit_line("return { tag: \"ok\", value };");
         });
@@ -327,40 +313,180 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_format_float_helper(&mut self) {
-        let non_finite_call = Self::error_result_call(BuiltinErrorCode::FloatFormatInvariant);
-
+    /// Emits the profile-precision shortest formatter used by both Float casts and templates.
+    ///
+    /// WHAT: binary32 searches increasing significant-digit counts and verifies each candidate at
+    ///       binary32 precision; binary64 uses the engine's shortest binary64 decimal. Both paths
+    ///       share the exact Moth thresholds and fixed/exponent rendering below.
+    /// WHY: formatting is owned by the value precision, not the wider Number carrier that stores it.
+    fn emit_format_float_helper(&mut self, precision: BinaryFloatPrecision) {
+        let non_finite = self.error_result_call(BuiltinErrorCode::FloatFormatInvariant);
         self.emit_line("function __moth_format_float(value) {");
         self.with_indent(|emitter| {
-            // The formatter is defensive: valid Moth `Float` is finite, but non-finite values
-            // can appear from unchecked JS boundaries during formatting if HIR is malformed.
             emitter.emit_line("if (!Number.isFinite(value)) {");
-            emitter.with_indent(|em| em.emit_line(&non_finite_call));
+            emitter.with_indent(|em| em.emit_line(&non_finite));
+            emitter.emit_line("}");
+            // Both zeros print "0"; the exponent threshold below applies to non-zero values only.
+            emitter.emit_line("if (value === 0) {");
+            emitter.with_indent(|em| em.emit_line("return { tag: \"ok\", value: \"0\" };"));
             emitter.emit_line("}");
 
-            // Moth formats `-0.0` as the string "0" so negative zero is not observable in
-            // text output.
-            emitter.emit_line("if (Object.is(value, -0)) {");
+            if precision == BinaryFloatPrecision::Binary32 {
+                emitter.emit_line("let text = __moth_float32_shortest(value);");
+            } else {
+                emitter.emit_line("let text = value.toExponential();");
+            }
+
+            emitter.emit_line("const separator = text.indexOf(\"e\");");
+            emitter.emit_line("const mantissa = separator < 0 ? text : text.slice(0, separator);");
+            emitter.emit_line("const exponent = separator < 0 ? 0 : Number(text.slice(separator + 1));");
+            emitter.emit_line("const negative = value < 0;");
+            emitter.emit_line("const unsigned = mantissa.startsWith(\"-\") ? mantissa.slice(1) : mantissa;");
+            emitter.emit_line("const point = unsigned.indexOf(\".\");");
+            emitter.emit_line("const fractionalDigits = point < 0 ? 0 : unsigned.length - point - 1;");
+            emitter.emit_line("let digits = unsigned.replace(\".\", \"\");");
+            emitter.emit_line("let decimalPosition = digits.length + exponent - fractionalDigits;");
+            emitter.emit_line("while (digits.length > 1 && digits.endsWith(\"0\")) digits = digits.slice(0, -1);");
+            emitter.emit_line("const magnitude = Math.abs(value);");
+            emitter.emit_line("let rendered;");
+            emitter.emit_line("if (magnitude >= 1e21 || magnitude < 1e-6) {");
             emitter.with_indent(|em| {
-                em.emit_line("return { tag: \"ok\", value: \"0\" };");
+                em.emit_line("const scientificExponent = decimalPosition - 1;");
+                em.emit_line("const coefficient = digits.length === 1 ? digits : digits[0] + \".\" + digits.slice(1);");
+                em.emit_line("const sign = scientificExponent >= 0 ? \"+\" : \"\";");
+                em.emit_line("rendered = coefficient + \"e\" + sign + scientificExponent;");
+            });
+            emitter.emit_line("} else if (decimalPosition <= 0) {");
+            emitter.with_indent(|em| {
+                em.emit_line("rendered = \"0.\" + \"0\".repeat(-decimalPosition) + digits;");
+            });
+            emitter.emit_line("} else if (decimalPosition >= digits.length) {");
+            emitter.with_indent(|em| {
+                em.emit_line("rendered = digits + \"0\".repeat(decimalPosition - digits.length);");
+            });
+            emitter.emit_line("} else {");
+            emitter.with_indent(|em| {
+                em.emit_line("rendered = digits.slice(0, decimalPosition) + \".\" + digits.slice(decimalPosition);");
             });
             emitter.emit_line("}");
-
-            // JS `Number.prototype.toString()` produces a round-trippable decimal and already
-            // matches Moth's exponent thresholds, lowercase `e`, and omitted trailing `.0` on
-            // compliant engines. We only normalize the exponent sign to guarantee `+` for positive
-            // exponents across engines.
-            emitter.emit_line("let text = value.toString();");
-            emitter
-                .emit_line("text = text.replace(/e([+-]?)(\\d+)/i, function (_, sign, digits) {");
-            emitter.with_indent(|em| {
-                em.emit_line(r#"const explicitSign = sign === "-" ? "-" : "+";"#);
-                em.emit_line(r#"return "e" + explicitSign + digits;"#);
-            });
-            emitter.emit_line("});");
-            emitter.emit_line("return { tag: \"ok\", value: text };");
+            emitter.emit_line("if (negative) rendered = \"-\" + rendered;");
+            emitter.emit_line("return { tag: \"ok\", value: rendered };");
         });
         self.emit_line("}");
         self.emit_line("");
+
+        if precision == BinaryFloatPrecision::Binary32 {
+            self.emit_float32_shortest_helper();
+        }
+    }
+
+    /// Emits exact candidate-distance comparisons so decimal midpoint ties
+    /// match the frontend Ryu formatter.
+    fn emit_float32_shortest_helper(&mut self) {
+        self.emit_line("const __moth_float32_view = new DataView(new ArrayBuffer(4));");
+        self.emit_line("");
+        self.emit_line("function __moth_float32_shortest(value) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line("const magnitude = Math.abs(value);");
+            emitter.emit_line("__moth_float32_view.setFloat32(0, magnitude, false);");
+            emitter.emit_line("const bits = __moth_float32_view.getUint32(0, false);");
+            emitter.emit_line("const exponentBits = (bits >>> 23) & 0xff;");
+            emitter.emit_line("const fraction = bits & 0x7fffff;");
+            emitter.emit_line(
+                "const binarySignificand = BigInt(exponentBits === 0 ? fraction : (0x800000 | fraction));",
+            );
+            emitter.emit_line("const binaryExponent = exponentBits === 0 ? -149 : exponentBits - 150;");
+            emitter.emit_line("let exactNumerator = binarySignificand;");
+            emitter.emit_line("let exactDenominator = 1n;");
+            emitter.emit_line("if (binaryExponent >= 0) {");
+            emitter.with_indent(|em| {
+                em.emit_line("exactNumerator <<= BigInt(binaryExponent);");
+            });
+            emitter.emit_line("} else {");
+            emitter.with_indent(|em| {
+                em.emit_line("exactDenominator <<= BigInt(-binaryExponent);");
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("for (let digits = 1; digits <= 9; digits++) {");
+            emitter.with_indent(|em| {
+                em.emit_line("const nearest = magnitude.toExponential(digits - 1);");
+                em.emit_line("const [mantissa, exponentText] = nearest.split(\"e\");");
+                em.emit_line("const significand = Number(mantissa.replace(\".\", \"\"));");
+                em.emit_line("const exponent = Number(exponentText) - (digits - 1);");
+                em.emit_line("let best = null;");
+                em.emit_line("let bestDistance = 0n;");
+                em.emit_line("let bestDenominator = 1n;");
+                em.emit_line("let bestSignificand = 0n;");
+                em.emit_line(
+                    "for (const candidate of [significand, significand + 1, significand - 1]) {",
+                );
+                em.with_indent(|inner| {
+                    inner.emit_line("const candidateSignificand = BigInt(candidate);");
+                    inner.emit_line("let candidateDigits = String(candidate);");
+                    inner.emit_line("let candidateExponent = exponent;");
+                    inner.emit_line("while (candidateDigits.endsWith(\"0\")) {");
+                    inner.with_indent(|deep| {
+                        deep.emit_line("candidateDigits = candidateDigits.slice(0, -1);");
+                        deep.emit_line("candidateExponent++;");
+                    });
+                    inner.emit_line("}");
+                    inner.emit_line("const text = candidateDigits + \"e\" + candidateExponent;");
+                    inner.emit_line("if (Math.fround(Number(text)) !== magnitude) continue;");
+                    inner.emit_line("let candidateNumerator = BigInt(candidateDigits);");
+                    inner.emit_line("let candidateDenominator = 1n;");
+                    inner.emit_line("if (candidateExponent >= 0) {");
+                    inner.with_indent(|deep| {
+                        deep.emit_line("candidateNumerator *= 10n ** BigInt(candidateExponent);");
+                    });
+                    inner.emit_line("} else {");
+                    inner.with_indent(|deep| {
+                        deep.emit_line(
+                            "candidateDenominator = 10n ** BigInt(-candidateExponent);",
+                        );
+                    });
+                    inner.emit_line("}");
+                    inner.emit_line(
+                        "const difference = candidateNumerator * exactDenominator - exactNumerator * candidateDenominator;",
+                    );
+                    inner.emit_line("const distance = difference < 0n ? -difference : difference;");
+                    inner.emit_line("let choose = best === null;");
+                    inner.emit_line("if (!choose) {");
+                    inner.with_indent(|deep| {
+                        deep.emit_line("const candidateDistance = distance * bestDenominator;");
+                        deep.emit_line("const currentDistance = bestDistance * candidateDenominator;");
+                        deep.emit_line("choose = candidateDistance < currentDistance || (");
+                        deep.with_indent(|deeper| {
+                            deeper.emit_line("candidateDistance === currentDistance &&");
+                            deeper.emit_line("candidateSignificand % 2n === 0n &&");
+                            deeper.emit_line("bestSignificand % 2n !== 0n");
+                        });
+                        deep.emit_line(");");
+                    });
+                    inner.emit_line("}");
+                    inner.emit_line("if (choose) {");
+                    inner.with_indent(|deep| {
+                        deep.emit_line("best = text;");
+                        deep.emit_line("bestDistance = distance;");
+                        deep.emit_line("bestDenominator = candidateDenominator;");
+                        deep.emit_line("bestSignificand = candidateSignificand;");
+                    });
+                    inner.emit_line("}");
+                });
+                em.emit_line("}");
+                em.emit_line("if (best !== null) return best;");
+            });
+            emitter.emit_line("}");
+            emitter.emit_line("return magnitude.toExponential();");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn error_result_call(&self, code: BuiltinErrorCode) -> String {
+        let message = code.default_message();
+        let code_value =
+            JsNumericCarrier::int_literal(code.as_i32() as i64, self.config.numeric_profile)
+                .expect("numeric error code always fits the Int numeric profile");
+        format!("return __moth_error_result(\"{message}\", {code_value});")
     }
 }

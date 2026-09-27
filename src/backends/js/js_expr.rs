@@ -4,6 +4,7 @@
 //! binding and alias helper conventions.
 
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -58,7 +59,15 @@ impl<'hir> JsEmitter<'hir> {
         // WHY: HIR has already linearized side effects, so expression lowering can stay a direct
         //      semantic mapping from each variant to the exact JS runtime helper sequence it needs.
         match &expression.kind {
-            HirExpressionKind::Int(value) => Ok(value.to_string()),
+            HirExpressionKind::Int(value) => {
+                JsNumericCarrier::int_literal(*value, self.config.numeric_profile).ok_or_else(
+                    || {
+                        CompilerError::compiler_error(
+                            "JS backend cannot format an Int literal for its numeric profile",
+                        )
+                    },
+                )
+            }
             HirExpressionKind::FixedScalar(_) => Err(CompilerError::compiler_error(
                 "JavaScript backend received a fixed-width scalar value; validate_fixed_width_scalar_values must reject fixed-width values before lowering",
             )),
@@ -67,9 +76,21 @@ impl<'hir> JsEmitter<'hir> {
                 variant_index,
                 fields,
             } => self.lower_variant_construct(carrier, *variant_index, fields),
-            // Moth `Float` is finite f64. HIR validation rejects non-finite literals, so
-            // reaching here with NaN/Infinity indicates a compiler invariant breach.
+            // HIR Float literals already contain the exact value rounded to the profile precision.
+            // Non-finite values remain an internal invariant violation.
             HirExpressionKind::Float(value) => {
+                let carrier =
+                    JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "JS backend has no carrier for Float literals",
+                            )
+                        })?;
+                if carrier.float_precision().is_none() {
+                    return Err(CompilerError::compiler_error(
+                        "JS backend mapped a Float literal to an integer carrier",
+                    ));
+                }
                 if !value.is_finite() {
                     return Err(CompilerError::compiler_error(
                         "JavaScript backend received non-finite HIR Float literal",
@@ -118,6 +139,18 @@ impl<'hir> JsEmitter<'hir> {
                 };
 
                 if let Some(fixed_capacity) = collection_shape.fixed_capacity {
+                    let fixed_capacity = i64::try_from(fixed_capacity).map_err(|_| {
+                        CompilerError::compiler_error(
+                            "JS fixed collection capacity exceeds the Int literal carrier",
+                        )
+                    })?;
+                    let fixed_capacity =
+                        JsNumericCarrier::int_literal(fixed_capacity, self.config.numeric_profile)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "JS fixed collection capacity exceeds the Int numeric profile",
+                                )
+                            })?;
                     Ok(format!(
                         "__moth_fixed_collection({}, {})",
                         items, fixed_capacity
@@ -166,10 +199,7 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Cast { source, policy } => {
                 let lowered_source = self.lower_expr(source)?;
-                match js_cast_helper_for_policy(*policy)? {
-                    Some(helper) => Ok(format!("{helper}({lowered_source})")),
-                    None => Ok(lowered_source),
-                }
+                js_cast_expression_for_policy(*policy, &lowered_source, self.config.numeric_profile)
             }
 
             HirExpressionKind::VariantPayloadGet {
@@ -371,6 +401,25 @@ impl<'hir> JsEmitter<'hir> {
             && left.ty == self.type_environment.builtins().string
             && right.ty == self.type_environment.builtins().string;
 
+        let is_numeric_comparison = matches!(
+            operator,
+            HirBinOp::Eq | HirBinOp::Ne | HirBinOp::Lt | HirBinOp::Le | HirBinOp::Gt | HirBinOp::Ge
+        );
+        let numeric_carriers_differ = if is_numeric_comparison {
+            match (
+                NumericScalar::from_type_id(left.ty, self.type_environment),
+                NumericScalar::from_type_id(right.ty, self.type_environment),
+            ) {
+                (Some(left_scalar), Some(right_scalar)) => {
+                    JsNumericCarrier::for_scalar(left_scalar, self.config.numeric_profile)
+                        != JsNumericCarrier::for_scalar(right_scalar, self.config.numeric_profile)
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+
         let left = self.lower_expr(left)?;
         let right = self.lower_expr(right)?;
 
@@ -397,9 +446,15 @@ impl<'hir> JsEmitter<'hir> {
             };
         }
 
+        // Numeric carrier identity governs strict equality. JS's relational operators compare
+        // Number/BigInt operands exactly without coercing either carrier to the other.
+        // StringAppend is compiler-generated for dynamic templates and keeps the ordinary JS
+        // string-concatenation semantics after each value has been rendered.
         let js_operator = match operator {
             HirBinOp::StringAppend => "+",
+            HirBinOp::Eq if numeric_carriers_differ => "==",
             HirBinOp::Eq => "===",
+            HirBinOp::Ne if numeric_carriers_differ => "!=",
             HirBinOp::Ne => "!==",
             HirBinOp::Lt => "<",
             HirBinOp::Le => "<=",
@@ -695,21 +750,42 @@ pub(crate) fn escape_js_string(value: &str) -> String {
     escaped
 }
 
-/// Returns the JS runtime helper name for a builtin cast policy, or `None` when the
-/// cast is a pure JS identity (`Int -> Float` numeric conversion).
-pub(super) fn js_cast_helper_for_policy(
+/// Returns the JavaScript expression implementing one builtin cast policy.
+pub(super) fn js_cast_expression_for_policy(
     policy: BuiltinCastPolicyId,
-) -> Result<Option<&'static str>, CompilerError> {
+    value: &str,
+    numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+) -> Result<String, CompilerError> {
     match policy {
         BuiltinCastPolicyId::NumericConversion { source, target }
             if source == NumericScalar::Int && target == NumericScalar::Float =>
         {
-            Ok(None)
+            let source_carrier = JsNumericCarrier::for_scalar(source, numeric_profile)
+                .ok_or_else(|| CompilerError::compiler_error("Int has no JS carrier"))?;
+            let target_carrier = JsNumericCarrier::for_scalar(target, numeric_profile)
+                .ok_or_else(|| CompilerError::compiler_error("Float has no JS carrier"))?;
+            match (source_carrier, target_carrier.float_precision()) {
+                (JsNumericCarrier::ExactInteger { .. }, Some(
+                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary32,
+                )) => Ok(format!("Math.fround({value})")),
+                (JsNumericCarrier::ExactInteger { .. }, Some(
+                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary64,
+                )) => Ok(value.to_owned()),
+                (JsNumericCarrier::BigInteger { .. }, Some(
+                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary32,
+                )) => Ok(format!("__moth_int_to_float32({value})")),
+                (JsNumericCarrier::BigInteger { .. }, Some(
+                    crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision::Binary64,
+                )) => Ok(format!("Number({value})")),
+                _ => Err(CompilerError::compiler_error(
+                    "JS backend received an unreachable Int-to-Float carrier pair",
+                )),
+            }
         }
         BuiltinCastPolicyId::NumericConversion { source, target }
             if source == NumericScalar::Float && target == NumericScalar::Int =>
         {
-            Ok(Some("__moth_cast_float_to_int"))
+            Ok(format!("__moth_cast_float_to_int({value})"))
         }
         BuiltinCastPolicyId::NumericConversion { source, target } => {
             Err(CompilerError::compiler_error(format!(
@@ -722,31 +798,35 @@ pub(super) fn js_cast_helper_for_policy(
             ))
         }
         BuiltinCastPolicyId::NumericToString(NumericScalar::Int) => {
-            Ok(Some("__moth_cast_int_to_string"))
+            Ok(format!("__moth_cast_int_to_string({value})"))
         }
         BuiltinCastPolicyId::NumericToString(NumericScalar::Float) => {
-            Ok(Some("__moth_cast_float_to_string"))
+            Ok(format!("__moth_cast_float_to_string({value})"))
         }
         BuiltinCastPolicyId::NumericToString(scalar) => {
             Err(CompilerError::compiler_error(format!(
                 "JavaScript backend received a fixed-width numeric text conversion for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
             )))
         }
-        BuiltinCastPolicyId::BoolToString => Ok(Some("__moth_cast_bool_to_string")),
-        BuiltinCastPolicyId::CharToString => Ok(Some("__moth_cast_char_to_string")),
-        BuiltinCastPolicyId::CharToInt => Ok(Some("__moth_cast_char_to_int")),
-        BuiltinCastPolicyId::StringToError => Ok(Some("__moth_cast_string_to_error")),
-        BuiltinCastPolicyId::ErrorToString => Ok(Some("__moth_cast_error_to_string")),
-        BuiltinCastPolicyId::IntToChar => Ok(Some("__moth_cast_int_to_char")),
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => Ok(Some("__moth_cast_int")),
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => Ok(Some("__moth_cast_float")),
+        BuiltinCastPolicyId::BoolToString => Ok(format!("__moth_cast_bool_to_string({value})")),
+        BuiltinCastPolicyId::CharToString => Ok(format!("__moth_cast_char_to_string({value})")),
+        BuiltinCastPolicyId::CharToInt => Ok(format!("__moth_cast_char_to_int({value})")),
+        BuiltinCastPolicyId::StringToError => Ok(format!("__moth_cast_string_to_error({value})")),
+        BuiltinCastPolicyId::ErrorToString => Ok(format!("__moth_cast_error_to_string({value})")),
+        BuiltinCastPolicyId::IntToChar => Ok(format!("__moth_cast_int_to_char({value})")),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int) => {
+            Ok(format!("__moth_cast_int({value})"))
+        }
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float) => {
+            Ok(format!("__moth_cast_float({value})"))
+        }
         BuiltinCastPolicyId::StringToNumeric(scalar) => {
             Err(CompilerError::compiler_error(format!(
                 "JavaScript backend received a fixed-width numeric text parse for {scalar:?}; validate_fixed_width_scalar_values must reject fixed-width values before lowering"
             )))
         }
-        BuiltinCastPolicyId::StringToBool => Ok(Some("__moth_cast_string_to_bool")),
-        BuiltinCastPolicyId::StringToChar => Ok(Some("__moth_cast_string_to_char")),
+        BuiltinCastPolicyId::StringToBool => Ok(format!("__moth_cast_string_to_bool({value})")),
+        BuiltinCastPolicyId::StringToChar => Ok(format!("__moth_cast_string_to_char({value})")),
     }
 }
 
