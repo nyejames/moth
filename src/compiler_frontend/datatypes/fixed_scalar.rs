@@ -209,13 +209,11 @@ impl FixedScalarValue {
     }
 
     /// The signed-integer value; `None` for other classes.
-    #[allow(dead_code)] // Numeric plan Phases 4-5: backend lowering reads payloads.
     pub(crate) fn as_i64(self) -> Option<i64> {
         (self.scalar.class() == FixedScalarClass::SignedInteger).then_some(self.bits as i64)
     }
 
     /// The unsigned-integer or `Byte` value; `None` for other classes.
-    #[allow(dead_code)] // Numeric plan Phases 4-5: backend lowering reads payloads.
     pub(crate) fn as_u64(self) -> Option<u64> {
         matches!(
             self.scalar.class(),
@@ -225,7 +223,6 @@ impl FixedScalarValue {
     }
 
     /// The binary-float value; `None` for other classes.
-    #[allow(dead_code)] // Numeric plan Phases 4-5: backend lowering reads payloads.
     pub(crate) fn as_f64(self) -> Option<f64> {
         (self.scalar.class() == FixedScalarClass::BinaryFloat).then_some(f64::from_bits(self.bits))
     }

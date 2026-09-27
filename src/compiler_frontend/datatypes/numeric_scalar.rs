@@ -3,7 +3,7 @@
 //! WHAT: the HIR-level numeric domains `Int`, `Float` and the explicit-width fixed scalars
 //!       (`I8`..`F64`), each derived from a canonical frontend `TypeId`.
 //! WHY: HIR numeric operations record a backend-neutral domain plus an operator instead of
-//!      duplicating one variant per width, so later fixed-width operator typing can add domains
+//!      duplicating one variant per width, so fixed-width domains share operator typing
 //!      without multiplying operation variants. Lowering, validation and backends share this one
 //!      derivation rather than re-matching `TypeId`s at each use.
 //!

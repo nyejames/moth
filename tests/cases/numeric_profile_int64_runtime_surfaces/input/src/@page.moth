@@ -41,6 +41,7 @@ text_length = length("A🦋B")
 text_length_checked = format_checked_offset(text_length) catch:
     then "overflow"
 ;
+text_length_safe_boundary = text_length + 9007199254740992
 
 range_total ~= 0
 loop 0 to 4 |value, index|:
@@ -112,4 +113,4 @@ subtract |left Float, right Float| -> Float:
 ;
 float_zero = subtract(1.0, 1.0)
 
-[:int64 runtime surfaces collection=[initial_length]/[final_length] checked=[initial_length_checked]/[final_length_checked]/[fixed_length_checked]/[text_length_checked] values=[first],[second],[third] text=[text_length] range=[range_total] iteration=[iteration_total] char=[code_point]/[round_trip] division=[division_code]/[division_code_checked] user=[user_code]/[user_code_checked] default=[default_code]/[default_code_checked] fixed=[fixed_push_code]/[fixed_push_code_checked]/[fixed_length] map=[collision_first]/[collision_second]/[collision_length]/[collision_length_checked] random=[random_in_bounds] zero=[float_zero]]
+[:int64 runtime surfaces collection=[initial_length]/[final_length] checked=[initial_length_checked]/[final_length_checked]/[fixed_length_checked]/[text_length_checked] values=[first],[second],[third] text=[text_length] safe_boundary=[text_length_safe_boundary] range=[range_total] iteration=[iteration_total] char=[code_point]/[round_trip] division=[division_code]/[division_code_checked] user=[user_code]/[user_code_checked] default=[default_code]/[default_code_checked] fixed=[fixed_push_code]/[fixed_push_code_checked]/[fixed_length] map=[collision_first]/[collision_second]/[collision_length]/[collision_length_checked] random=[random_in_bounds] zero=[float_zero]]

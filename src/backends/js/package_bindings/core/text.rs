@@ -9,12 +9,10 @@ use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
-pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
-    CoreJsHelper {
-        name: "__moth_text_length",
-        // A valid UTF-16 surrogate pair is one scalar, so it advances the index twice and the
-        // count once. Every other code unit, including a lone surrogate, counts on its own.
-        source: r#"function __moth_text_length(text) {
+macro_rules! core_text_length_helper_source {
+    ($return_expression:literal) => {
+        concat!(
+            r#"function __moth_text_length(text) {
     const value = __moth_string_value(text);
     let count = 0;
     let index = 0;
@@ -28,9 +26,20 @@ pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
             value.charCodeAt(index + 1) <= 0xdfff;
         index += isSurrogatePair ? 2 : 1;
         count += 1;
-    }
-    return count;
-}"#,
+    }"#,
+            "\n    return ",
+            $return_expression,
+            ";\n}"
+        )
+    };
+}
+
+pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
+    CoreJsHelper {
+        name: "__moth_text_length",
+        // A valid UTF-16 surrogate pair is one scalar, so it advances the index twice and the
+        // count once. Every other code unit, including a lone surrogate, counts on its own.
+        source: core_text_length_helper_source!("count"),
     },
     CoreJsHelper {
         name: "__moth_text_is_empty",
@@ -66,10 +75,9 @@ impl<'hir> JsEmitter<'hir> {
                         self.emit_javascript_source(helper.source);
                     }
                     JsNumericCarrier::BigInteger { .. } => {
-                        let source = helper
-                            .source
-                            .replace("return count;", "return BigInt(count);");
-                        self.emit_javascript_source(&source);
+                        self.emit_javascript_source(core_text_length_helper_source!(
+                            "BigInt(count)"
+                        ));
                     }
                     JsNumericCarrier::BinaryFloat { .. } => {
                         unreachable!("Int carrier cannot be a binary float")
