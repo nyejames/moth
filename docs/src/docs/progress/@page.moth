@@ -232,7 +232,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Results, options, multiple returns and multi-bind]
             [: Supported]
-            [: Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind and diagnostic coverage.]
+            [: Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind and diagnostic coverage; external-JS generated wrapper getter snapshots across both Int widths and debug/release builds.]
             [: JS / HTML]
             [: [$html:<code>Error!</code>], postfix [$html:<code>!</code>], [$html:<code>catch</code>], value-producing blocks, options, multiple returns and multi-bind are supported. Value-producing [$html:<code>if</code>] and match work at declaration, assignment, return and multi-bind receivers. Nested [$html:<code>then</code>] receivers remain deferred.]
         ]

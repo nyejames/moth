@@ -441,6 +441,86 @@ assert.equal(result.value[codeField], 0n);
 }
 
 #[test]
+fn fallible_wrapper_reads_foreign_error_code_once_for_each_profile_and_build_mode() {
+    let mut script = String::from(r#"import assert from "node:assert/strict";"#);
+
+    for (int_width, release_build, suffix) in [
+        (IntWidth::Bits32, false, "Int32Debug"),
+        (IntWidth::Bits32, true, "Int32Release"),
+        (IntWidth::Bits64, false, "Int64Debug"),
+        (IntWidth::Bits64, true, "Int64Release"),
+    ] {
+        let profile = NumericProfile {
+            int_width,
+            ..NumericProfile::STANDARD
+        };
+        let wrapper_name = format!("wrap{suffix}");
+        let export_name = format!("fail{suffix}");
+        let wrapper =
+            generate_fallible_wrapper(&wrapper_name, &export_name, release_build, profile);
+        let code_field = crate::backends::js::builtin_error_code_js_field_name(release_build);
+        let message_field =
+            crate::backends::js::builtin_error_message_js_field_name(release_build);
+        let (changing_code, invalid_initial_code, expected_code, zero_code) = match int_width {
+            IntWidth::Bits32 => ("Infinity", "Infinity", "-17", "0"),
+            IntWidth::Bits64 => ("1e20", "1e20", "-17n", "0n"),
+        };
+
+        script.push_str(&format!(
+            r#"
+let getterReads{suffix} = 0;
+let initialCode{suffix} = -17;
+let changingCode{suffix} = {changing_code};
+let repeatedReads{suffix} = 3;
+function {export_name}() {{
+    return {{ ok: false, error: {{
+        message: "accessor failure",
+        get code() {{
+            getterReads{suffix} += 1;
+            return getterReads{suffix} <= repeatedReads{suffix}
+                ? initialCode{suffix}
+                : changingCode{suffix};
+        }}
+    }} }};
+}}
+"#
+        ));
+        script.push_str(&wrapper);
+        script.push_str(&format!(
+            r#"
+const codeField{suffix} = {code_field:?};
+const messageField{suffix} = {message_field:?};
+let result{suffix} = {wrapper_name}();
+assert.equal(result{suffix}.tag, "err");
+assert.equal(result{suffix}.value[codeField{suffix}], {expected_code});
+assert.equal(result{suffix}.value[messageField{suffix}], "accessor failure");
+assert.equal(getterReads{suffix}, 1);
+
+getterReads{suffix} = 0;
+initialCode{suffix} = {invalid_initial_code};
+changingCode{suffix} = 29;
+repeatedReads{suffix} = 1;
+result{suffix} = {wrapper_name}();
+assert.equal(result{suffix}.tag, "err");
+assert.equal(result{suffix}.value[codeField{suffix}], {zero_code});
+assert.equal(result{suffix}.value[messageField{suffix}], "accessor failure");
+assert.equal(getterReads{suffix}, 1);
+"#
+        ));
+    }
+
+    let output = Command::new("node")
+        .args(["--input-type=module", "--eval", &script])
+        .output()
+        .expect("Node must be available to execute the generated external glue");
+    assert!(
+        output.status.success(),
+        "generated glue failed in Node:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn infallible_wrapper_forwards_raw_arguments_and_return() {
     let source = generate_infallible_wrapper("__moth_glue_fn1", "__moth_external_fn1");
     assert!(source.contains("export function __moth_glue_fn1(...args)"));

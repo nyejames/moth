@@ -114,14 +114,14 @@ pub(super) fn generate_fallible_wrapper(
                 .integer_bounds_js()
                 .expect("Int carrier always has integer bounds");
             let value = match int_carrier {
-                JsNumericCarrier::ExactInteger { .. } => "error.code",
-                JsNumericCarrier::BigInteger { .. } => "BigInt(error.code)",
+                JsNumericCarrier::ExactInteger { .. } => "errorCode",
+                JsNumericCarrier::BigInteger { .. } => "BigInt(errorCode)",
                 JsNumericCarrier::BinaryFloat { .. } => {
                     unreachable!("Int carrier cannot be a binary float")
                 }
             };
             format!(
-                "Number.isSafeInteger(error.code) && error.code >= {minimum} && error.code <= {maximum} ? {value} : {zero_code}"
+                "Number.isSafeInteger(errorCode) && errorCode >= {minimum} && errorCode <= {maximum} ? {value} : {zero_code}"
             )
         }
         JsNumericCarrier::BinaryFloat { .. } => {
@@ -137,7 +137,7 @@ pub(super) fn generate_fallible_wrapper(
     let catch_error =
         internal_error_object_source("String(e.message || e)", &zero_code, release_build);
     let returned_error = internal_error_object_source(
-        "error.message || \"Unknown error\"",
+        "errorMessage",
         &returned_error_code,
         release_build,
     );
@@ -168,6 +168,8 @@ pub(super) fn generate_fallible_wrapper(
         }}
         if (result.ok === false) {{
             const error = result.error || {{ message: \"Unknown error\", code: 0 }};
+            const errorMessage = error.message || \"Unknown error\";
+            const errorCode = error.code;
             return {{ tag: \"err\", value: {returned_error} }};
         }}
     }}
