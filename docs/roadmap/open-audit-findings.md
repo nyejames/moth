@@ -8,7 +8,7 @@ Unresolved audit work. Evidence stays in the owning report under [audits](./audi
 
 ## Audits in progress
 
-None.
+- [AUD-0007: Numeric profile boundary correctness](./audits/AUD-0007-numeric-profile-boundary-correctness.md) — Correctness | `contract.numeric_profile.frontend_runtime` (in progress).
 
 ## Candidate findings
 

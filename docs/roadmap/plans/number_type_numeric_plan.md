@@ -21,7 +21,7 @@
 - Delivered correction C2: `random_float` uses a demand-emitted JS runtime helper selected for the numeric profile. Float32 caps `Math.random()` at `0.9999999403953552` before profile rounding so the exclusive upper bound cannot round to `1.0`; Float64 keeps `Math.random()` unchanged. Helper emission remains independent from `random_int`, whose behavior and shared float validation are unchanged.
 - Delivered cleanup R1: HTML-JS and HTML-Wasm rendered-output harnesses compose one private terminal-event protocol while retaining their separate DOM, artifact, bootstrap and completion adapters. An HTML-only pre-summary check still rejects exhausted deterministic random samples as harness failures.
 - Delivered cleanup R2: Core Text's scalar-counting helper has one source body with a profile-selected static return expression; Int64 text-length tests retain checked offset coverage and exercise arithmetic beyond the safe Number integer boundary. Removed expired numeric payload-accessor allowances and updated the fixed-width domain rationale.
-- Deferred observation: a `#` constant referenced from a runtime expression is not folded, so `maximum + 1` with `maximum #Int = 2147483647` fails at runtime rather than at compile time. Decide during the Phase 8 range-proof work or the documentation closeout.
+- Known K1 conformance gap: a `#` constant referenced in a runtime expression can defer a source-known overflow to runtime. Reproduced on HTML-JS for `maximum #Int` at both Int32 and Int64 maxima followed by `maximum + 1` in a runtime function: compilation succeeds and the checked operation traps. The Phase 8 constant-consumption gate below must close this gap before the frontend claims final numeric semantic authority for Wasm; optional range-proof work cannot decide source validity.
 - Next action: Phase 5, Slice 5a (Wasm fixed-width numeric operations and compact layout).
 
 ## Goal and delivery order
@@ -600,6 +600,16 @@ with a truthful Wasm deferral and one shared semantic value policy.
   backends. Keep facts in side tables and preserve evaluation/failure ordering.
   Initial ReturnError lowering may retain its branch/carrier even when a predicate
   is proven safe. General CFG simplification is not part of this phase.
+- [ ] Close K1 as a separate constant-consumption conformance gate. Diagnose
+  arithmetic failures on already known `#` values during compilation, including
+  within builtin `Error!` functions, for both Int32 and Int64 profiles. Retain the
+  originating expression span and module identity, and the selected profile with
+  its config origin, when consuming folded values so diagnostics point to the
+  authored operation. Test both
+  `maximum #Int` overflow reproducers, a valid known-constant control and the
+  corresponding runtime-value failure path. Do not make this depend on optional
+  range proofs over runtime values or claim final Wasm frontend numeric authority
+  until this gate passes.
 - [ ] Migrate builtin Error.code to U32 with default zero, preserving messages,
   constructor order and existing code values. Update every producer and consumer,
   cast, public interface and foreign projection in the same coherent slice.
@@ -607,7 +617,8 @@ with a truthful Wasm deferral and one shared semantic value policy.
   Reject negative/oversized code construction and require casts from Int variables.
   Keep compiler diagnostics and Rust MON error enums outside the migration.
 
-Exit: one unsigned runtime error-code contract and no old signed-code fallback.
+Exit: one unsigned runtime error-code contract, no old signed-code fallback and
+compile-time diagnosis of source-known numeric failures at constant-consumption sites.
 
 ### Phase 9: Documentation sweep, validation and closeout
 
