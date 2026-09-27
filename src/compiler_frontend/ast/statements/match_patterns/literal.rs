@@ -37,12 +37,10 @@ type LiteralPatternResult<T> = Result<T, ExpressionParseError>;
 
 /// Materialize a `NumericLiteralToken` into an `Expression` with an explicit sign and location.
 ///
-/// WHAT: handles both whole-number (`Int` at the boundary width) and decimal/exponent (`Float`
-/// at the boundary precision) materialization from a single token, applying the provided sign
-/// for range checks (whole numbers) and float-value negation (decimal/exponent literals).
-/// WHY: the positive and negative numeric arms in `parse_literal_pattern` share identical
-/// materialization logic; this helper avoids duplicating the branch on `NumericLiteralKind`
-/// and the two error-construction paths.
+/// WHAT: naturally materialises whole-number patterns as `Int` and decimal/exponent patterns as
+///       profile `Float`; Float subjects route whole-number tokens through profile Float directly.
+/// WHY: positive and negative pattern arms share the same natural materialisation logic, while
+///      `parse_literal_pattern` applies receiver-specific materialisation before falling back here.
 fn materialize_numeric_literal(
     token: &NumericLiteralToken,
     sign: NumericLiteralSign,
@@ -134,9 +132,26 @@ fn materialize_current_numeric_literal(
     string_table: &mut StringTable,
     numeric_profile: NumericProfile,
     fixed_scalar: Option<FixedScalar>,
+    float_subject: bool,
 ) -> LiteralPatternResult<Expression> {
     if let Some(token) = token_stream.current_numeric_literal_in(string_table)? {
         let sign = sign_override.unwrap_or(token.sign);
+
+        if float_subject && token.kind == NumericLiteralKind::WholeNumber {
+            let mut signed_token = token;
+            signed_token.sign = sign;
+            let value =
+                materialize_float(&signed_token, numeric_profile.float_precision, string_table)
+                    .map_err(|reason| {
+                        ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                            signed_token.source_text,
+                            reason,
+                            span,
+                        ))
+                    })?;
+
+            return Ok(Expression::float(value, span, ValueMode::ImmutableOwned));
+        }
 
         if let Some(scalar) = fixed_scalar
             && literal_kind_initialises(token.kind, scalar)
@@ -195,6 +210,7 @@ pub(super) fn parse_literal_pattern(
     type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<Expression> {
     let fixed_scalar = type_environment.fixed_scalar(subject_type_id);
+    let float_subject = subject_type_id == type_environment.builtins().float;
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
         return Err(diagnostic.into());
     }
@@ -211,6 +227,7 @@ pub(super) fn parse_literal_pattern(
                 string_table,
                 numeric_profile,
                 fixed_scalar,
+                float_subject,
             )?;
             token_stream.advance();
             expression
@@ -262,6 +279,7 @@ pub(super) fn parse_literal_pattern(
                 string_table,
                 numeric_profile,
                 fixed_scalar,
+                float_subject,
             )?;
             token_stream.advance();
             expression

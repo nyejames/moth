@@ -58,8 +58,8 @@ pub fn evaluate_expression(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<Expression, ExpressionTypingError> {
-    let direct_scalar =
-        direct_fixed_scalar_destination(&nodes, type_interner.environment(), expected_type);
+    let direct_destination =
+        direct_numeric_destination(&nodes, type_interner.environment(), expected_type);
     let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes)?;
 
     // Fast path: a single R-value needs no operator resolution or RPN assembly.
@@ -71,7 +71,7 @@ pub fn evaluate_expression(
             materialize_pending_literal(
                 &mut ordered_nodes,
                 0,
-                direct_scalar,
+                direct_destination,
                 context,
                 string_table,
             )?;
@@ -117,7 +117,7 @@ pub fn evaluate_expression(
     let resolved_type = resolve_expression_result_type(
         &mut ordered_nodes,
         span,
-        direct_scalar,
+        direct_destination,
         context,
         string_table,
         type_interner.environment(),
@@ -199,7 +199,7 @@ pub fn evaluate_expression(
     )?)
 }
 
-/// Materialise a pending literal using its immediate fixed-scalar peer or natural value mode.
+/// Materialise a pending literal using its immediate numeric peer or natural value mode.
 ///
 /// WHAT: replaces one deferred RPN item with a typed operand and returns its semantic type.
 /// WHY: direct literal parsing must preserve lexical facts until either a peer or the receiving
@@ -207,7 +207,7 @@ pub fn evaluate_expression(
 pub(super) fn materialize_pending_literal(
     nodes: &mut [ExpressionRpnItem],
     index: usize,
-    peer_scalar: Option<FixedScalar>,
+    destination: Option<PendingLiteralDestination>,
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<TypeId, ExpressionTypingError> {
@@ -230,17 +230,53 @@ pub(super) fn materialize_pending_literal(
             .into());
         };
 
-        let scalar = peer_scalar.filter(|scalar| literal_kind_initialises(token.kind, *scalar));
-        if let Some(scalar) = scalar {
-            let value = materialize_fixed_scalar(token, token.sign, scalar, string_table).map_err(
-                |reason| {
-                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
-                },
-            )?;
+        let destination = destination.filter(|destination| match destination {
+            PendingLiteralDestination::Int => token.kind == NumericLiteralKind::WholeNumber,
+            PendingLiteralDestination::Float => true,
+            PendingLiteralDestination::FixedScalar(scalar) => {
+                literal_kind_initialises(token.kind, *scalar)
+            }
+        });
 
-            Expression::fixed_scalar(value, *span, value_mode.clone())
-        } else {
-            default_materialised_literal(token, *span, value_mode.clone(), context, string_table)?
+        match destination {
+            Some(PendingLiteralDestination::Int) => {
+                let value = materialize_int(
+                    token,
+                    token.sign,
+                    context.numeric_profile.int_width,
+                    string_table,
+                )
+                .map_err(|reason| {
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                })?;
+                Expression::int(value, *span, value_mode.clone())
+            }
+            Some(PendingLiteralDestination::Float) => {
+                let value =
+                    materialize_float(token, context.numeric_profile.float_precision, string_table)
+                        .map_err(|reason| {
+                            CompilerDiagnostic::invalid_number_literal(
+                                token.source_text,
+                                reason,
+                                *span,
+                            )
+                        })?;
+                Expression::float(value, *span, value_mode.clone())
+            }
+            Some(PendingLiteralDestination::FixedScalar(scalar)) => {
+                let value = materialize_fixed_scalar(token, token.sign, scalar, string_table)
+                    .map_err(|reason| {
+                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                    })?;
+                Expression::fixed_scalar(value, *span, value_mode.clone())
+            }
+            None => default_materialised_literal(
+                token,
+                *span,
+                value_mode.clone(),
+                context,
+                string_table,
+            )?,
         }
     };
     let type_id = expression.type_id;
@@ -255,26 +291,55 @@ pub(super) fn materialize_pending_literal(
     Ok(type_id)
 }
 
-/// The direct destination when the whole fragment is one literal with a fixed expectation.
+/// The direct destination when the whole fragment is one literal with a numeric expectation.
 ///
-/// WHAT: returns the fixed scalar only when the parsed nodes are exactly one pending literal
-///       and the expected type (or its option inner type) is a fixed scalar.
+/// WHAT: returns the numeric destination only when the parsed nodes are exactly one pending
+///       literal and the expected type (or its option inner type) is numeric or `Byte`.
 /// WHY: "direct" means the literal is the entire receiving expression, so an operator result
 ///      such as `1 + 1` never retags through its receiving annotation.
-fn direct_fixed_scalar_destination(
+fn direct_numeric_destination(
     nodes: &[ExpressionRpnItem],
     type_environment: &TypeEnvironment,
     expected_type: &ExpectedType,
-) -> Option<FixedScalar> {
+) -> Option<PendingLiteralDestination> {
     let [ExpressionRpnItem::PendingNumericLiteral { .. }] = nodes else {
         return None;
     };
 
     let expected_type_id = expected_type.literal_destination_type_id()?;
-    type_environment.fixed_scalar_of(expected_type_id)
+    let destination_type_id = type_environment
+        .option_inner_type(expected_type_id)
+        .unwrap_or(expected_type_id);
+    pending_literal_destination_for_type_id(destination_type_id, type_environment)
 }
 
-/// Today's default literal materialisation, unchanged for non-fixed destinations.
+/// A semantic numeric or `Byte` destination eligible for pending-literal materialisation.
+#[derive(Clone, Copy)]
+pub(super) enum PendingLiteralDestination {
+    Int,
+    Float,
+    FixedScalar(FixedScalar),
+}
+
+/// Classify one direct semantic type as an eligible pending-literal destination.
+pub(super) fn pending_literal_destination_for_type_id(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> Option<PendingLiteralDestination> {
+    let builtins = type_environment.builtins();
+    if type_id == builtins.int {
+        return Some(PendingLiteralDestination::Int);
+    }
+    if type_id == builtins.float {
+        return Some(PendingLiteralDestination::Float);
+    }
+
+    type_environment
+        .fixed_scalar(type_id)
+        .map(PendingLiteralDestination::FixedScalar)
+}
+
+/// Today's default literal materialisation, unchanged without an eligible destination.
 ///
 /// WHAT: whole literals materialise at the boundary `Int` width and decimal/exponent literals
 ///       at the boundary `Float` precision, with the exact-negation behaviour the parser

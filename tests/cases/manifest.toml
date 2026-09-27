@@ -13256,3 +13256,31 @@ path = "external_numeric_profile_error_code"
 tags = ["integration", "numeric", "external", "runtime", "int64"]
 contract = "language.numeric.external_error_code_uses_int64_carrier"
 role = "backend"
+
+[[case]]
+id = "numeric_float_whole_literal_int32_float32"
+path = "numeric_float_whole_literal_int32_float32"
+tags = ["integration", "numeric", "numeric-profile", "float32"]
+contract = "language.numeric.whole_float_literal_destination_int32_float32"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int32_float64"
+path = "numeric_float_whole_literal_int32_float64"
+tags = ["integration", "numeric", "numeric-profile", "float64"]
+contract = "language.numeric.whole_float_literal_destination_int32_float64"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int64_float32"
+path = "numeric_float_whole_literal_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "float32"]
+contract = "language.numeric.whole_float_literal_destination_int64_float32"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int64_float64"
+path = "numeric_float_whole_literal_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "float64"]
+contract = "language.numeric.whole_float_literal_destination_int64_float64"
+role = "primary"

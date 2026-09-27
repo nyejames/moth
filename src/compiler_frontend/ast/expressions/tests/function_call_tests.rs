@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -598,6 +599,31 @@ fn optional_call_context_is_limited_to_bare_none_arguments() {
             ..
         }
     ));
+}
+
+#[test]
+fn whole_numeric_call_arguments_use_float_parameter_destinations() {
+    let expectation = [ParameterExpectation {
+        name: None,
+        expected_type: ExpectedParameterType::Known(builtin_type_ids::FLOAT),
+        access_mode: ExpectedAccessMode::Shared,
+        requires_reactive_source: false,
+        default_value: None,
+    }];
+    let arguments = parse_args_with_receiving_context(
+        "identity(18_446_744_073_709_551_615)",
+        super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
+            callee_name: None,
+        }),
+        Some(&expectation),
+    )
+    .expect("a Float parameter should receive an out-of-Int-range whole literal");
+
+    assert_eq!(arguments[0].value.type_id, builtin_type_ids::FLOAT);
+    assert!(
+        matches!(&arguments[0].value.kind, ExpressionKind::Float(value) if *value == 18_446_744_073_709_551_615_f64),
+        "expected the call argument to retain semantic Float identity"
+    );
 }
 
 #[test]

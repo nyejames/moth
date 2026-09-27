@@ -1,0 +1,62 @@
+@core/math atan2
+
+format_float |value Float| -> String:
+    return cast value
+;
+
+echo_float |value Float| -> Float:
+    return value
+;
+
+echo_optional_float |value Float?| -> Float?:
+    return value
+;
+
+return_large_float || -> Float:
+    return 18_446_744_073_709_551_615
+;
+float_add_assign || -> Float:
+    value ~Float = 1.0
+    value += 18_446_744_073_709_551_615
+    return value
+;
+
+Box = |
+    value Float,
+|
+
+large_whole Float = 18_446_744_073_709_551_615
+same_value Float = 18_446_744_073_709_551_615.0
+expected_optional Float? = same_value
+maybe Float? = 18_446_744_073_709_551_615
+parameter_value = echo_float(18_446_744_073_709_551_615)
+optional_parameter_value = echo_optional_float(18_446_744_073_709_551_615)
+box = Box(value = 18_446_744_073_709_551_615)
+returned_value = return_large_float()
+peer = 1.0
+peer_sum = peer + 18_446_744_073_709_551_615
+large_compound_value = float_add_assign()
+large_compound_match = large_compound_value is 18_446_744_073_709_551_615.0
+
+profile_value Float = 16_777_217
+single_value F32 = 16_777_217
+double_value F64 = 16_777_217
+single_control = single_value is 16_777_216
+double_control = double_value is 16_777_217
+
+negative_zero Float = -0
+positive_zero Float = 0
+negative_zero_atan2_is_negative = atan2(negative_zero, -1.0) < 0.0
+positive_zero_atan2_is_negative = atan2(positive_zero, -1.0) < 0.0
+large_match = large_whole is same_value
+optional_present = maybe is not none
+optional_value_match = maybe is expected_optional
+parameter_match = parameter_value is large_whole
+optional_parameter_present = optional_parameter_value is not none
+optional_parameter_value_match = optional_parameter_value is expected_optional
+field_match = box.value is large_whole
+return_match = returned_value is large_whole
+peer_match = peer_sum is large_whole
+profile_text = format_float(profile_value)
+
+[:profile=[profile_text] fixed-controls=[single_control]/[double_control] surfaces=[large_match]/[optional_present]/[optional_value_match]/[parameter_match]/[optional_parameter_present]/[optional_parameter_value_match]/[field_match]/[return_match]/[peer_match]/[large_compound_match] zero-signs=[negative_zero_atan2_is_negative]/[positive_zero_atan2_is_negative]]

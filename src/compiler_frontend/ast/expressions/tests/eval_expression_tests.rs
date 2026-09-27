@@ -700,6 +700,108 @@ fn direct_fixed_literal_materialises_whole_literal_into_f64() {
 }
 
 #[test]
+fn profile_float_whole_literals_materialise_directly_with_float_identity_and_signed_zero() {
+    let large = first_start_declaration_expression("large Float = 18_446_744_073_709_551_615\n");
+    assert_eq!(large.type_id, builtin_type_ids::FLOAT);
+    assert!(
+        matches!(large.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64),
+        "expected a profile Float beyond Int range, got {:?}",
+        large.kind
+    );
+
+    let negative_zero = first_start_declaration_expression("negative Float = -0\n");
+    assert_eq!(negative_zero.type_id, builtin_type_ids::FLOAT);
+    assert!(
+        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
+        "expected a sign-preserving profile Float zero, got {:?}",
+        negative_zero.kind
+    );
+
+    let optional =
+        first_start_declaration_expression("maybe Float? = 18_446_744_073_709_551_615\n");
+    let ExpressionKind::Coerced { value: inner, .. } = &optional.kind else {
+        panic!(
+            "optional Float should wrap the directly materialised value, got {:?}",
+            optional.kind
+        );
+    };
+    assert_eq!(inner.type_id, builtin_type_ids::FLOAT);
+    assert!(matches!(
+        &inner.kind,
+        ExpressionKind::Float(value) if *value == 18_446_744_073_709_551_615_f64
+    ));
+
+    let f32 = first_start_declaration_expression("single F32 = 18_446_744_073_709_551_615\n");
+    assert_eq!(
+        f32.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F32)
+    );
+    assert!(matches!(f32.kind, ExpressionKind::FixedScalar(_)));
+
+    let f64 = first_start_declaration_expression("double F64 = 18_446_744_073_709_551_615\n");
+    assert_eq!(
+        f64.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
+    assert!(matches!(f64.kind, ExpressionKind::FixedScalar(_)));
+}
+
+#[test]
+fn profile_float_peer_materialises_whole_literals_without_int_range_narrowing() {
+    let sum = nth_start_declaration_expression(
+        "peer Float = 1.0\nsum = peer + 18_446_744_073_709_551_615\n",
+        1,
+    );
+
+    assert_eq!(sum.type_id, builtin_type_ids::FLOAT);
+    let ExpressionKind::Runtime(rpn) = &sum.kind else {
+        panic!("a variable-plus-literal expression should remain runtime RPN");
+    };
+    assert!(
+        rpn.items.iter().any(|item| matches!(
+            item,
+            ExpressionRpnItem::Operand(operand)
+                if matches!(operand.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64)
+        )),
+        "the immediate Float peer should materialise the whole literal as profile Float"
+    );
+}
+
+#[test]
+fn numeric_receiving_context_keeps_integer_rules_and_does_not_retag_operator_results() {
+    let int_overflow = parse_single_file_ast_diagnostic("large Int = 18_446_744_073_709_551_615\n");
+    assert!(matches!(
+        int_overflow.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideIntRange,
+            ..
+        }
+    ));
+
+    let decimal_int = parse_single_file_ast_diagnostic("value Int = 1.0\n");
+    assert!(matches!(
+        decimal_int.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::Declaration,
+            ..
+        }
+    ));
+
+    let unconstrained = first_start_declaration_expression("value = 1 + 1\n");
+    assert_eq!(unconstrained.type_id, builtin_type_ids::INT);
+    assert!(matches!(unconstrained.kind, ExpressionKind::Int(2)));
+
+    let operator_result = parse_single_file_ast_diagnostic("value F32 = 1 + 1\n");
+    assert!(matches!(
+        operator_result.payload,
+        DiagnosticPayload::TypeMismatch {
+            context: TypeMismatchContext::Declaration,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn direct_fixed_literal_materialises_option_of_fixed() {
     let value = nth_start_declaration_expression("maybe U8? = 200\n", 0);
 

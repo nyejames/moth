@@ -40,6 +40,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
+    is_numeric_literal_destination_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -305,12 +306,11 @@ pub(crate) enum CallArgumentSyntaxContext {
 ///
 /// WHAT: passes an optional parameter type into expression parsing so a call argument such as
 ///      `message = none` can resolve its inner type before ordinary call validation runs.
-///      A bare `none` keeps the baseline option slot; any other argument into a
-///      fixed-scalar (bare or option-of-fixed) slot carries a direct-literal hint.
-///      The evaluator materialises a lone literal in that scalar, and every other
-///      shape behaves exactly as inference.
+///      Bare `none` keeps the baseline option slot; any other argument into a numeric
+///      (bare or optional) slot carries a direct-literal hint. The evaluator materialises a lone
+///      literal in that destination, and every other shape behaves exactly as inference.
 /// WHY: call arguments otherwise parse with natural-type inference, which is correct for most
-///      values but rejects context-sensitive `none` literals before the receiving slot is known.
+///      values but rejects context-sensitive literals before the receiving slot is known.
 ///      Call validation keeps owning every argument type diagnostic.
 fn expected_type_for_parameter_expectation(
     expectation: &ParameterExpectation,
@@ -325,7 +325,7 @@ fn expected_type_for_parameter_expectation(
         return ExpectedType::Known(type_id);
     }
 
-    if type_environment.fixed_scalar_of(type_id).is_some() {
+    if is_numeric_literal_destination_type_id(type_id, type_environment) {
         return ExpectedType::DirectLiteral(type_id);
     }
 

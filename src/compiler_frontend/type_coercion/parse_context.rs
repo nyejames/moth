@@ -1,29 +1,16 @@
 //! Parse-time context helpers for the Moth compiler frontend.
 //!
 //! WHAT: determines what expected type should be threaded into expression
-//! parsing at assignment-like sites (declarations, mutations, struct fields,
-//! collection items).
+//!       parsing at assignment-like sites (declarations, mutations, struct fields,
+//!       collection items).
 //! WHY: most types should be resolved strictly by the expression parser with
-//! no expected-type hint (`Inferred`), so that `eval_expression` operates in
-//! `Exact` context and callers own their own post-parse coercion. However, some
-//! literals are parse-context-sensitive: `none` needs an `Option(_)` target, empty
-//! collection literals need an explicit `Collection(T)` target, and numeric literals
-//! need a fixed-scalar target for destination-aware materialisation. Without
-//! those hints the parser must reject the literal immediately, because there is
-//! no post-parse coercion that can "invent" a missing inner type or recover a
-//! literal that already overflowed its default `Int`/`Float` materialisation.
-//!
-//! ## Rule
-//!
-//! - `Option(_)` targets: pass the full option type through so `none` can
-//!   extract its inner type at parse time.
-//! - Explicit `Collection(T)` targets: pass the collection type through so
-//!   empty collection literals can resolve their element type.
-//! - Bare fixed-scalar targets: pass a direct-literal hint so a direct numeric
-//!   literal can materialise in its destination type with no `Int` intermediate.
-//!   In every other respect the hint behaves like `Infer`.
-//! - All other targets: pass `Inferred` so the expression resolves its own
-//!   natural type and the call site validates/coerces after the fact.
+//!      no expected-type hint (`Inferred`), so `eval_expression` operates in
+//!      `Exact` context and callers own their own post-parse coercion. However, some
+//!      literals are parse-context-sensitive: `none` needs an `Option(_)` target, empty
+//!      collection literals need an explicit `Collection(T)` target, and numeric literals
+//!      need a numeric scalar target. Without those hints the parser must reject the literal
+//!      immediately, because there is no post-parse coercion that can recover a literal that
+//!      already overflowed its default `Int`/`Float` materialisation.
 
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastTarget, cast_target_for_receiving_type,
@@ -36,12 +23,12 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Parse-time expected type for context-sensitive literals such as `none`,
-/// empty collection literals, and direct fixed-width numeric literals.
+/// empty collection literals, and direct numeric literals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpectedType {
     Known(TypeId),
     /// A direct numeric-literal destination: the evaluator may materialise one
-    /// pending literal in the fixed scalar `TypeId`, and in every other respect
+    /// pending literal in the destination type, and in every other respect
     /// this behaves exactly like `Infer`.
     DirectLiteral(TypeId),
     Infer,
@@ -107,7 +94,7 @@ pub(crate) fn parse_expectation_for_type_id(
         return ExpectedType::Known(target_id);
     }
 
-    if type_environment.fixed_scalar_of(target_id).is_some() {
+    if is_numeric_literal_destination_type_id(target_id, type_environment) {
         return ExpectedType::DirectLiteral(target_id);
     }
 
@@ -125,6 +112,25 @@ pub(crate) fn parse_expectation_for_type_id(
     }
 
     ExpectedType::Infer
+}
+
+/// Returns whether a receiving type can directly materialise a numeric literal.
+///
+/// WHAT: accepts `Int`, `Float`, fixed scalars, `Byte`, and their optional forms.
+/// WHY: assignments and call arguments share one semantic eligibility rule, while each
+///      boundary retains its own handling for `none`.
+pub(crate) fn is_numeric_literal_destination_type_id(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> bool {
+    let inner_type_id = type_environment
+        .option_inner_type(type_id)
+        .unwrap_or(type_id);
+    let builtins = type_environment.builtins();
+
+    inner_type_id == builtins.int
+        || inner_type_id == builtins.float
+        || type_environment.fixed_scalar(inner_type_id).is_some()
 }
 
 /// Builds a `CastTargetContext` from a receiving type.

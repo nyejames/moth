@@ -5,9 +5,9 @@
 //!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a place
 //!     expression has been resolved.
 //!   - Validates mutability and type compatibility for the target.
-//!   - Parses compound RHSs with a direct-literal peer hint for fixed-scalar
-//!     targets, evaluates `target op rhs` in its promoted domain and converts
-//!     incompatible numeric results back through builtin cast evidence.
+//!   - Parses compound RHSs with a direct-literal peer hint for fixed-scalar and
+//!     bare `Float` targets, evaluates `target op rhs` in its promoted domain and
+//!     converts incompatible numeric results back through builtin cast evidence.
 //!
 //! WHY:  Mutation is a distinct expression kind in the AST; centralising
 //!       the parsing, validation, and compound-value construction here
@@ -71,7 +71,8 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
-    ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
+    ExpectedType, cast_target_context_for_type_id, is_numeric_literal_destination_type_id,
+    parse_expectation_for_type_id,
 };
 
 /// Build the existing assignment mismatch diagnostic for a compound store.
@@ -127,10 +128,8 @@ struct CompoundAssignmentInput<'a> {
     operator: Operator,
 }
 
-/// Build the value stored by a compound assignment.
-///
-/// WHAT: gives a fixed-scalar target as a direct-literal peer hint, then evaluates
-///       `target op rhs` in the promoted domain.
+/// WHAT: gives existing fixed-scalar targets and bare `Float` targets a direct-literal peer hint,
+///       then evaluates `target op rhs` in the promoted domain.
 /// WHY: an incompatible numeric result must convert back through builtin cast
 ///      evidence, infallibly or with a checked `CastHandling::StoreConversion`.
 fn evaluate_compound_assignment_value(
@@ -147,13 +146,14 @@ fn evaluate_compound_assignment_value(
         target_type_id,
         operator,
     } = input;
-    let mut expr_type = if type_interner
-        .environment()
-        .fixed_scalar(target_type_id)
-        .is_some()
-    {
-        // Ordinary binary evaluation peers a pending fixed-scalar literal against its immediate
-        // typed operand. This direct hint gives a lone RHS literal that same materialisation.
+    let type_environment = type_interner.environment();
+    let peer_numeric_literal =
+        is_numeric_literal_destination_type_id(target_type_id, type_environment)
+            && (type_environment.fixed_scalar(target_type_id).is_some()
+                || target_type_id == type_environment.builtins().float);
+    let mut expr_type = if peer_numeric_literal {
+        // Ordinary binary evaluation peers a pending numeric literal against its immediate typed
+        // operand. This direct hint gives fixed-scalar and Float compound RHS literals parity.
         ExpectedType::DirectLiteral(target_type_id)
     } else {
         ExpectedType::Infer
@@ -330,7 +330,7 @@ fn build_mutation_from_target(
     let value = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
             // Simple assignment keeps the receiver hint for context-sensitive values. Compound
-            // RHSs use a direct-literal peer hint for fixed scalars before promoted evaluation.
+            // RHSs peer direct literals for fixed scalars and bare Float before promoted evaluation.
             token_stream.advance();
 
             let mut expr_type =

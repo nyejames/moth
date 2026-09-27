@@ -1,9 +1,9 @@
 //! Literal match-pattern parsing regression tests.
 //!
-//! WHAT: validates destination-aware fixed scalar literal patterns, existing `Int` boundaries,
-//!       and relational-pattern literal typing.
-//! WHY: pattern literals have an independent parser path whose signed and receiving-type behavior
-//!      must stay aligned with the shared numeric materialization contract.
+//! WHAT: validates destination-aware fixed scalar and profile Float literal patterns, existing
+//!       `Int` boundaries, and relational-pattern literal typing.
+//! WHY: pattern literals have an independent parser path whose receiver-aware and signed numeric
+//!      behavior must stay aligned with the shared materialization contract.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -93,6 +93,32 @@ fn fixed_scalar_literal_patterns_materialize_at_the_subject_type() {
     )
     .unwrap();
     assert_fixed_scalar_pattern(&byte, FixedScalar::Byte, None, Some(255), None);
+}
+
+#[test]
+fn profile_float_subject_patterns_materialise_whole_literals_directly() {
+    let large = parse_numeric_pattern(
+        builtin_type_ids::FLOAT,
+        "18_446_744_073_709_551_615",
+        NumericLiteralKind::WholeNumber,
+    )
+    .unwrap();
+    assert_eq!(large.type_id, builtin_type_ids::FLOAT);
+    assert!(
+        matches!(large.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64),
+        "Float match subjects should materialise whole literals as profile Float"
+    );
+
+    let negative_zero = parse_negative_numeric_pattern(
+        builtin_type_ids::FLOAT,
+        "0",
+        NumericLiteralKind::WholeNumber,
+    )
+    .unwrap();
+    assert!(
+        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
+        "Float match subjects should preserve the sign of whole-number zero"
+    );
 }
 
 #[test]

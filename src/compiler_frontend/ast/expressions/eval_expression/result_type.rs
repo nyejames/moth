@@ -4,7 +4,9 @@
 //! WHY: AST enforces operator typing before folding/lowering; one pass resolves each pending
 //!      literal at its direct or immediate-peer boundary before the canonical policy runs.
 
-use super::evaluator::materialize_pending_literal;
+use super::evaluator::{
+    PendingLiteralDestination, materialize_pending_literal, pending_literal_destination_for_type_id,
+};
 use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operator_type};
 use super::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::ScopeContext;
@@ -15,7 +17,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -25,7 +26,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(super) fn resolve_expression_result_type(
     output_queue: &mut [ExpressionRpnItem],
     expression_span: Option<SourceSpan>,
-    direct_scalar: Option<FixedScalar>,
+    direct_destination: Option<PendingLiteralDestination>,
     context: &ScopeContext,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
@@ -94,10 +95,10 @@ pub(super) fn resolve_expression_result_type(
 
                     let accepts_peer_literal = operator_accepts_peer_literal(operator);
                     let lhs_peer = accepts_peer_literal
-                        .then(|| fixed_scalar_peer(rhs, type_environment))
+                        .then(|| numeric_literal_peer(rhs, type_environment))
                         .flatten();
                     let rhs_peer = accepts_peer_literal
-                        .then(|| fixed_scalar_peer(lhs, type_environment))
+                        .then(|| numeric_literal_peer(lhs, type_environment))
                         .flatten();
                     let lhs_type = materialize_type_stack_slot(
                         lhs,
@@ -138,8 +139,8 @@ pub(super) fn resolve_expression_result_type(
 
     // A pending literal left alone by malformed RPN has no peer; preserve its one-item
     // receiving path, then let the stack-shape diagnostic report the malformed expression.
-    let lone_pending_scalar = match stack.as_slice() {
-        [ExpressionTypeStackSlot::Pending(_)] => direct_scalar,
+    let lone_pending_destination = match stack.as_slice() {
+        [ExpressionTypeStackSlot::Pending(_)] => direct_destination,
         _ => None,
     };
     for slot in &mut stack {
@@ -147,7 +148,7 @@ pub(super) fn resolve_expression_result_type(
             *slot = ExpressionTypeStackSlot::Typed(materialize_pending_literal(
                 output_queue,
                 index,
-                lone_pending_scalar,
+                lone_pending_destination,
                 context,
                 string_table,
             )?);
@@ -187,16 +188,20 @@ enum ExpressionTypeStackSlot {
 
 fn materialize_type_stack_slot(
     slot: ExpressionTypeStackSlot,
-    peer_scalar: Option<FixedScalar>,
+    peer_destination: Option<PendingLiteralDestination>,
     ordered_items: &mut [ExpressionRpnItem],
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<TypeId, ExpressionTypingError> {
     match slot {
         ExpressionTypeStackSlot::Typed(type_id) => Ok(type_id),
-        ExpressionTypeStackSlot::Pending(index) => {
-            materialize_pending_literal(ordered_items, index, peer_scalar, context, string_table)
-        }
+        ExpressionTypeStackSlot::Pending(index) => materialize_pending_literal(
+            ordered_items,
+            index,
+            peer_destination,
+            context,
+            string_table,
+        ),
     }
 }
 
@@ -215,12 +220,14 @@ fn operator_accepts_peer_literal(operator: &Operator) -> bool {
         )
 }
 
-fn fixed_scalar_peer(
+fn numeric_literal_peer(
     slot: ExpressionTypeStackSlot,
     type_environment: &TypeEnvironment,
-) -> Option<FixedScalar> {
+) -> Option<PendingLiteralDestination> {
     match slot {
-        ExpressionTypeStackSlot::Typed(type_id) => type_environment.fixed_scalar(type_id),
+        ExpressionTypeStackSlot::Typed(type_id) => {
+            pending_literal_destination_for_type_id(type_id, type_environment)
+        }
         ExpressionTypeStackSlot::Pending(_) => None,
     }
 }
