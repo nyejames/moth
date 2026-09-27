@@ -13,6 +13,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Numeric types and semantics](./plans/number_type_numeric_plan.md) - Ready next after delivered MON v1. Deliver fixed-width integers/floats, a compilation-wide numeric profile and runtime Byte first, then Number/NumberN and the final Error.code U32 migration. Reuse the MON codec and preserve ordinary Int/Float APIs.
 
+- [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
+
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
