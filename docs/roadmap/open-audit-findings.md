@@ -14,10 +14,7 @@ None.
 
 Filed, not yet triaged.
 
-- [AUD-0007-F03: Standard-profile external errors admit out-of-domain Error.code](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f03-standard-profile-external-errors-admit-out-of-domain-errorcode)
-  - `Correctness` | `contract.numeric_profile.frontend_runtime`
-- [AUD-0008-F03: Standard external error-code test pins a permissive expression](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f03-standard-external-error-code-test-pins-a-permissive-expression)
-  - `Tests` | `contract.numeric_profile.regression_tests`
+None.
 
 ## Accepted
 
@@ -38,6 +35,13 @@ Waiting on a design decision.
 None.
 
 ## Resolved in this branch
+- AUD-0007-F03 and linked AUD-0008-F03 were accepted and resolved by applying the shared
+  safe-integer/profile-bound projection to standard external `Error.code` values before creating
+  a Moth Error. Generated standard and Int64 fallible wrappers execute in Node: signed endpoints
+  and invalid external codes exercise numeric fallback; the source-expression pin was deleted.
+  `just validate` passed. See the [Correctness triage record](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f03-standard-profile-external-errors-admit-out-of-domain-errorcode)
+  and [Tests triage record](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f03-standard-external-error-code-test-pins-a-permissive-expression).
+
 - AUD-0007-F02 and linked AUD-0008-F02 were accepted and resolved by stopping const-template
   Int64 counters at their final valid bound before overflow, treating equal/empty Float bounds
   without an unnecessary progress check, and preserving nonterminal stalled-step diagnostics.

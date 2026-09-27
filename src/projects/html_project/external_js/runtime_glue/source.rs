@@ -109,9 +109,6 @@ pub(super) fn generate_fallible_wrapper(
     let zero_code = JsNumericCarrier::int_literal(0, numeric_profile)
         .expect("zero always fits the Int profile");
     let returned_error_code = match int_carrier {
-        JsNumericCarrier::ExactInteger { .. } if numeric_profile == NumericProfile::STANDARD => {
-            "typeof error.code === \"number\" ? error.code : 0".to_owned()
-        }
         JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. } => {
             let (minimum, maximum) = int_carrier
                 .integer_bounds_js()

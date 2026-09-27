@@ -133,7 +133,7 @@ AUD-0008-F02 proposes endpoint successes and a meaningful nonterminal-stall cont
 
 ### AUD-0007-F03: Standard-profile external errors admit out-of-domain `Error.code`
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -167,6 +167,12 @@ Execute generated standard and Int64 fallible wrappers in Node with valid endpoi
 #### Linked findings
 
 AUD-0008-F03 proposes executable wrapper value-domain coverage. Both linked findings require triage acceptance before code or tests change. The current Rust test asserts the permissive generated expression, which must be deleted rather than pinned to a replacement spelling.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** Standard `Error.code` is still profile `Int`: `Number.isSafeInteger` with selected `Int` bounds is needed before projecting external numbers into the compiler-owned Error. Preserve zero fallback, negative signed codes and the existing safe-Number-to-BigInt conversion for Int64. Reuse the generated wrapper's existing carrier/bounds branch rather than inventing a second standard-only path. Linked Tests finding AUD-0008-F03 is independently accepted: delete the source-expression pin and execute the generated standard wrapper against signed endpoints, invalid values and caught exceptions in Node. Phase 8's future `U32` field is not part of this correction.
+
+2026-09-27 — **Accepted and resolved.** Removed the standard-only permissive expression; the shared Int-carrier projection requires a safe JS integer within the selected profile bounds before storing `Error.code`. Int32 negative and positive endpoints survive; fractions, nonfinite values, out-of-range values and nonnumeric carriers use the zero fallback. The Int64 Number-to-BigInt projection remains unchanged. Generated Node wrapper tests and `just validate` passed (5475 unit, 2086/2086 integration, docs check, all-features clippy, benchmark preflight and scaling). Independent correctness and Tests reviewers found no required findings. Release-mode wrapper execution and an external-module graph runtime remain outside this focused test boundary; neither was asserted as covered.
 
 ## Checked and clean
 

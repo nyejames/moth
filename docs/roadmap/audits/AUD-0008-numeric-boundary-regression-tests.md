@@ -109,7 +109,7 @@ AUD-0007-F02.
 
 ### AUD-0008-F03: Standard external error-code test pins a permissive expression
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Tests`
 
 #### Evidence
@@ -143,6 +143,12 @@ Run generated-wrapper Node tests and `just validate`.
 #### Linked findings
 
 AUD-0007-F03.
+
+#### Triage record
+
+2026-09-27 — **Accepted.** The source-text assertion pins the exact permissive expression and cannot detect an out-of-domain generated Error. Replace it with executable canonical message and caught-error coverage; add a Node-executed standard-profile wrapper test for signed Int32 endpoints, fractional/nonfinite/out-of-range/string/undefined codes and caught exceptions. Preserve the existing Int64 execution test and the documented zero fallback. Linked Correctness finding AUD-0007-F03 is independently accepted.
+
+2026-09-27 — **Accepted and resolved.** Removed the old source-expression/canonical-field pin and now execute the generated standard wrapper in Node. Assertions cover both signed Int32 endpoints, valid negative and zero codes, adjacent and noninteger invalids, canonical message/code fields, a thrown exception and a successful value; the Int64 Node wrapper test remains. Focused fallible-wrapper tests passed 5/5 and `just validate` passed (5475 unit, 2086/2086 integration); independent correctness and test-strength reviews were clean.
 
 ## Checked and clean
 

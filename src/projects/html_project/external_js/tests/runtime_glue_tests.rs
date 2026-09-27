@@ -319,24 +319,77 @@ fn fallible_wrapper_handles_invalid_shape_differently_for_debug_and_release() {
 }
 
 #[test]
-fn fallible_wrapper_converts_external_errors_to_internal_error_fields() {
-    let debug_source = generate_fallible_wrapper(
-        "__moth_glue_fn1",
-        "__moth_external_fn1",
+fn standard_fallible_wrapper_bounds_error_code_to_int32() {
+    let wrapper = generate_fallible_wrapper(
+        "wrapExternal",
+        "failExternal",
         false,
         NumericProfile::STANDARD,
     );
-
-    assert!(
-        debug_source.contains("moth_field_6d657373616765: String(e.message || e)")
-            && debug_source.contains("moth_field_636f6465: 0"),
-        "caught JS exceptions must become canonical Moth Error values"
+    let code_field = crate::backends::js::builtin_error_code_js_field_name(false);
+    let code_field = format!("{code_field:?}");
+    let message_field = crate::backends::js::builtin_error_message_js_field_name(false);
+    let message_field = format!("{message_field:?}");
+    let script = format!(
+        r#"
+import assert from "node:assert/strict";
+let suppliedError;
+let shouldThrow = false;
+let shouldSucceed = false;
+function failExternal() {{
+    if (shouldThrow) throw new Error("thrown failure");
+    if (shouldSucceed) return {{ ok: true, value: 42 }};
+    return {{ ok: false, error: suppliedError }};
+}}
+{wrapper}
+const codeField = {code_field};
+const messageField = {message_field};
+for (const validCode of [-2147483648, 2147483647, -1, 0]) {{
+    suppliedError = {{ message: "failure", code: validCode }};
+    const result = wrapExternal();
+    assert.equal(result.tag, "err");
+    assert.equal(typeof result.value[codeField], "number");
+    assert.equal(result.value[codeField], validCode);
+    assert.equal(result.value[messageField], "failure");
+}}
+for (const invalidError of [
+    {{ message: "failure", code: 1.5 }},
+    {{ message: "failure", code: NaN }},
+    {{ message: "failure", code: Infinity }},
+    {{ message: "failure", code: -Infinity }},
+    {{ message: "failure", code: 2147483648 }},
+    {{ message: "failure", code: -2147483649 }},
+    {{ message: "failure", code: "500" }},
+    {{ message: "failure" }},
+]) {{
+    suppliedError = invalidError;
+    const result = wrapExternal();
+    assert.equal(result.tag, "err");
+    assert.equal(typeof result.value[codeField], "number");
+    assert.equal(result.value[codeField], 0);
+    assert.equal(result.value[messageField], "failure");
+}}
+shouldThrow = true;
+let result = wrapExternal();
+assert.equal(result.tag, "err");
+assert.equal(typeof result.value[codeField], "number");
+assert.equal(result.value[codeField], 0);
+assert.equal(result.value[messageField], "thrown failure");
+shouldThrow = false;
+shouldSucceed = true;
+result = wrapExternal();
+assert.deepEqual(result, {{ tag: "ok", value: 42 }});
+"#
     );
+
+    let output = Command::new("node")
+        .args(["--input-type=module", "--eval", &script])
+        .output()
+        .expect("Node must be available to execute the generated external glue");
     assert!(
-        debug_source.contains("moth_field_6d657373616765: error.message || \"Unknown error\"")
-            && debug_source
-                .contains("moth_field_636f6465: typeof error.code === \"number\" ? error.code : 0"),
-        "external mothErr values must be translated into canonical Moth Error values"
+        output.status.success(),
+        "generated glue failed in Node:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
