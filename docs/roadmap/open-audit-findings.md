@@ -8,13 +8,25 @@ Unresolved audit work. Evidence stays in the owning report under [audits](./audi
 
 ## Audits in progress
 
-- [AUD-0007: Numeric profile boundary correctness](./audits/AUD-0007-numeric-profile-boundary-correctness.md) — Correctness | `contract.numeric_profile.frontend_runtime` (in progress).
+None.
 
 ## Candidate findings
 
 Filed, not yet triaged.
 
-None.
+- [AUD-0007-F01: Optional fixed scalars escape template renderability checks](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f01-optional-fixed-scalars-escape-template-renderability-checks)
+  - `Correctness` | `contract.numeric_profile.frontend_runtime`
+- [AUD-0007-F02: Int64 const-template ranges require an overflowed terminal successor](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f02-int64-const-template-ranges-require-an-overflowed-terminal-successor)
+  - `Correctness` | `contract.numeric_profile.frontend_runtime`
+- [AUD-0007-F03: Standard-profile external errors admit out-of-domain Error.code](./audits/AUD-0007-numeric-profile-boundary-correctness.md#aud-0007-f03-standard-profile-external-errors-admit-out-of-domain-errorcode)
+  - `Correctness` | `contract.numeric_profile.frontend_runtime`
+
+- [AUD-0008-F01: Optional fixed-scalar template interpolation lacks a source-diagnostic owner](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f01-optional-fixed-scalar-template-interpolation-lacks-a-source-diagnostic-owner)
+  - `Tests` | `contract.numeric_profile.regression_tests`
+- [AUD-0008-F02: Empty Float const range is pinned as a non-progress error](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f02-empty-float-const-range-is-pinned-as-a-non-progress-error)
+  - `Tests` | `contract.numeric_profile.regression_tests`
+- [AUD-0008-F03: Standard external error-code test pins a permissive expression](./audits/AUD-0008-numeric-boundary-regression-tests.md#aud-0008-f03-standard-external-error-code-test-pins-a-permissive-expression)
+  - `Tests` | `contract.numeric_profile.regression_tests`
 
 ## Accepted
 

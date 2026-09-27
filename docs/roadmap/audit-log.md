@@ -41,6 +41,8 @@ Coverage is not quality. An audited area may still have open findings.
 | `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
 | `frontend.tokenizer` | `src/compiler_frontend/tokenizer/**` - lexer, tokens, numeric scanning, text modes, line scanning, newline handling, and the tokenizer test files | Correctness 2026-08 AUD-0005 `stale` |
 | `frontend.symbols` | `src/compiler_frontend/symbols/**` - string interning with fork/merge/freeze, complete-path interning (`PathId`, `PathInternerBuilder`, `PathTable`), `InternedPath`, identifier and reserved-name policy, compiler-owned symbol preseeding, dependency identities, and the symbols test files | Correctness 2026-09 AUD-0006 `stale` |
+| `contract.numeric_profile.frontend_runtime` | Numeric-profile and folded-value handoff across frontend, build/config/template services, HTML-JS lowering, foreign Error projection and integration evidence. Excludes full Wasm scalar execution and unmodified consumers. | Correctness 2026-09 AUD-0007 `partial` |
+| `contract.numeric_profile.regression_tests` | Template fixed-scalar, const-template range and external-JS fallible wrapper regression cases and Rust generated-wrapper tests. Excludes the remainder of `tests.cases` and backend tests. | Tests 2026-09 AUD-0008 `partial` |
 
 ## Never audited
 
