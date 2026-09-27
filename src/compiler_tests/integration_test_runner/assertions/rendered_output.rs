@@ -15,6 +15,7 @@ use super::html_scripts::extract_executable_scripts;
 use super::node_harness::{RenderHarnessError, run_node_script, with_harness_workspace};
 use crate::build_system::build::OutputFile;
 use crate::compiler_tests::integration_test_runner::types::RenderedOutputExpectation;
+use std::io::Write;
 use std::path::Path;
 
 pub(super) fn validate_rendered_output(
@@ -66,12 +67,18 @@ fn execute_wasm_page_in_node(
 /// text boundary and a non-UTF-8 workspace path cannot be lossily rewritten.
 fn run_wasm_harness_in(directory: &Path) -> Result<RenderedOutput, RenderHarnessError> {
     let harness_path = directory.join("harness.js");
-    std::fs::write(&harness_path, NODE_WASM_HARNESS).map_err(|error| {
-        RenderHarnessError::workspace(format!(
-            "rendered_output: failed to write the HTML-Wasm Node harness '{}': {error}",
-            harness_path.display()
-        ))
-    })?;
+    std::fs::File::create(&harness_path)
+        .and_then(|mut harness| {
+            harness.write_all(NODE_WASM_HARNESS_PREFIX.as_bytes())?;
+            harness.write_all(NODE_TERMINAL_PROTOCOL.as_bytes())?;
+            harness.write_all(NODE_WASM_HARNESS_SUFFIX.as_bytes())
+        })
+        .map_err(|error| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: failed to write the HTML-Wasm Node harness '{}': {error}",
+                harness_path.display()
+            ))
+        })?;
 
     let run = run_node_script(&harness_path, directory)?;
     parse_harness_output(run.stdout.trim())
@@ -363,8 +370,8 @@ impl RenderedOutput {
 /// Executes the script blocks from compiled HTML through a minimal Node.js harness.
 ///
 /// The harness stubs `document.getElementById` to capture `insertAdjacentHTML` calls, intercepts
-/// `console.log` and emits a JSON summary after one microtask tick so runtime assertions can
-/// observe batched reactive flushes queued by the page bundle.
+/// `console.log` and emits a summary after the page script's queued microtasks drain so runtime
+/// assertions can observe batched reactive flushes queued by the page bundle.
 fn execute_html_in_node(
     index: &BuiltArtifactIndex<'_>,
     math_random_samples: Option<&[f64]>,
@@ -389,41 +396,20 @@ fn execute_html_in_node(
     })
 }
 
-fn build_node_harness(scripts: &[String], math_random_samples: Option<&[f64]>) -> String {
-    let prefix = r#"const __moth_events = [];
-const __moth_slot_by_id = new Map();
-console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
-function __moth_get_slot(id) {
-    if (!__moth_slot_by_id.has(id)) {
-        const slot = {
-            id,
-            innerHTML: "",
-            insertAdjacentHTML: (_, html) => {
-                const text = String(html);
-                slot.innerHTML += text;
-                __moth_events.push({ type: 'fragment_insert', id: String(id), html: text });
-            }
-        };
-        __moth_slot_by_id.set(id, slot);
-    }
-    return __moth_slot_by_id.get(id);
-}
-const document = {
-    getElementById: __moth_get_slot
-};
-
-// A Moth runtime error is a value thrown as `new Error(message)`; subclasses and engine errors
-// such as TypeError are codegen or harness faults. The first one ends the run: the summary is
-// serialized synchronously so host work queued before the throw (reactive flush microtasks)
-// cannot append events after it, and later throws are ignored.
+const NODE_TERMINAL_PROTOCOL: &str = r#"// A Moth runtime error is a value thrown as `new Error(message)`; subclasses and engine errors
+// such as TypeError are codegen or harness faults. The first one ends the run; the summary is
+// serialized synchronously so host work queued before the throw cannot append events after it.
+// Target adapters may veto a summary with a harness error before events are serialized.
+let __moth_summary_error_hook = null;
 let __moth_finished = false;
 function __moth_write_summary() {
     if (__moth_finished) return;
-    if (__moth_events.__moth_random_samples_exhausted) {
-        __moth_report_harness_failure(
-            new TypeError(__moth_events.__moth_random_samples_exhausted_message)
-        );
-        return;
+    if (__moth_summary_error_hook !== null) {
+        const error = __moth_summary_error_hook();
+        if (error !== null) {
+            __moth_report_harness_failure(error);
+            return;
+        }
     }
     __moth_finished = true;
     process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
@@ -451,6 +437,31 @@ function __moth_handle_runtime_error(error) {
 process.on('uncaughtException', __moth_handle_runtime_error);
 process.on('unhandledRejection', __moth_handle_runtime_error);
 "#;
+
+fn build_node_harness(scripts: &[String], math_random_samples: Option<&[f64]>) -> String {
+    let prefix = r#"const __moth_events = [];
+const __moth_slot_by_id = new Map();
+console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
+function __moth_get_slot(id) {
+    if (!__moth_slot_by_id.has(id)) {
+        const slot = {
+            id,
+            innerHTML: "",
+            insertAdjacentHTML: (_, html) => {
+                const text = String(html);
+                slot.innerHTML += text;
+                __moth_events.push({ type: 'fragment_insert', id: String(id), html: text });
+            }
+        };
+        __moth_slot_by_id.set(id, slot);
+    }
+    return __moth_slot_by_id.get(id);
+}
+const document = {
+    getElementById: __moth_get_slot
+};
+
+"#;
     let samples_json = math_random_samples
         .map(|samples| {
             serde_json::to_string(samples)
@@ -460,6 +471,10 @@ process.on('unhandledRejection', __moth_handle_runtime_error);
     let mut random_setup = String::from(
         r#"__moth_events.__moth_random_samples_exhausted = false;
 __moth_events.__moth_random_samples_exhausted_message = null;
+__moth_summary_error_hook = () => {
+    if (!__moth_events.__moth_random_samples_exhausted) return null;
+    return new TypeError(__moth_events.__moth_random_samples_exhausted_message);
+};
 {
     const samples = "#,
     );
@@ -487,14 +502,17 @@ __moth_events.__moth_random_samples_exhausted_message = null;
 setImmediate(__moth_write_summary);
 "#;
 
-    format!("{prefix}{random_setup}{}\n{suffix}", scripts.join("\n"))
+    format!(
+        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}{}\n{suffix}",
+        scripts.join("\n")
+    )
 }
 
-/// HTML-Wasm harness source.
+/// HTML-Wasm harness adapter source, composed with the shared terminal protocol.
 ///
-/// It resolves its artifacts through `__dirname` rather than an interpolated path, so the
-/// workspace location never has to survive a UTF-8 text boundary.
-const NODE_WASM_HARNESS: &str = r#"const fs = require("fs");
+/// It resolves artifacts through `__dirname` rather than an interpolated path, so the workspace
+/// location never has to survive a UTF-8 text boundary.
+const NODE_WASM_HARNESS_PREFIX: &str = r#"const fs = require("fs");
 const path = require("path");
 const __moth_wasm_dir = __dirname;
 const __moth_events = [];
@@ -529,36 +547,9 @@ globalThis.fetch = async (url) => {
         arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
     };
 };
+"#;
 
-// Same runtime-error protocol as the HTML-JS harness in `build_node_harness`.
-let __moth_finished = false;
-function __moth_write_summary() {
-    if (__moth_finished) return;
-    __moth_finished = true;
-    process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
-}
-function __moth_report_harness_failure(error) {
-    if (__moth_finished) return;
-    let message;
-    try {
-        message = error instanceof Error ? (error.stack || String(error)) : String(error);
-    } catch {
-        message = '<unprintable thrown value>';
-    }
-    __moth_finished = true;
-    process.stderr.write(message + '\n', () => process.exit(1));
-}
-function __moth_handle_runtime_error(error) {
-    if (__moth_finished) return;
-    if (error !== null && typeof error === 'object' && Object.getPrototypeOf(error) === Error.prototype) {
-        __moth_events.push({ type: 'runtime_error', message: String(error.message) });
-        __moth_write_summary();
-        return;
-    }
-    __moth_report_harness_failure(error);
-}
-process.on('uncaughtException', __moth_handle_runtime_error);
-process.on('unhandledRejection', __moth_handle_runtime_error);
+const NODE_WASM_HARNESS_SUFFIX: &str = r#"
 
 (async () => {
     try {

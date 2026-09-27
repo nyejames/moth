@@ -826,6 +826,42 @@ fn rendered_output_does_not_treat_other_throws_as_a_moth_runtime_error() {
 }
 
 #[test]
+fn rendered_output_random_sample_exhaustion_remains_a_harness_failure_when_caught() {
+    for (script, output, runtime_error) in [
+        (
+            "try { Math.random(); Math.random(); } catch {} console.log('caught sample exhaustion');",
+            "caught sample exhaustion",
+            None,
+        ),
+        (
+            concat!(
+                "console.log('before sample exhaustion'); ",
+                "try { Math.random(); Math.random(); } catch {} ",
+                "throw new Error('plain runtime error after sample exhaustion');",
+            ),
+            "before sample exhaustion",
+            Some("plain runtime error after sample exhaustion"),
+        ),
+    ] {
+        let (passed, kind, _reason) = validate_html_script(
+            script,
+            RenderedOutputExpectation {
+                contains: vec![output.to_owned()],
+                runtime_error_contains: runtime_error.into_iter().map(str::to_owned).collect(),
+                math_random_samples: Some(vec![0.25]),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            !passed,
+            "sample exhaustion must not satisfy rendered-output assertions"
+        );
+        assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    }
+}
+
+#[test]
 fn rendered_output_expected_runtime_error_requires_an_error_to_occur() {
     let (passed, kind, reason) = validate_html_script(
         "console.log('completed normally');",
