@@ -104,6 +104,7 @@ pub(crate) struct RenderedOutputExpectation {
     pub not_contains: Vec<String>,
     pub contains_in_order: Vec<String>,
     pub contains_exactly_once: Vec<String>,
+    pub runtime_error_contains: Vec<String>,
 }
 
 impl RenderedOutputExpectation {
@@ -113,6 +114,7 @@ impl RenderedOutputExpectation {
             || !self.not_contains.is_empty()
             || !self.contains_in_order.is_empty()
             || !self.contains_exactly_once.is_empty()
+            || !self.runtime_error_contains.is_empty()
     }
 
     pub(crate) fn assertion_count(&self) -> usize {
@@ -121,6 +123,7 @@ impl RenderedOutputExpectation {
             + self.not_contains.len()
             + self.contains_in_order.len()
             + self.contains_exactly_once.len()
+            + self.runtime_error_contains.len()
     }
 }
 

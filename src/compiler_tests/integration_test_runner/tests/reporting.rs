@@ -166,7 +166,7 @@ fn inventory_json_groups_backend_metadata_under_one_canonical_case() {
     );
     let json = serde_json::to_value(&report).expect("inventory should serialize");
 
-    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["schema_version"], 9);
     assert_eq!(json["repository_revision"]["commit"], "0123456789abcdef");
     assert_eq!(json["run"]["command"], "tests --audit");
     assert_eq!(json["run"]["thread_count"], 4);
@@ -256,7 +256,7 @@ fn inventory_reports_acceptance_only_without_baseline_only_state() {
 }
 
 #[test]
-fn inventory_reports_each_rendered_output_form_and_schema_six_summary_counts() {
+fn inventory_reports_each_rendered_output_form_and_schema_nine_summary_counts() {
     let cases = vec![
         case(
             "exact_output",
@@ -314,17 +314,42 @@ fn inventory_reports_each_rendered_output_form_and_schema_six_summary_counts() {
                 artifacts_must_not_exist: Vec::new(),
             }),
         ),
+        case(
+            "runtime_error_output",
+            BackendId::Html,
+            &["integration"],
+            None,
+            None,
+            ExpectedOutcome::Success(SuccessExpectation {
+                warnings: WarningExpectation::Forbid,
+                success_contract: None,
+                artifact_assertions: Vec::new(),
+                golden: GoldenExpectation::default(),
+                rendered_output: RenderedOutputExpectation {
+                    runtime_error_contains: vec![
+                        "Int operation".to_owned(),
+                        "overflowed".to_owned(),
+                    ],
+                    ..Default::default()
+                },
+                artifacts_must_not_exist: Vec::new(),
+            }),
+        ),
     ];
 
     let json = serde_json::to_value(report_for_cases(&cases, RepositoryRevision::NotARepository))
         .expect("report should serialize");
 
-    assert_eq!(json["schema_version"], 8);
-    assert_eq!(json["summary"]["rendered_output_backend_blocks"], 3);
+    assert_eq!(json["schema_version"], 9);
+    assert_eq!(json["summary"]["rendered_output_backend_blocks"], 4);
     assert_eq!(json["summary"]["rendered_output_exact_backend_blocks"], 1);
     assert_eq!(json["summary"]["rendered_output_order_backend_blocks"], 1);
     assert_eq!(
         json["summary"]["rendered_output_exactly_once_backend_blocks"],
+        1
+    );
+    assert_eq!(
+        json["summary"]["rendered_output_runtime_error_backend_blocks"],
         1
     );
 
@@ -370,6 +395,20 @@ fn inventory_reports_each_rendered_output_form_and_schema_six_summary_counts() {
             "backend_baseline",
             "rendered_output",
             "rendered_output_contains_exactly_once"
+        ])
+    );
+    let runtime_error_backend = &json["cases"][3]["backends"][0];
+    assert_eq!(runtime_error_backend["rendered_output_assertion_count"], 2);
+    assert_eq!(
+        runtime_error_backend["rendered_output_runtime_error_contains_count"],
+        2
+    );
+    assert_eq!(
+        runtime_error_backend["assertion_kinds"],
+        serde_json::json!([
+            "backend_baseline",
+            "rendered_output",
+            "rendered_output_runtime_error_contains"
         ])
     );
 }

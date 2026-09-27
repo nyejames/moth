@@ -4,4 +4,4 @@ numeric_profile = "Int32/Float32"
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "int32-float32 same=true/true int-to-float=16777216 sum=0.3 float-to-int=43 range-error=301 ties=17.007812|17.007812,241.64062|241.64062,234.45312|234.45312 non-ties=0.1|0.1,3.25|3.25"
+rendered_output_exact = "int32-float32 same=true/true int-to-float=16777216 sum=0.3 float-to-int=43 range-error=301 assign=16777216/16777217 negative-zero=true/0/300 ties=17.007812|17.007812,241.64062|241.64062,234.45312|234.45312 non-ties=0.1|0.1,3.25|3.25"

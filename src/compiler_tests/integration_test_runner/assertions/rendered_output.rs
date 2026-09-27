@@ -26,7 +26,7 @@ pub(super) fn validate_rendered_output(
         Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
 
-    validate_rendered_output_fragments(&rendered.combined_output(), expectation)
+    validate_rendered_output_result(&rendered, expectation)
 }
 
 /// Executes the generated HTML-Wasm bootstrap and validates its hydrated slot output.
@@ -44,7 +44,7 @@ pub(super) fn validate_wasm_rendered_output(
         Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
 
-    validate_rendered_output_fragments(&rendered.combined_output(), expectation)
+    validate_rendered_output_result(&rendered, expectation)
 }
 
 fn execute_wasm_page_in_node(
@@ -142,6 +142,54 @@ fn required_wasm_artifact<'index>(
             "rendered_output assertion requires '{relative_path}' to be a wasm artifact."
         ))
     })
+}
+
+fn validate_rendered_output_result(
+    rendered: &RenderedOutput,
+    expectation: &RenderedOutputExpectation,
+) -> Option<(String, FailureKind)> {
+    let actual = rendered.runtime_error_message();
+    if expectation.runtime_error_contains.is_empty()
+        && let Some(message) = actual
+    {
+        return Some((
+            format!("rendered_output: unexpected uncaught Moth runtime Error: {message}"),
+            FailureKind::HarnessFailed,
+        ));
+    }
+
+    if let Some(failure) =
+        validate_rendered_output_fragments(&rendered.combined_output(), expectation)
+    {
+        return Some(failure);
+    }
+
+    if expectation.runtime_error_contains.is_empty() {
+        return None;
+    }
+
+    let Some(actual) = actual else {
+        return Some((
+            format!(
+                "rendered_output: expected an uncaught Moth runtime Error containing {:?}, but no runtime error occurred.",
+                expectation.runtime_error_contains
+            ),
+            FailureKind::RenderedOutputMismatch,
+        ));
+    };
+
+    for fragment in &expectation.runtime_error_contains {
+        if !actual.contains(fragment) {
+            return Some((
+                format!(
+                    "rendered_output: runtime error message did not contain required fragment '{fragment}'.\nActual runtime error:\n{actual}"
+                ),
+                FailureKind::RenderedOutputMismatch,
+            ));
+        }
+    }
+
+    None
 }
 
 /// Validates rendered fragments independently of harness execution.
@@ -250,6 +298,7 @@ pub(crate) struct RenderedOutput {
 pub(crate) enum RuntimeEvent {
     Console { text: String },
     FragmentInsert { id: String, html: String },
+    RuntimeError { message: String },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -260,6 +309,13 @@ pub(crate) struct SlotOutput {
 }
 
 impl RenderedOutput {
+    pub(crate) fn runtime_error_message(&self) -> Option<&str> {
+        self.events.iter().find_map(|event| match event {
+            RuntimeEvent::RuntimeError { message } => Some(message.as_str()),
+            RuntimeEvent::Console { .. } | RuntimeEvent::FragmentInsert { .. } => None,
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn events(&self) -> &[RuntimeEvent] {
         &self.events
@@ -296,6 +352,7 @@ impl RenderedOutput {
             match event {
                 RuntimeEvent::Console { text } => parts.push(text.to_owned()),
                 RuntimeEvent::FragmentInsert { html, .. } => parts.push(html.to_owned()),
+                RuntimeEvent::RuntimeError { .. } => {}
             }
         }
 
@@ -353,12 +410,43 @@ function __moth_get_slot(id) {
 const document = {
     getElementById: __moth_get_slot
 };
+
+// A Moth runtime error is a value thrown as `new Error(message)`; subclasses and engine errors
+// such as TypeError are codegen or harness faults. The first one ends the run: the summary is
+// serialized synchronously so host work queued before the throw (reactive flush microtasks)
+// cannot append events after it, and later throws are ignored.
+let __moth_finished = false;
+function __moth_write_summary() {
+    if (__moth_finished) return;
+    __moth_finished = true;
+    process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
+}
+function __moth_report_harness_failure(error) {
+    if (__moth_finished) return;
+    let message;
+    try {
+        message = error instanceof Error ? (error.stack || String(error)) : String(error);
+    } catch {
+        message = '<unprintable thrown value>';
+    }
+    __moth_finished = true;
+    process.stderr.write(message + '\n', () => process.exit(1));
+}
+function __moth_handle_runtime_error(error) {
+    if (__moth_finished) return;
+    if (error !== null && typeof error === 'object' && Object.getPrototypeOf(error) === Error.prototype) {
+        __moth_events.push({ type: 'runtime_error', message: String(error.message) });
+        __moth_write_summary();
+        return;
+    }
+    __moth_report_harness_failure(error);
+}
+process.on('uncaughtException', __moth_handle_runtime_error);
+process.on('unhandledRejection', __moth_handle_runtime_error);
 "#;
 
     let suffix = r#"
-Promise.resolve().then(() => {
-    process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n');
-});
+setImmediate(__moth_write_summary);
 "#;
 
     format!("{prefix}{}\n{suffix}", scripts.join("\n"))
@@ -404,16 +492,46 @@ globalThis.fetch = async (url) => {
     };
 };
 
+// Same runtime-error protocol as the HTML-JS harness in `build_node_harness`.
+let __moth_finished = false;
+function __moth_write_summary() {
+    if (__moth_finished) return;
+    __moth_finished = true;
+    process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
+}
+function __moth_report_harness_failure(error) {
+    if (__moth_finished) return;
+    let message;
+    try {
+        message = error instanceof Error ? (error.stack || String(error)) : String(error);
+    } catch {
+        message = '<unprintable thrown value>';
+    }
+    __moth_finished = true;
+    process.stderr.write(message + '\n', () => process.exit(1));
+}
+function __moth_handle_runtime_error(error) {
+    if (__moth_finished) return;
+    if (error !== null && typeof error === 'object' && Object.getPrototypeOf(error) === Error.prototype) {
+        __moth_events.push({ type: 'runtime_error', message: String(error.message) });
+        __moth_write_summary();
+        return;
+    }
+    __moth_report_harness_failure(error);
+}
+process.on('uncaughtException', __moth_handle_runtime_error);
+process.on('unhandledRejection', __moth_handle_runtime_error);
+
 (async () => {
     try {
         const page_js = fs.readFileSync(path.join(__moth_wasm_dir, "page.js"), "utf8");
         const page_completion = (0, eval)(page_js);
         await page_completion;
-        await Promise.resolve();
-        process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n');
+        await new Promise((resolve) => setImmediate(resolve));
+        __moth_write_summary();
     } catch (error) {
-        console.error(error);
-        process.exitCode = 1;
+        // WebAssembly.RuntimeError remains a harness failure until Phase 5 defines Wasm trap surfacing.
+        __moth_handle_runtime_error(error);
     }
 })();
 "#;
@@ -451,8 +569,15 @@ pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderH
     };
 
     let mut events = Vec::with_capacity(events_array.len());
+    let mut runtime_error_seen = false;
     for (index, event_value) in events_array.iter().enumerate() {
+        if runtime_error_seen {
+            return Err(invalid_harness_output(
+                "a runtime_error event must be the final event".to_owned(),
+            ));
+        }
         let event = decode_runtime_event(index, event_value).map_err(invalid_harness_output)?;
+        runtime_error_seen = matches!(&event, RuntimeEvent::RuntimeError { .. });
         events.push(event);
     }
 
@@ -477,6 +602,12 @@ fn decode_runtime_event(index: usize, value: &serde_json::Value) -> Result<Runti
             let id = required_string_field(object, "id", &format!("event {index}"))?;
             let html = required_string_field(object, "html", &format!("event {index}"))?;
             Ok(RuntimeEvent::FragmentInsert { id, html })
+        }
+
+        "runtime_error" => {
+            reject_unknown_fields(object, &["type", "message"], &format!("event {index}"))?;
+            let message = required_string_field(object, "message", &format!("event {index}"))?;
+            Ok(RuntimeEvent::RuntimeError { message })
         }
 
         other => Err(format!("event {index} has unknown type '{other}'")),

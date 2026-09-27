@@ -397,19 +397,25 @@ event array when each event happens, then joins their text with newlines in that
 views are derived from the event array. They never reconstruct chronology after execution.
 
 The harness runs only when a backend declares a rendered-output assertion. It executes the emitted
-page scripts and waits for one documented microtask tick so scheduled reactive updates can flush.
-Do not make extra scheduler turns or incidental microtask counts contractual.
+page scripts, captures pending page microtasks, and waits for Node to report unhandled Promise
+rejections before emitting its summary. Do not make scheduler turns or incidental microtask counts
+contractual.
 
 Choose the narrowest field that owns the behaviour:
 
-- `rendered_output_exact` protects the complete combined output. It is mutually exclusive with the
-  other rendered-output fields. Exact comparison normalizes line endings only and preserves every
-  other whitespace difference.
+- `rendered_output_exact` protects the complete combined output and is mutually exclusive with other
+  text-output fields. It may accompany `runtime_error_contains`; exact comparison normalizes line
+  endings only and preserves every other whitespace difference.
 - `rendered_output_contains_in_order` protects the relative order of two or more fragments.
 - `rendered_output_contains_exactly_once` protects activation, mounting and helper output from
   duplication.
 - `rendered_output_contains` and `rendered_output_not_contains` protect required and forbidden
   fragments when complete output isn't the contract.
+- `runtime_error_contains` protects the message of an uncaught runtime trap or assertion stop that
+  ends page execution. The first such error ends the run, and text assertions check only output
+  captured before it. Only values thrown as `new Error(...)` count; subclasses, engine errors such
+  as `TypeError` and `WebAssembly.RuntimeError` remain harness failures. Without this field, an
+  uncaught runtime error fails the case.
 
 [codeblock, $code("toml"):
     [backends.html]
@@ -419,6 +425,15 @@ Choose the narrowest field that owns the behaviour:
     rendered_output_not_contains = ["imported-root"]
     rendered_output_contains_in_order = ["before-loop", "after-loop"]
     rendered_output_contains_exactly_once = ["active-root", "mounted"]
+]
+
+Use a runtime-error contract when the case's intended result is a terminating runtime failure:
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    runtime_error_contains = ["Int operation overflowed"]
 ]
 
 Use exact output for small deterministic behaviours such as loop or map operation results. Use

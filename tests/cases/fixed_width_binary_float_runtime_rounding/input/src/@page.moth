@@ -35,7 +35,7 @@ f32_sum_folded #F32 = single_left + single_right
 f32_sum_matches_folded = f32_sum is f32_sum_folded
 
 half_max #F16 = 65504
-rounding_source #F64 = 1.0004882821813226
+rounding_source #F64 = 1.0004882812500002
 direct_half = round_f64_to_f16(rounding_source) catch:
     then 0.0
 ;

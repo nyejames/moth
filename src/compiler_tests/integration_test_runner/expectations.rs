@@ -75,6 +75,8 @@ struct BackendExpectationToml {
     #[serde(default)]
     rendered_output_contains_exactly_once: Option<Vec<String>>,
     #[serde(default)]
+    runtime_error_contains: Option<Vec<String>>,
+    #[serde(default)]
     artifacts_must_not_exist: Vec<String>,
 }
 
@@ -282,11 +284,14 @@ fn parse_matrix_expectation_file(
         let rendered_output = parse_rendered_output_expectation(
             path,
             &context,
-            backend_expectation.rendered_output_exact,
-            backend_expectation.rendered_output_contains,
-            backend_expectation.rendered_output_not_contains,
-            backend_expectation.rendered_output_contains_in_order,
-            backend_expectation.rendered_output_contains_exactly_once,
+            AuthoredRenderedOutput {
+                exact: backend_expectation.rendered_output_exact,
+                contains: backend_expectation.rendered_output_contains,
+                not_contains: backend_expectation.rendered_output_not_contains,
+                contains_in_order: backend_expectation.rendered_output_contains_in_order,
+                contains_exactly_once: backend_expectation.rendered_output_contains_exactly_once,
+                runtime_error_contains: backend_expectation.runtime_error_contains,
+            },
         )?;
 
         let has_authored_expected_warning = matches!(&warnings, WarningExpectation::Exact(_));
@@ -311,8 +316,8 @@ fn parse_matrix_expectation_file(
             return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
-                 'rendered_output_not_contains', 'rendered_output_contains_in_order', or \
-                 'rendered_output_contains_exactly_once'.",
+                 'rendered_output_not_contains', 'rendered_output_contains_in_order', \
+                 'rendered_output_contains_exactly_once', or 'runtime_error_contains'.",
                 path.display(),
                 context
             )));
@@ -867,15 +872,30 @@ fn validate_exact_diagnostic_match_reason(
     Ok(())
 }
 
-fn parse_rendered_output_expectation(
-    path: &Path,
-    context: &str,
+/// Rendered-output fields exactly as one backend block authored them, before validation.
+struct AuthoredRenderedOutput {
     exact: Option<String>,
     contains: Vec<String>,
     not_contains: Vec<String>,
     contains_in_order: Option<Vec<String>>,
     contains_exactly_once: Option<Vec<String>>,
+    runtime_error_contains: Option<Vec<String>>,
+}
+
+fn parse_rendered_output_expectation(
+    path: &Path,
+    context: &str,
+    authored: AuthoredRenderedOutput,
 ) -> Result<RenderedOutputExpectation, FixtureLoadError> {
+    let AuthoredRenderedOutput {
+        exact,
+        contains,
+        not_contains,
+        contains_in_order,
+        contains_exactly_once,
+        runtime_error_contains,
+    } = authored;
+
     if exact.is_some()
         && (!contains.is_empty()
             || !not_contains.is_empty()
@@ -883,7 +903,8 @@ fn parse_rendered_output_expectation(
             || contains_exactly_once.is_some())
     {
         return Err(FixtureLoadError::expectation_contract(format!(
-            "Expectation file '{}' {} sets 'rendered_output_exact' and must not combine it with any other rendered-output assertion field.",
+            "Expectation file '{}' {} sets 'rendered_output_exact' and must not \
+             combine it with any other text-output assertion field.",
             path.display(),
             context
         )));
@@ -935,6 +956,21 @@ fn parse_rendered_output_expectation(
             )));
         }
     }
+    let runtime_error_contains_was_authored = runtime_error_contains.is_some();
+    let runtime_error_contains = runtime_error_contains.unwrap_or_default();
+    if runtime_error_contains_was_authored && runtime_error_contains.is_empty() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} requires 'runtime_error_contains' to contain at least one entry.",
+            path.display(),
+            context
+        )));
+    }
+    validate_rendered_output_strings(
+        path,
+        context,
+        "runtime_error_contains",
+        &runtime_error_contains,
+    )?;
 
     Ok(RenderedOutputExpectation {
         exact,
@@ -942,6 +978,7 @@ fn parse_rendered_output_expectation(
         not_contains,
         contains_in_order,
         contains_exactly_once,
+        runtime_error_contains,
     })
 }
 

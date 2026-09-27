@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "integer boundaries i8=-128/127 i16=-32768/32767 i32=-2147483648/2147483647 i64=-9223372036854775808/9223372036854775807 u8=0/255 u16=0/65535 u32=0/4294967295 u64=0/18446744073709551615 narrow=-129/128/-32769/32768/256/65536 overflow=301/301/301/301/301/301/301/301 min-div=301/301 min-rem=0/0/0/0 zero-div=300/300 exponent=302/301 products=4294967295/301/27021597764222979/301/9223372030926249001/301/2147395600/301"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"

@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["before custom-channel numeric trap"]
+runtime_error_contains = ["Int operation overflowed"]

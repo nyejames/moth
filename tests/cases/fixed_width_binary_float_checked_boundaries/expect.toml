@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "float boundaries near-ties-f16=1.001/1.001 ties-f32=1/1.0000002 subnormal-f16=0.00006104/6e-8 subnormal-f32=1.1754944e-38/1e-45 int-f32=4611686600000000000/4611686000000000000/9223373000000000000/9223372000000000000 int-f16=65500/65500 limits=65500/243/3.4028235e+38/243/303 zero=true/0/true/0/0/0/true/0 zero-arith=true/0/true/0/true/0/true/0 underflow=true/0/300/true/0/300 division=300/300/300/300"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"

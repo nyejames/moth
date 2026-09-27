@@ -57,12 +57,6 @@ overflow_i64 |value I64| -> I64, Error!:
     return value + 1
 ;
 
-trap_i64_add |run Bool, value I64|:
-    if run:
-        ignored = value + 1
-    ;
-;
-
 report ~CastReport = CastReport(code = 0, message = "", recovered = "")
 
 capture_i8(128, ~report)
@@ -103,7 +97,5 @@ recovered_overflow = overflow_i64(9223372036854775807) catch |overflow_error|:
     overflow_report = [:i64-overflow code=[overflow_error.code] message=[overflow_error.message]]
     then 0
 ;
-
-trap_i64_add(false, 9223372036854775807)
 
 [:fixed cast recovery i64-to-i8 code=[i8_code] message=[i8_message] recovered=[i8_recovered] f64-to-f16 code=[f16_range_code] message=[f16_range_message] recovered=[f16_range_recovered] f64-to-i64 code=[i64_range_code] message=[i64_range_message] recovered=[i64_range_recovered] u64-parse code=[u64_parse_code] message=[u64_parse_message] recovered=[u64_parse_recovered] f16-parse code=[f16_parse_code] message=[f16_parse_message] recovered=[f16_parse_recovered] bang report=[bang_report] recovered=[bang_recovered] overflow report=[overflow_report] recovered=[recovered_overflow]]

@@ -15,11 +15,6 @@ rendered_output_contains = [
     "recovered=0",
 ]
 
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["__moth_numeric_trap(__moth_bigint_add("]
-
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"

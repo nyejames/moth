@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["fixed integer runtime u8=300 promoted=true signed=-420 promotion=true i64=-9223372036854775807 u64=18446744073709551614 signed-div=-2/-1/-2/1 fixed-div=3.5 mixed=true/true/true"]
+rendered_output_exact = "compound atomicity i8=20/1 failed-i8=242/100/1 field=10/1 failed-field=242/255/1"
 
 [backends.html_wasm]
 mode = "failure"

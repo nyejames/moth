@@ -1,0 +1,314 @@
+format_i8 |value I8| -> String:
+    return cast value
+;
+format_i16 |value I16| -> String:
+    return cast value
+;
+format_i32 |value I32| -> String:
+    return cast value
+;
+format_i64 |value I64| -> String:
+    return cast value
+;
+format_u8 |value U8| -> String:
+    return cast value
+;
+format_u16 |value U16| -> String:
+    return cast value
+;
+format_u32 |value U32| -> String:
+    return cast value
+;
+format_u64 |value U64| -> String:
+    return cast value
+;
+
+add_i32 |value I32| -> I32, Error!:
+    return value + 1
+;
+sub_i32 |value I32| -> I32, Error!:
+    return value - 1
+;
+add_i64 |value I64| -> I64, Error!:
+    return value + 1
+;
+sub_i64 |value I64| -> I64, Error!:
+    return value - 1
+;
+add_u32 |value U32| -> U32, Error!:
+    return value + 1
+;
+sub_u32 |value U32| -> U32, Error!:
+    return value - 1
+;
+add_u64 |value U64| -> U64, Error!:
+    return value + 1
+;
+sub_u64 |value U64| -> U64, Error!:
+    return value - 1
+;
+
+capture_i32_add |value I32| -> Int:
+    code ~Int = 0
+    ignored = add_i32(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_i32_sub |value I32| -> Int:
+    code ~Int = 0
+    ignored = sub_i32(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_i64_add |value I64| -> Int:
+    code ~Int = 0
+    ignored = add_i64(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_i64_sub |value I64| -> Int:
+    code ~Int = 0
+    ignored = sub_i64(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_u32_add |value U32| -> Int:
+    code ~Int = 0
+    ignored = add_u32(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_u32_sub |value U32| -> Int:
+    code ~Int = 0
+    ignored = sub_u32(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_u64_add |value U64| -> Int:
+    code ~Int = 0
+    ignored = add_u64(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_u64_sub |value U64| -> Int:
+    code ~Int = 0
+    ignored = sub_u64(value) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+
+minus_one_i8 |value I8| -> I32:
+    return value - 1
+;
+plus_one_i8 |value I8| -> I32:
+    return value + 1
+;
+minus_one_i16 |value I16| -> I32:
+    return value - 1
+;
+plus_one_i16 |value I16| -> I32:
+    return value + 1
+;
+plus_one_u8 |value U8| -> U32:
+    return value + 1
+;
+plus_one_u16 |value U16| -> U32:
+    return value + 1
+;
+
+multiply_u32 |left U32, right U32| -> U32, Error!:
+    return left * right
+;
+multiply_u64 |left U64, right U64| -> U64, Error!:
+    return left * right
+;
+multiply_i64 |left I64, right I64| -> I64, Error!:
+    return left * right
+;
+multiply_i32 |left I32, right I32| -> I32, Error!:
+    return left * right
+;
+
+capture_u32_product |left U32, right U32| -> Int:
+    code ~Int = 0
+    ignored = multiply_u32(left, right) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_u64_product |left U64, right U64| -> Int:
+    code ~Int = 0
+    ignored = multiply_u64(left, right) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_i64_product |left I64, right I64| -> Int:
+    code ~Int = 0
+    ignored = multiply_i64(left, right) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_i32_product |left I32, right I32| -> Int:
+    code ~Int = 0
+    ignored = multiply_i32(left, right) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+
+quotient_i32 |dividend I32, divisor I32| -> I32, Error!:
+    return dividend // divisor
+;
+remainder_i32 |dividend I32, divisor I32| -> I32, Error!:
+    return dividend % divisor
+;
+quotient_i64 |dividend I64, divisor I64| -> I64, Error!:
+    return dividend // divisor
+;
+remainder_i64 |dividend I64, divisor I64| -> I64, Error!:
+    return dividend % divisor
+;
+capture_quotient_i32 |dividend I32, divisor I32| -> Int:
+    code ~Int = 0
+    ignored = quotient_i32(dividend, divisor) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_remainder_i32 |dividend I32, divisor I32| -> Int:
+    code ~Int = 0
+    ignored = remainder_i32(dividend, divisor) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_quotient_i64 |dividend I64, divisor I64| -> Int:
+    code ~Int = 0
+    ignored = quotient_i64(dividend, divisor) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+capture_remainder_i64 |dividend I64, divisor I64| -> Int:
+    code ~Int = 0
+    ignored = remainder_i64(dividend, divisor) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+remainder_result_i32 |dividend I32, divisor I32| -> I32:
+    result = remainder_i32(dividend, divisor) catch:
+        then 0
+    ;
+    return result
+;
+remainder_result_i64 |dividend I64, divisor I64| -> I64:
+    result = remainder_i64(dividend, divisor) catch:
+        then 0
+    ;
+    return result
+;
+power_i32 |base I32, exponent I32| -> I32, Error!:
+    return base ^ exponent
+;
+capture_power_i32 |base I32, exponent I32| -> Int:
+    code ~Int = 0
+    ignored = power_i32(base, exponent) catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+
+limits_i8 = format_i8(-128)
+limits_i8_max = format_i8(127)
+limits_i16 = format_i16(-32768)
+limits_i16_max = format_i16(32767)
+limits_i32 = format_i32(-2147483648)
+limits_i32_max = format_i32(2147483647)
+limits_i64 = format_i64(-9223372036854775808)
+limits_i64_max = format_i64(9223372036854775807)
+limits_u8 = format_u8(0)
+limits_u8_max = format_u8(255)
+limits_u16 = format_u16(0)
+limits_u16_max = format_u16(65535)
+limits_u32 = format_u32(0)
+limits_u32_max = format_u32(4294967295)
+limits_u64 = format_u64(0)
+limits_u64_max = format_u64(18446744073709551615)
+
+narrow_i8_min = format_i32(minus_one_i8(-128))
+narrow_i8_max = format_i32(plus_one_i8(127))
+narrow_i16_min = format_i32(minus_one_i16(-32768))
+narrow_i16_max = format_i32(plus_one_i16(32767))
+narrow_u8_max = format_u32(plus_one_u8(255))
+narrow_u16_max = format_u32(plus_one_u16(65535))
+
+i32_add_error = capture_i32_add(2147483647)
+i32_sub_error = capture_i32_sub(-2147483648)
+i64_add_error = capture_i64_add(9223372036854775807)
+i64_sub_error = capture_i64_sub(-9223372036854775808)
+u32_add_error = capture_u32_add(4294967295)
+u32_sub_error = capture_u32_sub(0)
+u64_add_error = capture_u64_add(18446744073709551615)
+u64_sub_error = capture_u64_sub(0)
+
+i32_min_div_error = capture_quotient_i32(-2147483648, -1)
+i64_min_div_error = capture_quotient_i64(-9223372036854775808, -1)
+i32_min_remainder = format_i32(remainder_result_i32(-2147483648, -1))
+i64_min_remainder = format_i64(remainder_result_i64(-9223372036854775808, -1))
+i32_min_remainder_error = capture_remainder_i32(-2147483648, -1)
+i64_min_remainder_error = capture_remainder_i64(-9223372036854775808, -1)
+i32_zero_div_error = capture_quotient_i32(10, 0)
+i32_zero_rem_error = capture_remainder_i32(10, 0)
+negative_exponent_error = capture_power_i32(2, -1)
+overflow_exponent_error = capture_power_i32(2, 31)
+
+u32_product_result = multiply_u32(65535, 65537) catch:
+    then 0
+;
+u32_product_in = format_u32(u32_product_result)
+u32_product_out = capture_u32_product(65536, 65536)
+u64_product_result = multiply_u64(9007199254740993, 3) catch:
+    then 0
+;
+u64_product_in = format_u64(u64_product_result)
+u64_product_out = capture_u64_product(4294967296, 4294967296)
+i64_product_result = multiply_i64(3037000499, 3037000499) catch:
+    then 0
+;
+i64_product_in = format_i64(i64_product_result)
+i64_product_out = capture_i64_product(3037000500, 3037000500)
+i32_product_result = multiply_i32(46340, 46340) catch:
+    then 0
+;
+i32_product_in = format_i32(i32_product_result)
+i32_product_out = capture_i32_product(46341, 46341)
+
+[:integer boundaries i8=[limits_i8]/[limits_i8_max] i16=[limits_i16]/[limits_i16_max] i32=[limits_i32]/[limits_i32_max] i64=[limits_i64]/[limits_i64_max] u8=[limits_u8]/[limits_u8_max] u16=[limits_u16]/[limits_u16_max] u32=[limits_u32]/[limits_u32_max] u64=[limits_u64]/[limits_u64_max] narrow=[narrow_i8_min]/[narrow_i8_max]/[narrow_i16_min]/[narrow_i16_max]/[narrow_u8_max]/[narrow_u16_max] overflow=[i32_add_error]/[i32_sub_error]/[i64_add_error]/[i64_sub_error]/[u32_add_error]/[u32_sub_error]/[u64_add_error]/[u64_sub_error] min-div=[i32_min_div_error]/[i64_min_div_error] min-rem=[i32_min_remainder]/[i64_min_remainder]/[i32_min_remainder_error]/[i64_min_remainder_error] zero-div=[i32_zero_div_error]/[i32_zero_rem_error] exponent=[negative_exponent_error]/[overflow_exponent_error] products=[u32_product_in]/[u32_product_out]/[u64_product_in]/[u64_product_out]/[i64_product_in]/[i64_product_out]/[i32_product_in]/[i32_product_out]]

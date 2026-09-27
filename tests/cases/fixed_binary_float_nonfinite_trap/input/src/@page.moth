@@ -1,0 +1,5 @@
+overflow_f64 |value F64|:
+    ignored = value * 2.0
+;
+
+overflow_f64(1.7976931348623157e308)

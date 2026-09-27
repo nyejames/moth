@@ -378,7 +378,7 @@ fn the_audit_report_records_the_run_and_the_repository_revision() {
     let json: serde_json::Value =
         serde_json::from_str(&report).expect("audit report should be valid JSON");
 
-    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["schema_version"], 9);
     assert_eq!(json["run"]["command"], "tests --audit");
     assert_eq!(json["run"]["completed"], true);
     assert_eq!(json["run"]["os"], std::env::consts::OS);

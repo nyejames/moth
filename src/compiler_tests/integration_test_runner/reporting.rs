@@ -26,7 +26,7 @@ use std::process;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 8;
+const SUITE_INVENTORY_SCHEMA_VERSION: u32 = 9;
 const FAILURE_TRIAGE_SCHEMA_VERSION: u32 = 1;
 
 /// What a report knows about the repository revision it describes.
@@ -175,6 +175,7 @@ pub(crate) struct InventorySummary {
     pub rendered_output_exact_backend_blocks: usize,
     pub rendered_output_order_backend_blocks: usize,
     pub rendered_output_exactly_once_backend_blocks: usize,
+    pub rendered_output_runtime_error_backend_blocks: usize,
     pub artifact_backend_blocks: usize,
     pub golden_backend_blocks: usize,
     pub absence_backend_blocks: usize,
@@ -218,6 +219,7 @@ pub(crate) struct InventoryBackend {
     pub rendered_output_not_contains_count: usize,
     pub rendered_output_contains_in_order_count: usize,
     pub rendered_output_contains_exactly_once_count: usize,
+    pub rendered_output_runtime_error_contains_count: usize,
     pub artifact_absence_assertion_count: usize,
 }
 
@@ -275,6 +277,7 @@ fn build_inventory_summary(cases: &[InventoryCase]) -> InventorySummary {
         rendered_output_exact_backend_blocks: 0,
         rendered_output_order_backend_blocks: 0,
         rendered_output_exactly_once_backend_blocks: 0,
+        rendered_output_runtime_error_backend_blocks: 0,
         artifact_backend_blocks: 0,
         golden_backend_blocks: 0,
         absence_backend_blocks: 0,
@@ -312,6 +315,9 @@ fn build_inventory_summary(cases: &[InventoryCase]) -> InventorySummary {
         }
         if backend.rendered_output_contains_exactly_once_count > 0 {
             summary.rendered_output_exactly_once_backend_blocks += 1;
+        }
+        if backend.rendered_output_runtime_error_contains_count > 0 {
+            summary.rendered_output_runtime_error_backend_blocks += 1;
         }
         if has_artifacts {
             summary.artifact_backend_blocks += 1;
@@ -359,6 +365,10 @@ fn build_backend_inventory(case: &TestCaseSpec) -> InventoryBackend {
                 .rendered_output
                 .contains_exactly_once
                 .len(),
+            rendered_output_runtime_error_contains_count: expectation
+                .rendered_output
+                .runtime_error_contains
+                .len(),
             artifact_absence_assertion_count: expectation.artifacts_must_not_exist.len(),
         },
         ExpectedOutcome::Failure(expectation) => InventoryBackend {
@@ -382,6 +392,7 @@ fn build_backend_inventory(case: &TestCaseSpec) -> InventoryBackend {
             rendered_output_not_contains_count: 0,
             rendered_output_contains_in_order_count: 0,
             rendered_output_contains_exactly_once_count: 0,
+            rendered_output_runtime_error_contains_count: 0,
             artifact_absence_assertion_count: 0,
         },
     }
@@ -423,6 +434,13 @@ fn success_assertion_kinds(
     }
     if !expectation.rendered_output.contains_exactly_once.is_empty() {
         kinds.push("rendered_output_contains_exactly_once");
+    }
+    if !expectation
+        .rendered_output
+        .runtime_error_contains
+        .is_empty()
+    {
+        kinds.push("rendered_output_runtime_error_contains");
     }
     if !expectation.artifacts_must_not_exist.is_empty() {
         kinds.push("artifact_absence");

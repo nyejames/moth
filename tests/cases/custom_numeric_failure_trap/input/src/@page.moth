@@ -1,0 +1,8 @@
+custom_channel_overflow |value Int| -> Int, String!:
+    return value + 1
+;
+
+io.line("before custom-channel numeric trap")
+ignored = custom_channel_overflow(2147483647) catch:
+    then 0
+;

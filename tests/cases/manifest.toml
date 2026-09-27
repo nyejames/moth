@@ -7329,6 +7329,20 @@ contract = "language.arithmetic.compound_store_conversion_error_and_success_only
 role = "primary"
 
 [[case]]
+id = "compound_assignment_atomicity_runtime"
+path = "compound_assignment_atomicity_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
+contract = "language.numbers.compound_assignment_runtime_atomicity"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_store_conversion_trap"
+path = "compound_assignment_store_conversion_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
+contract = "backend.html.compound_store_conversion_runtime_trap"
+role = "backend"
+
+[[case]]
 id = "compound_assignment_u8_literal_range_rejected"
 path = "compound_assignment_u8_literal_range_rejected"
 tags = ["integration", "language", "diagnostics", "mutation"]
@@ -11894,10 +11908,10 @@ contract = "language.numeric.builtin_error_recovery_acceptance"
 role = "primary"
 
 [[case]]
-id = "checked_numeric_trap_mode"
-path = "checked_numeric_trap_mode"
-tags = ["integration", "language", "numeric", "js-backend"]
-contract = "backend.html.numeric_trap_helper_emission"
+id = "custom_numeric_failure_trap"
+path = "custom_numeric_failure_trap"
+tags = ["integration", "numeric", "runtime", "js-backend", "error-handling"]
+contract = "backend.html.custom_error_channel_numeric_trap"
 role = "backend"
 
 [[case]]
@@ -12997,6 +13011,34 @@ path = "fixed_width_integer_runtime_arithmetic"
 tags = ["integration", "numeric", "runtime", "fixed-width"]
 contract = "language.numbers.fixed_width_integer_runtime_arithmetic"
 role = "primary"
+
+[[case]]
+id = "fixed_width_integer_checked_boundaries"
+path = "fixed_width_integer_checked_boundaries"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_width_integer_checked_boundaries"
+role = "primary"
+
+[[case]]
+id = "fixed_width_integer_overflow_trap"
+path = "fixed_width_integer_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap"]
+contract = "backend.html.fixed_width_integer_runtime_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_binary_float_checked_boundaries"
+path = "fixed_width_binary_float_checked_boundaries"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float"]
+contract = "language.numbers.fixed_binary_float_checked_boundaries"
+role = "primary"
+
+[[case]]
+id = "fixed_binary_float_nonfinite_trap"
+path = "fixed_binary_float_nonfinite_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "trap"]
+contract = "backend.html.fixed_binary_float_nonfinite_runtime_trap"
+role = "backend"
 
 [[case]]
 id = "fixed_width_binary_float_runtime_rounding"

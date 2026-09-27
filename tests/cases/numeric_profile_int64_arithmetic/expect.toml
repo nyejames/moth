@@ -4,9 +4,5 @@ numeric_profile = "Int64/Float32"
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["int64 max=9223372036854775807 min=-9223372036854775808 product=27021597764222979 quotient=-3074457345618258602 remainder=-1 power=4611686018427387904 add-overflow=-11 negate-min=-12 divide-min=-13 power-overflow=-14 invalid-exponent=-15 parse-max=9223372036854775807 parse-overflow=-98 float-truncate=42 float-overflow=-101"]
+rendered_output_contains = ["int64 max=9223372036854775807 min=-9223372036854775808 product=27021597764222979 quotient=-3074457345618258602 remainder=-1 power=4611686018427387904 add-overflow=-11 negate-min=-12 divide-min=-13 power-overflow=-14 invalid-exponent=-15 parse-max=9223372036854775807 parse-overflow=-98 float-truncate=42 float-overflow=-101 profile-divide=9007199254740992/9007199254740993 int-to-float=9007199000000000"]
 
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["__moth_numeric_trap(__moth_bigint_add("]

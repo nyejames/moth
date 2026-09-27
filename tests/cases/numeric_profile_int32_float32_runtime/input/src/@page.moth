@@ -21,6 +21,28 @@ float_to_int |value Float| -> Int, Error!:
 increment |value Int| -> Int, Error!:
     return value + 1
 ;
+assign_divide_int |target ~Int| -> Int, Error!:
+    target /= 1
+    return target
+;
+assign_integer_divide_int |target ~Int| -> Int, Error!:
+    target //= 1
+    return target
+;
+parse_profile_float |text String| -> Float, Error!:
+    return cast! text
+;
+divide_profile_float |left Float, right Float| -> Float, Error!:
+    return left / right
+;
+capture_profile_divide |left Float, right Float| -> Int:
+    code ~Int = 0
+    ignored = divide_profile_float(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
 
 same_folded #Bool = 16777217 is 16777216.0
 same_runtime = compare(16777217, 16777216.0)
@@ -39,6 +61,23 @@ float_to_int_value = float_to_int(rounded_value) catch:
 range_error_code = increment(2147483647) catch |overflow_error|:
     then overflow_error.code
 ;
+profile_divide_target ~= 16777217
+profile_integer_divide_target ~= 16777217
+profile_divide_assign = assign_divide_int(~profile_divide_target) catch:
+    then -1
+;
+profile_integer_divide_assign = assign_integer_divide_int(~profile_integer_divide_target) catch:
+    then -1
+;
+profile_negative_zero = parse_profile_float("-0.0") catch:
+    then 1.0
+;
+profile_positive_zero = parse_profile_float("0.0") catch:
+    then 1.0
+;
+profile_negative_zero_equal = profile_negative_zero is profile_positive_zero
+profile_negative_zero_text = format_float(profile_negative_zero)
+profile_zero_division_error = capture_profile_divide(1.0, profile_negative_zero)
 
 tie_one #Float = 17.0078125
 tie_two #Float = 241.640625
@@ -58,4 +97,4 @@ non_tie_two_folded #String = cast non_tie_two
 non_tie_one_runtime = format_float(non_tie_one)
 non_tie_two_runtime = format_float(non_tie_two)
 
-[:int32-float32 same=[same_folded]/[same_runtime] int-to-float=[rounded_float_text] sum=[sum_text] float-to-int=[float_to_int_value] range-error=[range_error_code] ties=[tie_one_folded]|[tie_one_runtime],[tie_two_folded]|[tie_two_runtime],[tie_three_folded]|[tie_three_runtime] non-ties=[non_tie_one_folded]|[non_tie_one_runtime],[non_tie_two_folded]|[non_tie_two_runtime]]
+[:int32-float32 same=[same_folded]/[same_runtime] int-to-float=[rounded_float_text] sum=[sum_text] float-to-int=[float_to_int_value] range-error=[range_error_code] assign=[profile_divide_assign]/[profile_integer_divide_assign] negative-zero=[profile_negative_zero_equal]/[profile_negative_zero_text]/[profile_zero_division_error] ties=[tie_one_folded]|[tie_one_runtime],[tie_two_folded]|[tie_two_runtime],[tie_three_folded]|[tie_three_runtime] non-ties=[non_tie_one_folded]|[non_tie_one_runtime],[non_tie_two_folded]|[non_tie_two_runtime]]

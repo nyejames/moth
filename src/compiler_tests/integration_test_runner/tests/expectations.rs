@@ -1056,6 +1056,88 @@ fn parses_and_retains_all_rendered_output_assertion_forms() {
 }
 
 #[test]
+fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
+    for backend in ["html", "html_wasm"] {
+        let (_root, case_root) = write_fixture(
+            &format!("runtime_error_contains_{backend}"),
+            &format!(
+                concat!(
+                    "[backends.{}]\n",
+                    "mode = \"success\"\n",
+                    "warnings = \"forbid\"\n",
+                    "rendered_output_exact = \"before overflow\"\n",
+                    "runtime_error_contains = [\"Int operation\", \"overflowed\"]\n"
+                ),
+                backend
+            ),
+        );
+
+        let cases = load_canonical_case_specs(&case_root, None)
+            .expect("runtime_error_contains should be a success contract");
+        let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
+            panic!("case should have a success expectation");
+        };
+        assert_eq!(
+            expectation.rendered_output.exact.as_deref(),
+            Some("before overflow")
+        );
+        assert_eq!(
+            expectation.rendered_output.runtime_error_contains,
+            vec!["Int operation", "overflowed"]
+        );
+        assert!(expectation.rendered_output.is_present());
+    }
+}
+
+#[test]
+fn runtime_error_contains_rejects_failure_mode_and_lists_rendered_fields() {
+    let (_root, case_root) = write_fixture(
+        "runtime_error_contains_failure_mode",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nruntime_error_contains = [\"overflow\"]\n",
+    );
+
+    let Err(error) = load_canonical_case_specs(&case_root, None) else {
+        panic!("runtime_error_contains in failure mode should be rejected");
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract
+    );
+    assert!(
+        error.message.contains("runtime_error_contains")
+            && error.message.contains("rendered_output_contains"),
+        "failure-mode error should list the rendered-output fields: {error}"
+    );
+}
+
+#[test]
+fn runtime_error_contains_rejects_empty_lists_and_entries() {
+    for (name, value, expected_message) in [
+        ("empty_list", "[]", "at least one entry"),
+        ("empty_entry", "[\"\"]", "empty 'runtime_error_contains'"),
+    ] {
+        let (_root, case_root) = write_fixture(
+            &format!("runtime_error_contains_{name}"),
+            &format!(
+                "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_error_contains = {value}\n"
+            ),
+        );
+
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("runtime_error_contains = {value} should be rejected");
+        };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract
+        );
+        assert!(
+            error.message.contains(expected_message),
+            "unexpected error for runtime_error_contains = {value}: {error}"
+        );
+    }
+}
+
+#[test]
 fn exact_output_accepts_authored_empty_string() {
     let (_root, case_root) = write_fixture(
         "rendered_output_exact_empty",

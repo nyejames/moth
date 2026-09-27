@@ -46,12 +46,6 @@ less_u32_u64 |left U32, right U64| -> Bool:
     return left < right
 ;
 
-trap_i64_add |run Bool, value I64|:
-    if run:
-        ignored = value + 1
-    ;
-;
-
 u8_left #U8 = 200
 u8_right #U8 = 100
 u8_sum = add_u8(u8_left, u8_right)
@@ -94,8 +88,6 @@ fixed_quotient = divide_fixed(7) catch:
 mixed_equal = equal_u8_i64(255, 255)
 negative_i64_less = less_i64_u64(-1, a_u64_max)
 u32_less = less_u32_u64(4294967295, 4294967296)
-
-trap_i64_add(false, 9223372036854775807)
 
 u8_text String = cast u8_sum
 signed_text String = cast signed_sum

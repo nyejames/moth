@@ -535,6 +535,41 @@ fn html_wasm_rendered_output_waits_for_bootstrap_completion() {
 }
 
 #[test]
+fn html_wasm_rendered_output_captures_plain_runtime_errors() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    std::fs::write(
+        temp_dir.path().join("page.js"),
+        r#"console.log("before");
+throw new Error("wasm runtime trap");
+"#,
+    )
+    .expect("runtime-error bootstrap fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("plain Error from HTML-Wasm page execution should be reported as runtime output");
+
+    assert_eq!(output.combined_output(), "before");
+    assert_eq!(output.runtime_error_message(), Some("wasm runtime trap"));
+}
+
+#[test]
+fn html_wasm_runtime_error_from_webassembly_remains_a_harness_failure() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    std::fs::write(
+        temp_dir.path().join("page.js"),
+        r#"throw new WebAssembly.RuntimeError("wasm trap");
+"#,
+    )
+    .expect("Wasm trap fixture should be written");
+
+    let error = execute_wasm_harness_for_test(temp_dir.path())
+        .expect_err("WebAssembly.RuntimeError should not satisfy a Moth runtime-error expectation");
+
+    assert_eq!(error.kind, RenderHarnessErrorKind::ExitStatus);
+    assert!(error.message.contains("wasm trap"), "{}", error.message);
+}
+
+#[test]
 fn rendered_output_decodes_typed_runtime_events() {
     let output = parse_harness_output(
         r#"{"events":[{"type":"console","text":"hello"},{"type":"fragment_insert","id":"root","html":"<p>hi</p>"}]}"#,
@@ -552,6 +587,31 @@ fn rendered_output_decodes_typed_runtime_events() {
                 html: "<p>hi</p>".to_owned(),
             },
         ]
+    );
+}
+
+#[test]
+fn rendered_output_decodes_one_runtime_error_after_captured_events() {
+    let output = parse_harness_output(
+        r#"{"events":[{"type":"console","text":"before trap"},{"type":"runtime_error","message":"Int operation overflowed"}]}"#,
+    )
+    .expect("one terminal runtime error should decode");
+
+    assert_eq!(
+        output.events(),
+        &[
+            RuntimeEvent::Console {
+                text: "before trap".to_owned(),
+            },
+            RuntimeEvent::RuntimeError {
+                message: "Int operation overflowed".to_owned(),
+            },
+        ]
+    );
+    assert_eq!(output.combined_output(), "before trap");
+    assert_eq!(
+        output.runtime_error_message(),
+        Some("Int operation overflowed")
     );
 }
 
@@ -628,6 +688,10 @@ fn rendered_output_rejects_unknown_or_malformed_runtime_events() {
             r#"{"events":[{"type":"console","text":"value","extra":true}]}"#,
             "unknown field 'extra'",
         ),
+        (
+            r#"{"events":[{"type":"runtime_error","message":"first"},{"type":"runtime_error","message":"second"}]}"#,
+            "must be the final event",
+        ),
     ] {
         let error =
             parse_harness_output(json).expect_err("malformed runtime events must fail decoding");
@@ -646,6 +710,184 @@ fn rendered_output_rejects_stdout_noise_around_the_event_payload() {
 }
 
 // ─── Harness wiring through success validation ──────────────────────────────
+
+fn validate_html_script(
+    script: &str,
+    rendered_output: RenderedOutputExpectation,
+) -> (bool, Option<FailureKind>, Option<String>) {
+    let script_block = format!("<script>{script}</script>\n  </body>");
+    let html = VALID_HTML.replace("  </body>", &script_block);
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output,
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let result = validate_success_result(&case, build_result_with_index_html(&html), &expectation);
+
+    (result.passed, result.failure_kind, result.failure_reason)
+}
+
+#[test]
+fn rendered_output_captures_output_before_a_runtime_error() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('before overflow'); throw new Error('Int operation overflowed');",
+        RenderedOutputExpectation {
+            exact: Some("before overflow".to_owned()),
+            runtime_error_contains: vec!["Int operation".to_owned(), "overflowed".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "expected runtime error should satisfy the contract: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_captures_plain_errors_rejected_by_page_promises() {
+    let (passed, kind, reason) = validate_html_script(
+        concat!(
+            "console.log('before promise rejection'); ",
+            "Promise.resolve().then(() => { throw new Error('async trap'); });",
+        ),
+        RenderedOutputExpectation {
+            contains: vec!["before promise rejection".to_owned()],
+            runtime_error_contains: vec!["async trap".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "unhandled page rejection should be captured: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_runtime_error_ends_the_run_before_queued_page_work() {
+    // Reactive flushes are queued microtasks. They must not append output after the trap, and a
+    // later throw from them must not replace the first runtime error.
+    let (passed, kind, reason) = validate_html_script(
+        concat!(
+            "queueMicrotask(() => { console.log('after trap'); throw new Error('second trap'); }); ",
+            "console.log('before trap'); ",
+            "throw new Error('first trap');",
+        ),
+        RenderedOutputExpectation {
+            exact: Some("before trap".to_owned()),
+            runtime_error_contains: vec!["first trap".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "the first runtime error should end the run: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_does_not_treat_other_throws_as_a_moth_runtime_error() {
+    for (script, thrown) in [
+        (
+            "throw new TypeError('invalid generated operation');",
+            "TypeError",
+        ),
+        (
+            "class SpoofError extends Error {} throw new SpoofError('invalid generated operation');",
+            "SpoofError",
+        ),
+    ] {
+        let (passed, kind, reason) = validate_html_script(
+            script,
+            RenderedOutputExpectation {
+                runtime_error_contains: vec!["invalid generated operation".to_owned()],
+                ..Default::default()
+            },
+        );
+
+        assert!(!passed, "{thrown} must not satisfy runtime_error_contains");
+        assert_eq!(kind, Some(FailureKind::HarnessFailed), "{thrown}");
+        assert!(
+            reason
+                .as_deref()
+                .is_some_and(|message| message.contains("invalid generated operation")),
+            "harness failure should surface the thrown message: {reason:?}"
+        );
+    }
+}
+
+#[test]
+fn rendered_output_expected_runtime_error_requires_an_error_to_occur() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('completed normally');",
+        RenderedOutputExpectation {
+            contains: vec!["completed normally".to_owned()],
+            runtime_error_contains: vec!["overflow".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("no runtime error occurred")),
+        "mismatch should explain the missing runtime error: {reason:?}"
+    );
+}
+
+#[test]
+fn rendered_output_unexpected_runtime_error_is_a_harness_failure() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('output before trap'); throw new Error('unexpected runtime trap'); console.log('output after trap');",
+        RenderedOutputExpectation {
+            contains: vec!["output after trap".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unexpected runtime trap")),
+        "failure should surface the uncaught runtime message: {reason:?}"
+    );
+}
+
+#[test]
+fn rendered_output_runtime_error_requires_every_expected_fragment() {
+    let (passed, kind, reason) = validate_html_script(
+        "throw new Error('first fragment present');",
+        RenderedOutputExpectation {
+            runtime_error_contains: vec![
+                "first fragment".to_owned(),
+                "missing fragment".to_owned(),
+            ],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("missing fragment")),
+        "mismatch should name the absent message fragment: {reason:?}"
+    );
+}
 
 #[test]
 fn rendered_output_validation_reports_harness_failure_without_script_blocks() {
