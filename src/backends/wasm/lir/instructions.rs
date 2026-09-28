@@ -1,13 +1,61 @@
 //! Statement and terminator instructions for Wasm LIR.
 //!
-//! The instruction set is intentionally narrow and tuned for lowering validation plus direct
-//! binary emission. Variants marked with dead-code allowances are already supported by the emitter
-//! or reserved by the memory model, but production HIR lowering does not construct them yet.
+//! The instruction set keeps target-local computation facts explicit for validation and binary
+//! emission. Unsupported semantic families remain gated before HIR lowering.
 
 use crate::backends::wasm::lir::types::{
-    WasmImportId, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId, WasmStaticDataId,
+    WasmAbiType, WasmImportId, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId, WasmStaticDataId,
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+
+/// Integer operation domain resolved from canonical ranges, separate from scalar storage layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmIntegerOperationKind {
+    Signed32,
+    Unsigned32,
+    Signed64,
+    Unsigned64,
+}
+
+impl WasmIntegerOperationKind {
+    pub(crate) fn carrier(self) -> WasmAbiType {
+        match self {
+            WasmIntegerOperationKind::Signed32 | WasmIntegerOperationKind::Unsigned32 => {
+                WasmAbiType::I32
+            }
+            WasmIntegerOperationKind::Signed64 | WasmIntegerOperationKind::Unsigned64 => {
+                WasmAbiType::I64
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmIntegerOperationOperands {
+    Unary {
+        operand: WasmLirLocalId,
+    },
+    Binary {
+        left: WasmLirLocalId,
+        right: WasmLirLocalId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WasmIntegerPowerScratch {
+    pub(crate) factor: WasmLirLocalId,
+    pub(crate) exponent: WasmLirLocalId,
+}
+
+/// Non-aliasing intermediate locals allocated only when the operation needs them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WasmIntegerScratch {
+    /// A full I64 product for checked 32-bit multiplication, including power's repeated products.
+    pub(crate) product: Option<WasmLirLocalId>,
+    /// Power preserves factor and exponent here and accumulates directly in its destination.
+    pub(crate) power: Option<WasmIntegerPowerScratch>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WasmScalarComparisonType {
@@ -139,55 +187,24 @@ pub(crate) enum WasmLirStmt {
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
     },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntAdd {
+    /// Trap-mode checked integer arithmetic in its canonical semantic result domain.
+    CheckedIntegerOp {
         dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntSub {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntMod {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntMul {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    /// Truncating integer division (for `//` operator); dst, lhs, rhs all I64.
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntFloorDiv {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
+        operator: NumericOperator,
+        kind: WasmIntegerOperationKind,
+        operands: WasmIntegerOperationOperands,
+        scratch: WasmIntegerScratch,
     },
     /// Convert the profile-selected signed Int carrier to the profile-selected Float carrier.
     IntToFloat {
         dst: WasmLirLocalId,
         source: WasmLirLocalId,
     },
-    /// Regular division with integer operands. lhs/rhs are I64; dst is F64.
-    /// WHY: Moth `Int / Int` always yields Float; conversion is emitted here.
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    IntToFloatDiv {
+    /// Sign- or zero-extend a narrower canonical integer carrier for an infallible cast.
+    IntegerExtend {
         dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
+        source: WasmLirLocalId,
+        source_signed: bool,
     },
     #[allow(dead_code)]
     // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.

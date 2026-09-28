@@ -8,7 +8,10 @@ use crate::backends::wasm::lir::instructions::{
 };
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId, WasmLocalRole};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
@@ -291,6 +294,22 @@ pub(crate) fn lower_expression(
                     prefer_move: false,
                 })
             }
+            BuiltinCastPolicyId::NumericConversion {
+                source: source_domain,
+                target: target_domain,
+            } if source_domain != target_domain
+                && source_domain.is_integer()
+                && target_domain.is_integer() =>
+            {
+                lower_infallible_integer_conversion(
+                    context,
+                    source_domain,
+                    target_domain,
+                    source,
+                    expression,
+                    statements,
+                )
+            }
             _ => Err(lir_transformation_error(format!(
                 "Wasm lowering does not yet support cast policy {policy:?}"
             ))),
@@ -305,6 +324,60 @@ pub(crate) fn lower_expression(
             "Wasm lowering does not yet support this HIR expression",
         )),
     }
+}
+
+fn lower_infallible_integer_conversion(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    source_domain: NumericScalar,
+    target_domain: NumericScalar,
+    source_expression: &HirExpression,
+    target_expression: &HirExpression,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<ExprLoweringOutput, CompilerError> {
+    let profile = context.module_context.request.numeric_profile;
+    let type_environment = context.module_context.type_environment;
+    if source_expression.ty != source_domain.type_id(type_environment)
+        || target_expression.ty != target_domain.type_id(type_environment)
+        || numeric_conversion_fallibility(source_domain, target_domain, profile)
+            != BuiltinCastFallibility::Infallible
+    {
+        return Err(lir_transformation_error(
+            "Wasm integer conversion has inconsistent or fallible HIR cast evidence",
+        ));
+    }
+
+    let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+        return Err(lir_transformation_error(
+            "Wasm integer conversion source has no canonical integer range",
+        ));
+    };
+
+    let source_abi = expression_abi(context, source_expression);
+    let target_abi = expression_abi(context, target_expression);
+    let source_value = lower_expression(context, source_expression, statements)?;
+    if source_abi == target_abi {
+        return Ok(ExprLoweringOutput {
+            value: source_value.value,
+            prefer_move: false,
+        });
+    }
+
+    if source_abi == WasmAbiType::I32 && target_abi == WasmAbiType::I64 {
+        let dst = context.alloc_temp(WasmAbiType::I64);
+        statements.push(WasmLirStmt::IntegerExtend {
+            dst,
+            source: source_value.value,
+            source_signed: source_minimum < 0,
+        });
+        return Ok(ExprLoweringOutput {
+            value: dst,
+            prefer_move: false,
+        });
+    }
+
+    Err(lir_transformation_error(format!(
+        "Wasm integer conversion cannot map {source_abi:?} to {target_abi:?}"
+    )))
 }
 
 fn render_structural_string(

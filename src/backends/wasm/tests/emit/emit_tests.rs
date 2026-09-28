@@ -2,7 +2,10 @@ use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
-use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
+use crate::backends::wasm::lir::instructions::{
+    WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerOperationOperands, WasmIntegerPowerScratch,
+    WasmIntegerScratch, WasmLirStmt, WasmLirTerminator,
+};
 use crate::backends::wasm::lir::linkage::{
     WasmExport, WasmExportKind, WasmFunctionLinkage, WasmImport, WasmImportKind,
 };
@@ -21,6 +24,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
@@ -168,7 +172,7 @@ fn rejects_invalid_helper_export_policy() {
 }
 
 #[test]
-fn rejects_mismatched_numeric_add_types() {
+fn rejects_mismatched_checked_integer_operand_types() {
     let mut module = build_manual_lir_module();
     let main = module
         .functions
@@ -176,19 +180,89 @@ fn rejects_mismatched_numeric_add_types() {
         .find(|function| function.id == WasmLirFunctionId(1))
         .expect("manual main function should be present");
 
-    main.blocks[0].statements.push(WasmLirStmt::IntAdd {
-        dst: WasmLirLocalId(13),
-        lhs: WasmLirLocalId(1),
-        rhs: WasmLirLocalId(3),
-    });
+    main.blocks[0]
+        .statements
+        .push(WasmLirStmt::CheckedIntegerOp {
+            dst: WasmLirLocalId(13),
+            operator: NumericOperator::Add,
+            kind: WasmIntegerOperationKind::Signed64,
+            operands: WasmIntegerOperationOperands::Binary {
+                left: WasmLirLocalId(1),
+                right: WasmLirLocalId(3),
+            },
+            scratch: WasmIntegerScratch {
+                product: None,
+                power: None,
+            },
+        });
 
     let error = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
-        .expect_err("mismatched IntAdd operands should fail emission");
+        .expect_err("mismatched checked integer operands should fail emission");
     assert_eq!(
         error.error_type,
         ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
-    assert!(error.msg.contains("type mismatch in numeric add"));
+}
+
+#[test]
+fn checked_integer_machine_boundaries_execute_with_native_traps() {
+    let case_names = [
+        "u64_mul_zero",
+        "u64_mul_overflow",
+        "i32_mul_overflow_high",
+        "i32_mul_overflow_low",
+        "i64_mul_underflow_min_times_two",
+        "i64_mul_underflow_two_times_min",
+        "i32_div_min_by_negative_one",
+        "i64_add_overflow_high",
+        "i64_add_overflow_low",
+        "i64_sub_overflow_low",
+        "i64_sub_overflow_high",
+        "i64_power_preserves_sources",
+    ];
+    let module = build_checked_integer_boundary_module();
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("checked integer boundary module should emit");
+    validate_wasm(&result.wasm_bytes);
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &case_names);
+    let expected = [
+        ("u64_mul_zero", "ok", "0"),
+        ("u64_mul_overflow", "trap", "unreachable"),
+        ("i32_mul_overflow_high", "trap", "unreachable"),
+        ("i32_mul_overflow_low", "trap", "unreachable"),
+        ("i64_mul_underflow_min_times_two", "trap", "unreachable"),
+        ("i64_mul_underflow_two_times_min", "trap", "unreachable"),
+        ("i32_div_min_by_negative_one", "trap", "unreachable"),
+        ("i64_add_overflow_high", "trap", "unreachable"),
+        ("i64_add_overflow_low", "trap", "unreachable"),
+        ("i64_sub_overflow_low", "trap", "unreachable"),
+        ("i64_sub_overflow_high", "trap", "unreachable"),
+        ("i64_power_preserves_sources", "ok", "7"),
+    ];
+
+    assert_eq!(actual.len(), expected.len());
+    for ((actual_name, actual_status, actual_value), (name, status, value)) in
+        actual.iter().zip(expected)
+    {
+        assert_eq!(actual_name.as_str(), name);
+        assert_eq!(
+            actual_status.as_str(),
+            status,
+            "{name} had an unexpected outcome"
+        );
+        if status == "trap" {
+            assert!(
+                actual_value.contains(value),
+                "{name} should trap through Wasm unreachable, found {actual_value:?}"
+            );
+        } else {
+            assert_eq!(
+                actual_value.as_str(),
+                value,
+                "{name} returned an unexpected result"
+            );
+        }
+    }
 }
 
 #[test]
@@ -703,20 +777,36 @@ fn build_manual_lir_module() -> WasmLirModule {
                     lhs: WasmLirLocalId(0),
                     rhs: WasmLirLocalId(10),
                 },
-                WasmLirStmt::IntAdd {
+                WasmLirStmt::CheckedIntegerOp {
                     dst: WasmLirLocalId(13),
-                    lhs: WasmLirLocalId(1),
-                    rhs: WasmLirLocalId(1),
+                    operator: NumericOperator::Add,
+                    kind: WasmIntegerOperationKind::Signed64,
+                    operands: WasmIntegerOperationOperands::Binary {
+                        left: WasmLirLocalId(1),
+                        right: WasmLirLocalId(1),
+                    },
+                    scratch: WasmIntegerScratch {
+                        product: None,
+                        power: None,
+                    },
                 },
                 WasmLirStmt::FloatAdd {
                     dst: WasmLirLocalId(14),
                     lhs: WasmLirLocalId(3),
                     rhs: WasmLirLocalId(3),
                 },
-                WasmLirStmt::IntSub {
+                WasmLirStmt::CheckedIntegerOp {
                     dst: WasmLirLocalId(20),
-                    lhs: WasmLirLocalId(13),
-                    rhs: WasmLirLocalId(1),
+                    operator: NumericOperator::Subtract,
+                    kind: WasmIntegerOperationKind::Signed64,
+                    operands: WasmIntegerOperationOperands::Binary {
+                        left: WasmLirLocalId(13),
+                        right: WasmLirLocalId(1),
+                    },
+                    scratch: WasmIntegerScratch {
+                        product: None,
+                        power: None,
+                    },
                 },
                 WasmLirStmt::FloatSub {
                     dst: WasmLirLocalId(21),
@@ -786,6 +876,229 @@ fn local(id: u32, ty: WasmAbiType, name: &str) -> WasmLirLocal {
         ty,
         role: WasmLocalRole::Temp,
     }
+}
+
+fn build_checked_integer_boundary_module() -> WasmLirModule {
+    let cases = [
+        (
+            "u64_mul_zero",
+            WasmIntegerOperationKind::Unsigned64,
+            NumericOperator::Multiply,
+            0,
+            -1,
+        ),
+        (
+            "u64_mul_overflow",
+            WasmIntegerOperationKind::Unsigned64,
+            NumericOperator::Multiply,
+            -1,
+            2,
+        ),
+        (
+            "i32_mul_overflow_high",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Multiply,
+            i32::MAX as i64,
+            2,
+        ),
+        (
+            "i32_mul_overflow_low",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::Multiply,
+            i32::MIN as i64,
+            2,
+        ),
+        (
+            "i64_mul_underflow_min_times_two",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Multiply,
+            i64::MIN,
+            2,
+        ),
+        (
+            "i64_mul_underflow_two_times_min",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Multiply,
+            2,
+            i64::MIN,
+        ),
+        (
+            "i32_div_min_by_negative_one",
+            WasmIntegerOperationKind::Signed32,
+            NumericOperator::IntegerDivide,
+            i32::MIN as i64,
+            -1,
+        ),
+        (
+            "i64_add_overflow_high",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Add,
+            i64::MAX,
+            1,
+        ),
+        (
+            "i64_add_overflow_low",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Add,
+            i64::MIN,
+            -1,
+        ),
+        (
+            "i64_sub_overflow_low",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Subtract,
+            i64::MIN,
+            1,
+        ),
+        (
+            "i64_sub_overflow_high",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Subtract,
+            i64::MAX,
+            -1,
+        ),
+        (
+            "i64_power_preserves_sources",
+            WasmIntegerOperationKind::Signed64,
+            NumericOperator::Power,
+            2,
+            5,
+        ),
+    ];
+    let mut module = WasmLirModule::default();
+    for (function_index, (name, kind, operator, left_value, right_value)) in
+        cases.into_iter().enumerate()
+    {
+        let function_id = WasmLirFunctionId(function_index as u32);
+        let (function, export) = checked_integer_boundary_function(
+            function_id,
+            name,
+            kind,
+            operator,
+            left_value,
+            right_value,
+        );
+        module.functions.push(function);
+        module.exports.push(export);
+    }
+    module
+}
+
+fn checked_integer_boundary_function(
+    function_id: WasmLirFunctionId,
+    name: &str,
+    kind: WasmIntegerOperationKind,
+    operator: NumericOperator,
+    left_value: i64,
+    right_value: i64,
+) -> (WasmLirFunction, WasmExport) {
+    let carrier = kind.carrier();
+    let left = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let operation_result = WasmLirLocalId(2);
+    let mut locals = vec![
+        local(left.0, carrier, "left"),
+        local(right.0, carrier, "right"),
+        local(operation_result.0, carrier, "operation_result"),
+    ];
+    let mut statements = match carrier {
+        WasmAbiType::I32 => vec![
+            WasmLirStmt::ConstI32 {
+                dst: left,
+                value: left_value as i32,
+            },
+            WasmLirStmt::ConstI32 {
+                dst: right,
+                value: right_value as i32,
+            },
+        ],
+        WasmAbiType::I64 => vec![
+            WasmLirStmt::ConstI64 {
+                dst: left,
+                value: left_value,
+            },
+            WasmLirStmt::ConstI64 {
+                dst: right,
+                value: right_value,
+            },
+        ],
+        _ => unreachable!("checked integer boundary cases use integer carriers"),
+    };
+    let (power_scratch, source_sum) = if operator == NumericOperator::Power {
+        let factor = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(factor.0, carrier, "power_factor"));
+        let exponent = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(exponent.0, carrier, "power_exponent"));
+        let sum = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(sum.0, carrier, "source_sum"));
+        (
+            Some(WasmIntegerPowerScratch { factor, exponent }),
+            Some(sum),
+        )
+    } else {
+        (None, None)
+    };
+    let needs_product_scratch =
+        matches!(
+            kind,
+            WasmIntegerOperationKind::Signed32 | WasmIntegerOperationKind::Unsigned32
+        ) && matches!(operator, NumericOperator::Multiply | NumericOperator::Power);
+    let product_scratch = if needs_product_scratch {
+        let scratch = WasmLirLocalId(locals.len() as u32);
+        locals.push(local(scratch.0, WasmAbiType::I64, "product_scratch"));
+        Some(scratch)
+    } else {
+        None
+    };
+    statements.push(WasmLirStmt::CheckedIntegerOp {
+        dst: operation_result,
+        operator,
+        kind,
+        operands: WasmIntegerOperationOperands::Binary { left, right },
+        scratch: WasmIntegerScratch {
+            product: product_scratch,
+            power: power_scratch,
+        },
+    });
+
+    let return_local = if let Some(sum) = source_sum {
+        statements.push(WasmLirStmt::CheckedIntegerOp {
+            dst: sum,
+            operator: NumericOperator::Add,
+            kind,
+            operands: WasmIntegerOperationOperands::Binary { left, right },
+            scratch: WasmIntegerScratch {
+                product: None,
+                power: None,
+            },
+        });
+        sum
+    } else {
+        operation_result
+    };
+    let function = WasmLirFunction {
+        id: function_id,
+        debug_name: name.to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![carrier],
+        },
+        locals,
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements,
+            terminator: WasmLirTerminator::Return {
+                value: Some(return_local),
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: name.to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    };
+    (function, export)
 }
 
 fn build_scalar_storage_lir_module() -> WasmLirModule {
@@ -948,6 +1261,57 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
     }
 }
 
+fn execute_wasm_checked_exports_in_node(
+    wasm_bytes: &[u8],
+    export_names: &[&str],
+) -> Vec<(String, String, String)> {
+    const NODE_BODY: &str = r#"
+const results = [];
+for (const name of __EXPORT_NAMES__) {
+  try {
+    results.push(`${name}|ok|${String(instance.exports[name]())}`);
+  } catch (error) {
+    if (error !== null
+        && typeof error === "object"
+        && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype) {
+      results.push(`${name}|trap|${String(error.message)}`);
+    } else {
+      throw error;
+    }
+  }
+}
+process.stdout.write(results.join("\n"));
+"#;
+    let export_names = export_names
+        .iter()
+        .map(|name| format!("{name:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_body = NODE_BODY.replace("__EXPORT_NAMES__", &format!("[{export_names}]"));
+    let output = run_wasm_node_script(wasm_bytes, &node_body);
+    String::from_utf8(output)
+        .expect("Node checked integer results should be UTF-8")
+        .lines()
+        .map(|line| {
+            let mut parts = line.splitn(3, '|');
+            (
+                parts
+                    .next()
+                    .expect("result should include export name")
+                    .to_owned(),
+                parts
+                    .next()
+                    .expect("result should include outcome")
+                    .to_owned(),
+                parts
+                    .next()
+                    .expect("result should include value or trap")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
 fn scalar_load(dst: u32, offset: u32, kind: WasmScalarStorageKind) -> WasmLirStmt {
     WasmLirStmt::LoadScalar {
         dst: WasmLirLocalId(dst),
@@ -967,27 +1331,35 @@ fn scalar_store(value: u32, offset: u32, kind: WasmScalarStorageKind) -> WasmLir
 }
 
 fn execute_wasm_in_node(wasm_bytes: &[u8]) -> Vec<u8> {
+    const NODE_BODY: &str = r#"
+instance.exports.run();
+process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 120));
+"#;
+    run_wasm_node_script(wasm_bytes, NODE_BODY)
+}
+
+fn run_wasm_node_script(wasm_bytes: &[u8], node_body: &str) -> Vec<u8> {
     const NODE_SCRIPT: &str = r#"
 const chunks = [];
 process.stdin.on("data", chunk => chunks.push(chunk));
 process.stdin.on("end", async () => {
   try {
     const { instance } = await WebAssembly.instantiate(Buffer.concat(chunks));
-    instance.exports.run();
-    process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 120));
+    __NODE_BODY__
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     process.exitCode = 1;
   }
 });
 "#;
+    let node_script = NODE_SCRIPT.replace("__NODE_BODY__", node_body);
     let mut child = Command::new("node")
-        .args(["--eval", NODE_SCRIPT])
+        .args(["--eval", node_script.as_str()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("Node must be available for Wasm scalar execution tests");
+        .expect("Node must be available for Wasm execution tests");
     child
         .stdin
         .take()
@@ -999,7 +1371,7 @@ process.stdin.on("end", async () => {
         .expect("Node execution should complete");
     assert!(
         output.status.success(),
-        "Node Wasm scalar execution failed: {}",
+        "Node Wasm execution failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout

@@ -161,6 +161,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [hir_to_lir](src/backends/wasm/hir_to_lir/): semantic lowering to Wasm LIR.
     - [lir](src/backends/wasm/lir/): Wasm-neutral low IR.
     - [emit](src/backends/wasm/emit/): binary emission/sections/validation.
+        - [checked_integer.rs](src/backends/wasm/emit/checked_integer.rs): checked integer trap emission, exact overflow checks and full-width power.
     - [runtime](src/backends/wasm/runtime/): imports/memory/strings.
 - [HTML-Wasm artifact plan](src/projects/html_project/wasm/): bootstrap/export roots.
 

@@ -1,15 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = [
-    "int_remainder_signed_minimum_by_negative_one_runtime minimum=0 ordinary=-1",
-]
+rendered_output_exact = "int_remainder_signed_minimum_by_negative_one_runtime minimum=0 ordinary=-1"
 
 [backends.html_wasm]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0064"]
-
-[[backends.html_wasm.diagnostic_assertions]]
-code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.checked_numeric_operations"
+rendered_output_exact = "int_remainder_signed_minimum_by_negative_one_runtime minimum=0 ordinary=-1"

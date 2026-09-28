@@ -1,0 +1,5 @@
+negate_i64 |value I64| -> I64:
+    return -value
+;
+
+result = negate_i64(-9223372036854775808)

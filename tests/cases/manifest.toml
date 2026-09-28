@@ -4304,6 +4304,13 @@ contract = "language.loops.range_direction_and_step_acceptance"
 role = "primary"
 
 [[case]]
+id = "int_range_runtime_alias_updates"
+path = "int_range_runtime_alias_updates"
+tags = ["integration", "control-flow", "numeric", "runtime", "html-wasm"]
+contract = "backend.html_wasm.int_range_runtime_numericop_alias_updates"
+role = "backend"
+
+[[case]]
 id = "loop_zero_step"
 path = "loop_zero_step"
 tags = ["integration", "control-flow", "diagnostics"]
@@ -12001,7 +12008,7 @@ role = "primary"
 [[case]]
 id = "int_remainder_signed_minimum_by_negative_one_runtime"
 path = "int_remainder_signed_minimum_by_negative_one_runtime"
-tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+tags = ["integration", "language", "numeric", "runtime", "html-wasm"]
 contract = "language.numeric.signed_minimum_remainder_by_negative_one_acceptance"
 role = "primary"
 
@@ -13057,8 +13064,106 @@ role = "primary"
 [[case]]
 id = "fixed_width_integer_overflow_trap"
 path = "fixed_width_integer_overflow_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap"]
-contract = "backend.html.fixed_width_integer_runtime_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u64_add_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_trap_arithmetic"
+path = "fixed_width_integer_trap_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_trap_arithmetic"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_profile_int64_trap_arithmetic"
+path = "fixed_width_integer_profile_int64_trap_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_profile_int64_trap_arithmetic"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_subtraction_trap"
+path = "fixed_width_integer_subtraction_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u32_subtraction_underflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_u32_multiplication_trap"
+path = "fixed_width_integer_u32_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u32_multiplication_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_i64_multiplication_trap"
+path = "fixed_width_integer_i64_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_multiplication_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_minimum_multiplication_trap"
+path = "fixed_width_integer_minimum_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_minimum_times_negative_one_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_minimum_division_trap"
+path = "fixed_width_integer_minimum_division_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_min_division_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_division_zero_trap"
+path = "fixed_width_integer_division_zero_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_division_by_zero_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_remainder_zero_trap"
+path = "fixed_width_integer_remainder_zero_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_remainder_by_zero_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_negative_exponent_trap"
+path = "fixed_width_integer_negative_exponent_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_negative_exponent_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_power_overflow_trap"
+path = "fixed_width_integer_power_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_power_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_negation_trap"
+path = "fixed_width_integer_negation_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_negation_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_int32_overflow_trap"
+path = "fixed_width_integer_int32_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_int32_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_int64_overflow_trap"
+path = "fixed_width_integer_int64_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_int64_overflow_trap"
 role = "backend"
 
 [[case]]

@@ -321,6 +321,27 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
+    /// Snapshots source places so body mutations cannot change the evaluated range state.
+    fn snapshot_range_loop_operand(&mut self, value: HirExpression) -> HirExpression {
+        match value {
+            HirExpression {
+                kind: HirExpressionKind::Load(place),
+                ty,
+                value_kind: ValueKind::Place,
+                region,
+                span,
+                ..
+            } => self.make_expression(
+                &span,
+                HirExpressionKind::Copy(place),
+                ty,
+                ValueKind::RValue,
+                region,
+            ),
+            value => value,
+        }
+    }
+
     fn initialize_range_loop_state(
         &mut self,
         range: &RangeLoopSpec,
@@ -334,6 +355,7 @@ impl<'a> HirBuilder<'a> {
         let RangeLoopRuntime { locals, types, .. } = runtime;
 
         let lowered_start = self.lower_expression_value_to_current_block(&range.start)?;
+        let lowered_start = self.snapshot_range_loop_operand(lowered_start);
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(locals.current),
@@ -343,6 +365,7 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         let lowered_end = self.lower_expression_value_to_current_block(&range.end)?;
+        let lowered_end = self.snapshot_range_loop_operand(lowered_end);
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(locals.end),
@@ -370,6 +393,7 @@ impl<'a> HirBuilder<'a> {
         // `by` is optional for integer ranges; omitted steps default to +1 / +1.0.
         if let Some(step_expression) = &range.step {
             let lowered_step = self.lower_expression_value_to_current_block(step_expression)?;
+            let lowered_step = self.snapshot_range_loop_operand(lowered_step);
 
             self.emit_statement_kind(
                 HirStatementKind::Assign {

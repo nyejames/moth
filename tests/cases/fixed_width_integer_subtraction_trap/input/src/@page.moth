@@ -1,0 +1,5 @@
+subtract_u32 |left U32, right U32| -> U32:
+    return left - right
+;
+
+result = subtract_u32(0, 1)

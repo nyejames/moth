@@ -1,0 +1,5 @@
+multiply_u32 |left U32, right U32| -> U32:
+    return left * right
+;
+
+result = multiply_u32(4294967295, 4294967295)

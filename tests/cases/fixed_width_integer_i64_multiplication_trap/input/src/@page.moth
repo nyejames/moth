@@ -1,0 +1,5 @@
+multiply_i64 |left I64, right I64| -> I64:
+    return left * right
+;
+
+result = multiply_i64(3037000500, 3037000500)

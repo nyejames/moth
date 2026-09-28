@@ -7,7 +7,10 @@
 
 use crate::backends::external_package_validation::BackendTarget;
 use crate::backends::js::JsNumericCarrier;
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, UnsupportedBackendFeatureReason,
@@ -30,7 +33,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
@@ -103,9 +106,8 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm does not yet lower hashmaps, reactive runtime features, casts outside the
-            // narrow Int-to-Float expression conversion, checked numeric operations, or generic
-            // runtime values.
+            // Wasm does not yet lower hashmaps, reactive runtime features, recoverable numeric
+            // failures, float operations, statement casts, or generic runtime values.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -115,6 +117,7 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_runtime_casts(
                 &reachability.reachable_runtime_casts,
                 input.target,
+                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_checked_numeric_ops(
@@ -531,29 +534,23 @@ fn validate_wasm_reactive_features(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable runtime cast outside the Wasm-supported expression policy.
+/// Reports the first reachable runtime cast outside Wasm's infallible expression conversions.
 ///
-/// WHAT: Wasm supports the infallible Int-to-Float expression conversion. All statement casts
-///       and other builtin cast policies remain unsupported.
-/// WHY: reject early with a structured diagnostic carrying the source span instead of a
-///      backend-internal lowering failure.
+/// WHAT: accepts the existing profile-selected Int-to-Float cast and integer-to-integer
+///       conversions whose complete source range fits their target. Statement casts remain
+///       unsupported because their control-flow/result handling is not implemented.
+/// WHY: target validation consumes retained cast evidence before lowering, preserving authored
+///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
     runtime_casts: &[ReachableRuntimeCastUse],
     target: BackendTarget,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(runtime_cast) = runtime_casts.iter().find(|runtime_cast| {
-        !matches!(
-            (runtime_cast.form, runtime_cast.policy),
-            (
-                ReachableRuntimeCastForm::Expression,
-                BuiltinCastPolicyId::NumericConversion {
-                    source: NumericScalar::Int,
-                    target: NumericScalar::Float,
-                }
-            )
-        )
-    }) else {
+    let Some(runtime_cast) = runtime_casts
+        .iter()
+        .find(|runtime_cast| !wasm_supports_runtime_cast(runtime_cast, numeric_profile))
+    else {
         return Ok(());
     };
 
@@ -566,18 +563,44 @@ fn validate_wasm_runtime_casts(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable checked numeric operation for the Wasm target.
+fn wasm_supports_runtime_cast(
+    runtime_cast: &ReachableRuntimeCastUse,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if runtime_cast.form != ReachableRuntimeCastForm::Expression {
+        return false;
+    }
+
+    match runtime_cast.policy {
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Int,
+            target: NumericScalar::Float,
+        } => true,
+        BuiltinCastPolicyId::NumericConversion { source, target } => {
+            source != target
+                && source.is_integer()
+                && target.is_integer()
+                && numeric_conversion_fallibility(source, target, numeric_profile)
+                    == BuiltinCastFallibility::Infallible
+        }
+        _ => false,
+    }
+}
+
+/// Reports the first reachable checked numeric operation outside Wasm's integer trap path.
 ///
-/// WHAT: checked arithmetic is valid HIR, but HTML-Wasm does not yet implement the helper and
-///       trap/recoverability contract for `HirStatementKind::NumericOp`.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of letting Wasm LIR
-///      lowering report an infrastructure failure.
+/// WHAT: integer operations in trap mode are supported. Float operations and `ReturnError`
+///       operations remain target-gated.
+/// WHY: lowerers receive only operations whose exact failure mode they can implement, and this
+///      gate uses the operation/domain facts retained by HIR reachability.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(numeric_op) = numeric_ops.first() else {
+    let Some(numeric_op) = numeric_ops.iter().find(|numeric_op| {
+        numeric_op.failure_mode != NumericFailureMode::Trap || !numeric_op.op.domain.is_integer()
+    }) else {
         return Ok(());
     };
 

@@ -21,7 +21,9 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
@@ -77,6 +79,50 @@ fn wasm_feature_validation_allows_expression_int_to_float_cast() {
 }
 
 #[test]
+fn wasm_feature_validation_uses_profile_range_for_integer_expression_casts() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = module_returning_cast_expression(int_cast_expression(
+        0,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Int,
+            target: NumericScalar::Fixed(FixedScalar::I32),
+        },
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    ));
+    let reachability = test_reachability(&module);
+
+    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile {
+                    int_width,
+                    float_precision: FloatPrecision::Bits64,
+                },
+                external_package_registry: None,
+            },
+            &mut string_table,
+        );
+
+        match (int_width, result) {
+            (IntWidth::Bits32, Ok(())) => {}
+            (IntWidth::Bits64, Err(BackendFeatureValidationError::Diagnostic(diagnostic))) => {
+                assert_unsupported_feature(
+                    &diagnostic,
+                    &mut string_table,
+                    UnsupportedBackendFeatureReason::RuntimeCasts,
+                );
+            }
+            _ => panic!("Integer conversion gate disagrees with the {int_width:?} source range"),
+        }
+    }
+}
+
+#[test]
 fn wasm_feature_validation_rejects_other_expression_cast_policies() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
@@ -100,7 +146,7 @@ fn wasm_feature_validation_rejects_other_expression_cast_policies() {
             &module,
             &type_environment,
             &mut string_table,
-            "Wasm should reject every expression cast policy except Int-to-Float",
+            "Wasm should reject unsupported expression casts",
         );
 
         assert_unsupported_feature(
@@ -224,8 +270,7 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
 }
 
 #[test]
-fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
-    let span = None;
+fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -233,7 +278,44 @@ fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(10, int_add_op(), span)],
+            vec![numeric_op_statement(10, int_add_op(), None)],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm should allow reachable trap-mode integer numeric operations"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_return_error_integer_numeric_op() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![numeric_op_statement_with_failure(
+                10,
+                int_add_op(),
+                None,
+                NumericFailureMode::ReturnError,
+            )],
             HirTerminator::Return(unit_expression(0)),
         )],
     );
@@ -242,9 +324,42 @@ fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm validation should reject reachable checked numeric operations",
+        "Wasm validation should reject recoverable checked numeric operations",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_trap_float_numeric_op() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![numeric_op_statement(
+                10,
+                HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Float,
+                },
+                None,
+            )],
+            HirTerminator::Return(unit_expression(0)),
+        )],
     );
 
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm validation should keep trap-mode float arithmetic gated",
+    );
     assert_unsupported_feature(
         &diagnostic,
         &mut string_table,
@@ -1199,19 +1314,40 @@ fn block_with_locals(
 }
 
 fn numeric_op_statement(id: u32, op: HirNumericOp, span: Option<SourceSpan>) -> HirStatement {
-    let failure_mode = NumericFailureMode::Trap;
+    numeric_op_statement_with_failure(id, op, span, NumericFailureMode::Trap)
+}
+
+fn numeric_op_statement_with_failure(
+    id: u32,
+    op: HirNumericOp,
+    span: Option<SourceSpan>,
+    failure_mode: NumericFailureMode,
+) -> HirStatement {
+    let (left_kind, right_kind, ty) = match op.domain {
+        NumericScalar::Int => (
+            HirExpressionKind::Int(1),
+            HirExpressionKind::Int(2),
+            builtin_type_ids::INT,
+        ),
+        NumericScalar::Float => (
+            HirExpressionKind::Float(1.0),
+            HirExpressionKind::Float(2.0),
+            builtin_type_ids::FLOAT,
+        ),
+        domain => panic!("numeric operation test helper does not support {domain:?}"),
+    };
     let left = HirExpression {
         id: HirValueId(id + 100),
-        kind: HirExpressionKind::Int(1),
-        ty: builtin_type_ids::INT,
+        kind: left_kind,
+        ty,
         value_kind: ValueKind::Const,
         region: RegionId(0),
         span: None,
     };
     let right = HirExpression {
         id: HirValueId(id + 101),
-        kind: HirExpressionKind::Int(2),
-        ty: builtin_type_ids::INT,
+        kind: right_kind,
+        ty,
         value_kind: ValueKind::Const,
         region: RegionId(0),
         span: None,

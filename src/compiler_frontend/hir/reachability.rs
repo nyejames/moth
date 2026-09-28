@@ -18,7 +18,9 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
@@ -433,6 +435,8 @@ pub(crate) struct ReachableRuntimeCastUse {
 ///      operation before lowering instead of failing with a backend-internal error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableNumericOpUse {
+    pub(crate) op: HirNumericOp,
+    pub(crate) failure_mode: NumericFailureMode,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -864,10 +868,19 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
             HirStatementKind::Drop(_) => {}
 
-            HirStatementKind::NumericOp { operands, .. } => {
+            HirStatementKind::NumericOp {
+                op,
+                failure_mode,
+                operands,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_numeric_ops
-                    .push(ReachableNumericOpUse { span });
+                    .push(ReachableNumericOpUse {
+                        op: *op,
+                        failure_mode: *failure_mode,
+                        span,
+                    });
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
