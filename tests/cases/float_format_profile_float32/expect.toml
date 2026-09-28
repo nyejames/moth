@@ -1,0 +1,12 @@
+entry = "."
+numeric_profile = "Int32/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "profile=1.0000001|0 fixed=0.01563|1.0000001|1.0000001192092896"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "profile=1.0000001|0 fixed=0.01563|1.0000001|1.0000001192092896"

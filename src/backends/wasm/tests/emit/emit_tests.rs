@@ -28,6 +28,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
 use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
@@ -1311,6 +1312,228 @@ process.stdout.write(results.join("\n"));
         actual,
         "signed_i32|-2147483648\nunsigned_i32|4294967295\nsigned_i64|-9223372036854775808\nsigned_i64|9223372036854775807\nunsigned_i64|18446744073709551615\nunsigned_i64|0"
     );
+}
+
+#[test]
+fn float_text_helpers_return_canonical_utf8_from_node_instantiated_wasm() {
+    let module = build_float_string_conversion_lir_module();
+    let mut request = WasmBackendRequest::default();
+    request.export_policy.helper_exports.export_memory = true;
+
+    let result = emit_lir_to_wasm_module(&module, &request).expect("float text LIR should emit");
+    validate_wasm(&result.wasm_bytes);
+    let sections = collect_section_order(&result.wasm_bytes);
+    assert!(
+        !sections.iter().any(|section| section == "import"),
+        "float string conversion must not add a host import"
+    );
+
+    let f32_bits = float_text_f32_cases();
+    let f64_bits = float_text_f64_cases();
+    let f32_js_bits = f32_bits
+        .iter()
+        .map(|bits| format!("0x{bits:08x}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let f64_js_bits = f64_bits
+        .iter()
+        .map(|bits| format!("0x{bits:016x}n"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_body = r#"
+const f32Bits = [__F32_BITS__];
+const f64Bits = [__F64_BITS__];
+const rows = [];
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+function readString(handle) {
+  // Runtime formatting may grow memory, so never retain a buffer from before the call.
+  const memory = instance.exports.memory.buffer;
+  const view = new DataView(memory);
+  const pointer = view.getUint32(handle, true);
+  const length = view.getUint32(handle + 4, true);
+  return utf8.decode(new Uint8Array(memory, pointer, length));
+}
+function f16BitsToF32(bits) {
+  const sign = (bits & 0x8000) === 0 ? 1 : -1;
+  const exponent = (bits >>> 10) & 0x1f;
+  const fraction = bits & 0x03ff;
+  if (exponent === 0) {
+    return sign * fraction * (2 ** -24);
+  }
+  return sign * (1 + fraction / 1024) * (2 ** (exponent - 15));
+}
+for (const sign of [0, 0x8000]) {
+  for (let magnitude = 0; magnitude < 0x7c00; magnitude += 1) {
+    const bits = sign | magnitude;
+    const value = f16BitsToF32(bits);
+    let handle;
+    try {
+      handle = instance.exports.string_f16(value);
+    } catch (error) {
+      throw new Error(`F16 bits 0x${bits.toString(16).padStart(4, "0")}: ${error.stack}`);
+    }
+    rows.push(`f16|${bits.toString(16).padStart(4, "0")}|${readString(handle)}`);
+  }
+}
+const f32View = new DataView(new ArrayBuffer(4));
+for (const bits of f32Bits) {
+  f32View.setUint32(0, bits, true);
+  const value = f32View.getFloat32(0, true);
+  const handle = instance.exports.string_f32(value);
+  rows.push(`f32|${bits.toString(16).padStart(8, "0")}|${readString(handle)}`);
+}
+const f64View = new DataView(new ArrayBuffer(8));
+for (const bits of f64Bits) {
+  f64View.setBigUint64(0, bits, true);
+  const value = f64View.getFloat64(0, true);
+  const handle = instance.exports.string_f64(value);
+  rows.push(`f64|${bits.toString(16).padStart(16, "0")}|${readString(handle)}`);
+}
+
+// The same F32 carrier value is formatted once as F16 and once as F32.
+const halfPrecisionProbe = 65504;
+rows.push(`f16-probe|7bff|${readString(instance.exports.string_f16(halfPrecisionProbe))}`);
+rows.push(`f32-probe|477fe000|${readString(instance.exports.string_f32(halfPrecisionProbe))}`);
+
+// The F64 call receives the exact promotion of this same F32 value.
+f32View.setUint32(0, 0x3dcccccd, true);
+const promotedF32 = f32View.getFloat32(0, true);
+f64View.setFloat64(0, promotedF32, true);
+const promotedF64Bits = f64View.getBigUint64(0, true);
+rows.push(`f32-promoted-probe|3dcccccd|${readString(instance.exports.string_f32(promotedF32))}`);
+rows.push(`f64-promoted-probe|${promotedF64Bits.toString(16).padStart(16, "0")}|${readString(instance.exports.string_f64(promotedF32))}`);
+
+function expectNonFiniteTrap(precision, bits, call) {
+  try {
+    call();
+  } catch (error) {
+    if (error instanceof WebAssembly.RuntimeError
+        && error.message.toLowerCase().includes("unreachable")) {
+      rows.push(`trap|${precision}|${bits}|ok`);
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`${precision} formatter accepted non-finite bits ${bits}`);
+}
+for (const [bits, label] of [
+  [0x7fc00000, "7fc00000"],
+  [0x7f800000, "7f800000"],
+  [0xff800000, "ff800000"],
+]) {
+  f32View.setUint32(0, bits, true);
+  const value = f32View.getFloat32(0, true);
+  expectNonFiniteTrap("f16", label, () => instance.exports.string_f16(value));
+  expectNonFiniteTrap("f32", label, () => instance.exports.string_f32(value));
+}
+for (const [bits, label] of [
+  [0x7ff8000000000000n, "7ff8000000000000"],
+  [0x7ff0000000000000n, "7ff0000000000000"],
+  [0xfff0000000000000n, "fff0000000000000"],
+]) {
+  f64View.setBigUint64(0, bits, true);
+  const value = f64View.getFloat64(0, true);
+  expectNonFiniteTrap("f64", label, () => instance.exports.string_f64(value));
+}
+process.stdout.write(rows.join("\n"));
+"#
+    .replace("__F32_BITS__", &f32_js_bits)
+    .replace("__F64_BITS__", &f64_js_bits);
+    let output = run_wasm_node_script(&result.wasm_bytes, &node_body);
+    let actual = String::from_utf8(output)
+        .expect("Node float string results should be UTF-8")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    let mut expected = Vec::with_capacity(63_488 + f32_bits.len() + f64_bits.len() + 17);
+    for sign in [0u16, 0x8000] {
+        for magnitude in 0..0x7c00 {
+            let bits = sign | magnitude;
+            push_float_text_expectation(
+                &mut expected,
+                "f16",
+                format!("{bits:04x}"),
+                binary16_bits_as_f64(bits),
+                BinaryFloatPrecision::Binary16,
+            );
+        }
+    }
+    for bits in &f32_bits {
+        push_float_text_expectation(
+            &mut expected,
+            "f32",
+            format!("{bits:08x}"),
+            f64::from(f32::from_bits(*bits)),
+            BinaryFloatPrecision::Binary32,
+        );
+    }
+    for bits in &f64_bits {
+        push_float_text_expectation(
+            &mut expected,
+            "f64",
+            format!("{bits:016x}"),
+            f64::from_bits(*bits),
+            BinaryFloatPrecision::Binary64,
+        );
+    }
+
+    let half_probe = 65504.0f32;
+    let half_probe_value = f64::from(half_probe);
+    let half_text = format_finite_float(half_probe_value, BinaryFloatPrecision::Binary16)
+        .expect("finite F16 probe should format");
+    let f32_text = format_finite_float(half_probe_value, BinaryFloatPrecision::Binary32)
+        .expect("finite F32 probe should format");
+    assert_ne!(
+        half_text, f32_text,
+        "the F16/F32 probe must distinguish precision for F32 bits 477fe000"
+    );
+    expected.push(format!("f16-probe|7bff|{half_text}"));
+    expected.push(format!("f32-probe|477fe000|{f32_text}"));
+
+    let promoted_f32 = f32::from_bits(0x3dcccccd);
+    let promoted_f64 = f64::from(promoted_f32);
+    let promoted_f32_text =
+        format_finite_float(promoted_f64, BinaryFloatPrecision::Binary32)
+            .expect("finite promoted F32 probe should format");
+    let promoted_f64_text =
+        format_finite_float(promoted_f64, BinaryFloatPrecision::Binary64)
+            .expect("finite promoted F64 probe should format");
+    assert_ne!(
+        promoted_f32_text, promoted_f64_text,
+        "the F32/F64 probe must distinguish precision for promoted F32 bits 3dcccccd"
+    );
+    expected.push(format!("f32-promoted-probe|3dcccccd|{promoted_f32_text}"));
+    expected.push(format!(
+        "f64-promoted-probe|{:016x}|{promoted_f64_text}",
+        promoted_f64.to_bits()
+    ));
+    for (precision, bits) in [
+        ("f16", "7fc00000"),
+        ("f32", "7fc00000"),
+        ("f16", "7f800000"),
+        ("f32", "7f800000"),
+        ("f16", "ff800000"),
+        ("f32", "ff800000"),
+        ("f64", "7ff8000000000000"),
+        ("f64", "7ff0000000000000"),
+        ("f64", "fff0000000000000"),
+    ] {
+        expected.push(format!("trap|{precision}|{bits}|ok"));
+    }
+
+    let next_expected_row = expected.get(actual.len()).or_else(|| expected.last());
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "Node float output row count mismatch near {next_expected_row:?}"
+    );
+    for (expected_row, actual_row) in expected.iter().zip(&actual) {
+        assert_eq!(
+            actual_row, expected_row,
+            "Wasm float formatter mismatch for {expected_row}"
+        );
+    }
 }
 
 #[test]
@@ -2716,6 +2939,170 @@ fn integer_string_conversion_function(
     };
     (function, export)
 }
+
+fn build_float_string_conversion_lir_module() -> WasmLirModule {
+    let cases = [
+        ("string_f16", WasmAbiType::F32, BinaryFloatPrecision::Binary16),
+        ("string_f32", WasmAbiType::F32, BinaryFloatPrecision::Binary32),
+        ("string_f64", WasmAbiType::F64, BinaryFloatPrecision::Binary64),
+    ];
+    let mut functions = Vec::with_capacity(cases.len());
+    let mut exports = Vec::with_capacity(cases.len());
+    for (index, (name, carrier, precision)) in cases.into_iter().enumerate() {
+        let function_id = WasmLirFunctionId(index as u32);
+        let input = WasmLirLocalId(0);
+        let output = WasmLirLocalId(1);
+        functions.push(WasmLirFunction {
+            id: function_id,
+            debug_name: format!("float_to_string_{name}"),
+            origin: WasmLirFunctionOrigin::ExportWrapper,
+            signature: WasmLirSignature {
+                params: vec![carrier],
+                results: vec![WasmAbiType::Handle],
+            },
+            locals: vec![
+                WasmLirLocal {
+                    id: input,
+                    name: Some("value".to_owned()),
+                    ty: carrier,
+                    role: WasmLocalRole::Param,
+                },
+                local(output.0, WasmAbiType::Handle, "string_handle"),
+            ],
+            blocks: vec![WasmLirBlock {
+                id: WasmLirBlockId(0),
+                statements: vec![WasmLirStmt::StringFromFloat {
+                    dst: output,
+                    value: input,
+                    precision,
+                }],
+                terminator: WasmLirTerminator::Return { value: Some(output) },
+            }],
+            linkage: WasmFunctionLinkage::ExportedWrapper,
+        });
+        exports.push(WasmExport {
+            export_name: name.to_owned(),
+            kind: WasmExportKind::Function(function_id),
+        });
+    }
+    WasmLirModule {
+        functions,
+        imports: vec![],
+        exports,
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    }
+}
+
+fn float_text_f32_cases() -> Vec<u32> {
+    let mut bits = vec![
+        0x0000_0000,
+        0x8000_0000,
+        0x0000_0001,
+        0x8000_0001,
+        0x007f_ffff,
+        0x807f_ffff,
+        0x0080_0000,
+        0x8080_0000,
+        0x7f7f_ffff,
+        0xff7f_ffff,
+        0x3d_cc_cc_cd, // 0.1, also used by the promoted-precision comparison.
+        0x477f_e000, // 65504, the largest finite F16 value.
+    ];
+    for value in [1.0e-6f32, 1.0e21f32] {
+        push_f32_neighbor_bits(&mut bits, value.to_bits());
+    }
+    for exponent in [-126, -14, -1, 0, 1, 23, 127] {
+        push_f32_neighbor_bits(&mut bits, 2.0f32.powi(exponent).to_bits());
+    }
+
+    let mut state = 0x5a17_39cdu32;
+    let mut random_count = 0;
+    while random_count < 128 {
+        state = state
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        if state & 0x7f80_0000 != 0x7f80_0000 {
+            bits.push(state);
+            random_count += 1;
+        }
+    }
+    bits
+}
+
+fn push_f32_neighbor_bits(bits: &mut Vec<u32>, center: u32) {
+    for neighbor in [center - 1, center, center + 1] {
+        bits.push(neighbor);
+        bits.push(neighbor | 0x8000_0000);
+    }
+}
+
+fn float_text_f64_cases() -> Vec<u64> {
+    let mut bits = vec![
+        0x0000_0000_0000_0000,
+        0x8000_0000_0000_0000,
+        0x0000_0000_0000_0001,
+        0x8000_0000_0000_0001,
+        0x000f_ffff_ffff_ffff,
+        0x800f_ffff_ffff_ffff,
+        0x0010_0000_0000_0000,
+        0x8010_0000_0000_0000,
+        0x7fef_ffff_ffff_ffff,
+        0xffef_ffff_ffff_ffff,
+    ];
+    for value in [1.0e-6f64, 1.0e21f64] {
+        push_f64_neighbor_bits(&mut bits, value.to_bits());
+    }
+    for exponent in [-1022, -1, 0, 1, 52, 1023] {
+        push_f64_neighbor_bits(&mut bits, 2.0f64.powi(exponent).to_bits());
+    }
+    bits.push(f64::from(f32::from_bits(0x3dcc_cccd)).to_bits());
+
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut random_count = 0;
+    while random_count < 128 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        if state & 0x7ff0_0000_0000_0000 != 0x7ff0_0000_0000_0000 {
+            bits.push(state);
+            random_count += 1;
+        }
+    }
+    bits
+}
+
+fn push_f64_neighbor_bits(bits: &mut Vec<u64>, center: u64) {
+    for neighbor in [center - 1, center, center + 1] {
+        bits.push(neighbor);
+        bits.push(neighbor | 0x8000_0000_0000_0000);
+    }
+}
+
+fn binary16_bits_as_f64(bits: u16) -> f64 {
+    let sign = if bits & 0x8000 == 0 { 1.0 } else { -1.0 };
+    let exponent = i32::from((bits >> 10) & 0x1f);
+    let fraction = f64::from(bits & 0x03ff);
+    if exponent == 0 {
+        sign * fraction * 2.0f64.powi(-24)
+    } else {
+        sign * (1.0 + fraction / 1024.0) * 2.0f64.powi(exponent - 15)
+    }
+}
+
+fn push_float_text_expectation(
+    expected: &mut Vec<String>,
+    precision_name: &str,
+    bits: String,
+    value: f64,
+    precision: BinaryFloatPrecision,
+) {
+    let text = format_finite_float(value, precision)
+        .unwrap_or_else(|error| panic!("{precision_name} bits {bits}: {error}"));
+    expected.push(format!("{precision_name}|{bits}|{text}"));
+}
+
+
 
 fn execute_wasm_checked_exports_in_node(
     wasm_bytes: &[u8],

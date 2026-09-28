@@ -6,13 +6,6 @@ warnings = "forbid"
 rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1 direct: 200"]
 
 [backends.html_wasm]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0064"]
-
-[[backends.html_wasm.diagnostic_assertions]]
-code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.runtime_casts"
-path = "input/@page.moth"
-line = 6
-column = 30
+rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1 direct: 200"]

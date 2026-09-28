@@ -463,22 +463,39 @@ fn lower_infallible_numeric_to_string(
 ) -> Result<ExprLoweringOutput, CompilerError> {
     let type_environment = context.module_context.type_environment;
     let profile = context.module_context.request.numeric_profile;
-    if !source_domain.is_integer()
+    let float_precision = match source_domain {
+        NumericScalar::Fixed(FixedScalar::F16 | FixedScalar::F32 | FixedScalar::F64) => {
+            source_domain.binary_float_precision(profile)
+        }
+        _ => None,
+    };
+    let source_minimum = source_domain.integer_range(profile).map(|(minimum, _)| minimum);
+    if (!source_domain.is_integer() && float_precision.is_none())
+        || (source_domain.is_integer() && source_minimum.is_none())
         || source_expression.ty != source_domain.type_id(type_environment)
         || target_expression.ty != type_environment.builtins().string
     {
         return Err(lir_transformation_error(
-            "Wasm NumericToString cast has inconsistent or non-integer HIR evidence",
+            "Wasm NumericToString cast has inconsistent or unsupported HIR evidence",
         ));
     }
-    let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
-        return Err(lir_transformation_error(
-            "Wasm NumericToString source has no canonical integer range",
-        ));
-    };
 
     let source_abi = expression_abi(context, source_expression);
-    if !matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64)
+    let expected_source_abi = match float_precision {
+        Some(BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32) => {
+            WasmAbiType::F32
+        }
+        Some(BinaryFloatPrecision::Binary64) => WasmAbiType::F64,
+        None if source_domain.is_integer() => source_abi,
+        None => {
+            return Err(lir_transformation_error(
+                "Wasm NumericToString source has no supported numeric precision",
+            ));
+        }
+    };
+    if source_abi != expected_source_abi
+        || (float_precision.is_none()
+            && !matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64))
         || expression_abi(context, target_expression) != WasmAbiType::Handle
     {
         return Err(lir_transformation_error(format!(
@@ -487,9 +504,27 @@ fn lower_infallible_numeric_to_string(
         )));
     }
 
+    // Evaluate a cast source once; the LIR carries its canonical domain precision separately.
     let source_value = lower_expression(context, source_expression, statements)?;
+    if context
+        .local_type_by_id
+        .get(&source_value.value)
+        .copied()
+        != Some(source_abi)
+    {
+        return Err(lir_transformation_error(format!(
+            "Wasm NumericToString source lowered to an unexpected carrier for {}",
+            source_domain.name()
+        )));
+    }
     let dst = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
-    statements.push(if source_minimum < 0 {
+    let statement = if let Some(precision) = float_precision {
+        WasmLirStmt::StringFromFloat {
+            dst,
+            value: source_value.value,
+            precision,
+        }
+    } else if matches!(source_minimum, Some(minimum) if minimum < 0) {
         WasmLirStmt::StringFromI64 {
             dst,
             value: source_value.value,
@@ -499,7 +534,8 @@ fn lower_infallible_numeric_to_string(
             dst,
             value: source_value.value,
         }
-    });
+    };
+    statements.push(statement);
     Ok(ExprLoweringOutput {
         value: dst,
         prefer_move: false,

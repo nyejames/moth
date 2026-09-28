@@ -217,13 +217,16 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
 }
 
 #[test]
-fn wasm_feature_validation_allows_integer_text_casts_and_keeps_other_text_casts_gated() {
+fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     for domain in [
         NumericScalar::Int,
         NumericScalar::Fixed(FixedScalar::I8),
         NumericScalar::Fixed(FixedScalar::U64),
+        NumericScalar::Fixed(FixedScalar::F16),
+        NumericScalar::Fixed(FixedScalar::F32),
+        NumericScalar::Fixed(FixedScalar::F64),
     ] {
         let module = module_returning_cast_expression(HirExpression {
             id: HirValueId(0),
@@ -250,10 +253,9 @@ fn wasm_feature_validation_allows_integer_text_casts_and_keeps_other_text_casts_
         );
         assert!(
             result.is_ok(),
-            "Wasm should allow integer NumericToString casts for {domain:?}"
+            "Wasm should allow NumericToString casts for {domain:?}"
         );
     }
-
     for (policy, source, target) in [
         (
             BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
@@ -281,7 +283,7 @@ fn wasm_feature_validation_allows_integer_text_casts_and_keeps_other_text_casts_
             &module,
             &type_environment,
             &mut string_table,
-            "Wasm should keep Float formatting and StringToNumeric casts gated",
+            "Wasm should keep profile Float expression casts and StringToNumeric casts gated",
         );
         assert_unsupported_feature(
             &diagnostic,
@@ -414,8 +416,50 @@ fn wasm_feature_validation_rejects_statement_casts() {
 }
 
 #[test]
-fn wasm_feature_validation_rejects_reachable_format_float() {
-    let span = None;
+fn wasm_feature_validation_allows_reachable_trap_format_float_under_each_profile() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    for float_precision in [FloatPrecision::Bits32, FloatPrecision::Bits64] {
+        let module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![block(
+                BlockId(0),
+                vec![float_statement(
+                    10,
+                    ReachableFloatStatementKind::FormatFloat,
+                    NumericFailureMode::Trap,
+                    None,
+                )],
+                HirTerminator::Return(unit_expression(0)),
+            )],
+        );
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile {
+                    int_width: IntWidth::Bits64,
+                    float_precision,
+                },
+                external_package_registry: None,
+            },
+            &mut string_table,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Wasm should allow trap-mode FormatFloat with {float_precision:?}"
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_return_error_format_float() {
+    let span = test_source_span(13);
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -426,8 +470,8 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
             vec![float_statement(
                 10,
                 ReachableFloatStatementKind::FormatFloat,
-                NumericFailureMode::Trap,
-                span,
+                NumericFailureMode::ReturnError,
+                Some(span),
             )],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -437,7 +481,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm validation should reject reachable FormatFloat",
+        "Wasm validation should reject ReturnError FormatFloat",
     );
 
     assert_unsupported_feature(
@@ -445,6 +489,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
         &mut string_table,
         UnsupportedBackendFeatureReason::FloatFormatting,
     );
+    assert_eq!(diagnostic.primary_span, Some(span));
 }
 
 #[test]

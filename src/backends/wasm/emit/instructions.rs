@@ -10,6 +10,7 @@ use crate::backends::wasm::lir::types::{
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
+use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
 use rustc_hash::FxHashMap;
 use wasm_encoder::{BlockType, Function, Instruction, MemArg};
@@ -153,6 +154,13 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::StringFromU64 { dst, value } => {
             emit_integer_to_string(function, *dst, *value, context, plan, false)?;
+        }
+        WasmLirStmt::StringFromFloat {
+            dst,
+            value,
+            precision,
+        } => {
+            emit_float_to_string(function, *dst, *value, *precision, context, plan)?;
         }
         WasmLirStmt::StringFinish { dst, buffer } => {
             function.instruction(&Instruction::LocalGet(local_index(*buffer, context)?));
@@ -439,6 +447,35 @@ fn emit_integer_to_string(
         WasmRuntimeHelper::StringFromU64
     };
     function.instruction(&Instruction::Call(helper_index(plan, helper)?));
+    function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
+    Ok(())
+}
+
+fn emit_float_to_string(
+    function: &mut Function,
+    dst: WasmLirLocalId,
+    value: WasmLirLocalId,
+    precision: BinaryFloatPrecision,
+    context: &LirBodyEmitContext<'_>,
+    plan: &WasmEmitPlan,
+) -> Result<(), CompilerError> {
+    let (value_abi, selector) = match precision {
+        BinaryFloatPrecision::Binary16 => (WasmAbiType::F32, 16),
+        BinaryFloatPrecision::Binary32 => (WasmAbiType::F32, 32),
+        BinaryFloatPrecision::Binary64 => (WasmAbiType::F64, 64),
+    };
+    ensure_local_abi(dst, WasmAbiType::Handle, context, "StringFromFloat destination")?;
+    ensure_local_abi(value, value_abi, context, "StringFromFloat source")?;
+
+    function.instruction(&Instruction::LocalGet(local_index(value, context)?));
+    if value_abi == WasmAbiType::F32 {
+        function.instruction(&Instruction::F64PromoteF32);
+    }
+    function.instruction(&Instruction::I32Const(selector));
+    function.instruction(&Instruction::Call(helper_index(
+        plan,
+        WasmRuntimeHelper::StringFromFloat,
+    )?));
     function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
     Ok(())
 }

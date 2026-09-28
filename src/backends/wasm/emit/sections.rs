@@ -44,6 +44,12 @@ pub(crate) struct WasmEmitPlan {
     pub data_offsets: FxHashMap<WasmStaticDataId, u32>,
     /// Static-data segment lengths cached for literal helper calls.
     pub data_lengths: FxHashMap<WasmStaticDataId, u32>,
+    /// Ryu power-table segment offset and byte length when Float formatting is used.
+    pub float_format_tables_offset: Option<u32>,
+    pub float_format_tables_len: Option<u32>,
+    pub float_format_tables: Option<Vec<u8>>,
+    /// Initial memory size adjusted so every emitted active data segment is in bounds.
+    pub initial_memory_pages: u32,
     /// First aligned address available for dynamic heap allocation.
     pub heap_base: u32,
     /// `heap_top` mutable global index when memory runtime helpers are emitted.
@@ -105,12 +111,16 @@ pub(crate) fn build_emit_plan(
     let f16_bits_to_f32_needed = helper_requirements.f16_bits_to_f32;
     // WHAT: helper ordering is fixed and independent of usage count.
     // WHY: stable helper function indices simplify exports and debug output.
+    let float_format_needed = helper_requirements.float_format;
     for helper in helper_emit_order() {
         let helper_is_needed = match helper {
             WasmRuntimeHelper::FloatPower => float_power_needed,
             WasmRuntimeHelper::FloatRemainder => float_remainder_needed,
             WasmRuntimeHelper::F32ToF16Bits => f32_to_f16_bits_needed,
             WasmRuntimeHelper::F16BitsToF32 => f16_bits_to_f32_needed,
+            WasmRuntimeHelper::FloatToDecimal | WasmRuntimeHelper::StringFromFloat => {
+                float_format_needed
+            }
             _ => memory_helpers_needed,
         };
         if !helper_is_needed {
@@ -129,9 +139,28 @@ pub(crate) fn build_emit_plan(
     let StaticDataLayoutResult {
         data_offsets,
         data_lengths,
+        float_format_tables_offset,
+        float_format_tables,
+        float_format_tables_len,
         heap_base,
-    } = plan_static_data_layout(module)?;
+    } = plan_static_data_layout(module, float_format_needed)?;
     let heap_top_global_index = memory_helpers_needed.then_some(0);
+    let initial_memory_pages = if float_format_needed {
+        let required_pages =
+            heap_base / 65_536 + (heap_base % 65_536 != 0) as u32;
+        module.memory_plan.initial_pages.max(required_pages)
+    } else {
+        module.memory_plan.initial_pages
+    };
+    if float_format_needed
+        && let Some(max_pages) = module.memory_plan.max_pages
+        && initial_memory_pages > max_pages
+    {
+        return Err(CompilerError::compiler_error(
+            "Wasm Float formatting tables exceed the configured maximum memory",
+        )
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+    }
 
     Ok(WasmEmitPlan {
         type_entries,
@@ -143,12 +172,16 @@ pub(crate) fn build_emit_plan(
         defined_function_type_indices,
         data_offsets,
         data_lengths,
+        float_format_tables_offset,
+        float_format_tables_len,
+        float_format_tables,
+        initial_memory_pages,
         heap_base,
         heap_top_global_index,
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 20] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 22] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -172,6 +205,8 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 20] {
         WasmRuntimeHelper::FloatRemainder,
         WasmRuntimeHelper::F32ToF16Bits,
         WasmRuntimeHelper::F16BitsToF32,
+        WasmRuntimeHelper::FloatToDecimal,
+        WasmRuntimeHelper::StringFromFloat,
     ]
 }
 
@@ -229,6 +264,14 @@ pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
                 results: vec![Handle],
             }
         }
+        WasmRuntimeHelper::FloatToDecimal => WasmLirSignature {
+            params: vec![F64, I32],
+            results: vec![I64, I32],
+        },
+        WasmRuntimeHelper::StringFromFloat => WasmLirSignature {
+            params: vec![F64, I32],
+            results: vec![Handle],
+        },
         WasmRuntimeHelper::VecNew => WasmLirSignature {
             params: vec![],
             results: vec![Handle],
@@ -290,6 +333,8 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::FloatRemainder => "rt_float_remainder",
         WasmRuntimeHelper::F32ToF16Bits => "rt_f32_to_f16_bits",
         WasmRuntimeHelper::F16BitsToF32 => "rt_f16_bits_to_f32",
+        WasmRuntimeHelper::FloatToDecimal => "rt_float_to_decimal",
+        WasmRuntimeHelper::StringFromFloat => "rt_string_from_float",
     }
 }
 
@@ -308,7 +353,9 @@ pub(crate) fn plan_sections_text(module: &WasmLirModule, plan: &WasmEmitPlan) ->
     // Includes only LIR-declared exports. Helper exports are controlled by request policy.
     let _ = writeln!(out, "  export: {}", module.exports.len());
     let _ = writeln!(out, "  code: {}", plan.defined_function_order.len());
-    let _ = writeln!(out, "  data: {}", module.static_data.len());
+    let emitted_data_count =
+        module.static_data.len() + usize::from(plan.float_format_tables_offset.is_some());
+    let _ = writeln!(out, "  data: {emitted_data_count}");
     out
 }
 
@@ -395,6 +442,12 @@ pub(crate) fn plan_data_layout_text(module: &WasmLirModule, plan: &WasmEmitPlan)
             );
         }
     }
+    if let (Some(offset), Some(len)) = (
+        plan.float_format_tables_offset,
+        plan.float_format_tables_len,
+    ) {
+        let _ = writeln!(out, "  float_format_tables offset={offset} len={len}");
+    }
     let _ = writeln!(out, "  heap_base={}", plan.heap_base);
     out
 }
@@ -405,6 +458,7 @@ struct RuntimeHelperRequirements {
     float_remainder: bool,
     f32_to_f16_bits: bool,
     f16_bits_to_f32: bool,
+    float_format: bool,
 }
 
 fn runtime_helper_requirements(
@@ -417,6 +471,7 @@ fn runtime_helper_requirements(
         float_remainder: false,
         f32_to_f16_bits: false,
         f16_bits_to_f32: false,
+        float_format: false,
     };
 
     for function in &module.functions {
@@ -446,6 +501,10 @@ fn runtime_helper_requirements(
                     | WasmLirStmt::VecNew { .. }
                     | WasmLirStmt::VecPushHandle { .. }
                     | WasmLirStmt::DropIfOwned { .. } => requirements.memory = true,
+                    WasmLirStmt::StringFromFloat { .. } => {
+                        requirements.memory = true;
+                        requirements.float_format = true;
+                    }
                     WasmLirStmt::CheckedFloatOp {
                         operator: NumericOperator::Power,
                         ..
@@ -466,15 +525,18 @@ fn runtime_helper_requirements(
 struct StaticDataLayoutResult {
     data_offsets: FxHashMap<WasmStaticDataId, u32>,
     data_lengths: FxHashMap<WasmStaticDataId, u32>,
+    float_format_tables_offset: Option<u32>,
+    float_format_tables: Option<Vec<u8>>,
+    float_format_tables_len: Option<u32>,
     heap_base: u32,
 }
 
 fn plan_static_data_layout(
     module: &WasmLirModule,
+    float_format_needed: bool,
 ) -> Result<StaticDataLayoutResult, CompilerError> {
-    // WHAT: place static segments by stable `WasmStaticDataId`, aligned to 8 bytes.
-    // WHY: deterministic layout keeps literal pointer tests reproducible and preserves
-    // handle/pointer alignment assumptions for runtime helpers.
+    // WHAT: place static segments by stable id, then append Ryu tables only for dynamic float
+    // formatting. All segments are aligned to 8 bytes for deterministic heap placement.
     let mut data_offsets = FxHashMap::default();
     let mut data_lengths = FxHashMap::default();
 
@@ -483,23 +545,48 @@ fn plan_static_data_layout(
 
     let mut cursor = module.memory_plan.static_data_base;
     for segment in static_data {
-        cursor = align_to(cursor, 8);
+        cursor = align_to(cursor, 8).ok_or_else(|| {
+            static_data_layout_error("Wasm static data layout overflowed while aligning a segment")
+        })?;
+        let len = u32::try_from(segment.bytes.len()).map_err(|_| {
+            static_data_layout_error("Wasm static data segment length exceeded u32 address space")
+        })?;
         data_offsets.insert(segment.id, cursor);
-        data_lengths.insert(segment.id, segment.bytes.len() as u32);
+        data_lengths.insert(segment.id, len);
         cursor = cursor
-            .checked_add(segment.bytes.len() as u32)
+            .checked_add(len)
             .ok_or_else(|| {
-                CompilerError::compiler_error(
-                "Wasm static data layout overflowed u32 address space while planning data segments",
-            )
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+                static_data_layout_error(
+                    "Wasm static data layout overflowed u32 address space while planning data segments",
+                )
             })?;
     }
+
+    cursor = align_to(cursor, 8).ok_or_else(|| {
+        static_data_layout_error("Wasm static data layout overflowed while aligning Ryu tables")
+    })?;
+    let (float_format_tables_offset, float_format_tables, float_format_tables_len) =
+        if float_format_needed {
+            let tables = super::float_format::ryu_table_data();
+            let len = tables.len() as u32;
+            let offset = cursor;
+            cursor = cursor.checked_add(len).ok_or_else(|| {
+                static_data_layout_error("Wasm Ryu table layout overflowed u32 address space")
+            })?;
+            (Some(offset), Some(tables), Some(len))
+        } else {
+            (None, None, None)
+        };
 
     Ok(StaticDataLayoutResult {
         data_offsets,
         data_lengths,
-        heap_base: align_to(cursor, 8),
+        float_format_tables_offset,
+        float_format_tables,
+        float_format_tables_len,
+        heap_base: align_to(cursor, 8).ok_or_else(|| {
+            static_data_layout_error("Wasm static data layout overflowed while aligning heap base")
+        })?,
     })
 }
 
@@ -520,17 +607,20 @@ fn intern_signature(
     index
 }
 
-fn align_to(value: u32, alignment: u32) -> u32 {
-    // WHAT: round `value` up to the next `alignment` boundary.
-    // WHY: static data and heap base require predictable alignment guarantees.
+fn static_data_layout_error(message: &str) -> CompilerError {
+    CompilerError::compiler_error(message)
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+}
+
+fn align_to(value: u32, alignment: u32) -> Option<u32> {
     if alignment == 0 {
-        return value;
+        return Some(value);
     }
 
     let remainder = value % alignment;
     if remainder == 0 {
-        value
+        Some(value)
     } else {
-        value + (alignment - remainder)
+        value.checked_add(alignment - remainder)
     }
 }

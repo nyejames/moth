@@ -11,6 +11,7 @@ mod checked_integer;
 pub(crate) mod data;
 pub(crate) mod exports;
 mod float_power;
+mod float_format;
 mod float_remainder;
 pub(crate) mod functions;
 pub(crate) mod helpers;

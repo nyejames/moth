@@ -12041,6 +12041,13 @@ contract = "language.numeric.float_formatting_edge_case_contract"
 role = "primary"
 
 [[case]]
+id = "float_format_profile_float32"
+path = "float_format_profile_float32"
+tags = ["integration", "numeric", "runtime", "float", "formatting", "html-wasm"]
+contract = "language.numeric.float32_profile_float_formatting"
+role = "primary"
+
+[[case]]
 id = "numeric_literal_uppercase_e_rejected"
 path = "numeric_literal_uppercase_e_rejected"
 tags = ["integration", "diagnostics", "numeric", "syntax"]

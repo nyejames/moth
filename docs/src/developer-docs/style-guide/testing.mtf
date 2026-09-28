@@ -611,18 +611,18 @@ precision reported by the case's builder for every backend block. Its exact acce
 `Int32/Float32`, `Int32/Float64`, `Int64/Float32` and `Int64/Float64`; omitting the key selects the
 default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
 
-The paired `html_wasm` profile matrix covers supported scalar paths in all four numeric profiles.
-Integer `NumericToString` expression casts have separate one-profile coverage below.
-Paired backend blocks exercise values, comparisons, checked integer and Float/F32/F64 trap-mode arithmetic and
-infallible numeric expression casts that do not involve `F16`, plus `Byte -> U8` and
+The paired `html_wasm` profile matrix covers supported scalar paths in all four numeric profiles:
+values, comparisons, checked integer and Float/F32/F64 trap-mode arithmetic, F16 scalar
+conversion and supported infallible numeric expression casts, including `Byte -> U8` and
 `U8 -> Byte`. A paired `NumericToString` expression-cast case covers profile `Int` and
 fixed signed/unsigned integers in the `Int32/Float32` profile only; generated-Wasm UTF-8
-helper tests cover signed and unsigned output. Recoverable numeric `Error!` paths and other
-builtin runtime casts remain gated. Those casts include fallible conversions, other defined
-conversions involving `Bool`, `Char`, `Error` or `String` (including `Char -> Int`,
-String-to-numeric parsing and `Float`/`F16`/`F32`/`F64`-to-String formatting), and
-statement-form casts. Fixed-scalar aggregates and external finite-value validation retain
-their separate target gates.
+helper tests cover signed and unsigned output. Separate paired cases exercise trap-mode
+`Float`/`F16`/`F32`/`F64` text at the default and `Int32/Float32` profiles.
+Recoverable numeric `Error!` paths and reachable `ReturnError` `FormatFloat` and
+`ValidateFloat` remain target-gated, as do fallible conversions, other defined
+conversions involving `Bool`, `Char`, `Error` or `String` (including `Char -> Int` and
+String-to-numeric parsing), and statement-form casts. Fixed-scalar aggregates and
+source-level external finite-value validation retain separate target gates.
 
 - Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`

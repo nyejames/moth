@@ -28,7 +28,7 @@ pub(crate) fn emit_lir_to_wasm_module(
     // WHAT: precompute all indices/layout before section writing starts.
     // WHY: index spaces cross-reference each other, so deterministic preplanning avoids
     // accidental order-dependent bugs during section assembly.
-    let plan = build_emit_plan(lir_module, request)?;
+    let mut plan = build_emit_plan(lir_module, request)?;
     let mut wasm_module = Module::new();
 
     // WHAT: type section must be emitted first in core Wasm section order.
@@ -70,7 +70,7 @@ pub(crate) fn emit_lir_to_wasm_module(
 
     let mut memory_section = MemorySection::new();
     memory_section.memory(MemoryType {
-        minimum: u64::from(lir_module.memory_plan.initial_pages),
+        minimum: u64::from(plan.initial_memory_pages),
         maximum: lir_module.memory_plan.max_pages.map(u64::from),
         memory64: false,
         shared: false,
@@ -112,8 +112,8 @@ pub(crate) fn emit_lir_to_wasm_module(
 
     // WHAT: static data is emitted as active segments into memory index 0.
     // WHY: the current emitter uses one internal linear memory and deterministic static placement.
-    if !lir_module.static_data.is_empty() {
-        let data_section = build_data_section(lir_module, &plan)?;
+    if !lir_module.static_data.is_empty() || plan.float_format_tables_offset.is_some() {
+        let data_section = build_data_section(lir_module, &mut plan)?;
         wasm_module.section(&data_section);
     }
 

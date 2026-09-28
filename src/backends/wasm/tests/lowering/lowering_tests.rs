@@ -17,9 +17,10 @@ use crate::backends::wasm::tests::lowering::test_support::{
     string_expression, unit_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
@@ -1521,6 +1522,332 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
                 WasmLirTerminator::Return { value: Some(value) } if *value == *dst
             ),
             "{profile} should return the validated destination unchanged"
+        );
+    }
+}
+
+#[test]
+fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let float_type = type_environment.builtins().float;
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let formatter_path = path_fork
+        .try_intern_portable_path("format_float", &mut string_table)
+        .expect("test path fits");
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![
+            (
+                HirFunction {
+                    id: FunctionId(0),
+                    entry: BlockId(0),
+                    params: vec![],
+                    return_type: types.int,
+                },
+                start_path,
+                HirFunctionOrigin::EntryStart,
+            ),
+            (
+                HirFunction {
+                    id: FunctionId(1),
+                    entry: BlockId(1),
+                    params: vec![],
+                    return_type: types.string,
+                },
+                formatter_path,
+                HirFunctionOrigin::Normal,
+            ),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(
+                    200,
+                    0,
+                    types.int,
+                    RegionId(0),
+                )),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![local(20, types.string, RegionId(0))],
+                statements: vec![statement(
+                    202,
+                    HirStatementKind::FormatFloat {
+                        source: expression(
+                            201,
+                            HirExpressionKind::Float(1.5),
+                            float_type,
+                            RegionId(0),
+                            ValueKind::Const,
+                        ),
+                        failure_mode: NumericFailureMode::Trap,
+                        result: LocalId(20),
+                    },
+                    2,
+                )],
+                terminator: HirTerminator::Return(load_local(
+                    203,
+                    LocalId(20),
+                    types.string,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    );
+
+    for (float_precision, expected_carrier, expected_precision) in [
+        (
+            FloatPrecision::Bits32,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+        (
+            FloatPrecision::Bits64,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: NumericProfile {
+                int_width: IntWidth::Bits64,
+                float_precision,
+            },
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{float_precision:?} FormatFloat should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("formatter function should be lowered");
+        assert_eq!(function.signature.results, vec![WasmAbiType::Handle]);
+
+        let statements = &function.blocks[0].statements;
+        let float_constants = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => {
+                    Some(*dst)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            float_constants.len(),
+            1,
+            "{float_precision:?} source expression should be lowered exactly once"
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|statement| matches!(statement, WasmLirStmt::StringFromFloat { .. }))
+                .count(),
+            1,
+            "{float_precision:?} should emit one StringFromFloat"
+        );
+        let formatted = statements
+            .iter()
+            .find_map(|statement| match statement {
+                WasmLirStmt::StringFromFloat {
+                    dst,
+                    value,
+                    precision,
+                } => Some((*dst, *value, *precision)),
+                _ => None,
+            })
+            .expect("FormatFloat should lower through StringFromFloat");
+        assert_eq!(formatted.1, float_constants[0]);
+        assert_eq!(formatted.2, expected_precision);
+        let source_local = function
+            .locals
+            .iter()
+            .find(|local| local.id == formatted.1)
+            .expect("formatted source local should exist");
+        assert_eq!(source_local.ty, expected_carrier);
+        let destination = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::UserLocal)
+            .expect("formatted String result local should exist");
+        assert_eq!(destination.ty, WasmAbiType::Handle);
+        assert_eq!(formatted.0, destination.id);
+    }
+}
+
+#[test]
+fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let formatter_path = path_fork
+        .try_intern_portable_path("format_fixed_float", &mut string_table)
+        .expect("test path fits");
+
+    for (scalar, expected_precision, expected_carrier) in [
+        (FixedScalar::F16, BinaryFloatPrecision::Binary16, WasmAbiType::F32),
+        (FixedScalar::F32, BinaryFloatPrecision::Binary32, WasmAbiType::F32),
+        (FixedScalar::F64, BinaryFloatPrecision::Binary64, WasmAbiType::F64),
+    ] {
+        let source = expression(
+            501,
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::binary_float(scalar, 1.5)
+                    .expect("1.5 is a finite fixed-width float"),
+            ),
+            builtin_type_ids::fixed_scalar(scalar),
+            RegionId(0),
+            ValueKind::Const,
+        );
+        let cast = expression(
+            502,
+            HirExpressionKind::Cast {
+                source: Box::new(source),
+                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(scalar)),
+            },
+            types.string,
+            RegionId(0),
+            ValueKind::RValue,
+        );
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            vec![
+                (
+                    HirFunction {
+                        id: FunctionId(0),
+                        entry: BlockId(0),
+                        params: vec![],
+                        return_type: types.int,
+                    },
+                    start_path,
+                    HirFunctionOrigin::EntryStart,
+                ),
+                (
+                    HirFunction {
+                        id: FunctionId(1),
+                        entry: BlockId(1),
+                        params: vec![],
+                        return_type: types.string,
+                    },
+                    formatter_path,
+                    HirFunctionOrigin::Normal,
+                ),
+            ],
+            vec![
+                HirBlock {
+                    id: BlockId(0),
+                    region: RegionId(0),
+                    locals: vec![],
+                    statements: vec![],
+                    terminator: HirTerminator::Return(int_expression(
+                        500,
+                        0,
+                        types.int,
+                        RegionId(0),
+                    )),
+                },
+                HirBlock {
+                    id: BlockId(1),
+                    region: RegionId(0),
+                    locals: vec![],
+                    statements: vec![],
+                    terminator: HirTerminator::Return(cast),
+                },
+            ],
+            FunctionId(0),
+        );
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} NumericToString should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("fixed-float formatter should be lowered");
+        assert_eq!(function.signature.results, vec![WasmAbiType::Handle]);
+        let statements = &function.blocks[0].statements;
+        let float_constants = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => {
+                    Some(*dst)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            float_constants.len(),
+            1,
+            "{scalar:?} source expression should be lowered exactly once"
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|statement| matches!(statement, WasmLirStmt::StringFromFloat { .. }))
+                .count(),
+            1,
+            "{scalar:?} should emit one StringFromFloat"
+        );
+        let formatted = statements
+            .iter()
+            .find_map(|statement| match statement {
+                WasmLirStmt::StringFromFloat {
+                    dst,
+                    value,
+                    precision,
+                } => Some((*dst, *value, *precision)),
+                _ => None,
+            })
+            .expect("NumericToString should lower through StringFromFloat");
+        assert_eq!(formatted.1, float_constants[0]);
+        assert_eq!(formatted.2, expected_precision);
+        assert_eq!(
+            function
+                .locals
+                .iter()
+                .find(|local| local.id == formatted.1)
+                .expect("formatted input local should exist")
+                .ty,
+            expected_carrier
+        );
+        assert_eq!(
+            function
+                .locals
+                .iter()
+                .find(|local| local.id == formatted.0)
+                .expect("String result local should exist")
+                .ty,
+            WasmAbiType::Handle
         );
     }
 }

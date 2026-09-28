@@ -111,8 +111,9 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
-            // statement casts, formatting, generic values and the later Error-value/fallible-
-            // control-flow checks. Trap-mode ValidateFloat is lowered natively.
+            // statement casts, unsupported formatting, generic values and later Error-value/
+            // fallible-control-flow checks. Trap-mode Float formatting and finite validation run
+            // natively.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -556,8 +557,8 @@ fn validate_wasm_reactive_features(
 /// Reports the first reachable runtime cast outside Wasm's supported expression conversions.
 ///
 /// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 numeric conversions,
-///       integer-to-String casts, plus Byte/U8; fallible pairs, Float formatting and statement
-///       casts remain gated.
+///       integer and fixed-binary-float-to-String casts, plus Byte/U8; fallible pairs, profile
+///       `Float` expression casts and statement casts remain gated.
 /// WHY: target validation consumes retained cast evidence before lowering, preserving authored
 ///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
@@ -594,7 +595,18 @@ fn wasm_supports_runtime_cast(
         BuiltinCastPolicyId::NumericConversion { source, target } => {
             wasm_supports_numeric_conversion(source, target, numeric_profile)
         }
-        BuiltinCastPolicyId::NumericToString(source) => source.is_integer(),
+        BuiltinCastPolicyId::NumericToString(source) => {
+            source.is_integer()
+                || (source != NumericScalar::Float
+                    && matches!(
+                        source.binary_float_precision(numeric_profile),
+                        Some(
+                            BinaryFloatPrecision::Binary16
+                                | BinaryFloatPrecision::Binary32
+                                | BinaryFloatPrecision::Binary64
+                        )
+                    ))
+        }
         BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => true,
         _ => false,
     }
@@ -702,8 +714,8 @@ fn wasm_supports_checked_numeric_op(
 
 /// Reports the first reachable Float formatting or unsupported validation statement for Wasm.
 ///
-/// WHAT: trap-mode external-Float boundary validation is supported, while Float formatting and
-///       recoverable validation remain target-gated.
+/// WHAT: trap-mode Float formatting and boundary validation are supported, while recoverable
+///       validation and formatting remain target-gated.
 /// WHY: target validation consumes the exact failure mode retained by HIR reachability so Wasm
 ///      never substitutes a trap for a recoverable `ReturnError` contract.
 fn validate_wasm_float_statements(
@@ -711,10 +723,10 @@ fn validate_wasm_float_statements(
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(float_statement) = float_statements.iter().find(|statement| {
-        statement.kind == ReachableFloatStatementKind::FormatFloat
-            || statement.failure_mode != NumericFailureMode::Trap
-    }) else {
+    let Some(float_statement) = float_statements
+        .iter()
+        .find(|statement| statement.failure_mode != NumericFailureMode::Trap)
+    else {
         return Ok(());
     };
 

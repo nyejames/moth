@@ -144,6 +144,13 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         value: WasmLirLocalId,
     },
+    /// Convert an F32/F64 carrier to a finalized decimal string using its semantic precision.
+    /// F16 values use their exact F32 carrier with `Binary16` precision.
+    StringFromFloat {
+        dst: WasmLirLocalId,
+        value: WasmLirLocalId,
+        precision: BinaryFloatPrecision,
+    },
     StringFinish {
         dst: WasmLirLocalId,
         buffer: WasmLirLocalId,

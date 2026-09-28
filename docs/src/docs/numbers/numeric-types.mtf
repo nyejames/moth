@@ -148,23 +148,22 @@ implicit receiving boundary never narrows an already typed numeric value.
 This reference owns the accepted contract for the complete numeric family.
 @../progress (Progress) owns current compiler and backend support.
 The frontend recognises fixed-width types and `Byte`, materialises their literals,
-records fixed-width operator facts in HIR, checks their casts, and folds numeric
+records fixed-width operator facts in HIR, checks their casts and folds numeric
 operators, casts and text. HTML-JS executes fixed-width numeric and `Byte` runtime
-values and uses Moth-owned `Float` formatting for runtime template interpolation
-and casts. HTML-JS validates successful external `Float` returns before ordinary
-Moth code observes them. HTML-Wasm executes fixed
-integers, `Byte`, `F32` and `F64` values, comparisons and trap-mode arithmetic,
-infallible numeric expression casts that do not involve `F16`, plus `Byte -> U8`
-and `U8 -> Byte`. It also supports infallible integer-to-`String` expression
-casts from profile `Int` and fixed signed/unsigned integer types. For Float
-boundaries, HTML-Wasm only supports trap-mode finite validation after carrier
-conversion; HIR-to-LIR lowering and generated, instantiated Wasm modules are
-covered, but source-level external `Float` calls cannot execute until Wasm
-import/metadata support exists. HTML-Wasm does not support recoverable
-(`ReturnError`) validation, `Float`-family formatting to `String`, or `Float`
-parsing from `String`. Other remaining builtin runtime casts stay gated,
-including conversions involving `Bool`, `Char` or `Error` (including
-`Char -> Int`), and statement-form casts. The `Number` family is not implemented.
+values, formats `Float` for templates and casts and validates successful external
+`Float` returns before ordinary Moth code observes them.
+
+HTML-Wasm executes fixed integers, `Byte` and fixed binary floats through values,
+comparisons, checked trap-mode arithmetic and supported infallible numeric
+expression casts, including integer-to-`F16` and widening `F16`-to-`F32`/`F64`.
+It also converts profile `Int` and fixed integers to decimal `String` values.
+HTML-Wasm validates finite `Float` values after carrier conversion in trap mode.
+It formats runtime `Float` templates and `Float`/`F16`/`F32`/`F64`-to-`String` expression casts at their own precision in trap mode. Non-finite formatting and validation trap only in trap mode, while negative zero formats as `0`.
+
+Source-level external `Float` calls still need Wasm import/metadata support. Reachable `ReturnError` `FormatFloat` and `ValidateFloat`, plus `String`-to-numeric parsing, remain target-rejected.
+Other builtin runtime casts stay gated, including conversions
+involving `Bool`, `Char` or `Error` (including `Char -> Int`) and statement-form
+casts. The `Number` family is not implemented.
 
 ### MON data boundary
 

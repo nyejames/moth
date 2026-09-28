@@ -1,4 +1,4 @@
--- float_format_contract: backend-stable Float -> String formatting coverage.
+-- float_format_contract: backend-stable Float and fixed-float -> String formatting coverage.
 --
 -- This test exercises both the compile-time/folded path and the runtime path for
 -- Float -> String formatting, locking the exact output contract for all required
@@ -27,17 +27,32 @@ tiny #Float = 0.0000001
 big #Float = 1e21
 neg_big #Float = -1e21
 
-[: [zero]|[neg_zero]|[one]|[one_half]|[small]|[tiny]|[big]|[neg_big]]
+[:folded float: [zero]|[neg_zero]|[one]|[one_half]|[small]|[tiny]|[big]|[neg_big]]
 
 -- ---------------------
 --  Runtime path
 -- ---------------------
--- An explicit Float -> String cast inside a function body exercises
--- HirStatementKind::FormatFloat and the JS __moth_format_float helper.
+-- An explicit Float -> String cast inside a function body exercises the
+-- runtime formatter on both backends.
 
 format_value |value Float| -> String:
     text String = cast value
     return text
 ;
 
-[: [format_value(0.0)]|[format_value(-0.0)]|[format_value(1.0)]|[format_value(1.5)]|[format_value(0.000001)]|[format_value(0.0000001)]|[format_value(1e21)]|[format_value(-1e21)]]
+format_f16 |value F16| -> String:
+    return cast value
+;
+
+format_f32 |value F32| -> String:
+    return cast value
+;
+
+format_f64 |value F64| -> String:
+    return cast value
+;
+
+[:runtime float: [format_value(0.0)]|[format_value(-0.0)]|[format_value(1.0)]|[format_value(1.5)]|[format_value(0.000001)]|[format_value(0.0000001)]|[format_value(1e21)]|[format_value(-1e21)]]
+
+-- Typed function calls keep the fixed-precision cases on the runtime path.
+[:runtime precision: F16 max=[format_f16(65504)]|F16 2^-6=[format_f16(0.015625)]|F32 0.1=[format_f32(0.1)]|F64 1e21=[format_f64(1e21)]]

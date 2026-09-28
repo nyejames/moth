@@ -125,9 +125,11 @@ pub(crate) fn lower_statement(
                 )
             }
         }
-        HirStatementKind::FormatFloat { .. } => Err(lir_transformation_error(
-            "Wasm lowering does not yet support Float formatting",
-        )),
+        HirStatementKind::FormatFloat {
+            source,
+            failure_mode,
+            result,
+        } => lower_format_float(context, source, *failure_mode, *result, statements),
         HirStatementKind::ValidateFloat {
             source,
             failure_mode,
@@ -346,6 +348,76 @@ fn lower_validate_float(
     statements.push(WasmLirStmt::ValidateFloat {
         dst: destination,
         source: lowered_source.value,
+        precision,
+    });
+    Ok(())
+}
+
+fn lower_format_float(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    source: &HirExpression,
+    failure_mode: NumericFailureMode,
+    result: LocalId,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), CompilerError> {
+    if failure_mode != NumericFailureMode::Trap {
+        return Err(lir_transformation_error(format!(
+            "Wasm lowering does not support Float formatting in {failure_mode:?} mode"
+        )));
+    }
+
+    let type_environment = context.module_context.type_environment;
+    if source.ty != type_environment.builtins().float {
+        return Err(lir_transformation_error(format!(
+            "Wasm Float formatting source has type {:?}, expected Float",
+            source.ty
+        )));
+    }
+
+    let precision = NumericScalar::Float
+        .binary_float_precision(context.module_context.request.numeric_profile)
+        .filter(|precision| {
+            matches!(
+                precision,
+                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+            )
+        })
+        .ok_or_else(|| {
+            lir_transformation_error("Wasm Float formatting requires F32 or F64 precision")
+        })?;
+    let expected_carrier = match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+    };
+
+    let destination = context.local_map.get(&result).copied().ok_or_else(|| {
+        lir_transformation_error(format!(
+            "Wasm lowering could not resolve Float formatting result local {result:?}"
+        ))
+    })?;
+    if context.local_type_by_id.get(&destination).copied() != Some(WasmAbiType::Handle) {
+        return Err(lir_transformation_error(
+            "Wasm Float formatting result does not use the String handle carrier",
+        ));
+    }
+
+    // Evaluate the source once; its semantic Float precision remains explicit in LIR.
+    let lowered_source = lower_expression(context, source, statements)?;
+    if context
+        .local_type_by_id
+        .get(&lowered_source.value)
+        .copied()
+        != Some(expected_carrier)
+    {
+        return Err(lir_transformation_error(format!(
+            "Wasm Float formatting source does not use the profile carrier {expected_carrier:?}"
+        )));
+    }
+
+    statements.push(WasmLirStmt::StringFromFloat {
+        dst: destination,
+        value: lowered_source.value,
         precision,
     });
     Ok(())

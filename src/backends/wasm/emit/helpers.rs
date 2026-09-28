@@ -22,6 +22,9 @@ pub(crate) fn emit_helper_function(
         WasmRuntimeHelper::F16BitsToF32 => {
             return Ok(super::binary16::emit_f16_bits_to_f32());
         }
+        WasmRuntimeHelper::FloatToDecimal => {
+            return super::float_format::emit_float_to_decimal(plan);
+        }
         _ => {}
     }
 
@@ -42,6 +45,9 @@ pub(crate) fn emit_helper_function(
             CompilerError::compiler_error("Wasm emission missing rt_alloc helper index")
                 .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
+    if helper == WasmRuntimeHelper::StringFromFloat {
+        return super::float_format::emit_string_from_float(plan, alloc_index);
+    }
 
     // Vec-handle helpers have their own focused emitter.
     if matches!(
@@ -107,8 +113,10 @@ pub(crate) fn emit_helper_function(
         WasmRuntimeHelper::FloatPower
         | WasmRuntimeHelper::FloatRemainder
         | WasmRuntimeHelper::F32ToF16Bits
-        | WasmRuntimeHelper::F16BitsToF32 => {
-            unreachable!("pure numeric helpers are dispatched before memory helpers")
+        | WasmRuntimeHelper::F16BitsToF32
+        | WasmRuntimeHelper::FloatToDecimal
+        | WasmRuntimeHelper::StringFromFloat => {
+            unreachable!("numeric/string formatters are dispatched to their focused emitters")
         }
     };
 
@@ -619,8 +627,10 @@ pub(crate) fn emit_helper_function(
         WasmRuntimeHelper::FloatPower
         | WasmRuntimeHelper::FloatRemainder
         | WasmRuntimeHelper::F32ToF16Bits
-        | WasmRuntimeHelper::F16BitsToF32 => {
-            unreachable!("pure numeric helpers are dispatched before memory helpers")
+        | WasmRuntimeHelper::F16BitsToF32
+        | WasmRuntimeHelper::FloatToDecimal
+        | WasmRuntimeHelper::StringFromFloat => {
+            unreachable!("numeric/string formatters are dispatched to their focused emitters")
         }
 
     }
