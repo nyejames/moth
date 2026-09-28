@@ -1,0 +1,40 @@
+rhs_i32 |increment I32| -> I32:
+    return increment
+;
+
+rhs_u64 |increment U64| -> U64:
+    return increment
+;
+
+compound_i32 |initial I32, increment I32| -> I32:
+    value ~I32 = copy initial
+    value += rhs_i32(increment)
+    return value
+;
+
+compound_u64 |initial U64, increment U64| -> U64:
+    value ~U64 = copy initial
+    value += rhs_u64(increment)
+    return value
+;
+
+compound_i8_widen |initial I32, increment I8| -> I32:
+    value ~I32 = copy initial
+    widened I32 = cast increment
+    value += widened
+    return value
+;
+
+compound_u16_widen |initial I32, increment U16| -> I32:
+    value ~I32 = copy initial
+    widened I32 = cast increment
+    value += widened
+    return value
+;
+
+i32_result = compound_i32(40, 2)
+i8_result = compound_i8_widen(10, -128)
+u16_result = compound_u16_widen(1, 65535)
+u64_result = compound_u64(9223372036854775808, 1)
+
+[:compound i32=[i32_result] i8-to-i32=[i8_result] u16-to-i32=[u16_result] u64-high=[u64_result]]

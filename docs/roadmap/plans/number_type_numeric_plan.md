@@ -3,7 +3,7 @@
 ## Status
 
 - Status: active on numeric-type-expanding.
-- Current slice (Phase 5 scope adjusted): Wasm `F16` scalar paths, integer `NumericToString` casts, trap-mode finite `Float` validation and dynamic `Float`/`F16`/`F32`/`F64` text formatting are delivered. Next, run parity only over supported JS/Wasm scalars. Recoverable numeric operations, reachable `ReturnError` `FormatFloat`/`ValidateFloat`, fallible casts, String-to-numeric parsing, source-level external `Float` imports, mutable function parameters and unsupported aggregates remain target-rejected.
+- Current slice (Phase 5 complete): Supported Wasm scalar lowering/parity is delivered; compact-storage proof is emitter-level only (152 raw bytes), not source aggregate layout. Unsupported/target-gated boundaries remain: source aggregates and `Number`/`NumberN`; source-level external `Float` imports and host finite-boundary validation; recoverable numeric `Error!` paths, other fallible casts and String-to-numeric parsing; reachable `ReturnError` `FormatFloat`/`ValidateFloat`, builtin `Error` values/fallible control flow, and reachable mutable function parameters.
 - Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.46 against the n^1.70 budget in the latest gate).
 - Delivered: Slice 1a. The builder-selected `NumericProfile` is threaded through the config, module, single-file, template and backend boundaries. Profile-width `Int`/`Float` literals, folds, casts, struct defaults, capacities and const ranges are covered for all four combinations. Slice 5a now lowers supported Wasm scalar paths in every profile; MON materialises at the standard profile until Phase 6.
 - Delivered: Slice 1b. `I8`..`U64`, `F16`/`F32`/`F64` and `Byte` are builtin type keywords with distinct canonical identities (`FixedScalar`), preserved through generic instances, sidecars and import projection. The initial backend gates have since narrowed through Slices 4 and 5a. Lowercase spellings such as `byte` and `u8` join the existing keyword-shadow reservation.
@@ -41,7 +41,8 @@
 - Delivered: Wasm trap-mode finite `Float` boundary validation. Reachable HIR preserves numeric failure mode; only trap-mode `ValidateFloat` passes target validation. Wasm checks profile-selected F32/F64 values after carrier conversion, traps non-finite results and preserves signed zero. HIR-to-LIR profile coverage and Node-instantiated-Wasm tests cover finite extrema and subnormals, NaN, both infinities, negative zero and F64 host inputs that round to F32 infinity. The recorded fresh `just validate` and finite-validation evidence predate the formatting candidate. Reachable `ReturnError` `ValidateFloat` remains target-rejected.
 - Delivered: Wasm trap-mode `Float` template text and `Float`/`F16`/`F32`/`F64`-to-`String` expression casts. The portable Moth-owned shortest-decimal helper uses the value's semantic precision, normalises negative zero to `0` and traps on non-finite input before allocation; no host formatter import is required. Generated, Node-instantiated Wasm compares all 63,488 finite F16 encodings with the canonical formatter and checks F32/F64 boundary and deterministic bit samples. Paired HTML/HTML-Wasm source fixtures cover the default and `Int32/Float32` profiles, including distinct folded and dynamic Float text and precision-sensitive fixed floats. Four obsolete Wasm rejection fixtures now assert successful rendering. Fresh `just validate` passed 5,518 unit tests, 2,144/2,144 integration outcomes, Clippy, documentation checks, source/dependency audits, benchmark preflight and all three scaling budgets; the release documentation build produced 77 outputs. This is targeted two-profile source formatting coverage, not a four-profile formatting corpus. Reachable `ReturnError` formatting and parsing stay target-rejected.
 - Phase 5 parity finding: a selected `~Int`/`~I32` parameter previously accepted on Wasm but lost callee writes at the value-only call ABI (`42/1` on HTML-JS, `42/0` on instantiated Wasm). Wasm now rejects reachable mutable function parameters at their declaration with `unsupported_backend_feature.mutable_function_parameters`, while immutable parameters and mutable locals remain supported. The paired `mutable_parameter_wasm_rejected` case passes 2/2 HTML/HTML-Wasm expectations; full write-through and its ABI remain deferred beyond this scalar-only Wasm slice.
-- Next action: run the Phase 5 semantic parity corpus only over supported JS/Wasm scalar behavior. Wasm `Error!` recovery is not part of this numeric slice: its full payload/ABI belongs to later mixed-target Wasm work after validated physical planning and structured LIR. A host trap cannot replace recoverable `Error!`.
+- Delivered: Paired `wasm_scalar_compound_parity` passes 2/2 on HTML/instantiated Wasm for local I32/U64 compound operations, dynamic I8/U16 widening, and U64 above signed max. The four-profile scalar case and fixed-width trap cases also pass paired 2/2; the emitter-only compact-storage proof inspects 152 raw bytes, not source aggregate layout.
+- Next action: Phase 6 existing-language/MON consumers: ranges and map-key eligibility; foreign ABI widths versus deliberate Core/Builder Int/Float signatures; public MON schemas, values, profile binding and adapters.
 
 ## Goal and delivery order
 
@@ -567,9 +568,9 @@ profile without a second runtime value or error model.
 
 ### Phase 5: Wasm fixed scalar lowering
 
-- [ ] Add or reuse i32/i64/f32/f64 operations and scalar size/alignment/stride
+- [x] Add or reuse i32/i64/f32/f64 operations and scalar size/alignment/stride
   metadata. Use signed/unsigned load8/load16 and narrow stores where appropriate.
-- [ ] Finish supported checked 32/64-bit arithmetic, conversions, division/remainder
+- [x] Finish supported checked 32/64-bit arithmetic, conversions, division/remainder
   and power helpers. Finish supported infallible numeric conversions; never substitute
   a host trap for a reachable operation whose source semantics require recoverable `Error!`.
 - [x] Implement portable binary16 conversion and direct-rounding cases. Exercise
@@ -582,7 +583,7 @@ profile without a second runtime value or error model.
   has no compiler-owned aggregate layout or nominal `Error` path. Preserve
   source semantics and JS support; the next implicit-failures work may reject
   unsupported Wasm combinations without substituting traps.
-- [ ] Run a semantic parity corpus only over supported JS/Wasm scalar behavior.
+- [x] Run a semantic parity corpus only over supported JS/Wasm scalar behavior.
   Inspect emitted scalar-memory operations and raw stored bytes. Keep unsupported
   aggregate/host features target-rejected; preserve later HTML/WIT boundaries.
 

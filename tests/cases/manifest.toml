@@ -13244,6 +13244,13 @@ contract = "backend.html_wasm.infallible_integer_to_string_casts"
 role = "backend"
 
 [[case]]
+id = "wasm_scalar_compound_parity"
+path = "wasm_scalar_compound_parity"
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.scalar_compound_assignment_and_integer_widening_parity"
+role = "backend"
+
+[[case]]
 id = "wasm_scalar_profile_comparison_runtime_int32_float64"
 path = "wasm_scalar_profile_comparison_runtime_int32_float64"
 tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
