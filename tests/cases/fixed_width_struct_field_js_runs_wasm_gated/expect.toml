@@ -14,5 +14,5 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.fixed_width_scalar_values"
 path = "input/@page.moth"
-line = 5
+line = 6
 column = 1

@@ -13,6 +13,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::{HirTypeClass, classify_hir_type};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
@@ -180,9 +181,7 @@ impl<'a, 'b> WasmFunctionLoweringContext<'a, 'b> {
 ///
 /// The carriers are the Wasm value types that can hold each scalar without loss: 8/16/32-bit
 /// integers and `Byte` ride in I32, 64-bit integers in I64, 16/32-bit floats in F32, and 64-bit
-/// floats in F64. A fixed scalar only reaches lowering through an unreachable or otherwise
-/// unexecuted helper body, so this mapping exists to keep the ABI table total rather than to
-/// define the numeric operations later phases will add.
+/// floats in F64. Profile-dependent `Int` and `Float` use their selected carrier from the request.
 pub(crate) fn lower_type_to_abi(
     context: &WasmLirLoweringContext<'_>,
     type_id: TypeId,
@@ -192,8 +191,14 @@ pub(crate) fn lower_type_to_abi(
     {
         HirTypeClass::Unit => WasmAbiType::Void,
         HirTypeClass::Bool | HirTypeClass::Char => WasmAbiType::I32,
-        HirTypeClass::Int => WasmAbiType::I64,
-        HirTypeClass::Float => WasmAbiType::F64,
+        HirTypeClass::Int => match context.request.numeric_profile.int_width {
+            IntWidth::Bits32 => WasmAbiType::I32,
+            IntWidth::Bits64 => WasmAbiType::I64,
+        },
+        HirTypeClass::Float => match context.request.numeric_profile.float_precision {
+            FloatPrecision::Bits32 => WasmAbiType::F32,
+            FloatPrecision::Bits64 => WasmAbiType::F64,
+        },
         HirTypeClass::FixedScalar(scalar) => match scalar {
             FixedScalar::I8
             | FixedScalar::I16

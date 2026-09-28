@@ -9,6 +9,7 @@ use crate::backends::backend_feature_validation::{
     validate_hir_backend_feature_support,
 };
 use crate::backends::external_package_validation::BackendTarget;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind, UnsupportedBackendFeatureReason,
 };
@@ -43,6 +44,118 @@ use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, 
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+#[test]
+fn wasm_feature_validation_allows_expression_int_to_float_cast() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = module_returning_cast_expression(int_cast_expression(
+        0,
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Int,
+            target: NumericScalar::Float,
+        },
+        builtin_type_ids::FLOAT,
+    ));
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm should allow the infallible Int-to-Float expression cast"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_other_expression_cast_policies() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let unsupported_casts = [
+        (
+            BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Int,
+                target: NumericScalar::Fixed(FixedScalar::F32),
+            },
+            builtin_type_ids::fixed_scalar(FixedScalar::F32),
+        ),
+        (
+            BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+            builtin_type_ids::STRING,
+        ),
+    ];
+
+    for (policy, target_type) in unsupported_casts {
+        let module = module_returning_cast_expression(int_cast_expression(0, policy, target_type));
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm should reject every expression cast policy except Int-to-Float",
+        );
+
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::RuntimeCasts,
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_rejects_statement_int_to_float_cast() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let statement = HirStatement {
+        id: HirNodeId(10),
+        kind: HirStatementKind::CastOp {
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Int,
+                target: NumericScalar::Float,
+            },
+            source: HirExpression {
+                id: HirValueId(11),
+                kind: HirExpressionKind::Int(1),
+                ty: builtin_type_ids::INT,
+                value_kind: ValueKind::Const,
+                region: RegionId(0),
+                span: None,
+            },
+            result: None,
+        },
+        span: None,
+    };
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![statement],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should reject statement-shaped casts even for the Int-to-Float policy",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RuntimeCasts,
+    );
+}
 
 #[test]
 fn wasm_feature_validation_rejects_reachable_format_float() {
@@ -321,6 +434,47 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
 }
 
 #[test]
+fn backend_feature_validation_allows_direct_fixed_scalars_except_f16() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+
+    for scalar in FixedScalar::ALL {
+        let module = module_returning_expression(builtin_type_ids::fixed_scalar(scalar), None);
+
+        if scalar == FixedScalar::F16 {
+            let diagnostic = wasm_feature_validation_diagnostic(
+                &module,
+                &type_environment,
+                &mut string_table,
+                "Wasm should keep rejecting F16 until its value path is implemented",
+            );
+            assert_unsupported_feature(
+                &diagnostic,
+                &mut string_table,
+                UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+            );
+        } else {
+            let reachability = test_reachability(&module);
+            let result = validate_hir_backend_feature_support(
+                BackendFeatureValidationInput {
+                    hir: &module,
+                    reachability: &reachability,
+                    target: BackendTarget::Wasm,
+                    type_environment: Some(&type_environment),
+                    numeric_profile: NumericProfile::STANDARD,
+                    external_package_registry: None,
+                },
+                &mut string_table,
+            );
+            assert!(
+                result.is_ok(),
+                "direct {scalar:?} values should pass the Wasm shape gate"
+            );
+        }
+    }
+}
+
+#[test]
 fn backend_feature_validation_rejects_fixed_width_scalars_only_for_wasm() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();
@@ -446,7 +600,7 @@ fn backend_feature_validation_rejects_fixed_width_return_type_without_an_express
         type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
 
     // Generated or synthetic HIR can declare a fixed-width return type with no reachable
-    // expression of that type. The signature still fails and the diagnostic stays spanless.
+    // expression of that type and no recorded source provenance.
     let module = hir_module(
         FunctionId(0),
         vec![function_with_signature(
@@ -477,7 +631,126 @@ fn backend_feature_validation_rejects_fixed_width_return_type_without_an_express
     );
     assert_eq!(
         diagnostic.primary_span, None,
-        "a signature-only occurrence has no expression span to report"
+        "synthetic signatures without recorded source provenance stay spanless"
+    );
+}
+
+#[test]
+fn backend_feature_validation_prefers_authored_occurrence_over_synthetic_local_fallback() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let unsupported_type =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+    let carrier_type =
+        type_environment.intern_fallible_carrier(unsupported_type, builtin_type_ids::INT);
+    let authored_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+
+    for expected_span in [Some(authored_span), None] {
+        let success_value = match expected_span {
+            Some(span) => HirExpression {
+                id: HirValueId(1),
+                kind: HirExpressionKind::FallibleUnwrapSuccess {
+                    result: Box::new(typed_expression(2, carrier_type, Some(span))),
+                },
+                ty: unsupported_type,
+                value_kind: ValueKind::RValue,
+                region: RegionId(0),
+                span: None,
+            },
+            None => unit_expression(1),
+        };
+        let module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![
+                block_with_locals(
+                    BlockId(0),
+                    vec![HirLocal {
+                        id: LocalId(0),
+                        ty: unsupported_type,
+                        mutable: true,
+                        region: RegionId(0),
+                        span: None,
+                    }],
+                    vec![],
+                    HirTerminator::FallibleBranch {
+                        result: typed_expression(0, carrier_type, None),
+                        success_block: BlockId(1),
+                        error_block: BlockId(2),
+                    },
+                ),
+                block(BlockId(1), vec![], HirTerminator::Return(success_value)),
+                block(
+                    BlockId(2),
+                    vec![],
+                    HirTerminator::Return(unit_expression(3)),
+                ),
+            ],
+        );
+
+        let diagnostic = feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            BackendTarget::Wasm,
+            "generated unsupported values remain rejected",
+        );
+
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+        );
+        assert_eq!(
+            diagnostic.primary_span, expected_span,
+            "prefer an authored nested span, but keep synthetic-only rejection spanless"
+        );
+    }
+}
+
+#[test]
+fn backend_feature_validation_prefers_authored_function_span_over_synthetic_local_fallback() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let values =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+    let function = function_with_signature(FunctionId(0), BlockId(0), vec![], values);
+    let span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let mut module = hir_module(
+        FunctionId(0),
+        vec![function.clone()],
+        vec![block_with_locals(
+            BlockId(0),
+            vec![HirLocal {
+                id: LocalId(0),
+                ty: values,
+                mutable: false,
+                region: RegionId(0),
+                span: None,
+            }],
+            vec![],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    module.side_table.map_function(Some(span), &function);
+
+    let diagnostic = feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        BackendTarget::Wasm,
+        "a reachable authored return type carrying a fixed-width scalar must be rejected",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(span),
+        "an authored signature span should beat an earlier spanless unsupported local fallback"
     );
 }
 
@@ -1027,6 +1300,41 @@ fn module_returning_expression(ty: TypeId, span: Option<SourceSpan>) -> HirModul
             vec![],
             HirTerminator::Return(typed_expression(0, ty, span)),
         )],
+    )
+}
+
+fn int_cast_expression(id: u32, policy: BuiltinCastPolicyId, target_type: TypeId) -> HirExpression {
+    HirExpression {
+        id: HirValueId(id),
+        kind: HirExpressionKind::Cast {
+            source: Box::new(HirExpression {
+                id: HirValueId(id + 1),
+                kind: HirExpressionKind::Int(1),
+                ty: builtin_type_ids::INT,
+                value_kind: ValueKind::Const,
+                region: RegionId(0),
+                span: None,
+            }),
+            policy,
+        },
+        ty: target_type,
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
+        span: None,
+    }
+}
+
+fn module_returning_cast_expression(expression: HirExpression) -> HirModule {
+    let return_type = expression.ty;
+    hir_module(
+        FunctionId(0),
+        vec![function_with_signature(
+            FunctionId(0),
+            BlockId(0),
+            vec![],
+            return_type,
+        )],
+        vec![block(BlockId(0), vec![], HirTerminator::Return(expression))],
     )
 }
 

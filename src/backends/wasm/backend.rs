@@ -104,16 +104,6 @@ fn validate_request(
     // WHAT: reject request/contract issues before any lowering or emission work.
     // WHY: this guarantees deterministic diagnostics and prevents partial outputs.
 
-    // Numeric plan: temporary lowering gate removed by Phase 5 (Wasm fixed scalar lowering).
-    // WHY: fixed-width `Int`/`Float` lowering is not implemented yet, so a non-standard boundary
-    // profile must fail here rather than silently lower numbers under the default widths.
-    if !request.numeric_profile.is_standard() {
-        return Err(lir_transformation_error(format!(
-            "The Wasm backend does not lower NumericProfile {} yet.",
-            request.numeric_profile
-        )));
-    }
-
     let mut seen = HashSet::new();
     let mut export_name_set = HashSet::new();
 

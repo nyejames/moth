@@ -34,8 +34,7 @@ pub(crate) struct WasmBackendRequest {
     pub function_emission_policy: WasmFunctionEmissionPolicy,
     /// Compiler-owned numeric widths for this compilation boundary.
     ///
-    /// WHY: the backend's temporary numeric lowering gate must see the boundary profile, and
-    /// later fixed-numeric lowering reads its widths from here.
+    /// WHY: scalar carriers and conversions consume the boundary profile selected before typing.
     pub numeric_profile: NumericProfile,
 }
 

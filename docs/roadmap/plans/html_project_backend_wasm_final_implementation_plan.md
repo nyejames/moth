@@ -52,7 +52,7 @@ Legacy Wasm mode:
 Legacy Wasm LIR:
 
 - `WasmLirFunction` contains a flat `Vec<WasmLirBlock>` with `Jump` and `Branch` terminators
-- an unconditional Int-as-I64 ABI bridge and bridge-like `StringFromI64` instruction predate the numeric profile
+- Int now uses its profile-selected i32/i64 carrier; `StringFromI64` formats signed Int values through a real decimal helper, with sign extension for an i32 input
 - user functions are emitted through a dispatcher-loop strategy using an artificial program counter
 - the emitter defines memory inside each emitted module
 
@@ -269,7 +269,7 @@ See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 Context: consume the delivered scalar ABI and complete aggregate/runtime lowering.
 
 - Remove any remaining unconditional Int-as-I64 bridge. Int uses i32 or i64 according to NumericProfile. Keep I64/U64 and legitimate 64-bit formatting support.
-- Remove the legacy `StringFromI64` bridge instruction where it still exists. Reuse semantic numeric formatting rather than replacing every 64-bit formatter with `StringFromI32`.
+- Consolidate the profile-Int `StringFromI64` instruction into semantic numeric formatting when general scalar formatting lands. Preserve its complete signed-64-bit decimal helper and direct profile-Int32 input adaptation rather than replacing every 64-bit formatter with `StringFromI32`.
 - Remove `Void` as a real ABI type. Represent no result as `results: []`.
 - Consume scalar ABI mappings and complete mappings for handles, strings, collections, structs, choices, options and errors.
 - Consume compiler-owned physical struct layouts: field offsets, alignment, scalar widths/strides and representation constraints. Lower construction, field access, mutation and ownership hooks from those facts.
@@ -318,7 +318,7 @@ Context: the refactor is not complete while old whole-module modes, dispatcher l
 - Delete `Flag::HtmlWasm` whole-module mode selection.
 - Delete `moth_start` export and bootstrap path.
 - Delete dispatcher-loop emission code and `WasmCfgLoweringStrategy::DispatcherLoop`.
-- Delete any remaining `StringFromI64` legacy bridge instruction, preserving current 64-bit numeric formatters.
+- Delete redundant numeric formatting bridge instructions after consolidation, preserving the current signed-64-bit decimal formatter and profile-selected Int behavior.
 - Delete per-module memory section emission for user modules.
 - Delete per-module Wasm emission from the final HTML entry path once entry bundling is in place.
 - Delete `WasmFunctionEmissionPolicy::AllFunctions` and `ReachableFromExports` from the final module path.
@@ -346,7 +346,7 @@ Context: documentation, tests and progress matrix must reflect the final backend
 - `Flag::HtmlWasm` whole-module mode selection
 - `moth_start` export and bootstrap path
 - dispatcher-loop emission code
-- the legacy `StringFromI64` bridge instruction, not legitimate 64-bit formatting
+- redundant numeric formatting bridge instructions after consolidation, not legitimate signed-64-bit formatting
 - per-module memory section emission for user modules
 - `WasmLirBlock` flat block model with `Jump` and `Branch` terminators
 - unconditional Int-as-I64 ABI assumptions
@@ -422,6 +422,6 @@ Before marking this plan complete, verify:
 - WIT is not used as the semantic interface for Moth-source modules or packages
 - numeric semantics/profile are shared across partitions and scalar storage remains compact
 - U32 Error.code and valid I64/U64/Int64 paths survive removal of legacy bridges
-- `moth_start`, the legacy `StringFromI64` bridge and helper-export booleans are gone
+- `moth_start`, redundant numeric formatting bridges and helper-export booleans are gone
 - no compatibility adapter remains
 - `check` runs the same planning and validation as `build`

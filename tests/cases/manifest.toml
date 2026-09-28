@@ -11565,11 +11565,11 @@ contract = "language.dependencies.markdown_source_entry_rejected"
 role = "primary"
 
 [[case]]
-id = "cast_int_to_float_no_helper_emission"
-path = "cast_int_to_float_no_helper_emission"
-tags = ["integration", "language", "cast", "runtime", "on-demand-helpers"]
-contract = "backend.html.cast_helper_elision_int_to_float"
-role = "backend"
+id = "cast_int_to_float_runtime"
+path = "cast_int_to_float_runtime"
+tags = ["integration", "language", "cast", "runtime"]
+contract = "language.casts.int_to_float_runtime"
+role = "primary"
 
 [[case]]
 id = "cast_string_to_int_demand_helpers"
@@ -13088,6 +13088,34 @@ path = "fixed_width_aggregate_byte_runtime"
 tags = ["integration", "numeric", "runtime", "fixed-width", "aggregates"]
 contract = "language.numbers.fixed_width_aggregate_and_byte_runtime"
 role = "primary"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime"
+path = "wasm_scalar_profile_comparison_runtime"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int32_float64"
+path = "wasm_scalar_profile_comparison_runtime_int32_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int64_float32"
+path = "wasm_scalar_profile_comparison_runtime_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int64_float64"
+path = "wasm_scalar_profile_comparison_runtime_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
 
 [[case]]
 id = "numeric_profile_int64_float32_fixed_width_mix"

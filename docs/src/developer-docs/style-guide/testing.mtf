@@ -594,8 +594,10 @@ precision reported by the case's builder for every backend block. Its exact acce
 `Int32/Float32`, `Int32/Float64`, `Int64/Float32` and `Int64/Float64`; omitting the key selects the
 default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
 
-Until the Wasm profile phase, `html_wasm` rejects non-standard numeric profiles. A non-standard
-profile case should declare only backend blocks that support the selected profile.
+`html_wasm` accepts all four profiles for its supported scalar paths. Use paired backend
+blocks to exercise profile-selected values and comparisons. Checked arithmetic, F16,
+fixed-scalar aggregates and casts other than the infallible Int-to-Float expression
+conversion retain their separate target gates.
 
 - Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`

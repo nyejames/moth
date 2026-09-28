@@ -1,0 +1,18 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["profile-int=2147483648 profile-comparison=profile-comparison-false fixed-i64=fixed-i64-exact/fixed-i64-above-int32", "signed-unsigned=i64-negative-before-u64-zero/u64-zero-after-i64-negative/i64-zero-equals-u64-zero/u64-zero-equals-i64-zero/i64-zero-not-less-than-u64-zero/u64-zero-not-greater-than-i64-zero/i64-negative-not-equal-u64-max/u64-max-not-equal-i64-negative/i64-negative-before-u64-high/u64-high-after-i64-negative/i64-zero-before-u64-high/u64-high-after-i64-zero", "narrow=i8-min-before-max/i8-max-not-before-min/u16-max-greater-than-one/u16-one-not-greater-than-max/u32-high-over-low/u32-low-not-over-high", "float-mix=f32-over-f64/f64-under-f32/f32-not-equal-f64", "byte=byte-low-before-high/byte-high-not-before-low/byte-high-equals-copy/byte-low-not-equal-high"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["profile-int=2147483648 profile-comparison=profile-comparison-false fixed-i64=fixed-i64-exact/fixed-i64-above-int32", "signed-unsigned=i64-negative-before-u64-zero/u64-zero-after-i64-negative/i64-zero-equals-u64-zero/u64-zero-equals-i64-zero/i64-zero-not-less-than-u64-zero/u64-zero-not-greater-than-i64-zero/i64-negative-not-equal-u64-max/u64-max-not-equal-i64-negative/i64-negative-before-u64-high/u64-high-after-i64-negative/i64-zero-before-u64-high/u64-high-after-i64-zero", "narrow=i8-min-before-max/i8-max-not-before-min/u16-max-greater-than-one/u16-one-not-greater-than-max/u32-high-over-low/u32-low-not-over-high", "float-mix=f32-over-f64/f64-under-f32/f32-not-equal-f64", "byte=byte-low-before-high/byte-high-not-before-low/byte-high-equals-copy/byte-low-not-equal-high"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true
+must_export = ["moth_start"]

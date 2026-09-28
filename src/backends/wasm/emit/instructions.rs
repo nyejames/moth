@@ -2,7 +2,9 @@
 
 use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::emit::sections::WasmEmitPlan;
-use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
+use crate::backends::wasm::lir::instructions::{
+    WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
+};
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId,
 };
@@ -146,7 +148,19 @@ pub(crate) fn emit_statement(
             )?));
         }
         WasmLirStmt::StringFromI64 { dst, value } => {
+            let value_type = local_type(*value, context, "StringFromI64 value")?;
             function.instruction(&Instruction::LocalGet(local_index(*value, context)?));
+            match value_type {
+                WasmAbiType::I32 => {
+                    function.instruction(&Instruction::I64ExtendI32S);
+                }
+                WasmAbiType::I64 => {}
+                other => {
+                    return Err(wasm_generation_error(format!(
+                        "Wasm StringFromI64 requires an Int carrier, found {other:?}"
+                    )));
+                }
+            }
             function.instruction(&Instruction::Call(helper_index(
                 plan,
                 WasmRuntimeHelper::StringFromI64,
@@ -195,6 +209,17 @@ pub(crate) fn emit_statement(
         }
         WasmLirStmt::IntNe { dst, lhs, rhs } => {
             emit_compare(function, *lhs, *rhs, context, false)?;
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
+        WasmLirStmt::ScalarCompare {
+            dst,
+            lhs,
+            rhs,
+            op,
+            lhs_type,
+            rhs_type,
+        } => {
+            emit_scalar_compare(function, *lhs, *rhs, *op, *lhs_type, *rhs_type, context)?;
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::StringEq { dst, lhs, rhs } => {
@@ -264,6 +289,25 @@ pub(crate) fn emit_statement(
             function.instruction(&Instruction::LocalGet(local_index(*rhs, context)?));
             function.instruction(&Instruction::F64ConvertI64S);
             function.instruction(&Instruction::F64Div);
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
+        WasmLirStmt::IntToFloat { dst, source } => {
+            // Convert directly at the selected precision; Int64 -> F32 must round only once.
+            let source_type = local_type(*source, context, "IntToFloat source")?;
+            let dst_type = local_type(*dst, context, "IntToFloat destination")?;
+            let conversion = match (source_type, dst_type) {
+                (WasmAbiType::I32, WasmAbiType::F32) => &Instruction::F32ConvertI32S,
+                (WasmAbiType::I64, WasmAbiType::F32) => &Instruction::F32ConvertI64S,
+                (WasmAbiType::I32, WasmAbiType::F64) => &Instruction::F64ConvertI32S,
+                (WasmAbiType::I64, WasmAbiType::F64) => &Instruction::F64ConvertI64S,
+                (source_type, dst_type) => {
+                    return Err(wasm_generation_error(format!(
+                        "Wasm IntToFloat requires an integer source and float destination, found {source_type:?} -> {dst_type:?}"
+                    )));
+                }
+            };
+            function.instruction(&Instruction::LocalGet(local_index(*source, context)?));
+            function.instruction(conversion);
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::FloatAdd { dst, lhs, rhs } => {
@@ -598,23 +642,9 @@ fn emit_ordered_compare(
         ))
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }
-
     match lhs_type {
-        WasmAbiType::I32 => {
-            function.instruction(match kind {
-                OrderedCompareKind::Lt => &Instruction::I32LtS,
-                OrderedCompareKind::Le => &Instruction::I32LeS,
-                OrderedCompareKind::Gt => &Instruction::I32GtS,
-                OrderedCompareKind::Ge => &Instruction::I32GeS,
-            });
-        }
-        WasmAbiType::I64 => {
-            function.instruction(match kind {
-                OrderedCompareKind::Lt => &Instruction::I64LtS,
-                OrderedCompareKind::Le => &Instruction::I64LeS,
-                OrderedCompareKind::Gt => &Instruction::I64GtS,
-                OrderedCompareKind::Ge => &Instruction::I64GeS,
-            });
+        WasmAbiType::I32 | WasmAbiType::I64 => {
+            emit_integer_ordered_opcode(function, lhs_type, kind, false);
         }
         WasmAbiType::F32 => {
             function.instruction(match kind {
@@ -642,6 +672,395 @@ fn emit_ordered_compare(
     }
 
     Ok(())
+}
+
+fn emit_scalar_compare(
+    function: &mut Function,
+    lhs: WasmLirLocalId,
+    rhs: WasmLirLocalId,
+    op: WasmScalarComparisonOp,
+    lhs_type: WasmScalarComparisonType,
+    rhs_type: WasmScalarComparisonType,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let lhs_integer = integer_scalar_shape(lhs_type).is_some();
+    let rhs_integer = integer_scalar_shape(rhs_type).is_some();
+    let lhs_float = matches!(lhs_type, WasmScalarComparisonType::Float(_));
+    let rhs_float = matches!(rhs_type, WasmScalarComparisonType::Float(_));
+
+    match (lhs_integer, rhs_integer, lhs_float, rhs_float) {
+        (true, true, false, false) => {
+            emit_integer_compare(function, lhs, rhs, lhs_type, rhs_type, op, context)
+        }
+        (false, false, true, true) => {
+            if lhs_type == rhs_type
+                && matches!(
+                    lhs_type,
+                    WasmScalarComparisonType::Float(32) | WasmScalarComparisonType::Float(64)
+                )
+            {
+                let bits = emit_float_as_native(function, lhs, lhs_type, context)?;
+                emit_float_as_native(function, rhs, rhs_type, context)?;
+                return emit_float_compare(function, bits, op, context);
+            }
+
+            emit_float_as_f64(function, lhs, lhs_type, context)?;
+            emit_float_as_f64(function, rhs, rhs_type, context)?;
+            emit_float_compare(function, 64, op, context)
+        }
+        _ => Err(wasm_generation_error(format!(
+            "Wasm scalar comparison received incompatible operand types {lhs_type:?} and {rhs_type:?} in {:?}",
+            context.function_id
+        ))),
+    }
+}
+
+fn emit_integer_compare(
+    function: &mut Function,
+    lhs: WasmLirLocalId,
+    rhs: WasmLirLocalId,
+    lhs_type: WasmScalarComparisonType,
+    rhs_type: WasmScalarComparisonType,
+    op: WasmScalarComparisonOp,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let (lhs_bits, lhs_signed) = integer_scalar_shape(lhs_type).ok_or_else(|| {
+        wasm_generation_error(format!(
+            "Wasm integer comparison received non-integer lhs {lhs_type:?}"
+        ))
+    })?;
+    let (rhs_bits, rhs_signed) = integer_scalar_shape(rhs_type).ok_or_else(|| {
+        wasm_generation_error(format!(
+            "Wasm integer comparison received non-integer rhs {rhs_type:?}"
+        ))
+    })?;
+    let lhs_abi = integer_abi(lhs_bits, lhs_type, context)?;
+    let rhs_abi = integer_abi(rhs_bits, rhs_type, context)?;
+
+    // Equal signedness lets same-carrier values use the native opcode without widening.
+    if lhs_signed == rhs_signed && lhs_abi == rhs_abi {
+        ensure_local_abi(lhs, lhs_abi, context, "integer comparison")?;
+        ensure_local_abi(rhs, rhs_abi, context, "integer comparison")?;
+        function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
+        function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
+        emit_integer_compare_opcode(function, lhs_abi, op, !lhs_signed);
+        return Ok(());
+    }
+
+    let mixed_u64 = lhs_signed != rhs_signed
+        && ((!lhs_signed && lhs_bits == 64) || (!rhs_signed && rhs_bits == 64));
+
+    if mixed_u64 && matches!(op, WasmScalarComparisonOp::Eq | WasmScalarComparisonOp::Ne) {
+        let (signed_local, signed_type, unsigned_local, unsigned_type) = if lhs_signed {
+            (lhs, lhs_type, rhs, rhs_type)
+        } else {
+            (rhs, rhs_type, lhs, lhs_type)
+        };
+        emit_integer_as_i64(function, signed_local, signed_type, context)?;
+        function.instruction(&Instruction::I64Const(0));
+        function.instruction(&Instruction::I64LtS);
+        if op == WasmScalarComparisonOp::Eq {
+            function.instruction(&Instruction::I32Eqz);
+        }
+        emit_integer_as_i64(function, signed_local, signed_type, context)?;
+        emit_integer_as_i64(function, unsigned_local, unsigned_type, context)?;
+        emit_integer_compare_opcode(function, WasmAbiType::I64, op, false);
+        function.instruction(if op == WasmScalarComparisonOp::Eq {
+            &Instruction::I32And
+        } else {
+            &Instruction::I32Or
+        });
+        return Ok(());
+    }
+
+    if mixed_u64 {
+        let (signed_local, signed_type, unsigned_local, unsigned_type, signed_is_left) =
+            if lhs_signed {
+                (lhs, lhs_type, rhs, rhs_type, true)
+            } else {
+                (rhs, rhs_type, lhs, lhs_type, false)
+            };
+        let signed_op = if signed_is_left {
+            op
+        } else {
+            invert_ordered_op(op)?
+        };
+        emit_signed_u64_ordered_compare(
+            function,
+            signed_local,
+            signed_type,
+            unsigned_local,
+            unsigned_type,
+            signed_op,
+            context,
+        )?;
+        return Ok(());
+    }
+
+    emit_integer_as_i64(function, lhs, lhs_type, context)?;
+    emit_integer_as_i64(function, rhs, rhs_type, context)?;
+    emit_integer_compare_opcode(function, WasmAbiType::I64, op, !lhs_signed && !rhs_signed);
+    Ok(())
+}
+
+fn emit_signed_u64_ordered_compare(
+    function: &mut Function,
+    signed_local: WasmLirLocalId,
+    signed_type: WasmScalarComparisonType,
+    unsigned_local: WasmLirLocalId,
+    unsigned_type: WasmScalarComparisonType,
+    op: WasmScalarComparisonOp,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    emit_integer_as_i64(function, signed_local, signed_type, context)?;
+    function.instruction(&Instruction::I64Const(0));
+    function.instruction(&Instruction::I64LtS);
+    if matches!(op, WasmScalarComparisonOp::Gt | WasmScalarComparisonOp::Ge) {
+        function.instruction(&Instruction::I32Eqz);
+    }
+
+    emit_integer_as_i64(function, signed_local, signed_type, context)?;
+    emit_integer_as_i64(function, unsigned_local, unsigned_type, context)?;
+    emit_integer_ordered_opcode(function, WasmAbiType::I64, ordered_compare_kind(op), true);
+    function.instruction(
+        if matches!(op, WasmScalarComparisonOp::Lt | WasmScalarComparisonOp::Le) {
+            &Instruction::I32Or
+        } else {
+            &Instruction::I32And
+        },
+    );
+    Ok(())
+}
+
+fn emit_integer_as_i64(
+    function: &mut Function,
+    local: WasmLirLocalId,
+    scalar_type: WasmScalarComparisonType,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let (bits, signed) = integer_scalar_shape(scalar_type).ok_or_else(|| {
+        wasm_generation_error(format!(
+            "Wasm expected an integer scalar type, found {scalar_type:?} in {:?}",
+            context.function_id
+        ))
+    })?;
+    let expected_abi = integer_abi(bits, scalar_type, context)?;
+    ensure_local_abi(local, expected_abi, context, "integer comparison")?;
+    function.instruction(&Instruction::LocalGet(local_index(local, context)?));
+    if bits <= 32 {
+        function.instruction(if signed {
+            &Instruction::I64ExtendI32S
+        } else {
+            &Instruction::I64ExtendI32U
+        });
+    }
+    Ok(())
+}
+
+fn emit_float_as_native(
+    function: &mut Function,
+    local: WasmLirLocalId,
+    scalar_type: WasmScalarComparisonType,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<u8, CompilerError> {
+    let bits = float_width(scalar_type)?;
+    let expected_abi = match bits {
+        32 => WasmAbiType::F32,
+        64 => WasmAbiType::F64,
+        _ => {
+            return Err(wasm_generation_error(format!(
+                "Wasm scalar comparison cannot use F{bits} in {:?}",
+                context.function_id
+            )));
+        }
+    };
+    ensure_local_abi(local, expected_abi, context, "float comparison")?;
+    function.instruction(&Instruction::LocalGet(local_index(local, context)?));
+    Ok(bits)
+}
+
+fn emit_float_as_f64(
+    function: &mut Function,
+    local: WasmLirLocalId,
+    scalar_type: WasmScalarComparisonType,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let bits = emit_float_as_native(function, local, scalar_type, context)?;
+    if bits == 32 {
+        function.instruction(&Instruction::F64PromoteF32);
+    }
+    Ok(())
+}
+
+fn emit_float_compare(
+    function: &mut Function,
+    bits: u8,
+    op: WasmScalarComparisonOp,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let instruction = match bits {
+        32 => match op {
+            WasmScalarComparisonOp::Eq => &Instruction::F32Eq,
+            WasmScalarComparisonOp::Ne => &Instruction::F32Ne,
+            WasmScalarComparisonOp::Lt => &Instruction::F32Lt,
+            WasmScalarComparisonOp::Le => &Instruction::F32Le,
+            WasmScalarComparisonOp::Gt => &Instruction::F32Gt,
+            WasmScalarComparisonOp::Ge => &Instruction::F32Ge,
+        },
+        64 => match op {
+            WasmScalarComparisonOp::Eq => &Instruction::F64Eq,
+            WasmScalarComparisonOp::Ne => &Instruction::F64Ne,
+            WasmScalarComparisonOp::Lt => &Instruction::F64Lt,
+            WasmScalarComparisonOp::Le => &Instruction::F64Le,
+            WasmScalarComparisonOp::Gt => &Instruction::F64Gt,
+            WasmScalarComparisonOp::Ge => &Instruction::F64Ge,
+        },
+        _ => {
+            return Err(wasm_generation_error(format!(
+                "Wasm scalar comparison cannot use F{bits} in {:?}",
+                context.function_id
+            )));
+        }
+    };
+    function.instruction(instruction);
+    Ok(())
+}
+
+fn emit_integer_compare_opcode(
+    function: &mut Function,
+    abi: WasmAbiType,
+    op: WasmScalarComparisonOp,
+    unsigned: bool,
+) {
+    match op {
+        WasmScalarComparisonOp::Eq => {
+            function.instruction(match abi {
+                WasmAbiType::I32 => &Instruction::I32Eq,
+                WasmAbiType::I64 => &Instruction::I64Eq,
+                _ => unreachable!("integer comparison requires an integer carrier"),
+            });
+        }
+        WasmScalarComparisonOp::Ne => {
+            function.instruction(match abi {
+                WasmAbiType::I32 => &Instruction::I32Ne,
+                WasmAbiType::I64 => &Instruction::I64Ne,
+                _ => unreachable!("integer comparison requires an integer carrier"),
+            });
+        }
+        WasmScalarComparisonOp::Lt
+        | WasmScalarComparisonOp::Le
+        | WasmScalarComparisonOp::Gt
+        | WasmScalarComparisonOp::Ge => {
+            emit_integer_ordered_opcode(function, abi, ordered_compare_kind(op), unsigned);
+        }
+    }
+}
+
+fn ordered_compare_kind(op: WasmScalarComparisonOp) -> OrderedCompareKind {
+    match op {
+        WasmScalarComparisonOp::Lt => OrderedCompareKind::Lt,
+        WasmScalarComparisonOp::Le => OrderedCompareKind::Le,
+        WasmScalarComparisonOp::Gt => OrderedCompareKind::Gt,
+        WasmScalarComparisonOp::Ge => OrderedCompareKind::Ge,
+        _ => unreachable!("only ordered comparisons have an ordered comparison kind"),
+    }
+}
+
+fn emit_integer_ordered_opcode(
+    function: &mut Function,
+    abi: WasmAbiType,
+    kind: OrderedCompareKind,
+    unsigned: bool,
+) {
+    let instruction = match abi {
+        WasmAbiType::I32 => match (kind, unsigned) {
+            (OrderedCompareKind::Lt, false) => &Instruction::I32LtS,
+            (OrderedCompareKind::Le, false) => &Instruction::I32LeS,
+            (OrderedCompareKind::Gt, false) => &Instruction::I32GtS,
+            (OrderedCompareKind::Ge, false) => &Instruction::I32GeS,
+            (OrderedCompareKind::Lt, true) => &Instruction::I32LtU,
+            (OrderedCompareKind::Le, true) => &Instruction::I32LeU,
+            (OrderedCompareKind::Gt, true) => &Instruction::I32GtU,
+            (OrderedCompareKind::Ge, true) => &Instruction::I32GeU,
+        },
+        WasmAbiType::I64 => match (kind, unsigned) {
+            (OrderedCompareKind::Lt, false) => &Instruction::I64LtS,
+            (OrderedCompareKind::Le, false) => &Instruction::I64LeS,
+            (OrderedCompareKind::Gt, false) => &Instruction::I64GtS,
+            (OrderedCompareKind::Ge, false) => &Instruction::I64GeS,
+            (OrderedCompareKind::Lt, true) => &Instruction::I64LtU,
+            (OrderedCompareKind::Le, true) => &Instruction::I64LeU,
+            (OrderedCompareKind::Gt, true) => &Instruction::I64GtU,
+            (OrderedCompareKind::Ge, true) => &Instruction::I64GeU,
+        },
+        _ => unreachable!("integer comparison requires an integer carrier"),
+    };
+    function.instruction(instruction);
+}
+
+fn integer_scalar_shape(scalar_type: WasmScalarComparisonType) -> Option<(u8, bool)> {
+    match scalar_type {
+        WasmScalarComparisonType::SignedInteger(bits) => Some((bits, true)),
+        WasmScalarComparisonType::UnsignedInteger(bits) => Some((bits, false)),
+        WasmScalarComparisonType::Float(_) => None,
+    }
+}
+
+fn integer_abi(
+    bits: u8,
+    scalar_type: WasmScalarComparisonType,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<WasmAbiType, CompilerError> {
+    match bits {
+        8 | 16 | 32 => Ok(WasmAbiType::I32),
+        64 => Ok(WasmAbiType::I64),
+        _ => Err(wasm_generation_error(format!(
+            "Wasm scalar comparison received invalid integer type {scalar_type:?} in {:?}",
+            context.function_id
+        ))),
+    }
+}
+
+fn float_width(scalar_type: WasmScalarComparisonType) -> Result<u8, CompilerError> {
+    match scalar_type {
+        WasmScalarComparisonType::Float(bits) => Ok(bits),
+        _ => Err(wasm_generation_error(format!(
+            "Wasm expected a float scalar type, found {scalar_type:?}"
+        ))),
+    }
+}
+
+fn ensure_local_abi(
+    local: WasmLirLocalId,
+    expected: WasmAbiType,
+    context: &LirBodyEmitContext<'_>,
+    operation: &str,
+) -> Result<(), CompilerError> {
+    let actual = local_type(local, context, operation)?;
+    if actual != expected {
+        return Err(wasm_generation_error(format!(
+            "Wasm {operation} expected {expected:?}, found {actual:?} for {local:?} in {:?}",
+            context.function_id
+        )));
+    }
+    Ok(())
+}
+
+fn invert_ordered_op(op: WasmScalarComparisonOp) -> Result<WasmScalarComparisonOp, CompilerError> {
+    match op {
+        WasmScalarComparisonOp::Lt => Ok(WasmScalarComparisonOp::Gt),
+        WasmScalarComparisonOp::Le => Ok(WasmScalarComparisonOp::Ge),
+        WasmScalarComparisonOp::Gt => Ok(WasmScalarComparisonOp::Lt),
+        WasmScalarComparisonOp::Ge => Ok(WasmScalarComparisonOp::Le),
+        _ => Err(wasm_generation_error(
+            "Wasm mixed signed/unsigned comparison requires an ordering operator".to_owned(),
+        )),
+    }
+}
+
+fn wasm_generation_error(message: String) -> CompilerError {
+    CompilerError::compiler_error(message)
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
 }
 
 fn emit_numeric_sub(

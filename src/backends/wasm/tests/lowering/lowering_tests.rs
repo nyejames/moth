@@ -1,8 +1,9 @@
-use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
-use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
+use crate::backends::wasm::lir::instructions::{
+    WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
+};
 use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage};
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirFunctionId, WasmLirLocalId};
 use crate::backends::wasm::request::{
@@ -14,7 +15,8 @@ use crate::backends::wasm::tests::lowering::test_support::{
     string_expression, unit_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
-use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
@@ -909,8 +911,16 @@ fn lowers_ordered_comparison_and_control_flow() {
         lowered.blocks[0]
             .statements
             .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::OrderedLe { .. })),
-        "entry block should include ordered comparison lowering"
+            .any(|statement| matches!(
+                statement,
+                WasmLirStmt::ScalarCompare {
+                    op: WasmScalarComparisonOp::Le,
+                    lhs_type: WasmScalarComparisonType::SignedInteger(32),
+                    rhs_type: WasmScalarComparisonType::SignedInteger(32),
+                    ..
+                }
+            )),
+        "entry block should include profile-aware signed scalar comparison lowering"
     );
     assert!(
         matches!(
@@ -1204,10 +1214,7 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
 }
 
 #[test]
-fn rejects_every_non_standard_numeric_profile_and_lowers_standard() {
-    // WHAT: a non-standard boundary profile fails at the Wasm lowering entry, before any lowering.
-    // WHY: fixed-width numeric lowering arrives with the numeric plan's Phase 5, which removes
-    //      this gate; until then the backend must not lower numbers under the default widths.
+fn lowers_every_numeric_profile_with_selected_int_carrier() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -1236,26 +1243,15 @@ fn rejects_every_non_standard_numeric_profile_and_lowers_standard() {
         FunctionId(0),
     );
 
-    lower_hir_to_wasm_lir(
-        &module,
-        &default_borrow_facts(),
-        &WasmBackendRequest::default(),
-        &string_table,
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("the standard numeric profile should still lower");
-
-    // Every profile except Int32/Float64 must fail, so a gate that only compared one
-    // dimension cannot lower the remaining non-standard combinations under default widths.
     for profile in [
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
+        NumericProfile::STANDARD,
         NumericProfile {
             int_width: IntWidth::Bits32,
             float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
         },
         NumericProfile {
             int_width: IntWidth::Bits64,
@@ -1266,7 +1262,7 @@ fn rejects_every_non_standard_numeric_profile_and_lowers_standard() {
             numeric_profile: profile,
             ..Default::default()
         };
-        let error = lower_hir_to_wasm_lir(
+        let lowered = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
             &request,
@@ -1274,15 +1270,25 @@ fn rejects_every_non_standard_numeric_profile_and_lowers_standard() {
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .expect_err("a non-standard numeric profile must be rejected at the Wasm lowering entry");
-        let error = error
-            .infrastructure_error()
-            .expect("Wasm lowering failure should be wrapped for rendering");
-
-        assert_eq!(
-            error.error_type,
-            ErrorType::Backend(BackendErrorType::LirTransformation),
-            "{profile} must be rejected as a LIR transformation failure"
+        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        let start = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.origin == WasmLirFunctionOrigin::EntryStart)
+            .expect("the start function should be lowered");
+        let expected = match profile.int_width {
+            IntWidth::Bits32 => WasmAbiType::I32,
+            IntWidth::Bits64 => WasmAbiType::I64,
+        };
+        assert_eq!(start.signature.results, vec![expected], "{profile}");
+        assert!(
+            start.blocks[0].statements.iter().any(|statement| matches!(
+                (expected, statement),
+                (WasmAbiType::I32, WasmLirStmt::ConstI32 { value: 123, .. })
+                    | (WasmAbiType::I64, WasmLirStmt::ConstI64 { value: 123, .. })
+            )),
+            "{profile} Int literal must use the selected carrier"
         );
     }
 }
@@ -1511,28 +1517,74 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
     let range_id = builtins.range;
 
     let borrow_facts = default_borrow_facts();
-    let request = WasmBackendRequest::default();
     let path_table = path_fork.snapshot_table();
-    let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
-        &module,
-        &borrow_facts,
-        &request,
-        &string_table,
-        &path_table,
-        &type_environment,
-    );
+    for profile in [
+        NumericProfile::STANDARD,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
+            &module,
+            &borrow_facts,
+            &request,
+            &string_table,
+            &path_table,
+            &type_environment,
+        );
 
-    assert_eq!(lower_type_to_abi(&context, types.int), WasmAbiType::I64);
-    assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
-    assert_eq!(
-        lower_type_to_abi(&context, types.string),
-        WasmAbiType::Handle
-    );
-    assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
-    assert_eq!(lower_type_to_abi(&context, float_id), WasmAbiType::F64);
-    assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
-    assert_eq!(lower_type_to_abi(&context, decimal_id), WasmAbiType::Handle);
-    assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
+        assert_eq!(
+            lower_type_to_abi(&context, types.int),
+            match profile.int_width {
+                IntWidth::Bits32 => WasmAbiType::I32,
+                IntWidth::Bits64 => WasmAbiType::I64,
+            },
+            "{profile}"
+        );
+        assert_eq!(
+            lower_type_to_abi(&context, float_id),
+            match profile.float_precision {
+                FloatPrecision::Bits32 => WasmAbiType::F32,
+                FloatPrecision::Bits64 => WasmAbiType::F64,
+            },
+            "{profile}"
+        );
+        for scalar in FixedScalar::ALL {
+            let expected = match scalar {
+                FixedScalar::I64 | FixedScalar::U64 => WasmAbiType::I64,
+                FixedScalar::F64 => WasmAbiType::F64,
+                FixedScalar::F16 | FixedScalar::F32 => WasmAbiType::F32,
+                _ => WasmAbiType::I32,
+            };
+            assert_eq!(
+                lower_type_to_abi(&context, builtin_type_ids::fixed_scalar(scalar)),
+                expected,
+                "{profile} {scalar:?}"
+            );
+        }
+        assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
+        assert_eq!(
+            lower_type_to_abi(&context, types.string),
+            WasmAbiType::Handle
+        );
+        assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
+        assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
+        assert_eq!(lower_type_to_abi(&context, decimal_id), WasmAbiType::Handle);
+        assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
+    }
 }
 
 #[test]

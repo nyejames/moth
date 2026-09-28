@@ -8,6 +8,7 @@
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
@@ -408,14 +409,22 @@ pub(crate) enum ReachableReactiveSinkKind {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReachableRuntimeCastForm {
+    Expression,
+    Statement,
+}
+
 /// A reachable compiler-owned builtin runtime cast expression or statement.
 ///
-/// WHY: some backends (currently HTML-Wasm) cannot lower runtime casts yet. Recording the cast
-///      site in reachability lets backend feature validation report the first reachable unsupported
-///      cast without re-scanning HIR expressions locally.
+/// WHY: some backends (currently HTML-Wasm) cannot lower most runtime casts. Recording the cast
+///      site, policy, and HIR form lets backend feature validation reject unsupported casts without
+///      re-scanning HIR expressions locally.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableRuntimeCastUse {
     pub(crate) span: Option<SourceSpan>,
+    pub(crate) policy: BuiltinCastPolicyId,
+    pub(crate) form: ReachableRuntimeCastForm,
 }
 
 /// A reachable compiler-owned checked numeric operation.
@@ -871,10 +880,14 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
-            HirStatementKind::CastOp { source, .. } => {
+            HirStatementKind::CastOp { policy, source, .. } => {
                 self.direct_facts
                     .reachable_runtime_casts
-                    .push(ReachableRuntimeCastUse { span });
+                    .push(ReachableRuntimeCastUse {
+                        span,
+                        policy: *policy,
+                        form: ReachableRuntimeCastForm::Statement,
+                    });
                 self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
@@ -1007,12 +1020,15 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             }
 
             HirExpressionKind::Cast {
-                source: operand, ..
+                source: operand,
+                policy,
             } => {
                 self.direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         span: expression_span,
+                        policy: *policy,
+                        form: ReachableRuntimeCastForm::Expression,
                     });
                 self.collect_runtime_feature_uses_from_expression(operand, expression_span);
             }

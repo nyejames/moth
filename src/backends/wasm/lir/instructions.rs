@@ -8,6 +8,23 @@ use crate::backends::wasm::lir::types::{
     WasmImportId, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId, WasmStaticDataId,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmScalarComparisonType {
+    SignedInteger(u8),
+    UnsignedInteger(u8),
+    Float(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmScalarComparisonOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum WasmLirStmt {
     /// Materialize immediate scalar constants.
@@ -65,8 +82,8 @@ pub(crate) enum WasmLirStmt {
         buffer: WasmLirLocalId,
         handle: WasmLirLocalId,
     },
-    /// Scalar-to-string bridge for template interpolation paths.
-    /// NOTE: currently used for i64 chunks emitted by frontend string coercion.
+    /// Profile-Int string bridge for template interpolation.
+    /// The emitter sign-extends an I32 carrier; I64 carriers pass directly.
     StringFromI64 {
         dst: WasmLirLocalId,
         value: WasmLirLocalId,
@@ -99,6 +116,15 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
+    },
+    /// Compare semantic scalar values after applying their declared widths and signedness.
+    ScalarCompare {
+        dst: WasmLirLocalId,
+        lhs: WasmLirLocalId,
+        rhs: WasmLirLocalId,
+        op: WasmScalarComparisonOp,
+        lhs_type: WasmScalarComparisonType,
+        rhs_type: WasmScalarComparisonType,
     },
     /// Compare finalized String handles by UTF-8 content through the runtime helper.
     StringEq {
@@ -147,6 +173,11 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
+    },
+    /// Convert the profile-selected signed Int carrier to the profile-selected Float carrier.
+    IntToFloat {
+        dst: WasmLirLocalId,
+        source: WasmLirLocalId,
     },
     /// Regular division with integer operands. lhs/rhs are I64; dst is F64.
     /// WHY: Moth `Int / Int` always yields Float; conversion is emitted here.

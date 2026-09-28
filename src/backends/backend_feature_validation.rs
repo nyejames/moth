@@ -7,6 +7,7 @@
 
 use crate::backends::external_package_validation::BackendTarget;
 use crate::backends::js::JsNumericCarrier;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, UnsupportedBackendFeatureReason,
@@ -15,6 +16,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, TypeConstructor, TypeId,
 };
@@ -23,8 +25,10 @@ use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, 
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalJsLowering, ExternalPackageRegistry, ExternalSignatureType,
 };
+use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
-use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
@@ -33,7 +37,7 @@ use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse, ReachableExternalCall,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
     ReachableNumericOpUse, ReachableReactiveSinkKind, ReachableReactiveSinkUse,
-    ReachableReactiveTemplateUse, ReachableRuntimeCastUse,
+    ReachableReactiveTemplateUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -68,11 +72,9 @@ pub struct BackendFeatureValidationInput<'a> {
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
 ///
 /// WHAT: hashmap construction/use, reactive runtime features, runtime casts, checked numeric
-///       operations, and generic runtime values are legal HIR, but only the JS backend lowers them
-///       for Alpha. HTML-Wasm must reject reachable unsupported operations; unused functions stay
-///       type checked but do not block the experimental Wasm build path. Fixed-width numeric and
-///       `Byte` values lower on JS, while Wasm rejects reachable values of those types before its
-///       target-specific operation checks.
+///       operations, and generic runtime values are legal HIR, but this validator reports Wasm
+///       features that the target cannot lower. Its bounded scalar step accepts direct fixed
+///       integer/Byte and F32/F64 values while retaining gates for F16 and aggregates.
 /// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
@@ -101,8 +103,9 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm does not yet lower hashmaps, reactive runtime features, runtime casts, checked
-            // numeric operations, or generic runtime values.
+            // Wasm does not yet lower hashmaps, reactive runtime features, casts outside the
+            // narrow Int-to-Float expression conversion, checked numeric operations, or generic
+            // runtime values.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -326,13 +329,11 @@ fn signature_type_uses_unsupported_numeric_profile(
     }
 }
 
-/// Reports the first reachable fixed-width numeric or `Byte` value for the Wasm target.
+/// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
 ///
-/// WHAT: `I8`..`U64`, `F16`..`F64` and `Byte` are canonical frontend identities supported by JS
-///       lowering, but not by HTML-Wasm. A reachable local, expression or function signature whose
-///       type carries one is rejected.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of an internal Wasm
-///      lowering error. Unreachable private helpers keep their signatures and stay valid typed HIR.
+/// WHAT: direct integer/Byte and F32/F64 scalar values are accepted, but F16 and aggregate types
+///       containing any fixed scalar remain unsupported.
+/// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
     type_environment: Option<&TypeEnvironment>,
@@ -347,17 +348,32 @@ fn validate_fixed_width_scalar_values(
     )?;
     let mut backend_type_facts = BackendTypeFacts::new(type_environment);
 
-    // Reachable blocks come first so the diagnostic lands on the authored local or expression. The
-    // signature pass then covers generated or synthetic values that carry a fixed scalar with no
-    // reachable expression to place a span on.
-    let occurrence = first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
-        backend_type_facts.contains_fixed_scalar(type_id)
-    })
-    .or_else(|| {
-        first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
-            backend_type_facts.contains_fixed_scalar(type_id)
-        })
-    });
+    // Reachable block occurrences take source precedence over return signatures. Within each pass,
+    // a source-mapped occurrence wins over earlier generated HIR that has no source provenance.
+    let module_occurrences =
+        first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
+            match type_environment.fixed_scalar(type_id) {
+                Some(FixedScalar::F16) => true,
+                Some(_) => false,
+                None => backend_type_facts.contains_fixed_scalar(type_id),
+            }
+        });
+    let occurrence = if let Some(authored) = module_occurrences.authored {
+        Some(authored)
+    } else {
+        let signature_occurrences =
+            first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
+                match type_environment.fixed_scalar(type_id) {
+                    Some(FixedScalar::F16) => true,
+                    Some(_) => false,
+                    None => backend_type_facts.contains_fixed_scalar(type_id),
+                }
+            });
+        signature_occurrences
+            .authored
+            .or(module_occurrences.spanless_fallback)
+            .or(signature_occurrences.spanless_fallback)
+    };
 
     let Some(occurrence) = occurrence else {
         return Ok(());
@@ -515,10 +531,10 @@ fn validate_wasm_reactive_features(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable runtime cast for the Wasm target.
+/// Reports the first reachable runtime cast outside the Wasm-supported expression policy.
 ///
-/// WHAT: compiler-owned builtin runtime casts are valid HIR, but HTML-Wasm does not yet lower
-///       them.
+/// WHAT: Wasm supports the infallible Int-to-Float expression conversion. All statement casts
+///       and other builtin cast policies remain unsupported.
 /// WHY: reject early with a structured diagnostic carrying the source span instead of a
 ///      backend-internal lowering failure.
 fn validate_wasm_runtime_casts(
@@ -526,7 +542,18 @@ fn validate_wasm_runtime_casts(
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(runtime_cast) = runtime_casts.first() else {
+    let Some(runtime_cast) = runtime_casts.iter().find(|runtime_cast| {
+        !matches!(
+            (runtime_cast.form, runtime_cast.policy),
+            (
+                ReachableRuntimeCastForm::Expression,
+                BuiltinCastPolicyId::NumericConversion {
+                    source: NumericScalar::Int,
+                    target: NumericScalar::Float,
+                }
+            )
+        )
+    }) else {
         return Ok(());
     };
 
@@ -620,6 +647,7 @@ fn validate_wasm_generic_runtime_values(
                 Some(TypeDefinition::GenericInstance(_))
             )
         })
+        .preferred()
     else {
         return Ok(());
     };
@@ -643,18 +671,91 @@ struct ReachableTypeOccurrence {
     span: Option<SourceSpan>,
 }
 
-/// Finds the first reachable local, expression or terminator operand that a type-shape gate rejects.
+/// The preferred and fallback reachable occurrences found by a type-shape traversal.
 ///
-/// WHAT: one traversal shared by every type-shape gate; a gate supplies only its type predicate, so
-///       the reachable HIR walk cannot drift between checks.
-/// WHY: type-shape gates need the module `TypeEnvironment`, which is not available in
+/// WHAT: retains the first spanless occurrence for synthetic-only rejection while preferring the
+///       first source-mapped occurrence found later in the same traversal.
+#[derive(Clone, Copy, Debug, Default)]
+struct ReachableTypeOccurrences {
+    authored: Option<ReachableTypeOccurrence>,
+    spanless_fallback: Option<ReachableTypeOccurrence>,
+}
+
+impl ReachableTypeOccurrences {
+    fn preferred(self) -> Option<ReachableTypeOccurrence> {
+        self.authored.or(self.spanless_fallback)
+    }
+}
+
+struct TypeOccurrenceSearch<'predicate, IsUnsupported> {
+    is_unsupported: &'predicate mut IsUnsupported,
+    spanless_fallback: Option<ReachableTypeOccurrence>,
+    unsupported_count: usize,
+}
+
+impl<'predicate, IsUnsupported> TypeOccurrenceSearch<'predicate, IsUnsupported>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    fn new(is_unsupported: &'predicate mut IsUnsupported) -> Self {
+        TypeOccurrenceSearch {
+            is_unsupported,
+            spanless_fallback: None,
+            unsupported_count: 0,
+        }
+    }
+
+    fn check(
+        &mut self,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+    ) -> Option<ReachableTypeOccurrence> {
+        if !(self.is_unsupported)(type_id) {
+            return None;
+        }
+
+        self.record(span)
+    }
+
+    fn record(&mut self, span: Option<SourceSpan>) -> Option<ReachableTypeOccurrence> {
+        self.unsupported_count += 1;
+        let occurrence = ReachableTypeOccurrence { span };
+        if span.is_some() {
+            Some(occurrence)
+        } else {
+            if self.spanless_fallback.is_none() {
+                self.spanless_fallback = Some(occurrence);
+            }
+            None
+        }
+    }
+
+    fn finish(self, authored: Option<ReachableTypeOccurrence>) -> ReachableTypeOccurrences {
+        ReachableTypeOccurrences {
+            authored,
+            spanless_fallback: self.spanless_fallback,
+        }
+    }
+}
+
+/// Finds reachable unsupported locals, expressions or terminator operands.
+///
+/// WHAT: one traversal is shared by every type-shape gate; a gate supplies only its type
+///       predicate, so reachable-HIR coverage cannot drift between checks.
+/// WHY: type-shape gates need the module `TypeEnvironment`, which is not available to
 ///      backend-neutral HIR reachability collection.
-fn first_unsupported_module_occurrence(
+fn first_unsupported_module_occurrence<IsUnsupported>(
     module: &HirModule,
     reachable_blocks: &FxHashSet<BlockId>,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
-    for block in &module.blocks {
+    is_unsupported: &mut IsUnsupported,
+) -> ReachableTypeOccurrences
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    let mut authored = None;
+
+    'blocks: for block in &module.blocks {
         if !reachable_blocks.contains(&block.id) {
             continue;
         }
@@ -662,117 +763,198 @@ fn first_unsupported_module_occurrence(
         // A declared local carries its own authored span, so an unsupported local type is reported
         // on the binding rather than on a later use.
         for local in &block.locals {
-            if is_unsupported(local.ty) {
-                return Some(ReachableTypeOccurrence { span: local.span });
+            if let Some(occurrence) = search.check(local.ty, local.span) {
+                authored = Some(occurrence);
+                break 'blocks;
             }
         }
 
         for statement in &block.statements {
             if let Some(occurrence) =
-                first_unsupported_statement_occurrence(statement, is_unsupported)
+                first_unsupported_statement_occurrence(statement, &block.locals, &mut search)
             {
-                return Some(occurrence);
+                authored = Some(occurrence);
+                break 'blocks;
             }
         }
 
         if let Some(occurrence) =
-            first_unsupported_terminator_occurrence(&block.terminator, is_unsupported)
+            first_unsupported_terminator_occurrence(&block.terminator, &mut search)
         {
-            return Some(occurrence);
+            authored = Some(occurrence);
+            break 'blocks;
         }
     }
 
-    None
+    search.finish(authored)
 }
 
-/// Finds the first reachable function whose return type a type-shape gate rejects.
+/// Finds a reachable function whose return type a type-shape gate rejects.
 ///
-/// WHAT: scans reachable functions in module order after the block pass.
+/// WHAT: scans reachable functions in module order after block occurrences.
 /// WHY: parameters are entry-block locals, so the block pass already reports them on their
-///      authored bindings. A return type has no local or expression of its own, so generated or
-///      synthetic HIR can carry an unsupported type there alone; that occurrence is spanless.
-fn first_unsupported_function_signature_occurrence(
+///      bindings. A return type has no local or expression of its own, so use its recorded
+///      declaration span when available; generated or synthetic HIR can still be spanless.
+fn first_unsupported_function_signature_occurrence<IsUnsupported>(
     module: &HirModule,
     selection: &HirBackendSelection,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
+    is_unsupported: &mut IsUnsupported,
+) -> ReachableTypeOccurrences
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    let mut authored = None;
+
     for function in &module.functions {
-        if selection.contains_function(function.id) && is_unsupported(function.return_type) {
-            return Some(ReachableTypeOccurrence { span: None });
+        if !selection.contains_function(function.id)
+            || !(search.is_unsupported)(function.return_type)
+        {
+            continue;
+        }
+
+        let span = module
+            .side_table
+            .hir_source_span_for_hir(HirLocation::Function(function.id));
+        if let Some(occurrence) = search.record(span) {
+            authored = Some(occurrence);
+            break;
         }
     }
 
-    None
+    search.finish(authored)
 }
 
-fn first_unsupported_statement_occurrence(
+fn first_unsupported_statement_occurrence<IsUnsupported>(
     statement: &HirStatement,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
+    locals: &[HirLocal],
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match &statement.kind {
         HirStatementKind::Assign { target, value } => {
-            first_unsupported_place_occurrence(target, is_unsupported)
-                .or_else(|| first_unsupported_expression_occurrence(value, is_unsupported))
+            first_unsupported_place_occurrence(target, search)
+                .or_else(|| first_unsupported_expression_occurrence(value, search))
         }
         HirStatementKind::Call { args, .. } => args
             .iter()
-            .find_map(|arg| first_unsupported_expression_occurrence(arg, is_unsupported)),
+            .find_map(|arg| first_unsupported_expression_occurrence(arg, search)),
         HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            first_unsupported_expression_occurrence(value, is_unsupported)
+            first_unsupported_expression_occurrence(value, search)
         }
-        HirStatementKind::CastOp { source, .. }
-        | HirStatementKind::FormatFloat { source, .. }
+        HirStatementKind::CastOp { source, result, .. } => result
+            .as_ref()
+            .and_then(|result_local| {
+                first_unsupported_result_local_occurrence(
+                    locals,
+                    *result_local,
+                    statement.span,
+                    search,
+                )
+            })
+            .or_else(|| first_unsupported_expression_occurrence(source, search)),
+        HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            first_unsupported_expression_occurrence(source, is_unsupported)
+            first_unsupported_expression_occurrence(source, search)
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            first_unsupported_expression_occurrence(receiver, is_unsupported).or_else(|| {
+            first_unsupported_expression_occurrence(receiver, search).or_else(|| {
                 args.iter()
-                    .find_map(|arg| first_unsupported_expression_occurrence(arg, is_unsupported))
+                    .find_map(|arg| first_unsupported_expression_occurrence(arg, search))
             })
         }
-        HirStatementKind::NumericOp { operands, .. } => match operands {
-            HirNumericOperands::Unary { operand } => {
-                first_unsupported_expression_occurrence(operand, is_unsupported)
+        HirStatementKind::NumericOp {
+            operands, result, ..
+        } => {
+            if let Some(occurrence) =
+                first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
+            {
+                return Some(occurrence);
             }
-            HirNumericOperands::Binary { left, right } => {
-                first_unsupported_expression_occurrence(left, is_unsupported)
-                    .or_else(|| first_unsupported_expression_occurrence(right, is_unsupported))
+
+            let unsupported_before = search.unsupported_count;
+            let occurrence = match operands {
+                HirNumericOperands::Unary { operand } => {
+                    first_unsupported_expression_occurrence(operand, search)
+                }
+                HirNumericOperands::Binary { left, right } => {
+                    first_unsupported_expression_occurrence(left, search)
+                        .or_else(|| first_unsupported_expression_occurrence(right, search))
+                }
+            };
+
+            if let Some(occurrence) = occurrence {
+                // NumericOp's source span is the lowering's source anchor for this authored
+                // operation, and is more precise than either source operand.
+                return Some(ReachableTypeOccurrence {
+                    span: statement.span.or(occurrence.span),
+                });
             }
-        },
+
+            if search.unsupported_count > unsupported_before {
+                // Even when an operand is synthetic and spanless, an authored NumericOp span
+                // identifies the operation that consumes that unsupported value.
+                return statement
+                    .span
+                    .map(|span| ReachableTypeOccurrence { span: Some(span) });
+            }
+
+            None
+        }
         HirStatementKind::Drop(_) => None,
     }
 }
 
-fn first_unsupported_terminator_occurrence(
+fn first_unsupported_result_local_occurrence<IsUnsupported>(
+    locals: &[HirLocal],
+    result_local: LocalId,
+    statement_span: Option<SourceSpan>,
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    // Result types were already checked with the block locals. Only a rejected, spanless
+    // value needs this producer lookup; successful validation must not rescan locals per operation.
+    search.spanless_fallback?;
+    let local = locals.iter().find(|local| local.id == result_local)?;
+    // The statement span is the source of this local's produced value; never borrow a span from
+    // an unrelated local declaration or neighboring HIR node.
+    search.check(local.ty, statement_span)
+}
+
+fn first_unsupported_terminator_occurrence<IsUnsupported>(
     terminator: &HirTerminator,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match terminator {
         HirTerminator::If { condition, .. } => {
-            first_unsupported_expression_occurrence(condition, is_unsupported)
+            first_unsupported_expression_occurrence(condition, search)
         }
         HirTerminator::FallibleBranch { result, .. }
         | HirTerminator::Return(result)
         | HirTerminator::ReturnSuccess(result)
         | HirTerminator::ReturnError(result) => {
-            first_unsupported_expression_occurrence(result, is_unsupported)
+            first_unsupported_expression_occurrence(result, search)
         }
         HirTerminator::Match { scrutinee, arms } => {
-            first_unsupported_expression_occurrence(scrutinee, is_unsupported).or_else(|| {
+            first_unsupported_expression_occurrence(scrutinee, search).or_else(|| {
                 arms.iter().find_map(|arm| {
-                    first_unsupported_pattern_occurrence(&arm.pattern, is_unsupported).or_else(
-                        || {
-                            arm.guard.as_ref().and_then(|guard| {
-                                first_unsupported_expression_occurrence(guard, is_unsupported)
-                            })
-                        },
-                    )
+                    first_unsupported_pattern_occurrence(&arm.pattern, search).or_else(|| {
+                        arm.guard.as_ref().and_then(|guard| {
+                            first_unsupported_expression_occurrence(guard, search)
+                        })
+                    })
                 })
             })
         }
         HirTerminator::AssertFailure { message, .. } => {
-            first_unsupported_expression_occurrence(message, is_unsupported)
+            first_unsupported_expression_occurrence(message, search)
         }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
@@ -786,16 +968,19 @@ fn first_unsupported_terminator_occurrence(
 ///
 /// WHY: a pattern's literal, option payload or relational value is a lowered expression with its
 ///      own semantic type, so it is scanned with the same predicate as an arm guard.
-fn first_unsupported_pattern_occurrence(
+fn first_unsupported_pattern_occurrence<IsUnsupported>(
     pattern: &HirPattern,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match pattern {
         HirPattern::Literal(value)
         | HirPattern::OptionValue { value }
         | HirPattern::OptionRelational { value, .. }
         | HirPattern::Relational { value, .. } => {
-            first_unsupported_expression_occurrence(value, is_unsupported)
+            first_unsupported_expression_occurrence(value, search)
         }
         HirPattern::OptionNone
         | HirPattern::OptionPresent
@@ -804,36 +989,40 @@ fn first_unsupported_pattern_occurrence(
     }
 }
 
-/// Finds the first unsupported index expression inside a place projection.
+/// Finds an unsupported index expression inside a place projection.
 ///
-/// WHY: a projected place is not a value, but its index operand is an expression with a semantic
-///      type, and an unsupported index type is as unlowed as an unsupported value.
-fn first_unsupported_place_occurrence(
+/// WHY: a projected place is not a value, but its index operand has a semantic type and is scanned
+///      like every other reachable expression.
+fn first_unsupported_place_occurrence<IsUnsupported>(
     place: &HirPlace,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match place {
         HirPlace::Local(_) => None,
-        HirPlace::Field { base, .. } => first_unsupported_place_occurrence(base, is_unsupported),
-        HirPlace::Index { base, index } => first_unsupported_place_occurrence(base, is_unsupported)
-            .or_else(|| first_unsupported_expression_occurrence(index, is_unsupported)),
+        HirPlace::Field { base, .. } => first_unsupported_place_occurrence(base, search),
+        HirPlace::Index { base, index } => first_unsupported_place_occurrence(base, search)
+            .or_else(|| first_unsupported_expression_occurrence(index, search)),
     }
 }
 
-fn first_unsupported_expression_occurrence(
+fn first_unsupported_expression_occurrence<IsUnsupported>(
     expression: &HirExpression,
-    is_unsupported: &mut impl FnMut(TypeId) -> bool,
-) -> Option<ReachableTypeOccurrence> {
-    if is_unsupported(expression.ty) {
-        return Some(ReachableTypeOccurrence {
-            span: expression.span,
-        });
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    if let Some(occurrence) = search.check(expression.ty, expression.span) {
+        return Some(occurrence);
     }
 
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            first_unsupported_expression_occurrence(left, is_unsupported)
-                .or_else(|| first_unsupported_expression_occurrence(right, is_unsupported))
+            first_unsupported_expression_occurrence(left, search)
+                .or_else(|| first_unsupported_expression_occurrence(right, search))
         }
         HirExpressionKind::UnaryOp { operand, .. }
         | HirExpressionKind::TupleGet { tuple: operand, .. }
@@ -844,28 +1033,28 @@ fn first_unsupported_expression_occurrence(
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
-        } => first_unsupported_expression_occurrence(operand, is_unsupported),
+        } => first_unsupported_expression_occurrence(operand, search),
         HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            first_unsupported_place_occurrence(place, is_unsupported)
+            first_unsupported_place_occurrence(place, search)
         }
         HirExpressionKind::StructConstruct { fields, .. } => fields
             .iter()
-            .find_map(|(_, value)| first_unsupported_expression_occurrence(value, is_unsupported)),
+            .find_map(|(_, value)| first_unsupported_expression_occurrence(value, search)),
         HirExpressionKind::Collection(items)
         | HirExpressionKind::TupleConstruct { elements: items } => items
             .iter()
-            .find_map(|item| first_unsupported_expression_occurrence(item, is_unsupported)),
+            .find_map(|item| first_unsupported_expression_occurrence(item, search)),
         HirExpressionKind::MapLiteral(entries) => entries.iter().find_map(|entry| {
-            first_unsupported_expression_occurrence(&entry.key, is_unsupported)
-                .or_else(|| first_unsupported_expression_occurrence(&entry.value, is_unsupported))
+            first_unsupported_expression_occurrence(&entry.key, search)
+                .or_else(|| first_unsupported_expression_occurrence(&entry.value, search))
         }),
         HirExpressionKind::Range { start, end } => {
-            first_unsupported_expression_occurrence(start, is_unsupported)
-                .or_else(|| first_unsupported_expression_occurrence(end, is_unsupported))
+            first_unsupported_expression_occurrence(start, search)
+                .or_else(|| first_unsupported_expression_occurrence(end, search))
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => fields.iter().find_map(|field| {
-            first_unsupported_expression_occurrence(&field.value, is_unsupported)
-        }),
+        HirExpressionKind::VariantConstruct { fields, .. } => fields
+            .iter()
+            .find_map(|field| first_unsupported_expression_occurrence(&field.value, search)),
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
