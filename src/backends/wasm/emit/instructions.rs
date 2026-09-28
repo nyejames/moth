@@ -8,10 +8,11 @@ use crate::backends::wasm::lir::instructions::{
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId,
 };
+use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
 use rustc_hash::FxHashMap;
-use wasm_encoder::{BlockType, Function, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
 pub(crate) struct LirBodyEmitContext<'a> {
     pub function_id: WasmLirFunctionId,
@@ -362,6 +363,30 @@ pub(crate) fn emit_statement(
             }
             function.instruction(&Instruction::LocalSet(dst_idx));
         }
+        WasmLirStmt::LoadScalar {
+            dst,
+            address,
+            offset,
+            kind,
+        } => {
+            ensure_local_abi(*address, WasmAbiType::I32, context, "scalar load address")?;
+            ensure_local_abi(*dst, kind.carrier(), context, "scalar load result")?;
+            function.instruction(&Instruction::LocalGet(local_index(*address, context)?));
+            function.instruction(&scalar_load_instruction(*kind, *offset));
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
+        WasmLirStmt::StoreScalar {
+            address,
+            offset,
+            value,
+            kind,
+        } => {
+            ensure_local_abi(*address, WasmAbiType::I32, context, "scalar store address")?;
+            ensure_local_abi(*value, kind.carrier(), context, "scalar store value")?;
+            function.instruction(&Instruction::LocalGet(local_index(*address, context)?));
+            function.instruction(&Instruction::LocalGet(local_index(*value, context)?));
+            function.instruction(&scalar_store_instruction(*kind, *offset));
+        }
         WasmLirStmt::BoolAnd { dst, lhs, rhs } => {
             function.instruction(&Instruction::LocalGet(local_index(*lhs, context)?));
             function.instruction(&Instruction::LocalGet(local_index(*rhs, context)?));
@@ -393,6 +418,41 @@ pub(crate) fn emit_statement(
     }
 
     Ok(())
+}
+
+// Wasm's memarg alignment is an access hint; the storage kind separately owns layout alignment.
+fn scalar_memarg(kind: WasmScalarStorageKind, offset: u32) -> MemArg {
+    MemArg {
+        offset: u64::from(offset),
+        align: kind.alignment().trailing_zeros(),
+        memory_index: 0,
+    }
+}
+
+fn scalar_load_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruction<'static> {
+    let memarg = scalar_memarg(kind, offset);
+    match kind {
+        WasmScalarStorageKind::I8 => Instruction::I32Load8S(memarg),
+        WasmScalarStorageKind::U8 => Instruction::I32Load8U(memarg),
+        WasmScalarStorageKind::I16 => Instruction::I32Load16S(memarg),
+        WasmScalarStorageKind::U16 => Instruction::I32Load16U(memarg),
+        WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Load(memarg),
+        WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Load(memarg),
+        WasmScalarStorageKind::F32 => Instruction::F32Load(memarg),
+        WasmScalarStorageKind::F64 => Instruction::F64Load(memarg),
+    }
+}
+
+fn scalar_store_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruction<'static> {
+    let memarg = scalar_memarg(kind, offset);
+    match kind {
+        WasmScalarStorageKind::I8 | WasmScalarStorageKind::U8 => Instruction::I32Store8(memarg),
+        WasmScalarStorageKind::I16 | WasmScalarStorageKind::U16 => Instruction::I32Store16(memarg),
+        WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Store(memarg),
+        WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Store(memarg),
+        WasmScalarStorageKind::F32 => Instruction::F32Store(memarg),
+        WasmScalarStorageKind::F64 => Instruction::F64Store(memarg),
+    }
 }
 
 pub(crate) fn emit_terminator(

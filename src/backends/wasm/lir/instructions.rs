@@ -7,6 +7,7 @@
 use crate::backends::wasm::lir::types::{
     WasmImportId, WasmLirBlockId, WasmLirFunctionId, WasmLirLocalId, WasmStaticDataId,
 };
+use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WasmScalarComparisonType {
@@ -253,6 +254,32 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         lhs: WasmLirLocalId,
         rhs: WasmLirLocalId,
+    },
+    /// Load a typed scalar from linear memory at `address + offset`.
+    ///
+    /// The address is an already-owned i32 local; producers supply slots with the natural
+    /// alignment promised by `kind`. The Wasm memory operation retains normal bounds trapping.
+    #[allow(dead_code)]
+    // Executed by low-level LIR clients; HIR aggregate places remain gated.
+    LoadScalar {
+        dst: WasmLirLocalId,
+        address: WasmLirLocalId,
+        offset: u32,
+        kind: WasmScalarStorageKind,
+    },
+    /// Store a typed scalar to linear memory at `address + offset`.
+    ///
+    /// Producers must validate the source value against its semantic scalar range first. The
+    /// narrow Wasm store truncation is only the physical 8-/16-bit storage operation, not a
+    /// source-level narrowing conversion.
+    /// The producer must preserve the natural alignment promised by `kind`.
+    #[allow(dead_code)]
+    // Executed by low-level LIR clients; HIR aggregate places remain gated.
+    StoreScalar {
+        address: WasmLirLocalId,
+        offset: u32,
+        value: WasmLirLocalId,
+        kind: WasmScalarStorageKind,
     },
 }
 

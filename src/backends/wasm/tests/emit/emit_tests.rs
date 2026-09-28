@@ -15,12 +15,16 @@ use crate::backends::wasm::request::{
     WasmBackendRequest, WasmCfgLoweringStrategy, WasmDebugFlags, WasmEmitOptions, WasmExportPolicy,
     WasmHelperExportPolicy, WasmTargetFeatures,
 };
-use crate::backends::wasm::runtime::memory::WasmMemoryPlan;
+use crate::backends::wasm::runtime::memory::{WasmMemoryPlan, WasmScalarStorageKind};
 use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, int_expression,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
@@ -28,6 +32,8 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 #[test]
 fn lowers_hir_to_wasm_module_bytes() {
@@ -183,6 +189,133 @@ fn rejects_mismatched_numeric_add_types() {
         ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
     assert!(error.msg.contains("type mismatch in numeric add"));
+}
+
+#[test]
+fn scalar_storage_facts_follow_profile_and_natural_layout() {
+    let kinds = [
+        (WasmScalarStorageKind::I8, 1, WasmAbiType::I32),
+        (WasmScalarStorageKind::U8, 1, WasmAbiType::I32),
+        (WasmScalarStorageKind::I16, 2, WasmAbiType::I32),
+        (WasmScalarStorageKind::U16, 2, WasmAbiType::I32),
+        (WasmScalarStorageKind::I32, 4, WasmAbiType::I32),
+        (WasmScalarStorageKind::U32, 4, WasmAbiType::I32),
+        (WasmScalarStorageKind::I64, 8, WasmAbiType::I64),
+        (WasmScalarStorageKind::U64, 8, WasmAbiType::I64),
+        (WasmScalarStorageKind::F32, 4, WasmAbiType::F32),
+        (WasmScalarStorageKind::F64, 8, WasmAbiType::F64),
+    ];
+    for (kind, size, carrier) in kinds {
+        assert_eq!(kind.size(), size);
+        assert_eq!(kind.alignment(), size);
+        assert_eq!(kind.stride(), size);
+        assert_eq!(kind.carrier(), carrier);
+    }
+
+    let profiles = [
+        (
+            IntWidth::Bits32,
+            FloatPrecision::Bits32,
+            WasmScalarStorageKind::I32,
+            WasmScalarStorageKind::F32,
+        ),
+        (
+            IntWidth::Bits32,
+            FloatPrecision::Bits64,
+            WasmScalarStorageKind::I32,
+            WasmScalarStorageKind::F64,
+        ),
+        (
+            IntWidth::Bits64,
+            FloatPrecision::Bits32,
+            WasmScalarStorageKind::I64,
+            WasmScalarStorageKind::F32,
+        ),
+        (
+            IntWidth::Bits64,
+            FloatPrecision::Bits64,
+            WasmScalarStorageKind::I64,
+            WasmScalarStorageKind::F64,
+        ),
+    ];
+    for (int_width, float_precision, int_kind, float_kind) in profiles {
+        let profile = NumericProfile {
+            int_width,
+            float_precision,
+        };
+        assert_eq!(
+            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Int, profile),
+            Some(int_kind)
+        );
+        assert_eq!(
+            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Float, profile),
+            Some(float_kind)
+        );
+    }
+    assert_eq!(
+        WasmScalarStorageKind::from_fixed_scalar(FixedScalar::Byte),
+        Some(WasmScalarStorageKind::U8)
+    );
+    assert_eq!(
+        WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16),
+        None
+    );
+}
+
+#[test]
+fn scalar_storage_executes_in_node_with_compact_bytes_and_typed_loads() {
+    let module = build_scalar_storage_lir_module();
+    let mut request = WasmBackendRequest::default();
+    request.export_policy.helper_exports.export_memory = true;
+
+    let result = emit_lir_to_wasm_module(&module, &request).expect("scalar LIR should emit");
+    validate_wasm(&result.wasm_bytes);
+    let actual = execute_wasm_in_node(&result.wasm_bytes);
+
+    let signed_i32 = -0x0123_4567i32;
+    let unsigned_i32 = 0xfedc_ba98u32 as i32;
+    let signed_i64 = -0x0123_4567_89ab_cdefi64;
+    let unsigned_i64 = 0xfedc_ba98_7654_3210u64 as i64;
+    let negative_zero_f32 = -0.0f32;
+    let negative_zero_f64 = -0.0f64;
+    let mut expected = vec![0u8; 120];
+    expected[..64].fill(b'~');
+    expected[1] = 0xfe;
+    expected[2] = 0xfe;
+    expected[4..6].copy_from_slice(&(-0x1234i16).to_le_bytes());
+    expected[6..8].copy_from_slice(&0xfedcu16.to_le_bytes());
+    expected[12..16].copy_from_slice(&signed_i32.to_le_bytes());
+    expected[16..20].copy_from_slice(&0xfedc_ba98u32.to_le_bytes());
+    expected[20..24].copy_from_slice(&negative_zero_f32.to_bits().to_le_bytes());
+    expected[32..40].copy_from_slice(&signed_i64.to_le_bytes());
+    expected[40..48].copy_from_slice(&0xfedc_ba98_7654_3210u64.to_le_bytes());
+    expected[48..56].copy_from_slice(&negative_zero_f64.to_bits().to_le_bytes());
+    expected[64..68].copy_from_slice(&(-2i32).to_le_bytes());
+    expected[68..72].copy_from_slice(&254i32.to_le_bytes());
+    expected[72..76].copy_from_slice(&(-0x1234i32).to_le_bytes());
+    expected[76..80].copy_from_slice(&0xfedcu32.to_le_bytes());
+    expected[80..84].copy_from_slice(&signed_i32.to_le_bytes());
+    expected[84..88].copy_from_slice(&unsigned_i32.to_le_bytes());
+    expected[88..96].copy_from_slice(&signed_i64.to_le_bytes());
+    expected[96..104].copy_from_slice(&unsigned_i64.to_le_bytes());
+    expected[104..108].copy_from_slice(&negative_zero_f32.to_bits().to_le_bytes());
+    // Keep 108..112 untouched so the F64 round trip remains naturally aligned.
+    expected[112..120].copy_from_slice(&negative_zero_f64.to_bits().to_le_bytes());
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn scalar_storage_rejects_mismatched_local_carrier() {
+    let mut module = build_scalar_storage_lir_module();
+    module.functions[0].locals[1].ty = WasmAbiType::I64;
+
+    let error = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect_err("a scalar memory store with the wrong carrier must fail emission");
+    assert_eq!(
+        error.error_type,
+        ErrorType::Backend(BackendErrorType::WasmGeneration)
+    );
+    assert!(error.msg.contains("scalar store value"));
 }
 
 #[test]
@@ -653,4 +786,221 @@ fn local(id: u32, ty: WasmAbiType, name: &str) -> WasmLirLocal {
         ty,
         role: WasmLocalRole::Temp,
     }
+}
+
+fn build_scalar_storage_lir_module() -> WasmLirModule {
+    let address = WasmLirLocalId(0);
+    let fixed_kind = |scalar| {
+        WasmScalarStorageKind::from_fixed_scalar(scalar)
+            .expect("fixture uses supported fixed scalar storage")
+    };
+    let i8_kind = fixed_kind(FixedScalar::I8);
+    let u8_kind = fixed_kind(FixedScalar::U8);
+    let i16_kind = fixed_kind(FixedScalar::I16);
+    let u16_kind = fixed_kind(FixedScalar::U16);
+    let i32_kind = fixed_kind(FixedScalar::I32);
+    let u32_kind = fixed_kind(FixedScalar::U32);
+    let u64_kind = fixed_kind(FixedScalar::U64);
+    let f64_kind = fixed_kind(FixedScalar::F64);
+    let i64_kind = fixed_kind(FixedScalar::I64);
+    let f32_kind = fixed_kind(FixedScalar::F32);
+
+    let one_byte_start = 0;
+    let two_byte_start = 3;
+    let four_byte_start = 11;
+    let eight_byte_start = 31;
+    let mut statements = vec![
+        WasmLirStmt::ConstI32 {
+            dst: address,
+            value: 1,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(1),
+            value: -2,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(2),
+            value: 254,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(3),
+            value: -0x1234,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(4),
+            value: 0xfedc,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(5),
+            value: -0x0123_4567,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(6),
+            value: 0xfedc_ba98u32 as i32,
+        },
+        WasmLirStmt::ConstF32 {
+            dst: WasmLirLocalId(7),
+            value: -0.0,
+        },
+        WasmLirStmt::ConstI64 {
+            dst: WasmLirLocalId(8),
+            value: -0x0123_4567_89ab_cdef,
+        },
+        WasmLirStmt::ConstI64 {
+            dst: WasmLirLocalId(9),
+            value: 0xfedc_ba98_7654_3210u64 as i64,
+        },
+        WasmLirStmt::ConstF64 {
+            dst: WasmLirLocalId(10),
+            value: -0.0,
+        },
+    ];
+
+    statements.extend([
+        scalar_store(1, one_byte_start, i8_kind),
+        scalar_store(2, one_byte_start + i8_kind.stride(), u8_kind),
+        scalar_store(3, two_byte_start, i16_kind),
+        scalar_store(4, two_byte_start + i16_kind.stride(), u16_kind),
+        scalar_store(5, four_byte_start, i32_kind),
+        scalar_store(6, four_byte_start + i32_kind.stride(), u32_kind),
+        scalar_store(7, four_byte_start + 2 * i32_kind.stride(), f32_kind),
+        scalar_store(8, eight_byte_start, i64_kind),
+        scalar_store(9, eight_byte_start + i64_kind.stride(), u64_kind),
+        scalar_store(10, eight_byte_start + 2 * i64_kind.stride(), f64_kind),
+    ]);
+    statements.extend([
+        scalar_load(11, one_byte_start, i8_kind),
+        scalar_load(12, one_byte_start + i8_kind.stride(), u8_kind),
+        scalar_load(13, two_byte_start, i16_kind),
+        scalar_load(14, two_byte_start + i16_kind.stride(), u16_kind),
+        scalar_load(15, four_byte_start, i32_kind),
+        scalar_load(16, four_byte_start + i32_kind.stride(), u32_kind),
+        scalar_load(17, four_byte_start + 2 * i32_kind.stride(), f32_kind),
+        scalar_load(18, eight_byte_start, i64_kind),
+        scalar_load(19, eight_byte_start + i64_kind.stride(), u64_kind),
+        scalar_load(20, eight_byte_start + 2 * i64_kind.stride(), f64_kind),
+    ]);
+    statements.extend([
+        scalar_store(11, 63, u32_kind),
+        scalar_store(12, 67, u32_kind),
+        scalar_store(13, 71, u32_kind),
+        scalar_store(14, 75, u32_kind),
+        scalar_store(15, 79, i32_kind),
+        scalar_store(16, 83, u32_kind),
+        scalar_store(18, 87, i64_kind),
+        scalar_store(19, 95, u64_kind),
+        scalar_store(17, 103, f32_kind),
+        scalar_store(20, 111, f64_kind),
+    ]);
+
+    let locals = vec![
+        local(0, WasmAbiType::I32, "address"),
+        local(1, WasmAbiType::I32, "source_i8"),
+        local(2, WasmAbiType::I32, "source_u8"),
+        local(3, WasmAbiType::I32, "source_i16"),
+        local(4, WasmAbiType::I32, "source_u16"),
+        local(5, WasmAbiType::I32, "source_i32"),
+        local(6, WasmAbiType::I32, "source_u32"),
+        local(7, WasmAbiType::F32, "source_f32"),
+        local(8, WasmAbiType::I64, "source_i64"),
+        local(9, WasmAbiType::I64, "source_u64"),
+        local(10, WasmAbiType::F64, "source_f64"),
+        local(11, WasmAbiType::I32, "loaded_i8"),
+        local(12, WasmAbiType::I32, "loaded_u8"),
+        local(13, WasmAbiType::I32, "loaded_i16"),
+        local(14, WasmAbiType::I32, "loaded_u16"),
+        local(15, WasmAbiType::I32, "loaded_i32"),
+        local(16, WasmAbiType::I32, "loaded_u32"),
+        local(17, WasmAbiType::F32, "loaded_f32"),
+        local(18, WasmAbiType::I64, "loaded_i64"),
+        local(19, WasmAbiType::I64, "loaded_u64"),
+        local(20, WasmAbiType::F64, "loaded_f64"),
+    ];
+    WasmLirModule {
+        functions: vec![WasmLirFunction {
+            id: WasmLirFunctionId(0),
+            debug_name: "scalar_storage_round_trip".to_owned(),
+            origin: WasmLirFunctionOrigin::ExportWrapper,
+            signature: WasmLirSignature {
+                params: vec![],
+                results: vec![],
+            },
+            locals,
+            blocks: vec![WasmLirBlock {
+                id: WasmLirBlockId(0),
+                statements,
+                terminator: WasmLirTerminator::Return { value: None },
+            }],
+            linkage: WasmFunctionLinkage::ExportedWrapper,
+        }],
+        imports: vec![],
+        exports: vec![WasmExport {
+            export_name: "run".to_owned(),
+            kind: WasmExportKind::Function(WasmLirFunctionId(0)),
+        }],
+        static_data: vec![WasmStaticData {
+            id: WasmStaticDataId(0),
+            debug_name: "scalar_storage_sentinels".to_owned(),
+            bytes: vec![b'~'; 64],
+            kind: WasmStaticDataKind::Utf8StringBytes,
+        }],
+        memory_plan: WasmMemoryPlan::default(),
+    }
+}
+
+fn scalar_load(dst: u32, offset: u32, kind: WasmScalarStorageKind) -> WasmLirStmt {
+    WasmLirStmt::LoadScalar {
+        dst: WasmLirLocalId(dst),
+        address: WasmLirLocalId(0),
+        offset,
+        kind,
+    }
+}
+
+fn scalar_store(value: u32, offset: u32, kind: WasmScalarStorageKind) -> WasmLirStmt {
+    WasmLirStmt::StoreScalar {
+        address: WasmLirLocalId(0),
+        offset,
+        value: WasmLirLocalId(value),
+        kind,
+    }
+}
+
+fn execute_wasm_in_node(wasm_bytes: &[u8]) -> Vec<u8> {
+    const NODE_SCRIPT: &str = r#"
+const chunks = [];
+process.stdin.on("data", chunk => chunks.push(chunk));
+process.stdin.on("end", async () => {
+  try {
+    const { instance } = await WebAssembly.instantiate(Buffer.concat(chunks));
+    instance.exports.run();
+    process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 120));
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
+  }
+});
+"#;
+    let mut child = Command::new("node")
+        .args(["--eval", NODE_SCRIPT])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Node must be available for Wasm scalar execution tests");
+    child
+        .stdin
+        .take()
+        .expect("Node stdin should be piped")
+        .write_all(wasm_bytes)
+        .expect("emitted Wasm bytes should reach Node");
+    let output = child
+        .wait_with_output()
+        .expect("Node execution should complete");
+    assert!(
+        output.status.success(),
+        "Node Wasm scalar execution failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
 }

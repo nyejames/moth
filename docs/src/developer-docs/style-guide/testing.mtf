@@ -632,6 +632,11 @@ conversion retain their separate target gates.
 - Do not make temporary lowering order part of the public test contract.
 - For HIR validation, distinguish malformed-HIR invariant tests from user-facing source diagnostic tests.
 
+Compact scalar-memory coverage lives in the Wasm emitter tests. It instantiates the normal
+emitter's module in Node and inspects stored bytes, adjacent scalar slots, signed and unsigned
+narrow reloads, and floating-point signed zero. This is evidence for the LIR memory-access
+contract, not source-level aggregate layout, allocation or field/index support.
+
 ### Feature and platform lanes
 
 A feature-gated test that no command runs is not a test. Every declared Cargo feature belongs to a
