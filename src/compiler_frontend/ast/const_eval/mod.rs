@@ -56,6 +56,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, comparison_supported, negation_domain,
 };
+use crate::compiler_frontend::datatypes::numeric_power;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -1111,7 +1112,7 @@ fn fold_numeric_binary(
             }
             left_value % right_value
         }
-        NumericOperator::Power => left_value.powf(right_value),
+        NumericOperator::Power => numeric_power::pow(left_value, right_value),
         NumericOperator::IntegerDivide | NumericOperator::Negate => {
             return Err(CompilerError::compiler_error(format!(
                 "Binary-float folding received unsupported numeric operator '{}'",

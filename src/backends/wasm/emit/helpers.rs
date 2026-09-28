@@ -10,6 +10,15 @@ pub(crate) fn emit_helper_function(
     helper: WasmRuntimeHelper,
     plan: &WasmEmitPlan,
 ) -> Result<Function, CompilerError> {
+    // Pure numeric helpers have no dependency on linear memory or the allocator.
+    match helper {
+        WasmRuntimeHelper::FloatPower => return Ok(super::float_power::emit_float_power()),
+        WasmRuntimeHelper::FloatRemainder => {
+            return Ok(super::float_remainder::emit_float_remainder());
+        }
+        _ => {}
+    }
+
     // WHAT: helpers share one bump-allocation/global model.
     // WHY: correctness-first runtime scaffolding until richer ownership/runtime logic lands.
     let heap_top_global = plan.heap_top_global_index.ok_or_else(|| {
@@ -83,6 +92,9 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecLen
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
+        }
+        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => {
+            unreachable!("pure numeric helpers are dispatched before memory helpers")
         }
     };
 
@@ -586,6 +598,9 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecLen
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
+        }
+        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => {
+            unreachable!("pure numeric helpers are dispatched before memory helpers")
         }
     }
 

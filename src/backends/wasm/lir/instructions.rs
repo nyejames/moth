@@ -8,6 +8,7 @@ use crate::backends::wasm::lir::types::{
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 
 /// Integer operation domain resolved from canonical ranges, separate from scalar storage layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +33,7 @@ impl WasmIntegerOperationKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WasmIntegerOperationOperands {
+pub(crate) enum WasmNumericOperationOperands {
     Unary {
         operand: WasmLirLocalId,
     },
@@ -192,11 +193,24 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         operator: NumericOperator,
         kind: WasmIntegerOperationKind,
-        operands: WasmIntegerOperationOperands,
+        operands: WasmNumericOperationOperands,
         scratch: WasmIntegerScratch,
     },
-    /// Convert the profile-selected signed Int carrier to the profile-selected Float carrier.
-    IntToFloat {
+    /// Trap-mode checked float arithmetic in its profile-resolved semantic precision.
+    CheckedFloatOp {
+        dst: WasmLirLocalId,
+        operator: NumericOperator,
+        precision: BinaryFloatPrecision,
+        operands: WasmNumericOperationOperands,
+    },
+    /// Convert a signed or unsigned integer carrier directly to an F32/F64 computation carrier.
+    IntegerToFloat {
+        dst: WasmLirLocalId,
+        source: WasmLirLocalId,
+        source_signed: bool,
+    },
+    /// Widen an F32 carrier to F64 without changing its value.
+    FloatExtend {
         dst: WasmLirLocalId,
         source: WasmLirLocalId,
     },
@@ -205,42 +219,6 @@ pub(crate) enum WasmLirStmt {
         dst: WasmLirLocalId,
         source: WasmLirLocalId,
         source_signed: bool,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    FloatAdd {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    FloatSub {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    FloatMul {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    FloatDiv {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
-    },
-    /// Euclidean float modulus; emitted as `a − b·floor(a/b)` using the WASM stack.
-    #[allow(dead_code)]
-    // Numeric plan Phase 5: checked NumericOp lowering reuses these primitives.
-    FloatMod {
-        dst: WasmLirLocalId,
-        lhs: WasmLirLocalId,
-        rhs: WasmLirLocalId,
     },
     BoolAnd {
         dst: WasmLirLocalId,

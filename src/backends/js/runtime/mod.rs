@@ -1,8 +1,8 @@
 //! JS runtime helper emission.
 //!
-//! This module emits the JS helper functions that implement Moth's runtime
-//! semantics. All helper groups are declared as JS `function` declarations, which means
-//! JS hoisting guarantees correct behaviour regardless of emission order.
+//! This module emits JS helper functions that implement Moth's runtime semantics.
+//! Most helpers are hoisted `function` declarations; the optional float-power source
+//! also initialises constants in the prelude before user code runs.
 //!
 //! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
 //! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
@@ -48,6 +48,7 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) big_integer_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
+    pub(crate) binary_float_power: bool,
     pub(crate) format_binary16: bool,
     pub(crate) format_binary32: bool,
     pub(crate) format_binary64: bool,
@@ -77,6 +78,7 @@ impl NumericRuntimeHelperUsage {
             || self.big_integer_ops
             || self.binary32_ops
             || self.binary64_ops
+            || self.binary_float_power
             || self.uses_float_formatter()
             || self.validate_float
     }
@@ -105,8 +107,8 @@ impl<'hir> JsEmitter<'hir> {
     ///   choice helpers          — structural equality for nominal choice carriers
     ///   reactivity helpers      — reactive source bindings, scheduler, and template-string values
     ///
-    /// All groups use JS `function` declarations, which are hoisted by the JS engine.
-    /// Ordering here is for readability only; correctness does not depend on it.
+    /// Most groups use hoisted JS `function` declarations. Float power also initialises
+    /// top-level constants, so the complete prelude must precede emitted user functions and start.
     pub(crate) fn emit_runtime_prelude(
         &mut self,
         emitted_code_uses_maps: bool,

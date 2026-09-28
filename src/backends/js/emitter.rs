@@ -11,6 +11,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -225,7 +226,8 @@ impl<'hir> JsEmitter<'hir> {
                                     op.domain
                                 ))
                             })?;
-                            match carrier.helper_family() {
+                            let helper_family = carrier.helper_family();
+                            match helper_family {
                                 Some("int") => usage.number_integer_ops = true,
                                 Some("bigint") => usage.big_integer_ops = true,
                                 Some("float32") => usage.binary32_ops = true,
@@ -236,6 +238,11 @@ impl<'hir> JsEmitter<'hir> {
                                         op.domain
                                     )));
                                 }
+                            }
+                            if op.operator == NumericOperator::Power
+                                && matches!(helper_family, Some("float32") | Some("float"))
+                            {
+                                usage.binary_float_power = true;
                             }
                         }
                         HirStatementKind::FormatFloat { .. } => usage.require_float_formatter(

@@ -5,4 +5,6 @@ as_float |source Int| -> Float:
 half Float = as_float(2) * 0.5
 whole Float = as_float(10)
 
-[: identity float cast: [half]|[whole]]
+assert(half is 1.0)
+assert(whole is 10.0)
+[:identity float cast: 1|10]

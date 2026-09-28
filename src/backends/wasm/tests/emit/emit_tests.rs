@@ -3,8 +3,8 @@ use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{
-    WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerOperationOperands, WasmIntegerPowerScratch,
-    WasmIntegerScratch, WasmLirStmt, WasmLirTerminator,
+    WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerScratch,
+    WasmLirStmt, WasmLirTerminator, WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::linkage::{
     WasmExport, WasmExportKind, WasmFunctionLinkage, WasmImport, WasmImportKind,
@@ -28,7 +28,7 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
@@ -186,7 +186,7 @@ fn rejects_mismatched_checked_integer_operand_types() {
             dst: WasmLirLocalId(13),
             operator: NumericOperator::Add,
             kind: WasmIntegerOperationKind::Signed64,
-            operands: WasmIntegerOperationOperands::Binary {
+            operands: WasmNumericOperationOperands::Binary {
                 left: WasmLirLocalId(1),
                 right: WasmLirLocalId(3),
             },
@@ -224,7 +224,11 @@ fn checked_integer_machine_boundaries_execute_with_native_traps() {
     let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
         .expect("checked integer boundary module should emit");
     validate_wasm(&result.wasm_bytes);
-    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &case_names);
+    let export_specs = case_names
+        .iter()
+        .map(|name| (*name, None))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
     let expected = [
         ("u64_mul_zero", "ok", "0"),
         ("u64_mul_overflow", "trap", "unreachable"),
@@ -262,6 +266,583 @@ fn checked_integer_machine_boundaries_execute_with_native_traps() {
                 "{name} returned an unexpected result"
             );
         }
+    }
+}
+
+#[test]
+fn checked_float_machine_boundaries_execute_with_native_traps() {
+    let cases = [
+        checked_float_binary_case(
+            "f32_divide_zero",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Divide,
+            1.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f32_remainder_zero",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Remainder,
+            1.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f32_add_overflow",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Add,
+            f32::MAX as f64,
+            f32::MAX as f64,
+        ),
+        checked_float_binary_case(
+            "f32_subtract_overflow",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Subtract,
+            f32::MAX as f64,
+            -(f32::MAX as f64),
+        ),
+        checked_float_binary_case(
+            "f32_multiply_overflow",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Multiply,
+            f32::MAX as f64,
+            2.0,
+        ),
+        checked_float_binary_case(
+            "f32_power_overflow",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Power,
+            2.0,
+            128.0,
+        ),
+        checked_float_binary_case(
+            "f32_power_domain",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Power,
+            -2.0,
+            0.5,
+        ),
+        checked_float_unary_case(
+            "f32_negate_nan",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Negate,
+            f64::NAN,
+        ),
+        checked_float_binary_case(
+            "f64_divide_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Divide,
+            1.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f64_remainder_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            1.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f64_add_overflow",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Add,
+            f64::MAX,
+            f64::MAX,
+        ),
+        checked_float_binary_case(
+            "f64_subtract_overflow",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Subtract,
+            f64::MAX,
+            -f64::MAX,
+        ),
+        checked_float_binary_case(
+            "f64_multiply_overflow",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Multiply,
+            f64::MAX,
+            2.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_overflow",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            2.0,
+            1024.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_domain",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -2.0,
+            0.5,
+        ),
+        checked_float_unary_case(
+            "f64_negate_nan",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Negate,
+            f64::NAN,
+        ),
+    ];
+    let module = build_checked_float_operation_module(&cases);
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("checked float boundary module should emit");
+    validate_wasm(&result.wasm_bytes);
+    let export_specs = cases
+        .iter()
+        .map(|case| (case.name, Some(case.precision)))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+
+    assert_eq!(actual.len(), cases.len());
+    for ((actual_name, actual_status, actual_value), case) in actual.iter().zip(cases) {
+        assert_eq!(actual_name.as_str(), case.name);
+        assert_eq!(actual_status, "trap", "{} should trap", case.name);
+        assert!(
+            actual_value.contains("unreachable"),
+            "{} should trap through Wasm unreachable, found {actual_value:?}",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn checked_float_remainders_and_f32_arithmetic_return_exact_bits() {
+    let cases = [
+        checked_float_binary_case(
+            "f64_remainder_max_mod_3",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            f64::MAX,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_remainder_max_mod_min_subnormal",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            f64::MAX,
+            f64::from_bits(1),
+        ),
+        checked_float_binary_case(
+            "f64_remainder_negative_exact_is_negative_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            -6.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_remainder_subnormal",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            f64::from_bits(3),
+            f64::from_bits(2),
+        ),
+        checked_float_binary_case(
+            "f64_remainder_negative_divisor_larger_magnitude",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Remainder,
+            -0.5,
+            -2.0,
+        ),
+        checked_float_binary_case(
+            "f32_add_half_ulp_rounds_to_even",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Add,
+            1.0,
+            2.0_f64.powi(-24),
+        ),
+        checked_float_binary_case(
+            "f32_add_subnormals",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Add,
+            f32::from_bits(1) as f64,
+            f32::from_bits(1) as f64,
+        ),
+        checked_float_binary_case(
+            "f32_remainder_negative_exact_is_negative_zero",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Remainder,
+            -6.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f32_multiply_negative_zero",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Multiply,
+            -0.0,
+            2.0,
+        ),
+    ];
+    let expected = [
+        ("f64_remainder_max_mod_3", "4000000000000000"),
+        ("f64_remainder_max_mod_min_subnormal", "0000000000000000"),
+        (
+            "f64_remainder_negative_exact_is_negative_zero",
+            "8000000000000000",
+        ),
+        ("f64_remainder_subnormal", "0000000000000001"),
+        (
+            "f64_remainder_negative_divisor_larger_magnitude",
+            "bfe0000000000000",
+        ),
+        ("f32_add_half_ulp_rounds_to_even", "3f800000"),
+        ("f32_add_subnormals", "00000002"),
+        ("f32_remainder_negative_exact_is_negative_zero", "80000000"),
+        ("f32_multiply_negative_zero", "80000000"),
+    ];
+    let module = build_checked_float_operation_module(&cases);
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("checked float successful boundary module should emit");
+    validate_wasm(&result.wasm_bytes);
+    let export_specs = cases
+        .iter()
+        .map(|case| (case.name, Some(case.precision)))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+
+    assert_eq!(actual.len(), expected.len());
+    for ((actual_name, actual_status, actual_bits), (expected_name, expected_bits)) in
+        actual.iter().zip(expected)
+    {
+        assert_eq!(actual_name.as_str(), expected_name);
+        assert_eq!(actual_status, "ok", "{expected_name} should succeed");
+        assert_eq!(
+            actual_bits, expected_bits,
+            "{expected_name} returned unexpected float bits"
+        );
+    }
+}
+
+#[test]
+fn checked_float_power_boundaries_return_exact_bits_or_bounded_near_e() {
+    let cases = [
+        checked_float_binary_case(
+            "f64_power_two_to_min_subnormal",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            2.0,
+            -1074.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_negative_base_odd",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -2.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_negative_base_even",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -2.0,
+            4.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_zero_exponent",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            2.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_zero_to_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            0.0,
+            0.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_zero_base",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            0.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_negative_zero_odd",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -0.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_negative_zero_even",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -0.0,
+            2.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_huge_exponent_underflows_to_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            0.5,
+            f64::MAX,
+        ),
+        checked_float_binary_case(
+            "f64_power_huge_even_exponent_underflows_to_positive_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -0.5,
+            f64::MAX,
+        ),
+        checked_float_binary_case(
+            "f64_power_huge_odd_exponent_underflows_to_negative_zero",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            -0.5,
+            2049.0,
+        ),
+        checked_float_binary_case(
+            "f32_power_two_to_min_subnormal",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Power,
+            2.0,
+            -149.0,
+        ),
+        checked_float_binary_case(
+            "f32_power_negative_base_odd",
+            BinaryFloatPrecision::Binary32,
+            NumericOperator::Power,
+            -2.0,
+            3.0,
+        ),
+        checked_float_binary_case(
+            "f64_power_near_one_approaches_e",
+            BinaryFloatPrecision::Binary64,
+            NumericOperator::Power,
+            1.0 + 2.0_f64.powi(-52),
+            2.0_f64.powi(52),
+        ),
+    ];
+    let exact_expected = [
+        ("f64_power_two_to_min_subnormal", "0000000000000001"),
+        ("f64_power_negative_base_odd", "c020000000000000"),
+        ("f64_power_negative_base_even", "4030000000000000"),
+        ("f64_power_zero_exponent", "3ff0000000000000"),
+        ("f64_power_zero_to_zero", "3ff0000000000000"),
+        ("f64_power_zero_base", "0000000000000000"),
+        ("f64_power_negative_zero_odd", "8000000000000000"),
+        ("f64_power_negative_zero_even", "0000000000000000"),
+        (
+            "f64_power_huge_exponent_underflows_to_zero",
+            "0000000000000000",
+        ),
+        (
+            "f64_power_huge_even_exponent_underflows_to_positive_zero",
+            "0000000000000000",
+        ),
+        (
+            "f64_power_huge_odd_exponent_underflows_to_negative_zero",
+            "8000000000000000",
+        ),
+        ("f32_power_two_to_min_subnormal", "00000001"),
+        ("f32_power_negative_base_odd", "c1000000"),
+    ];
+    let module = build_checked_float_operation_module(&cases);
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("checked float power boundary module should emit");
+    validate_wasm(&result.wasm_bytes);
+    let export_specs = cases
+        .iter()
+        .map(|case| (case.name, Some(case.precision)))
+        .collect::<Vec<_>>();
+    let actual = execute_wasm_checked_exports_in_node(&result.wasm_bytes, &export_specs);
+
+    assert_eq!(actual.len(), cases.len());
+    for ((actual_name, actual_status, actual_bits), (expected_name, expected_bits)) in
+        actual.iter().zip(exact_expected)
+    {
+        assert_eq!(actual_name, expected_name);
+        assert_eq!(actual_status, "ok", "{expected_name} should succeed");
+        assert_eq!(
+            actual_bits, expected_bits,
+            "{expected_name} returned unexpected float bits"
+        );
+    }
+    let (actual_name, actual_status, actual_bits) = &actual[exact_expected.len()];
+    assert_eq!(actual_name.as_str(), "f64_power_near_one_approaches_e");
+    assert_eq!(actual_status, "ok");
+    let actual_near_e_bits =
+        u64::from_str_radix(actual_bits, 16).expect("near-e float bits should be hexadecimal");
+    let e_bits = std::f64::consts::E.to_bits();
+    // For h = 2^-52, (1 + h)^(1 / h) = e * (1 - h/2 + O(h^2)), less
+    // than one ULP from e. The emitted fdlibm helper is nearly, not
+    // universally, correctly rounded, so allow a bounded distance rather
+    // than pinning a host-libm result bitwise.
+    assert!(
+        actual_near_e_bits.abs_diff(e_bits) <= 4,
+        "near-one power was {actual_near_e_bits:016x}, more than four ULP from e ({e_bits:016x})"
+    );
+}
+
+#[test]
+fn checked_f64_power_matches_wasm_javascript_and_rust_bits() {
+    let mut cases = vec![
+        // Prior backend mismatches: a negative non-integer base with an even exponent and a
+        // near-one base raised to a large positive exponent.
+        (0xbff1_9999_9999_999a, 0x4010_0000_0000_0000),
+        (0x3ff0_0000_0000_0001, 0x4330_0000_0000_0000),
+        // Odd/even negative integer powers and signed-zero behavior.
+        (0xc000_0000_0000_0000, 0x4008_0000_0000_0000),
+        (0xc000_0000_0000_0000, 0x4010_0000_0000_0000),
+        (0x0000_0000_0000_0000, 0x4008_0000_0000_0000),
+        (0x8000_0000_0000_0000, 0x4008_0000_0000_0000),
+        (0x8000_0000_0000_0000, 0x4000_0000_0000_0000),
+        (0x4000_0000_0000_0000, (-0.0_f64).to_bits()),
+        // Subnormal input normalization and results, signed underflow, and finite near-overflow.
+        (0x4000_0000_0000_0000, (-1074.0_f64).to_bits()),
+        (0x0000_0000_0000_0001, 0.75_f64.to_bits()),
+        (0x000f_ffff_ffff_ffff, 0.75_f64.to_bits()),
+        (0xbfe0_0000_0000_0000, 2049.0_f64.to_bits()),
+        (0x3fff_ffff_ffff_ffff, 1024.0_f64.to_bits()),
+        (0xbfe0_0000_0000_0000, 1073.0_f64.to_bits()),
+        (0xbfe0_0000_0000_0000, 1074.0_f64.to_bits()),
+    ];
+
+    // Negative near-one bases keep finite results even for large integer exponents.
+    // These exercise the word-split parity cases on JS and the huge-exponent reduction.
+    let above_one = -(1.0_f64 + 2.0_f64.powi(-40));
+    let below_one = -(1.0_f64 - 2.0_f64.powi(-40));
+    let ulp_below_one = -(1.0_f64 - 2.0_f64.powi(-52));
+    cases.extend([
+        (above_one.to_bits(), 1_048_577.0_f64.to_bits()), // 2^20 + 1
+        (below_one.to_bits(), 4_294_967_297.0_f64.to_bits()), // 2^32 + 1
+        (below_one.to_bits(), 4_294_967_296.0_f64.to_bits()), // 2^32
+        (above_one.to_bits(), 2_147_483_649.0_f64.to_bits()), // 2^31 + 1
+        (
+            ulp_below_one.to_bits(),
+            9_007_199_254_740_994.0_f64.to_bits(),
+        ), // 2^53 + 2
+    ]);
+
+    // Keep a deterministic bounded matrix of positive fractional powers and negative integer
+    // powers. These values exercise varied exponents and significands while staying finite.
+    for base_index in 0..24 {
+        let base = 0.75 + base_index as f64 / 32.0;
+        for exponent in [-16.0_f64, -2.5, -1.0, 0.5, 3.0, 16.0] {
+            cases.push((base.to_bits(), exponent.to_bits()));
+        }
+    }
+    for base_index in 0..12 {
+        let base = -0.75 - base_index as f64 / 16.0;
+        for exponent in [-15.0_f64, -4.0, 3.0, 12.0] {
+            cases.push((base.to_bits(), exponent.to_bits()));
+        }
+    }
+
+    let function_id = WasmLirFunctionId(0);
+    let left = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let result_local = WasmLirLocalId(2);
+    let mut module = WasmLirModule::default();
+    module.functions.push(WasmLirFunction {
+        id: function_id,
+        debug_name: "checked_f64_power_parity".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![WasmAbiType::F64, WasmAbiType::F64],
+            results: vec![WasmAbiType::F64],
+        },
+        locals: vec![
+            WasmLirLocal {
+                id: left,
+                name: Some("base".to_owned()),
+                ty: WasmAbiType::F64,
+                role: WasmLocalRole::Param,
+            },
+            WasmLirLocal {
+                id: right,
+                name: Some("exponent".to_owned()),
+                ty: WasmAbiType::F64,
+                role: WasmLocalRole::Param,
+            },
+            local(result_local.0, WasmAbiType::F64, "power_result"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![WasmLirStmt::CheckedFloatOp {
+                dst: result_local,
+                operator: NumericOperator::Power,
+                precision: BinaryFloatPrecision::Binary64,
+                operands: WasmNumericOperationOperands::Binary { left, right },
+            }],
+            terminator: WasmLirTerminator::Return {
+                value: Some(result_local),
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    });
+    module.exports.push(WasmExport {
+        export_name: "checked_f64_power".to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    });
+
+    let emitted = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("dynamic checked F64 power module should emit");
+    validate_wasm(&emitted.wasm_bytes);
+
+    let node_cases = cases
+        .iter()
+        .map(|(left_bits, right_bits)| format!("[\"{left_bits:016x}\", \"{right_bits:016x}\"]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    const NODE_BODY: &str = r#"
+const floatPower = new Function(__FLOAT_POWER_SOURCE__ + "\nreturn __moth_float_power;")();
+const inputBits = new DataView(new ArrayBuffer(8));
+const outputBits = new DataView(new ArrayBuffer(8));
+const cases = [__POWER_CASES__];
+const bitsOf = value => {
+  if (!Number.isFinite(value)) {
+    throw new Error("expected a finite power result");
+  }
+  outputBits.setFloat64(0, value, true);
+  return outputBits.getBigUint64(0, true).toString(16).padStart(16, "0");
+};
+const results = cases.map(([leftBits, rightBits]) => {
+  inputBits.setBigUint64(0, BigInt(`0x${leftBits}`), true);
+  const left = inputBits.getFloat64(0, true);
+  inputBits.setBigUint64(0, BigInt(`0x${rightBits}`), true);
+  const right = inputBits.getFloat64(0, true);
+  const wasmResult = instance.exports.checked_f64_power(left, right);
+  const javascriptResult = floatPower(left, right);
+  return `${bitsOf(wasmResult)}|${bitsOf(javascriptResult)}`;
+});
+process.stdout.write(results.join("\n"));
+"#;
+    let node_body = NODE_BODY
+        .replace(
+            "__FLOAT_POWER_SOURCE__",
+            &format!("{:?}", include_str!("../../../js/runtime/float_power.js")),
+        )
+        .replace("__POWER_CASES__", &node_cases);
+    let output = run_wasm_node_script(&emitted.wasm_bytes, &node_body);
+    let output = String::from_utf8(output).expect("Node power parity output should be UTF-8");
+    let results = output.lines().collect::<Vec<_>>();
+    assert_eq!(results.len(), cases.len(), "Node should return every case");
+
+    for (index, ((left_bits, right_bits), result_line)) in cases.iter().zip(results).enumerate() {
+        let rust_result = crate::compiler_frontend::datatypes::numeric_power::pow(
+            f64::from_bits(*left_bits),
+            f64::from_bits(*right_bits),
+        );
+        assert!(
+            rust_result.is_finite(),
+            "case {index} (base={left_bits:016x}, exponent={right_bits:016x}) must be finite"
+        );
+        let expected_bits = format!("{:016x}", rust_result.to_bits());
+        let (wasm_bits, javascript_bits) = result_line
+            .split_once('|')
+            .expect("Node should return Wasm and JavaScript result bits");
+        assert_eq!(
+            wasm_bits,
+            expected_bits.as_str(),
+            "Wasm mismatch in case {index} (base={left_bits:016x}, exponent={right_bits:016x})"
+        );
+        assert_eq!(
+            javascript_bits,
+            expected_bits.as_str(),
+            "JavaScript mismatch in case {index} (base={left_bits:016x}, exponent={right_bits:016x})"
+        );
     }
 }
 
@@ -781,7 +1362,7 @@ fn build_manual_lir_module() -> WasmLirModule {
                     dst: WasmLirLocalId(13),
                     operator: NumericOperator::Add,
                     kind: WasmIntegerOperationKind::Signed64,
-                    operands: WasmIntegerOperationOperands::Binary {
+                    operands: WasmNumericOperationOperands::Binary {
                         left: WasmLirLocalId(1),
                         right: WasmLirLocalId(1),
                     },
@@ -790,16 +1371,11 @@ fn build_manual_lir_module() -> WasmLirModule {
                         power: None,
                     },
                 },
-                WasmLirStmt::FloatAdd {
-                    dst: WasmLirLocalId(14),
-                    lhs: WasmLirLocalId(3),
-                    rhs: WasmLirLocalId(3),
-                },
                 WasmLirStmt::CheckedIntegerOp {
                     dst: WasmLirLocalId(20),
                     operator: NumericOperator::Subtract,
                     kind: WasmIntegerOperationKind::Signed64,
-                    operands: WasmIntegerOperationOperands::Binary {
+                    operands: WasmNumericOperationOperands::Binary {
                         left: WasmLirLocalId(13),
                         right: WasmLirLocalId(1),
                     },
@@ -807,11 +1383,6 @@ fn build_manual_lir_module() -> WasmLirModule {
                         product: None,
                         power: None,
                     },
-                },
-                WasmLirStmt::FloatSub {
-                    dst: WasmLirLocalId(21),
-                    lhs: WasmLirLocalId(14),
-                    rhs: WasmLirLocalId(3),
                 },
                 WasmLirStmt::OrderedLt {
                     dst: WasmLirLocalId(15),
@@ -1054,7 +1625,7 @@ fn checked_integer_boundary_function(
         dst: operation_result,
         operator,
         kind,
-        operands: WasmIntegerOperationOperands::Binary { left, right },
+        operands: WasmNumericOperationOperands::Binary { left, right },
         scratch: WasmIntegerScratch {
             product: product_scratch,
             power: power_scratch,
@@ -1066,7 +1637,7 @@ fn checked_integer_boundary_function(
             dst: sum,
             operator: NumericOperator::Add,
             kind,
-            operands: WasmIntegerOperationOperands::Binary { left, right },
+            operands: WasmNumericOperationOperands::Binary { left, right },
             scratch: WasmIntegerScratch {
                 product: None,
                 power: None,
@@ -1096,6 +1667,133 @@ fn checked_integer_boundary_function(
     };
     let export = WasmExport {
         export_name: name.to_owned(),
+        kind: WasmExportKind::Function(function_id),
+    };
+    (function, export)
+}
+
+#[derive(Clone, Copy)]
+struct CheckedFloatOperationCase {
+    name: &'static str,
+    precision: BinaryFloatPrecision,
+    operator: NumericOperator,
+    left: f64,
+    right: Option<f64>,
+}
+
+fn checked_float_binary_case(
+    name: &'static str,
+    precision: BinaryFloatPrecision,
+    operator: NumericOperator,
+    left: f64,
+    right: f64,
+) -> CheckedFloatOperationCase {
+    CheckedFloatOperationCase {
+        name,
+        precision,
+        operator,
+        left,
+        right: Some(right),
+    }
+}
+
+fn checked_float_unary_case(
+    name: &'static str,
+    precision: BinaryFloatPrecision,
+    operator: NumericOperator,
+    value: f64,
+) -> CheckedFloatOperationCase {
+    CheckedFloatOperationCase {
+        name,
+        precision,
+        operator,
+        left: value,
+        right: None,
+    }
+}
+
+fn build_checked_float_operation_module(cases: &[CheckedFloatOperationCase]) -> WasmLirModule {
+    let mut module = WasmLirModule::default();
+    for (function_index, case) in cases.iter().enumerate() {
+        let function_id = WasmLirFunctionId(function_index as u32);
+        let (function, export) = checked_float_operation_function(function_id, case);
+        module.functions.push(function);
+        module.exports.push(export);
+    }
+    module
+}
+
+fn checked_float_operation_function(
+    function_id: WasmLirFunctionId,
+    case: &CheckedFloatOperationCase,
+) -> (WasmLirFunction, WasmExport) {
+    let left = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let result = WasmLirLocalId(2);
+    let (carrier, left_constant) = match case.precision {
+        BinaryFloatPrecision::Binary32 => (
+            WasmAbiType::F32,
+            WasmLirStmt::ConstF32 {
+                dst: left,
+                value: case.left as f32,
+            },
+        ),
+        BinaryFloatPrecision::Binary64 => (
+            WasmAbiType::F64,
+            WasmLirStmt::ConstF64 {
+                dst: left,
+                value: case.left,
+            },
+        ),
+        BinaryFloatPrecision::Binary16 => panic!("checked float cases require F32 or F64"),
+    };
+    let right_constant = case.right.map(|value| match case.precision {
+        BinaryFloatPrecision::Binary32 => WasmLirStmt::ConstF32 {
+            dst: right,
+            value: value as f32,
+        },
+        BinaryFloatPrecision::Binary64 => WasmLirStmt::ConstF64 { dst: right, value },
+        BinaryFloatPrecision::Binary16 => panic!("checked float cases require F32 or F64"),
+    });
+    let operands = if case.right.is_some() {
+        WasmNumericOperationOperands::Binary { left, right }
+    } else {
+        WasmNumericOperationOperands::Unary { operand: left }
+    };
+    let mut statements = vec![left_constant];
+    if let Some(right_constant) = right_constant {
+        statements.push(right_constant);
+    }
+    statements.push(WasmLirStmt::CheckedFloatOp {
+        dst: result,
+        operator: case.operator,
+        precision: case.precision,
+        operands,
+    });
+    let function = WasmLirFunction {
+        id: function_id,
+        debug_name: case.name.to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![carrier],
+        },
+        locals: vec![
+            local(left.0, carrier, "left"),
+            local(right.0, carrier, "right"),
+            local(result.0, carrier, "result"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements,
+            terminator: WasmLirTerminator::Return {
+                value: Some(result),
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: case.name.to_owned(),
         kind: WasmExportKind::Function(function_id),
     };
     (function, export)
@@ -1263,13 +1961,24 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
 
 fn execute_wasm_checked_exports_in_node(
     wasm_bytes: &[u8],
-    export_names: &[&str],
+    export_specs: &[(&str, Option<BinaryFloatPrecision>)],
 ) -> Vec<(String, String, String)> {
     const NODE_BODY: &str = r#"
 const results = [];
-for (const name of __EXPORT_NAMES__) {
+for (const [name, precision] of __EXPORT_SPECS__) {
   try {
-    results.push(`${name}|ok|${String(instance.exports[name]())}`);
+    const value = instance.exports[name]();
+    let rendered = String(value);
+    if (precision === "f32") {
+      const view = new DataView(new ArrayBuffer(4));
+      view.setFloat32(0, value, true);
+      rendered = view.getUint32(0, true).toString(16).padStart(8, "0");
+    } else if (precision === "f64") {
+      const view = new DataView(new ArrayBuffer(8));
+      view.setFloat64(0, value, true);
+      rendered = view.getBigUint64(0, true).toString(16).padStart(16, "0");
+    }
+    results.push(`${name}|ok|${rendered}`);
   } catch (error) {
     if (error !== null
         && typeof error === "object"
@@ -1282,15 +1991,25 @@ for (const name of __EXPORT_NAMES__) {
 }
 process.stdout.write(results.join("\n"));
 "#;
-    let export_names = export_names
+    let export_specs = export_specs
         .iter()
-        .map(|name| format!("{name:?}"))
+        .map(|(name, precision)| {
+            let precision = match precision {
+                Some(BinaryFloatPrecision::Binary32) => "\"f32\"",
+                Some(BinaryFloatPrecision::Binary64) => "\"f64\"",
+                Some(BinaryFloatPrecision::Binary16) => {
+                    panic!("checked float observations require F32 or F64")
+                }
+                None => "null",
+            };
+            format!("[{name:?}, {precision}]")
+        })
         .collect::<Vec<_>>()
         .join(", ");
-    let node_body = NODE_BODY.replace("__EXPORT_NAMES__", &format!("[{export_names}]"));
+    let node_body = NODE_BODY.replace("__EXPORT_SPECS__", &format!("[{export_specs}]"));
     let output = run_wasm_node_script(wasm_bytes, &node_body);
     String::from_utf8(output)
-        .expect("Node checked integer results should be UTF-8")
+        .expect("Node checked Wasm results should be UTF-8")
         .lines()
         .map(|line| {
             let mut parts = line.splitn(3, '|');

@@ -5,14 +5,14 @@ use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::hir_to_lir::expr::lower_expression;
 use crate::backends::wasm::hir_to_lir::imports::resolve_host_call_import;
 use crate::backends::wasm::lir::instructions::{
-    WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerOperationOperands, WasmIntegerPowerScratch,
-    WasmIntegerScratch, WasmLirStmt,
+    WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerScratch,
+    WasmLirStmt, WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::LocalId;
@@ -104,14 +104,27 @@ pub(crate) fn lower_statement(
             failure_mode,
             operands,
             result,
-        } => lower_checked_integer_operation(
-            context,
-            *op,
-            *failure_mode,
-            operands,
-            *result,
-            statements,
-        ),
+        } => {
+            if op.domain.is_integer() {
+                lower_checked_integer_operation(
+                    context,
+                    *op,
+                    *failure_mode,
+                    operands,
+                    *result,
+                    statements,
+                )
+            } else {
+                lower_checked_float_operation(
+                    context,
+                    *op,
+                    *failure_mode,
+                    operands,
+                    *result,
+                    statements,
+                )
+            }
+        }
         HirStatementKind::FormatFloat { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support Float formatting",
         )),
@@ -167,7 +180,7 @@ fn lower_checked_integer_operation(
     let lir_operands = match (op.operator, operands) {
         (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
             let lowered = lower_expression(context, operand, statements)?;
-            WasmIntegerOperationOperands::Unary {
+            WasmNumericOperationOperands::Unary {
                 operand: lowered.value,
             }
         }
@@ -182,7 +195,7 @@ fn lower_checked_integer_operation(
         ) => {
             let lowered_left = lower_expression(context, left, statements)?;
             let lowered_right = lower_expression(context, right, statements)?;
-            WasmIntegerOperationOperands::Binary {
+            WasmNumericOperationOperands::Binary {
                 left: lowered_left.value,
                 right: lowered_right.value,
             }
@@ -210,8 +223,8 @@ fn lower_checked_integer_operation(
     // Generated loop updates can reuse an operand's HIR local. Keep its old value available to
     // overflow checks, then commit the assignment only after the checked operation succeeds.
     let destination_aliases_source = match lir_operands {
-        WasmIntegerOperationOperands::Unary { operand } => destination == operand,
-        WasmIntegerOperationOperands::Binary { left, right } => {
+        WasmNumericOperationOperands::Unary { operand } => destination == operand,
+        WasmNumericOperationOperands::Binary { left, right } => {
             destination == left || destination == right
         }
     };
@@ -260,6 +273,111 @@ fn lower_checked_integer_operation(
             src: operation_destination,
         });
     }
+
+    Ok(())
+}
+
+fn lower_checked_float_operation(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: &HirNumericOperands,
+    result: LocalId,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), CompilerError> {
+    if failure_mode != NumericFailureMode::Trap || !op.domain.is_binary_float() {
+        return Err(lir_transformation_error(format!(
+            "Wasm lowering does not support checked float operation {op} in {failure_mode:?} mode"
+        )));
+    }
+
+    let profile = context.module_context.request.numeric_profile;
+    let precision = op
+        .domain
+        .binary_float_precision(profile)
+        .filter(|precision| {
+            matches!(
+                precision,
+                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+            )
+        })
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm checked float lowering does not support {} precision",
+                op.domain.name()
+            ))
+        })?;
+    let expected_type = op.domain.type_id(context.module_context.type_environment);
+
+    let lir_operands = match (op.operator, operands) {
+        (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
+            if operand.ty != expected_type {
+                return Err(lir_transformation_error(format!(
+                    "Wasm checked float operand has type {:?}, expected {}",
+                    operand.ty,
+                    op.domain.name()
+                )));
+            }
+            let lowered = lower_expression(context, operand, statements)?;
+            WasmNumericOperationOperands::Unary {
+                operand: lowered.value,
+            }
+        }
+        (
+            NumericOperator::Add
+            | NumericOperator::Subtract
+            | NumericOperator::Multiply
+            | NumericOperator::Divide
+            | NumericOperator::Remainder
+            | NumericOperator::Power,
+            HirNumericOperands::Binary { left, right },
+        ) => {
+            if left.ty != expected_type || right.ty != expected_type {
+                return Err(lir_transformation_error(format!(
+                    "Wasm checked float operands do not match {}",
+                    op.domain.name()
+                )));
+            }
+
+            // Linearise both operands in source order before emitting the checked operation.
+            let lowered_left = lower_expression(context, left, statements)?;
+            let lowered_right = lower_expression(context, right, statements)?;
+            WasmNumericOperationOperands::Binary {
+                left: lowered_left.value,
+                right: lowered_right.value,
+            }
+        }
+        _ => {
+            return Err(lir_transformation_error(format!(
+                "Wasm lowering received invalid float numeric operands for {op}"
+            )));
+        }
+    };
+
+    let Some(destination) = context.local_map.get(&result).copied() else {
+        return Err(lir_transformation_error(format!(
+            "Wasm lowering could not resolve float numeric result local {result:?}"
+        )));
+    };
+    let expected_carrier = match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+    };
+    if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
+        return Err(lir_transformation_error(format!(
+            "Wasm lowering expected float result carrier {expected_carrier:?}"
+        )));
+    }
+
+    // The emitter consumes all operand locals before storing the result, so in-place HIR updates
+    // need neither a copy nor a scratch local.
+    statements.push(WasmLirStmt::CheckedFloatOp {
+        dst: destination,
+        operator: op.operator,
+        precision,
+        operands: lir_operands,
+    });
 
     Ok(())
 }

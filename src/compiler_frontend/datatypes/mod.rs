@@ -18,6 +18,8 @@
 //! - `generic_identity_bridge.rs` — HIR/diagnostic bridge keys only.
 //! - `numeric_profile.rs` — the compiler-owned `NumericProfile` fixing `Int` width and
 //!   `Float` precision for one compilation boundary.
+//! - `numeric_power.rs` — portable binary64 power for compiler-owned constant folding; JS and
+//!   Wasm emit matching target-local implementations of the same algorithm.
 //!
 //! Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! Type compatibility POLICY does NOT belong here (see `type_coercion`).
@@ -33,6 +35,7 @@ pub mod generic_identity_bridge;
 pub mod generic_parameters;
 pub mod ids;
 pub(crate) mod numeric_operators;
+pub(crate) mod numeric_power;
 pub mod numeric_profile;
 pub(crate) mod numeric_scalar;
 pub mod parsed;

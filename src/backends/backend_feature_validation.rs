@@ -23,6 +23,7 @@ use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, TypeConstructor, TypeId,
 };
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::external_packages::{
@@ -106,8 +107,8 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm does not yet lower hashmaps, reactive runtime features, recoverable numeric
-            // failures, float operations, statement casts, or generic runtime values.
+            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
+            // statement casts, formatting/boundary validation, and generic runtime values.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -123,6 +124,7 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_checked_numeric_ops(
                 &reachability.reachable_numeric_ops,
                 input.target,
+                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_float_statements(
@@ -536,9 +538,8 @@ fn validate_wasm_reactive_features(
 
 /// Reports the first reachable runtime cast outside Wasm's infallible expression conversions.
 ///
-/// WHAT: accepts the existing profile-selected Int-to-Float cast and integer-to-integer
-///       conversions whose complete source range fits their target. Statement casts remain
-///       unsupported because their control-flow/result handling is not implemented.
+/// WHAT: accepts evidence-approved integer and F32/F64 expression conversions plus Byte/U8;
+///       F16, fallible pairs and statement casts remain gated.
 /// WHY: target validation consumes retained cast evidence before lowering, preserving authored
 ///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
@@ -572,35 +573,75 @@ fn wasm_supports_runtime_cast(
     }
 
     match runtime_cast.policy {
-        BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Int,
-            target: NumericScalar::Float,
-        } => true,
         BuiltinCastPolicyId::NumericConversion { source, target } => {
-            source != target
-                && source.is_integer()
-                && target.is_integer()
-                && numeric_conversion_fallibility(source, target, numeric_profile)
-                    == BuiltinCastFallibility::Infallible
+            wasm_supports_numeric_conversion(source, target, numeric_profile)
+        }
+        BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => true,
+        _ => false,
+    }
+}
+
+fn wasm_supports_numeric_conversion(
+    source: NumericScalar,
+    target: NumericScalar,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if source == target
+        || numeric_conversion_fallibility(source, target, numeric_profile)
+            != BuiltinCastFallibility::Infallible
+    {
+        return false;
+    }
+
+    if source.is_integer() && target.is_integer() {
+        return true;
+    }
+
+    if source.is_integer() && wasm_has_float_carrier(target, numeric_profile) {
+        return true;
+    }
+
+    match (
+        source.binary_float_precision(numeric_profile),
+        target.binary_float_precision(numeric_profile),
+    ) {
+        (Some(source_precision), Some(target_precision)) => {
+            matches!(
+                (source_precision, target_precision),
+                (
+                    BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64,
+                    BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+                )
+            ) && target_precision >= source_precision
         }
         _ => false,
     }
 }
 
-/// Reports the first reachable checked numeric operation outside Wasm's integer trap path.
+fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile) -> bool {
+    matches!(
+        domain.binary_float_precision(numeric_profile),
+        Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
+    )
+}
+
+/// Reports the first reachable checked numeric operation outside Wasm's trap-mode integer and
+/// binary32/binary64 paths.
 ///
-/// WHAT: integer operations in trap mode are supported. Float operations and `ReturnError`
-///       operations remain target-gated.
-/// WHY: lowerers receive only operations whose exact failure mode they can implement, and this
-///      gate uses the operation/domain facts retained by HIR reachability.
+/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError, F16 and
+///       integer-division-on-float operations remain target-gated.
+/// WHY: lowerers receive only operations whose exact failure mode and semantic precision they
+///      implement, using the operation/domain facts retained by HIR reachability.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(numeric_op) = numeric_ops.iter().find(|numeric_op| {
-        numeric_op.failure_mode != NumericFailureMode::Trap || !numeric_op.op.domain.is_integer()
-    }) else {
+    let Some(numeric_op) = numeric_ops
+        .iter()
+        .find(|numeric_op| !wasm_supports_checked_numeric_op(numeric_op, numeric_profile))
+    else {
         return Ok(());
     };
 
@@ -611,6 +652,24 @@ fn validate_wasm_checked_numeric_ops(
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+fn wasm_supports_checked_numeric_op(
+    numeric_op: &ReachableNumericOpUse,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if numeric_op.failure_mode != NumericFailureMode::Trap {
+        return false;
+    }
+
+    if numeric_op.op.domain.is_integer() {
+        return true;
+    }
+
+    matches!(
+        numeric_op.op.domain.binary_float_precision(numeric_profile),
+        Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
+    ) && numeric_op.op.operator != NumericOperator::IntegerDivide
 }
 
 /// Reports the first reachable Float formatting or validation statement for the Wasm target.

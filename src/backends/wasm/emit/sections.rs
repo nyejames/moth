@@ -11,6 +11,7 @@ use crate::backends::wasm::lir::types::{
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use rustc_hash::FxHashMap;
 use std::fmt::Write as _;
 
@@ -44,7 +45,7 @@ pub(crate) struct WasmEmitPlan {
     pub data_lengths: FxHashMap<WasmStaticDataId, u32>,
     /// First aligned address available for dynamic heap allocation.
     pub heap_base: u32,
-    /// `heap_top` mutable global index when runtime helpers are emitted.
+    /// `heap_top` mutable global index when memory runtime helpers are emitted.
     pub heap_top_global_index: Option<u32>,
 }
 
@@ -94,20 +95,31 @@ pub(crate) fn build_emit_plan(
         next_function_index += 1;
     }
 
-    let should_emit_helpers =
-        module_uses_runtime_helpers(module) || helper_exports_requested(request);
-    if should_emit_helpers {
-        // WHAT: helper ordering is fixed and independent of usage count.
-        // WHY: stable helper indices simplify wrapper exports and future host glue assumptions.
-        for helper in helper_emit_order() {
-            let signature = helper_signature(helper);
-            let type_index =
-                intern_signature(&signature, &mut type_entries, &mut type_index_by_signature);
-            helper_indices.insert(helper, next_function_index);
-            defined_function_order.push(DefinedFunctionKey::Helper(helper));
-            defined_function_type_indices.push(type_index);
-            next_function_index += 1;
+    let helper_requirements =
+        runtime_helper_requirements(module, helper_exports_requested(request));
+    let memory_helpers_needed = helper_requirements.memory;
+    let float_power_needed = helper_requirements.float_power;
+    let float_remainder_needed = helper_requirements.float_remainder;
+
+    // WHAT: helper ordering is fixed and independent of usage count.
+    // WHY: stable helper function indices simplify exports and debug output.
+    for helper in helper_emit_order() {
+        let helper_is_needed = match helper {
+            WasmRuntimeHelper::FloatPower => float_power_needed,
+            WasmRuntimeHelper::FloatRemainder => float_remainder_needed,
+            _ => memory_helpers_needed,
+        };
+        if !helper_is_needed {
+            continue;
         }
+
+        let signature = helper_signature(helper);
+        let type_index =
+            intern_signature(&signature, &mut type_entries, &mut type_index_by_signature);
+        helper_indices.insert(helper, next_function_index);
+        defined_function_order.push(DefinedFunctionKey::Helper(helper));
+        defined_function_type_indices.push(type_index);
+        next_function_index += 1;
     }
 
     let StaticDataLayoutResult {
@@ -115,7 +127,7 @@ pub(crate) fn build_emit_plan(
         data_lengths,
         heap_base,
     } = plan_static_data_layout(module)?;
-    let heap_top_global_index = should_emit_helpers.then_some(0);
+    let heap_top_global_index = memory_helpers_needed.then_some(0);
 
     Ok(WasmEmitPlan {
         type_entries,
@@ -132,7 +144,7 @@ pub(crate) fn build_emit_plan(
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 15] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 17] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -151,13 +163,19 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 15] {
         WasmRuntimeHelper::VecGet,
         WasmRuntimeHelper::Release,
         WasmRuntimeHelper::DropIfOwned,
+        WasmRuntimeHelper::FloatPower,
+        WasmRuntimeHelper::FloatRemainder,
     ]
 }
 
 pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
-    use WasmAbiType::{Handle, I32, I64};
+    use WasmAbiType::{F64, Handle, I32, I64};
 
     match helper {
+        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => WasmLirSignature {
+            params: vec![F64, F64],
+            results: vec![F64],
+        },
         WasmRuntimeHelper::Alloc => WasmLirSignature {
             params: vec![I32],
             results: vec![I32],
@@ -250,6 +268,8 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::VecGet => "rt_vec_get",
         WasmRuntimeHelper::Release => "rt_release",
         WasmRuntimeHelper::DropIfOwned => "rt_drop_if_owned",
+        WasmRuntimeHelper::FloatPower => "rt_float_power",
+        WasmRuntimeHelper::FloatRemainder => "rt_float_remainder",
     }
 }
 
@@ -359,32 +379,51 @@ pub(crate) fn plan_data_layout_text(module: &WasmLirModule, plan: &WasmEmitPlan)
     out
 }
 
-fn module_uses_runtime_helpers(module: &WasmLirModule) -> bool {
-    // WHAT: scan for statements that require synthesized runtime helper bodies.
-    // WHY: helper emission should be demand-driven so modules without helper operations stay lean.
+struct RuntimeHelperRequirements {
+    memory: bool,
+    float_power: bool,
+    float_remainder: bool,
+}
+
+fn runtime_helper_requirements(
+    module: &WasmLirModule,
+    memory_helpers_exported: bool,
+) -> RuntimeHelperRequirements {
+    let mut requirements = RuntimeHelperRequirements {
+        memory: memory_helpers_exported,
+        float_power: false,
+        float_remainder: false,
+    };
+
     for function in &module.functions {
         for block in &function.blocks {
             for statement in &block.statements {
-                if matches!(
-                    statement,
+                match statement {
                     WasmLirStmt::StringNewBuffer { .. }
-                        | WasmLirStmt::StringPushLiteral { .. }
-                        | WasmLirStmt::StringPushHandle { .. }
-                        | WasmLirStmt::StringFromI64 { .. }
-                        | WasmLirStmt::StringFinish { .. }
-                        | WasmLirStmt::StringEq { .. }
-                        | WasmLirStmt::StringNe { .. }
-                        | WasmLirStmt::VecNew { .. }
-                        | WasmLirStmt::VecPushHandle { .. }
-                        | WasmLirStmt::DropIfOwned { .. }
-                ) {
-                    return true;
+                    | WasmLirStmt::StringPushLiteral { .. }
+                    | WasmLirStmt::StringPushHandle { .. }
+                    | WasmLirStmt::StringFromI64 { .. }
+                    | WasmLirStmt::StringFinish { .. }
+                    | WasmLirStmt::StringEq { .. }
+                    | WasmLirStmt::StringNe { .. }
+                    | WasmLirStmt::VecNew { .. }
+                    | WasmLirStmt::VecPushHandle { .. }
+                    | WasmLirStmt::DropIfOwned { .. } => requirements.memory = true,
+                    WasmLirStmt::CheckedFloatOp {
+                        operator: NumericOperator::Power,
+                        ..
+                    } => requirements.float_power = true,
+                    WasmLirStmt::CheckedFloatOp {
+                        operator: NumericOperator::Remainder,
+                        ..
+                    } => requirements.float_remainder = true,
+                    _ => {}
                 }
             }
         }
     }
 
-    false
+    requirements
 }
 
 struct StaticDataLayoutResult {

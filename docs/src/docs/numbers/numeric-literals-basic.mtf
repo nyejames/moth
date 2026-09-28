@@ -44,6 +44,8 @@ whole, and a literal that does not fit its destination is rejected. Small values
 never infer a narrow type by size.
 
 **Current versus accepted.** The frontend materialises fixed-width and `Byte`
-literals with destination-aware range checks; their runtime values remain gated
-on JavaScript and Wasm. The `Number`/`NumberN` family is not implemented. See
-@../progress (Progress) for current support.
+literals with destination-aware range checks. HTML-JS executes fixed-width
+numeric and `Byte` runtime values. Experimental HTML-Wasm executes fixed
+integers, `Byte`, `F32` and `F64` values; `F16` remains gated. The
+`Number`/`NumberN` family is not implemented. See @../progress (Progress) for
+current support.

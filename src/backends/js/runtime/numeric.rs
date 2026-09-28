@@ -22,6 +22,10 @@ impl<'hir> JsEmitter<'hir> {
                 .and_then(JsNumericCarrier::float_precision)
                 .expect("Float always has a JavaScript binary-float carrier");
         self.emit_numeric_trap_helper();
+        if usage.binary_float_power {
+            self.emit_javascript_source(include_str!("float_power.js"));
+            self.emit_line("");
+        }
 
         if usage.number_integer_ops {
             self.emit_integer_helpers("int", false);
@@ -258,7 +262,7 @@ impl<'hir> JsEmitter<'hir> {
             ("mul", "a * b", false),
             ("div", "a / b", true),
             ("mod", "a % b", true),
-            ("pow", "Math.pow(a, b)", false),
+            ("pow", "__moth_float_power(a, b)", false),
         ] {
             self.emit_line(&format!("function __moth_{family}_{operation}(a, b) {{"));
             self.with_indent(|emitter| {

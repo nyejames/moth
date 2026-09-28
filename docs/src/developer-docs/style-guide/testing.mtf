@@ -612,10 +612,13 @@ precision reported by the case's builder for every backend block. Its exact acce
 default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
 
 `html_wasm` accepts all four profiles for its supported scalar paths. Paired backend blocks
-exercise values, comparisons, checked integer trap-mode arithmetic and infallible integer
-expression conversions. Recoverable numeric Error! paths, float arithmetic, F16, fixed-scalar
-aggregates and other casts retain their separate target gates. The infallible Int-to-Float
-expression conversion is also supported.
+exercise values, comparisons, checked integer and Float/F32/F64 trap-mode arithmetic and
+infallible numeric expression casts that do not involve `F16`, plus `Byte -> U8` and
+`U8 -> Byte`. Recoverable numeric `Error!` paths and other builtin runtime casts remain
+gated. Those casts include fallible conversions, defined conversions involving `Bool`,
+`Char`, `Error` or `String` (including `Char -> Int` and numeric parsing from or formatting
+to `String`), and statement-form casts. Fixed-scalar aggregates and external finite-value
+validation retain their separate target gates.
 
 - Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`

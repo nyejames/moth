@@ -1,0 +1,5 @@
+power_float |base F64, exponent F64| -> F64:
+    return base ^ exponent
+;
+
+result = power_float(-2.0, 0.5)

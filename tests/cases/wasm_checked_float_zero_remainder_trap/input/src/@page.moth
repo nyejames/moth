@@ -1,0 +1,5 @@
+remainder_float |dividend F64, divisor F64| -> F64:
+    return dividend % divisor
+;
+
+result = remainder_float(-5.5, 0.0)

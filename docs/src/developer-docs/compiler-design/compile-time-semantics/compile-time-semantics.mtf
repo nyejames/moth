@@ -139,11 +139,16 @@ Accepted ownership splits cleanly:
 - **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
 - compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
 
-The frontend/HIR now implements fixed-width and `Byte` literal typing,
-fixed-width operator semantics, casts and numeric constant folding; JavaScript
-and Wasm runtime values remain gated. The unified `Number`/`NumberN` family is
-not implemented. Keep this surface question separate from the ownership split
-above, which is accepted and stable regardless of how far coverage grows.
+The frontend/HIR implements fixed-width and `Byte` literal typing, fixed-width
+operator semantics, casts and numeric constant folding. HTML-JS executes
+fixed-width and `Byte` values. Experimental HTML-Wasm executes supported scalars
+with checked trap-mode arithmetic, infallible numeric expression casts that do not
+involve `F16`, and `Byte -> U8` and `U8 -> Byte`. Other builtin runtime casts remain
+gated, including fallible casts, defined conversions involving `Bool`, `Char`,
+`Error` or `String` (including `Char -> Int` and numeric parsing from or formatting
+to `String`), and statement-form casts. Recoverable numeric failure remains gated.
+The unified `Number`/`NumberN` family is not implemented. Keep implementation
+coverage separate from this accepted ownership split.
 
 ## What can fail here
 

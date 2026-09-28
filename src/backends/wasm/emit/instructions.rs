@@ -242,23 +242,52 @@ pub(crate) fn emit_statement(
                 function, *dst, *operator, *kind, *operands, *scratch, context,
             )?;
         }
-        WasmLirStmt::IntToFloat { dst, source } => {
-            // Convert directly at the selected precision; Int64 -> F32 must round only once.
-            let source_type = local_type(*source, context, "IntToFloat source")?;
-            let dst_type = local_type(*dst, context, "IntToFloat destination")?;
-            let conversion = match (source_type, dst_type) {
-                (WasmAbiType::I32, WasmAbiType::F32) => &Instruction::F32ConvertI32S,
-                (WasmAbiType::I64, WasmAbiType::F32) => &Instruction::F32ConvertI64S,
-                (WasmAbiType::I32, WasmAbiType::F64) => &Instruction::F64ConvertI32S,
-                (WasmAbiType::I64, WasmAbiType::F64) => &Instruction::F64ConvertI64S,
-                (source_type, dst_type) => {
+        WasmLirStmt::CheckedFloatOp {
+            dst,
+            operator,
+            precision,
+            operands,
+        } => {
+            super::checked_float::emit_checked_float_operation(
+                function, *dst, *operator, *precision, *operands, context, plan,
+            )?;
+        }
+        WasmLirStmt::IntegerToFloat {
+            dst,
+            source,
+            source_signed,
+        } => {
+            let source_type = local_type(*source, context, "IntegerToFloat source")?;
+            let dst_type = local_type(*dst, context, "IntegerToFloat destination")?;
+            let conversion = match (source_type, dst_type, source_signed) {
+                (WasmAbiType::I32, WasmAbiType::F32, true) => &Instruction::F32ConvertI32S,
+                (WasmAbiType::I32, WasmAbiType::F32, false) => &Instruction::F32ConvertI32U,
+                (WasmAbiType::I64, WasmAbiType::F32, true) => &Instruction::F32ConvertI64S,
+                (WasmAbiType::I64, WasmAbiType::F32, false) => &Instruction::F32ConvertI64U,
+                (WasmAbiType::I32, WasmAbiType::F64, true) => &Instruction::F64ConvertI32S,
+                (WasmAbiType::I32, WasmAbiType::F64, false) => &Instruction::F64ConvertI32U,
+                (WasmAbiType::I64, WasmAbiType::F64, true) => &Instruction::F64ConvertI64S,
+                (WasmAbiType::I64, WasmAbiType::F64, false) => &Instruction::F64ConvertI64U,
+                (source_type, dst_type, _) => {
                     return Err(wasm_generation_error(format!(
-                        "Wasm IntToFloat requires an integer source and float destination, found {source_type:?} -> {dst_type:?}"
+                        "Wasm IntegerToFloat requires an integer source and F32/F64 destination, found {source_type:?} -> {dst_type:?}"
                     )));
                 }
             };
             function.instruction(&Instruction::LocalGet(local_index(*source, context)?));
             function.instruction(conversion);
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
+        WasmLirStmt::FloatExtend { dst, source } => {
+            ensure_local_abi(*source, WasmAbiType::F32, context, "float extension source")?;
+            ensure_local_abi(
+                *dst,
+                WasmAbiType::F64,
+                context,
+                "float extension destination",
+            )?;
+            function.instruction(&Instruction::LocalGet(local_index(*source, context)?));
+            function.instruction(&Instruction::F64PromoteF32);
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::IntegerExtend {
@@ -285,58 +314,6 @@ pub(crate) fn emit_statement(
                 &Instruction::I64ExtendI32U
             });
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
-        }
-        WasmLirStmt::FloatAdd { dst, lhs, rhs } => {
-            emit_float_add(function, *lhs, *rhs, context)?;
-            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
-        }
-        WasmLirStmt::FloatSub { dst, lhs, rhs } => {
-            emit_float_sub(function, *lhs, *rhs, context)?;
-            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
-        }
-        WasmLirStmt::FloatMul { dst, lhs, rhs } => {
-            emit_float_mul(function, *lhs, *rhs, context)?;
-            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
-        }
-        WasmLirStmt::FloatDiv { dst, lhs, rhs } => {
-            emit_numeric_div(function, *lhs, *rhs, context)?;
-            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
-        }
-        WasmLirStmt::FloatMod { dst, lhs, rhs } => {
-            let dst_idx = local_index(*dst, context)?;
-            let lhs_idx = local_index(*lhs, context)?;
-            let rhs_idx = local_index(*rhs, context)?;
-            let lhs_type = local_type(*lhs, context, "lhs")?;
-
-            // Euclidean: a − b·floor(a/b) using the WASM value stack.
-            // Stack trace: [a][a][b] → [a][a/b] → [a][floor(a/b)][b] → [a][floor(a/b)·b] → [result]
-            function.instruction(&Instruction::LocalGet(lhs_idx));
-            function.instruction(&Instruction::LocalGet(lhs_idx));
-            function.instruction(&Instruction::LocalGet(rhs_idx));
-            match lhs_type {
-                WasmAbiType::F32 => {
-                    function.instruction(&Instruction::F32Div);
-                    function.instruction(&Instruction::F32Floor);
-                    function.instruction(&Instruction::LocalGet(rhs_idx));
-                    function.instruction(&Instruction::F32Mul);
-                    function.instruction(&Instruction::F32Sub);
-                }
-                WasmAbiType::F64 => {
-                    function.instruction(&Instruction::F64Div);
-                    function.instruction(&Instruction::F64Floor);
-                    function.instruction(&Instruction::LocalGet(rhs_idx));
-                    function.instruction(&Instruction::F64Mul);
-                    function.instruction(&Instruction::F64Sub);
-                }
-                other => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Wasm emission FloatMod requires F32 or F64 operands, found {other:?} in {:?}",
-                        context.function_id
-                    ))
-                    .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
-                }
-            }
-            function.instruction(&Instruction::LocalSet(dst_idx));
         }
         WasmLirStmt::LoadScalar {
             dst,
@@ -590,36 +567,6 @@ fn emit_string_compare(
         function.instruction(&Instruction::I32Eqz);
     }
 
-    Ok(())
-}
-
-fn emit_float_add(
-    function: &mut Function,
-    lhs: WasmLirLocalId,
-    rhs: WasmLirLocalId,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
-    let lhs_type = local_type(lhs, context, "FloatAdd lhs")?;
-    let rhs_type = local_type(rhs, context, "FloatAdd rhs")?;
-    if lhs_type != rhs_type {
-        return Err(wasm_generation_error(format!(
-            "Wasm FloatAdd operands have different ABI types: {lhs_type:?} and {rhs_type:?}"
-        )));
-    }
-
-    let opcode = match lhs_type {
-        WasmAbiType::F32 => &Instruction::F32Add,
-        WasmAbiType::F64 => &Instruction::F64Add,
-        _ => {
-            return Err(wasm_generation_error(format!(
-                "Wasm FloatAdd cannot lower ABI type {lhs_type:?}"
-            )));
-        }
-    };
-
-    function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
-    function.instruction(opcode);
     Ok(())
 }
 
@@ -1063,104 +1010,6 @@ pub(super) fn wasm_generation_error(message: String) -> CompilerError {
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
 }
 
-fn emit_float_sub(
-    function: &mut Function,
-    lhs: WasmLirLocalId,
-    rhs: WasmLirLocalId,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
-    let lhs_type = local_type(lhs, context, "FloatSub lhs")?;
-    let rhs_type = local_type(rhs, context, "FloatSub rhs")?;
-    if lhs_type != rhs_type {
-        return Err(wasm_generation_error(format!(
-            "Wasm FloatSub operands have different ABI types: {lhs_type:?} and {rhs_type:?}"
-        )));
-    }
-
-    let opcode = match lhs_type {
-        WasmAbiType::F32 => &Instruction::F32Sub,
-        WasmAbiType::F64 => &Instruction::F64Sub,
-        _ => {
-            return Err(wasm_generation_error(format!(
-                "Wasm FloatSub cannot lower ABI type {lhs_type:?}"
-            )));
-        }
-    };
-
-    function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
-    function.instruction(opcode);
-    Ok(())
-}
-
-fn emit_float_mul(
-    function: &mut Function,
-    lhs: WasmLirLocalId,
-    rhs: WasmLirLocalId,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
-    let lhs_type = local_type(lhs, context, "FloatMul lhs")?;
-    let rhs_type = local_type(rhs, context, "FloatMul rhs")?;
-    if lhs_type != rhs_type {
-        return Err(wasm_generation_error(format!(
-            "Wasm FloatMul operands have different ABI types: {lhs_type:?} and {rhs_type:?}"
-        )));
-    }
-
-    let opcode = match lhs_type {
-        WasmAbiType::F32 => &Instruction::F32Mul,
-        WasmAbiType::F64 => &Instruction::F64Mul,
-        _ => {
-            return Err(wasm_generation_error(format!(
-                "Wasm FloatMul cannot lower ABI type {lhs_type:?}"
-            )));
-        }
-    };
-
-    function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
-    function.instruction(opcode);
-    Ok(())
-}
-
-fn emit_numeric_div(
-    function: &mut Function,
-    lhs: WasmLirLocalId,
-    rhs: WasmLirLocalId,
-    context: &LirBodyEmitContext<'_>,
-) -> Result<(), CompilerError> {
-    function.instruction(&Instruction::LocalGet(local_index(lhs, context)?));
-    function.instruction(&Instruction::LocalGet(local_index(rhs, context)?));
-
-    let lhs_type = local_type(lhs, context, "lhs")?;
-    let rhs_type = local_type(rhs, context, "rhs")?;
-    if lhs_type != rhs_type {
-        return Err(CompilerError::compiler_error(format!(
-            "Wasm emission type mismatch in float div: lhs {:?} is {:?}, rhs {:?} is {:?} in {:?}",
-            lhs, lhs_type, rhs, rhs_type, context.function_id
-        ))
-        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
-    }
-
-    match lhs_type {
-        WasmAbiType::F32 => {
-            function.instruction(&Instruction::F32Div);
-        }
-        WasmAbiType::F64 => {
-            function.instruction(&Instruction::F64Div);
-        }
-        _ => {
-            return Err(CompilerError::compiler_error(format!(
-                "Wasm emission cannot lower FloatDiv for ABI type {:?} in function {:?}",
-                lhs_type, context.function_id
-            ))
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
-        }
-    }
-
-    Ok(())
-}
-
 pub(super) fn local_type(
     local_id: WasmLirLocalId,
     context: &LirBodyEmitContext<'_>,
@@ -1198,7 +1047,10 @@ pub(super) fn local_index(
         })
 }
 
-fn helper_index(plan: &WasmEmitPlan, helper: WasmRuntimeHelper) -> Result<u32, CompilerError> {
+pub(super) fn helper_index(
+    plan: &WasmEmitPlan,
+    helper: WasmRuntimeHelper,
+) -> Result<u32, CompilerError> {
     // WHAT: resolve synthesized helper to its planned function index.
     // WHY: helper calls are encoded as direct calls and must match plan indices exactly.
     plan.helper_indices.get(&helper).copied().ok_or_else(|| {

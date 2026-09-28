@@ -1,12 +1,15 @@
 //! LIR -> Wasm emission subsystem.
 //!
 //! This layer owns binary encoding only. It does not reinterpret frontend semantics.
-//! `instructions` dispatches LIR statements; `checked_integer` implements integer overflow,
-//! division and power checks without changing their resolved operation domains.
+//! `instructions` dispatches LIR statements; `checked_integer` and `checked_float` enforce the
+//! resolved numeric domains. Portable power and remainder helpers use only core Wasm instructions.
 
+mod checked_float;
 mod checked_integer;
 pub(crate) mod data;
 pub(crate) mod exports;
+mod float_power;
+mod float_remainder;
 pub(crate) mod functions;
 pub(crate) mod helpers;
 pub(crate) mod imports;

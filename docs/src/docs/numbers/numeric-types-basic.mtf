@@ -31,9 +31,14 @@ default profile is `Int32` with `Float64`.
 and needs an explicit conversion to `U8` before any arithmetic. A `{Byte}` is an
 ordinary collection rather than a special buffer or text type.
 
-**Current versus accepted.** The Alpha compiler implements `Int` and `Float` at
-the default runtime profile. The frontend also materialises fixed-width and
-`Byte` literals, types fixed-width operators and casts, and folds numeric
-operators and casts; JavaScript and Wasm runtime values remain gated. The
-`Number`/`NumberN` family is not implemented. See @../progress (Progress) for
-current support.
+**Current versus accepted.** The Alpha compiler supports all four `Int`/`Float`
+runtime profiles, destination-aware fixed-width and `Byte` literals, typed
+fixed-width operators and casts, and folded numeric operations. HTML-JS
+executes fixed-width and `Byte` values; experimental HTML-Wasm executes fixed
+integers, `Byte`, `F32` and `F64` with checked trap-mode arithmetic, infallible
+numeric expression casts that do not involve `F16`, plus `Byte -> U8` and
+`U8 -> Byte`. Other builtin runtime casts remain gated, including fallible casts,
+defined conversions involving `Bool`, `Char`, `Error` or `String` (including
+`Char -> Int` and numeric parsing from or formatting to `String`), and
+statement-form casts. Recoverable numeric errors remain gated. The `Number`/`NumberN`
+family is not implemented. See @../progress (Progress) for current support.

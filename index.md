@@ -74,6 +74,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
 - [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
+    - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.
 - [value_mode.rs](src/compiler_frontend/value_mode.rs): access modes (frontend root, shared by coercion and lowering).
 - [traits](src/compiler_frontend/traits/): trait definitions, evidence, syntax helpers.
@@ -156,12 +157,16 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [JS backend](src/backends/js/): HIR → JS. kw — readable JS, GC baseline, reachable emission.
     - [emitter.rs](src/backends/js/emitter.rs), [js_expr.rs](src/backends/js/js_expr.rs), [js_statement.rs](src/backends/js/js_statement.rs), [js_function.rs](src/backends/js/js_function.rs), [js_calls.rs](src/backends/js/js_calls.rs), [output.rs](src/backends/js/output.rs), [reachability.rs](src/backends/js/reachability.rs)
     - [runtime](src/backends/js/runtime/): helpers for strings/maps/casts.
+        - [float_power.js](src/backends/js/runtime/float_power.js): demand-emitted fdlibm binary64 power shared by checked Float32/Float64 operations.
 - [Wasm backend](src/backends/wasm/): experimental core Wasm. kw — HIR→LIR, linear memory, emit.
     - [backend.rs](src/backends/wasm/backend.rs): Wasm backend driver and request handling.
     - [hir_to_lir](src/backends/wasm/hir_to_lir/): semantic lowering to Wasm LIR.
     - [lir](src/backends/wasm/lir/): Wasm-neutral low IR.
     - [emit](src/backends/wasm/emit/): binary emission/sections/validation.
         - [checked_integer.rs](src/backends/wasm/emit/checked_integer.rs): checked integer trap emission, exact overflow checks and full-width power.
+        - [checked_float.rs](src/backends/wasm/emit/checked_float.rs): precision-specific float arithmetic, zero-divisor checks and finite-result traps.
+        - [float_power.rs](src/backends/wasm/emit/float_power.rs): portable binary64 power helper using fdlibm high/low arithmetic.
+        - [float_remainder.rs](src/backends/wasm/emit/float_remainder.rs): exact dividend-sign binary64 remainder using integer significands.
     - [runtime](src/backends/wasm/runtime/): imports/memory/strings.
 - [HTML-Wasm artifact plan](src/projects/html_project/wasm/): bootstrap/export roots.
 

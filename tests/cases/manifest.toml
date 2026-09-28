@@ -13230,6 +13230,41 @@ contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
 role = "backend"
 
 [[case]]
+id = "wasm_checked_float_runtime"
+path = "wasm_checked_float_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "cast", "html-wasm"]
+contract = "backend.html_wasm.checked_float_operations_and_infallible_numeric_casts"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_zero_division_trap"
+path = "wasm_checked_float_zero_division_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_zero_division_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_zero_remainder_trap"
+path = "wasm_checked_float_zero_remainder_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_zero_remainder_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_nonfinite_trap"
+path = "wasm_checked_float_nonfinite_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_nonfinite_arithmetic_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_power_domain_trap"
+path = "wasm_checked_float_power_domain_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_power_domain_trap"
+role = "backend"
+
+[[case]]
 id = "numeric_profile_int64_float32_fixed_width_mix"
 path = "numeric_profile_int64_float32_fixed_width_mix"
 tags = ["integration", "numeric", "runtime", "numeric-profile", "fixed-width"]

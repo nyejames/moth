@@ -18,7 +18,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
@@ -48,111 +48,225 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
-fn wasm_feature_validation_allows_expression_int_to_float_cast() {
+fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = module_returning_cast_expression(int_cast_expression(
-        0,
-        BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Int,
-            target: NumericScalar::Float,
-        },
-        builtin_type_ids::FLOAT,
-    ));
-    let reachability = test_reachability(&module);
-    let result = validate_hir_backend_feature_support(
-        BackendFeatureValidationInput {
-            hir: &module,
-            reachability: &reachability,
-            target: BackendTarget::Wasm,
-            type_environment: Some(&type_environment),
-            numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
-        },
-        &mut string_table,
-    );
+    let int32_float32 = NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits32,
+    };
+    let int32_float64 = NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let int64_float32 = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits32,
+    };
+    let int64_float64 = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let int32_scalar = NumericScalar::Int;
+    let float_scalar = NumericScalar::Float;
+    let i32_scalar = NumericScalar::Fixed(FixedScalar::I32);
+    let u32_scalar = NumericScalar::Fixed(FixedScalar::U32);
+    let i64_scalar = NumericScalar::Fixed(FixedScalar::I64);
+    let u64_scalar = NumericScalar::Fixed(FixedScalar::U64);
+    let f16_scalar = NumericScalar::Fixed(FixedScalar::F16);
+    let f32_scalar = NumericScalar::Fixed(FixedScalar::F32);
+    let f64_scalar = NumericScalar::Fixed(FixedScalar::F64);
+    let runtime_cast_rejection = Some(UnsupportedBackendFeatureReason::RuntimeCasts);
+    let f16_rejection = Some(UnsupportedBackendFeatureReason::FixedWidthScalarValues);
 
-    assert!(
-        result.is_ok(),
-        "Wasm should allow the infallible Int-to-Float expression cast"
-    );
-}
+    let cases = [
+        // Signed and unsigned integer carriers convert directly to F32 and F64.
+        (int32_float32, i32_scalar, f32_scalar, None),
+        (int32_float32, u32_scalar, f32_scalar, None),
+        (int64_float32, i64_scalar, f32_scalar, None),
+        (int64_float32, u64_scalar, f32_scalar, None),
+        (int32_float64, i32_scalar, f64_scalar, None),
+        (int32_float64, u32_scalar, f64_scalar, None),
+        (int64_float64, i64_scalar, f64_scalar, None),
+        (int64_float64, u64_scalar, f64_scalar, None),
+        (int32_float32, int32_scalar, float_scalar, None),
+        (int64_float64, int32_scalar, float_scalar, None),
+        (int32_float32, f32_scalar, f64_scalar, None),
+        // Nominal Float casts are infallible at equal precision.
+        (int32_float32, f32_scalar, float_scalar, None),
+        (int32_float32, float_scalar, f32_scalar, None),
+        (int64_float64, f64_scalar, float_scalar, None),
+        (int64_float64, float_scalar, f64_scalar, None),
+        // Profile-selected Float may widen to fixed precision, never narrow.
+        (int32_float32, float_scalar, f64_scalar, None),
+        (int64_float64, f32_scalar, float_scalar, None),
+        (
+            int32_float32,
+            f64_scalar,
+            float_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            float_scalar,
+            f32_scalar,
+            runtime_cast_rejection,
+        ),
+        // Int-to-I32 depends on the selected Int width.
+        (int32_float64, int32_scalar, i32_scalar, None),
+        (
+            int64_float64,
+            int32_scalar,
+            i32_scalar,
+            runtime_cast_rejection,
+        ),
+        // Narrowing, float-to-int and same-type casts remain rejected.
+        (
+            int64_float64,
+            i64_scalar,
+            i32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            u64_scalar,
+            u32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            f64_scalar,
+            f32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            f32_scalar,
+            i32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            i32_scalar,
+            i32_scalar,
+            runtime_cast_rejection,
+        ),
+        // F16 values remain outside this checkpoint in either direction.
+        (int32_float32, f16_scalar, f32_scalar, f16_rejection),
+        (int32_float32, f32_scalar, f16_scalar, f16_rejection),
+    ];
 
-#[test]
-fn wasm_feature_validation_uses_profile_range_for_integer_expression_casts() {
-    let mut string_table = StringTable::new();
-    let type_environment = TypeEnvironment::new();
-    let module = module_returning_cast_expression(int_cast_expression(
-        0,
-        BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Int,
-            target: NumericScalar::Fixed(FixedScalar::I32),
-        },
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-    ));
-    let reachability = test_reachability(&module);
-
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+    for (profile, source, target, expected_rejection) in cases {
+        let module = module_returning_cast_expression(numeric_cast_expression(0, source, target));
+        let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
                 hir: &module,
                 reachability: &reachability,
                 target: BackendTarget::Wasm,
                 type_environment: Some(&type_environment),
-                numeric_profile: NumericProfile {
-                    int_width,
-                    float_precision: FloatPrecision::Bits64,
-                },
+                numeric_profile: profile,
                 external_package_registry: None,
             },
             &mut string_table,
         );
 
-        match (int_width, result) {
-            (IntWidth::Bits32, Ok(())) => {}
-            (IntWidth::Bits64, Err(BackendFeatureValidationError::Diagnostic(diagnostic))) => {
-                assert_unsupported_feature(
-                    &diagnostic,
-                    &mut string_table,
-                    UnsupportedBackendFeatureReason::RuntimeCasts,
-                );
+        match (expected_rejection, result) {
+            (None, Ok(())) => {}
+            (None, Err(BackendFeatureValidationError::Diagnostic(_))) => {
+                panic!("Wasm unexpectedly rejected {source:?} -> {target:?} in {profile:?}")
             }
-            _ => panic!("Integer conversion gate disagrees with the {int_width:?} source range"),
+            (None, Err(BackendFeatureValidationError::Infrastructure(error))) => {
+                panic!("cast gate returned an infrastructure error: {error:?}")
+            }
+            (Some(reason), Err(BackendFeatureValidationError::Diagnostic(diagnostic))) => {
+                assert_unsupported_feature(&diagnostic, &mut string_table, reason);
+            }
+            (Some(reason), Ok(())) => {
+                panic!(
+                    "Wasm unexpectedly allowed {source:?} -> {target:?} in {profile:?}; expected {reason:?}"
+                )
+            }
+            (Some(_), Err(BackendFeatureValidationError::Infrastructure(error))) => {
+                panic!("cast gate returned an infrastructure error: {error:?}")
+            }
         }
     }
 }
 
 #[test]
-fn wasm_feature_validation_rejects_other_expression_cast_policies() {
+fn wasm_feature_validation_keeps_numeric_to_string_casts_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let unsupported_casts = [
-        (
-            BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Int,
-                target: NumericScalar::Fixed(FixedScalar::F32),
-            },
-            builtin_type_ids::fixed_scalar(FixedScalar::F32),
-        ),
-        (
-            BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
-            builtin_type_ids::STRING,
-        ),
-    ];
+    let domain = NumericScalar::Fixed(FixedScalar::I32);
+    let module = module_returning_cast_expression(HirExpression {
+        id: HirValueId(0),
+        kind: HirExpressionKind::Cast {
+            source: Box::new(numeric_scalar_expression(1, domain)),
+            policy: BuiltinCastPolicyId::NumericToString(domain),
+        },
+        ty: builtin_type_ids::STRING,
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
+        span: None,
+    });
 
-    for (policy, target_type) in unsupported_casts {
-        let module = module_returning_cast_expression(int_cast_expression(0, policy, target_type));
-        let diagnostic = wasm_feature_validation_diagnostic(
-            &module,
-            &type_environment,
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should keep NumericToString casts gated",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RuntimeCasts,
+    );
+}
+
+#[test]
+fn wasm_feature_validation_allows_byte_u8_expression_casts() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    for (source_scalar, target_scalar, policy) in [
+        (
+            FixedScalar::Byte,
+            FixedScalar::U8,
+            BuiltinCastPolicyId::ByteToU8,
+        ),
+        (
+            FixedScalar::U8,
+            FixedScalar::Byte,
+            BuiltinCastPolicyId::U8ToByte,
+        ),
+    ] {
+        let module = module_returning_cast_expression(HirExpression {
+            id: HirValueId(0),
+            kind: HirExpressionKind::Cast {
+                source: Box::new(fixed_scalar_expression(1, source_scalar)),
+                policy,
+            },
+            ty: builtin_type_ids::fixed_scalar(target_scalar),
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        });
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+                external_package_registry: None,
+            },
             &mut string_table,
-            "Wasm should reject unsupported expression casts",
         );
 
-        assert_unsupported_feature(
-            &diagnostic,
-            &mut string_table,
-            UnsupportedBackendFeatureReason::RuntimeCasts,
+        assert!(
+            result.is_ok(),
+            "Wasm should allow {source_scalar:?} -> {target_scalar:?}"
         );
     }
 }
@@ -302,39 +416,115 @@ fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
 }
 
 #[test]
-fn wasm_feature_validation_rejects_reachable_return_error_integer_numeric_op() {
+fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
-        FunctionId(0),
-        vec![function(FunctionId(0), BlockId(0))],
-        vec![block(
-            BlockId(0),
-            vec![numeric_op_statement_with_failure(
-                10,
-                int_add_op(),
-                None,
-                NumericFailureMode::ReturnError,
-            )],
-            HirTerminator::Return(unit_expression(0)),
-        )],
-    );
+    let domains = [
+        NumericScalar::Int,
+        NumericScalar::Float,
+        NumericScalar::Fixed(FixedScalar::F32),
+        NumericScalar::Fixed(FixedScalar::F64),
+    ];
 
-    let diagnostic = wasm_feature_validation_diagnostic(
-        &module,
-        &type_environment,
-        &mut string_table,
-        "Wasm validation should reject recoverable checked numeric operations",
-    );
-    assert_unsupported_feature(
-        &diagnostic,
-        &mut string_table,
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
-    );
+    for (index, domain) in domains.into_iter().enumerate() {
+        let module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![block(
+                BlockId(0),
+                vec![numeric_op_statement_with_failure(
+                    10,
+                    HirNumericOp {
+                        operator: NumericOperator::Add,
+                        domain,
+                    },
+                    None,
+                    NumericFailureMode::ReturnError,
+                )],
+                HirTerminator::Return(unit_expression(index as u32)),
+            )],
+        );
+
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm validation should reject recoverable checked numeric operations",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        );
+    }
 }
 
 #[test]
-fn wasm_feature_validation_rejects_reachable_trap_float_numeric_op() {
+fn wasm_feature_validation_allows_trap_float_operations_without_f16() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let domains = [
+        NumericScalar::Float,
+        NumericScalar::Fixed(FixedScalar::F32),
+        NumericScalar::Fixed(FixedScalar::F64),
+    ];
+    let operators = [
+        NumericOperator::Add,
+        NumericOperator::Subtract,
+        NumericOperator::Multiply,
+        NumericOperator::Divide,
+        NumericOperator::Remainder,
+        NumericOperator::Power,
+        NumericOperator::Negate,
+    ];
+    let profiles = [
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile::STANDARD,
+    ];
+
+    for profile in profiles {
+        for domain in domains {
+            for operator in operators {
+                let module = hir_module(
+                    FunctionId(0),
+                    vec![function(FunctionId(0), BlockId(0))],
+                    vec![block(
+                        BlockId(0),
+                        vec![numeric_op_statement(
+                            10,
+                            HirNumericOp { operator, domain },
+                            None,
+                        )],
+                        HirTerminator::Return(unit_expression(0)),
+                    )],
+                );
+                let reachability = test_reachability(&module);
+                let result = validate_hir_backend_feature_support(
+                    BackendFeatureValidationInput {
+                        hir: &module,
+                        reachability: &reachability,
+                        target: BackendTarget::Wasm,
+                        type_environment: Some(&type_environment),
+                        numeric_profile: profile,
+                        external_package_registry: None,
+                    },
+                    &mut string_table,
+                );
+
+                assert!(
+                    result.is_ok(),
+                    "Wasm should allow trap-mode {operator:?} in {domain:?} under {profile:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -346,7 +536,7 @@ fn wasm_feature_validation_rejects_reachable_trap_float_numeric_op() {
                 10,
                 HirNumericOp {
                     operator: NumericOperator::Add,
-                    domain: NumericScalar::Float,
+                    domain: NumericScalar::Fixed(FixedScalar::F16),
                 },
                 None,
             )],
@@ -358,7 +548,41 @@ fn wasm_feature_validation_rejects_reachable_trap_float_numeric_op() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm validation should keep trap-mode float arithmetic gated",
+        "Wasm should keep F16 arithmetic gated",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_integer_division_on_float_domains() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![numeric_op_statement(
+                10,
+                HirNumericOp {
+                    operator: NumericOperator::IntegerDivide,
+                    domain: NumericScalar::Fixed(FixedScalar::F32),
+                },
+                None,
+            )],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should reject integer division in a float domain",
     );
     assert_unsupported_feature(
         &diagnostic,
@@ -1323,46 +1547,104 @@ fn numeric_op_statement_with_failure(
     span: Option<SourceSpan>,
     failure_mode: NumericFailureMode,
 ) -> HirStatement {
-    let (left_kind, right_kind, ty) = match op.domain {
-        NumericScalar::Int => (
-            HirExpressionKind::Int(1),
-            HirExpressionKind::Int(2),
-            builtin_type_ids::INT,
-        ),
-        NumericScalar::Float => (
-            HirExpressionKind::Float(1.0),
-            HirExpressionKind::Float(2.0),
-            builtin_type_ids::FLOAT,
-        ),
-        domain => panic!("numeric operation test helper does not support {domain:?}"),
+    let left = numeric_scalar_expression(id + 100, op.domain);
+    let operands = if op.operator.is_unary() {
+        HirNumericOperands::Unary { operand: left }
+    } else {
+        HirNumericOperands::Binary {
+            left,
+            right: numeric_scalar_expression(id + 101, op.domain),
+        }
     };
-    let left = HirExpression {
-        id: HirValueId(id + 100),
-        kind: left_kind,
-        ty,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    };
-    let right = HirExpression {
-        id: HirValueId(id + 101),
-        kind: right_kind,
-        ty,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    };
-    let result = LocalId(9000);
 
     HirStatement {
         id: HirNodeId(id),
         kind: HirStatementKind::NumericOp {
             op,
             failure_mode,
-            operands: HirNumericOperands::Binary { left, right },
-            result,
+            operands,
+            result: LocalId(9000),
         },
         span,
+    }
+}
+
+fn numeric_scalar_expression(id: u32, domain: NumericScalar) -> HirExpression {
+    let (kind, ty) = match domain {
+        NumericScalar::Int => (HirExpressionKind::Int(1), builtin_type_ids::INT),
+        NumericScalar::Float => (HirExpressionKind::Float(1.5), builtin_type_ids::FLOAT),
+        NumericScalar::Fixed(scalar) => (
+            HirExpressionKind::FixedScalar(fixed_scalar_value(scalar)),
+            builtin_type_ids::fixed_scalar(scalar),
+        ),
+    };
+
+    HirExpression {
+        id: HirValueId(id),
+        kind,
+        ty,
+        value_kind: ValueKind::Const,
+        region: RegionId(0),
+        span: None,
+    }
+}
+
+fn numeric_cast_expression(
+    id: u32,
+    source_domain: NumericScalar,
+    target_domain: NumericScalar,
+) -> HirExpression {
+    HirExpression {
+        id: HirValueId(id),
+        kind: HirExpressionKind::Cast {
+            source: Box::new(numeric_scalar_expression(id + 1, source_domain)),
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: source_domain,
+                target: target_domain,
+            },
+        },
+        ty: numeric_scalar_type_id(target_domain),
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
+        span: None,
+    }
+}
+
+fn numeric_scalar_type_id(domain: NumericScalar) -> TypeId {
+    match domain {
+        NumericScalar::Int => builtin_type_ids::INT,
+        NumericScalar::Float => builtin_type_ids::FLOAT,
+        NumericScalar::Fixed(scalar) => builtin_type_ids::fixed_scalar(scalar),
+    }
+}
+
+fn fixed_scalar_expression(id: u32, scalar: FixedScalar) -> HirExpression {
+    HirExpression {
+        id: HirValueId(id),
+        kind: HirExpressionKind::FixedScalar(fixed_scalar_value(scalar)),
+        ty: builtin_type_ids::fixed_scalar(scalar),
+        value_kind: ValueKind::Const,
+        region: RegionId(0),
+        span: None,
+    }
+}
+
+fn fixed_scalar_value(scalar: FixedScalar) -> FixedScalarValue {
+    match scalar {
+        FixedScalar::I8 | FixedScalar::I16 | FixedScalar::I32 | FixedScalar::I64 => {
+            FixedScalarValue::signed(scalar, 1).expect("one fits every signed fixed scalar")
+        }
+        FixedScalar::U8
+        | FixedScalar::U16
+        | FixedScalar::U32
+        | FixedScalar::U64
+        | FixedScalar::Byte => {
+            FixedScalarValue::unsigned(scalar, 1).expect("one fits every unsigned fixed scalar")
+        }
+        FixedScalar::F16 | FixedScalar::F32 | FixedScalar::F64 => {
+            FixedScalarValue::binary_float(scalar, 1.5)
+                .expect("1.5 is a finite fixed binary-float value")
+        }
     }
 }
 
@@ -1437,27 +1719,6 @@ fn module_returning_expression(ty: TypeId, span: Option<SourceSpan>) -> HirModul
             HirTerminator::Return(typed_expression(0, ty, span)),
         )],
     )
-}
-
-fn int_cast_expression(id: u32, policy: BuiltinCastPolicyId, target_type: TypeId) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Cast {
-            source: Box::new(HirExpression {
-                id: HirValueId(id + 1),
-                kind: HirExpressionKind::Int(1),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Const,
-                region: RegionId(0),
-                span: None,
-            }),
-            policy,
-        },
-        ty: target_type,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
 }
 
 fn module_returning_cast_expression(expression: HirExpression) -> HirModule {

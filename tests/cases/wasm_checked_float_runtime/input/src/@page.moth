@@ -1,0 +1,201 @@
+f32_add |left F32, right F32| -> F32:
+    return left + right
+;
+
+f32_subtract |left F32, right F32| -> F32:
+    return left - right
+;
+
+f32_multiply |left F32, right F32| -> F32:
+    return left * right
+;
+
+f32_divide |left F32, right F32| -> F32:
+    return left / right
+;
+
+f32_remainder |dividend F32, divisor F32| -> F32:
+    return dividend % divisor
+;
+
+f32_power |base F32, exponent F32| -> F32:
+    return base ^ exponent
+;
+
+f32_unary_minus |value F32| -> F32:
+    return -value
+;
+
+f64_add |left F64, right F64| -> F64:
+    return left + right
+;
+
+f64_subtract |left F64, right F64| -> F64:
+    return left - right
+;
+
+f64_multiply |left F64, right F64| -> F64:
+    return left * right
+;
+
+f64_divide |left F64, right F64| -> F64:
+    return left / right
+;
+
+f64_remainder |dividend F64, divisor F64| -> F64:
+    return dividend % divisor
+;
+
+f64_power |base F64, exponent F64| -> F64:
+    return base ^ exponent
+;
+
+f64_unary_minus |value F64| -> F64:
+    return -value
+;
+
+i32_to_f32 |value I32| -> F32:
+    converted F32 = cast value
+    return converted
+;
+
+u32_to_f32 |value U32| -> F32:
+    converted F32 = cast value
+    return converted
+;
+
+i64_to_f32 |value I64| -> F32:
+    converted F32 = cast value
+    return converted
+;
+
+u64_to_f32 |value U64| -> F32:
+    converted F32 = cast value
+    return converted
+;
+
+i32_to_f64 |value I32| -> F64:
+    converted F64 = cast value
+    return converted
+;
+
+u32_to_f64 |value U32| -> F64:
+    converted F64 = cast value
+    return converted
+;
+
+i64_to_f64 |value I64| -> F64:
+    converted F64 = cast value
+    return converted
+;
+
+u64_to_f64 |value U64| -> F64:
+    converted F64 = cast value
+    return converted
+;
+
+f32_to_f64 |value F32| -> F64:
+    converted F64 = cast value
+    return converted
+;
+
+byte_to_u8 |value Byte| -> U8:
+    converted U8 = cast value
+    return converted
+;
+
+u8_to_byte |value U8| -> Byte:
+    converted Byte = cast value
+    return converted
+;
+
+i32_to_i64 |value I32| -> I64:
+    converted I64 = cast value
+    return converted
+;
+
+u32_to_i64 |value U32| -> I64:
+    converted I64 = cast value
+    return converted
+;
+
+u8_to_u16 |value U8| -> U16:
+    converted U16 = cast value
+    return converted
+;
+
+int_to_i64 |value Int| -> I64:
+    converted I64 = cast value
+    return converted
+;
+
+u64_u32_divide |numerator U64, denominator U32| -> F64:
+    return numerator / denominator
+;
+
+int_divide |numerator Int, denominator Int| -> Float:
+    return numerator / denominator
+;
+
+fractional_power_base #F32 = 1.1
+fractional_power_exponent #F32 = 2.5
+fractional_power_folded #F32 = fractional_power_base ^ fractional_power_exponent
+
+negative_power_base #F64 = -1.1
+negative_power_exponent #F64 = 4.0
+negative_power_folded #F64 = negative_power_base ^ negative_power_exponent
+near_one_power_base #F64 = 1.0000000000000002
+near_one_power_exponent #F64 = 4503599627370496.0
+near_one_power_folded #F64 = near_one_power_base ^ near_one_power_exponent
+
+assert(f32_add(1.25, 2.5) is 3.75)
+assert(f32_subtract(4.5, 1.25) is 3.25)
+assert(f32_multiply(1.5, 2.0) is 3.0)
+assert(f32_divide(7.5, 2.5) is 3.0)
+assert(f32_remainder(5.5, 2.0) is 1.5)
+assert(f32_remainder(-5.5, 2.0) is -1.5)
+assert(f32_remainder(5.5, -2.0) is 1.5)
+assert(f32_remainder(-5.5, -2.0) is -1.5)
+assert(f32_power(16.0, 0.5) is 4.0)
+assert(f32_power(2.0, -2.0) is 0.25)
+assert(f32_power(2.0, 3.0) is 8.0)
+assert(f32_power(fractional_power_base, fractional_power_exponent) is fractional_power_folded)
+assert(f32_unary_minus(-1.5) is 1.5)
+assert(f32_unary_minus(1.5) is -1.5)
+
+assert(f64_add(1.25, 2.5) is 3.75)
+assert(f64_subtract(4.5, 1.25) is 3.25)
+assert(f64_multiply(1.5, 2.0) is 3.0)
+assert(f64_divide(7.5, 2.5) is 3.0)
+assert(f64_remainder(5.5, 2.0) is 1.5)
+assert(f64_remainder(-5.5, 2.0) is -1.5)
+assert(f64_remainder(5.5, -2.0) is 1.5)
+assert(f64_remainder(-5.5, -2.0) is -1.5)
+assert(f64_power(16.0, 0.5) is 4.0)
+assert(f64_power(2.0, -2.0) is 0.25)
+assert(f64_power(2.0, 3.0) is 8.0)
+assert(f64_power(negative_power_base, negative_power_exponent) is negative_power_folded)
+assert(f64_power(near_one_power_base, near_one_power_exponent) is near_one_power_folded)
+assert(f64_unary_minus(-1.5) is 1.5)
+assert(f64_unary_minus(1.5) is -1.5)
+
+assert(i32_to_f32(16777217) is 16777216.0)
+assert(u32_to_f32(4294967295) is 4294967296.0)
+assert(i64_to_f32(-16777217) is -16777216.0)
+-- This high-half U64 sits just above a binary32 midpoint, distinguishing direct rounding from an F64 intermediate.
+assert(u64_to_f32(9223372586610589697) is 9223373136366403584.0)
+assert(i32_to_f64(-2147483648) is -2147483648.0)
+assert(u32_to_f64(4294967295) is 4294967295.0)
+assert(i64_to_f64(9007199254740993) is 9007199254740992.0)
+assert(u64_to_f64(9223372036854775808) is 9223372036854775808.0)
+assert(f32_to_f64(1.5) is 1.5)
+assert(byte_to_u8(255) is 255)
+assert(u8_to_byte(255) is 255)
+assert(i32_to_i64(-2147483648) is -2147483648)
+assert(u32_to_i64(4294967295) is 4294967295)
+assert(u8_to_u16(255) is 255)
+assert(int_to_i64(2147483647) is 2147483647)
+assert(u64_u32_divide(18446744073709551615, 1) is 18446744073709551616.0)
+assert(int_divide(3, 2) is 1.5)
+
+[:wasm-checked-float-runtime-ok]

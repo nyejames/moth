@@ -6,10 +6,6 @@ warnings = "forbid"
 runtime_error_contains = ["Float operation produced a non-finite value"]
 
 [backends.html_wasm]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0064"]
-
-[[backends.html_wasm.diagnostic_assertions]]
-code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.checked_numeric_operations"
+runtime_trap_contains = ["unreachable"]

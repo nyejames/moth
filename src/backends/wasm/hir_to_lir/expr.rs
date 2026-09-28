@@ -14,9 +14,10 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
 use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -272,44 +273,32 @@ pub(crate) fn lower_expression(
         )),
         HirExpressionKind::Cast { source, policy } => match *policy {
             BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Int,
-                target: NumericScalar::Float,
-            } => {
-                let builtins = context.module_context.type_environment.builtins();
-                if source.ty != builtins.int || expression.ty != builtins.float {
-                    return Err(lir_transformation_error(
-                        "Wasm Int-to-Float cast has inconsistent HIR operand types",
-                    ));
-                }
-
-                let source_value = lower_expression(context, source, statements)?;
-                let dst_abi = expression_abi(context, expression);
-                let dst = context.alloc_temp(dst_abi);
-                statements.push(WasmLirStmt::IntToFloat {
-                    dst,
-                    source: source_value.value,
-                });
-                Ok(ExprLoweringOutput {
-                    value: dst,
-                    prefer_move: false,
-                })
-            }
-            BuiltinCastPolicyId::NumericConversion {
                 source: source_domain,
                 target: target_domain,
-            } if source_domain != target_domain
-                && source_domain.is_integer()
-                && target_domain.is_integer() =>
-            {
-                lower_infallible_integer_conversion(
-                    context,
-                    source_domain,
-                    target_domain,
-                    source,
-                    expression,
-                    statements,
-                )
-            }
+            } => lower_infallible_numeric_conversion(
+                context,
+                source_domain,
+                target_domain,
+                source,
+                expression,
+                statements,
+            ),
+            BuiltinCastPolicyId::ByteToU8 => lower_infallible_byte_conversion(
+                context,
+                FixedScalar::Byte,
+                FixedScalar::U8,
+                source,
+                expression,
+                statements,
+            ),
+            BuiltinCastPolicyId::U8ToByte => lower_infallible_byte_conversion(
+                context,
+                FixedScalar::U8,
+                FixedScalar::Byte,
+                source,
+                expression,
+                statements,
+            ),
             _ => Err(lir_transformation_error(format!(
                 "Wasm lowering does not yet support cast policy {policy:?}"
             ))),
@@ -326,7 +315,7 @@ pub(crate) fn lower_expression(
     }
 }
 
-fn lower_infallible_integer_conversion(
+fn lower_infallible_numeric_conversion(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     source_domain: NumericScalar,
     target_domain: NumericScalar,
@@ -336,38 +325,99 @@ fn lower_infallible_integer_conversion(
 ) -> Result<ExprLoweringOutput, CompilerError> {
     let profile = context.module_context.request.numeric_profile;
     let type_environment = context.module_context.type_environment;
-    if source_expression.ty != source_domain.type_id(type_environment)
+    if source_domain == target_domain
+        || source_expression.ty != source_domain.type_id(type_environment)
         || target_expression.ty != target_domain.type_id(type_environment)
         || numeric_conversion_fallibility(source_domain, target_domain, profile)
             != BuiltinCastFallibility::Infallible
     {
         return Err(lir_transformation_error(
-            "Wasm integer conversion has inconsistent or fallible HIR cast evidence",
+            "Wasm numeric conversion has inconsistent or fallible HIR cast evidence",
         ));
     }
 
-    let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+    let source_precision = source_domain.binary_float_precision(profile);
+    let target_precision = target_domain.binary_float_precision(profile);
+    if source_precision == Some(BinaryFloatPrecision::Binary16)
+        || target_precision == Some(BinaryFloatPrecision::Binary16)
+    {
         return Err(lir_transformation_error(
-            "Wasm integer conversion source has no canonical integer range",
+            "Wasm numeric conversion does not yet support F16",
         ));
-    };
+    }
 
     let source_abi = expression_abi(context, source_expression);
     let target_abi = expression_abi(context, target_expression);
-    let source_value = lower_expression(context, source_expression, statements)?;
     if source_abi == target_abi {
+        let source_value = lower_expression(context, source_expression, statements)?;
         return Ok(ExprLoweringOutput {
             value: source_value.value,
             prefer_move: false,
         });
     }
 
-    if source_abi == WasmAbiType::I32 && target_abi == WasmAbiType::I64 {
-        let dst = context.alloc_temp(WasmAbiType::I64);
-        statements.push(WasmLirStmt::IntegerExtend {
+    if source_domain.is_integer() && target_domain.is_integer() {
+        let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+            return Err(lir_transformation_error(
+                "Wasm integer conversion source has no canonical integer range",
+            ));
+        };
+        if source_abi == WasmAbiType::I32 && target_abi == WasmAbiType::I64 {
+            let source_value = lower_expression(context, source_expression, statements)?;
+            let dst = context.alloc_temp(WasmAbiType::I64);
+            statements.push(WasmLirStmt::IntegerExtend {
+                dst,
+                source: source_value.value,
+                source_signed: source_minimum < 0,
+            });
+            return Ok(ExprLoweringOutput {
+                value: dst,
+                prefer_move: false,
+            });
+        }
+    }
+
+    if source_domain.is_integer() {
+        let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+            return Err(lir_transformation_error(
+                "Wasm integer conversion source has no canonical integer range",
+            ));
+        };
+        if matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64)
+            && matches!(
+                (target_precision, target_abi),
+                (Some(BinaryFloatPrecision::Binary32), WasmAbiType::F32)
+                    | (Some(BinaryFloatPrecision::Binary64), WasmAbiType::F64)
+            )
+        {
+            let source_value = lower_expression(context, source_expression, statements)?;
+            let dst = context.alloc_temp(target_abi);
+            statements.push(WasmLirStmt::IntegerToFloat {
+                dst,
+                source: source_value.value,
+                source_signed: source_minimum < 0,
+            });
+            return Ok(ExprLoweringOutput {
+                value: dst,
+                prefer_move: false,
+            });
+        }
+    }
+
+    if matches!(
+        (source_precision, target_precision, source_abi, target_abi),
+        (
+            Some(BinaryFloatPrecision::Binary32),
+            Some(BinaryFloatPrecision::Binary64),
+            WasmAbiType::F32,
+            WasmAbiType::F64
+        )
+    ) {
+        let source_value = lower_expression(context, source_expression, statements)?;
+        let dst = context.alloc_temp(WasmAbiType::F64);
+        statements.push(WasmLirStmt::FloatExtend {
             dst,
             source: source_value.value,
-            source_signed: source_minimum < 0,
         });
         return Ok(ExprLoweringOutput {
             value: dst,
@@ -376,8 +426,39 @@ fn lower_infallible_integer_conversion(
     }
 
     Err(lir_transformation_error(format!(
-        "Wasm integer conversion cannot map {source_abi:?} to {target_abi:?}"
+        "Wasm numeric conversion cannot map {} ({source_abi:?}) to {} ({target_abi:?})",
+        source_domain.name(),
+        target_domain.name()
     )))
+}
+
+fn lower_infallible_byte_conversion(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    source_scalar: FixedScalar,
+    target_scalar: FixedScalar,
+    source_expression: &HirExpression,
+    target_expression: &HirExpression,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<ExprLoweringOutput, CompilerError> {
+    if source_expression.ty != builtin_type_ids::fixed_scalar(source_scalar)
+        || target_expression.ty != builtin_type_ids::fixed_scalar(target_scalar)
+        || !matches!(
+            (source_scalar, target_scalar),
+            (FixedScalar::Byte, FixedScalar::U8) | (FixedScalar::U8, FixedScalar::Byte)
+        )
+        || expression_abi(context, source_expression) != WasmAbiType::I32
+        || expression_abi(context, target_expression) != WasmAbiType::I32
+    {
+        return Err(lir_transformation_error(
+            "Wasm Byte/U8 conversion has inconsistent HIR types or carriers",
+        ));
+    }
+
+    let source_value = lower_expression(context, source_expression, statements)?;
+    Ok(ExprLoweringOutput {
+        value: source_value.value,
+        prefer_move: false,
+    })
 }
 
 fn render_structural_string(

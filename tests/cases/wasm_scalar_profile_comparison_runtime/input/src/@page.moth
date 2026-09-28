@@ -122,6 +122,47 @@ equal_byte |left Byte, right Byte| -> Bool:
     return left is right
 ;
 
+profile_float_add |left Float, right Float| -> Float:
+    return left + right
+;
+
+profile_float_subtract |left Float, right Float| -> Float:
+    return left - right
+;
+
+profile_float_multiply |left Float, right Float| -> Float:
+    return left * right
+;
+
+profile_float_divide |left Float, right Float| -> Float:
+    return left / right
+;
+
+profile_float_remainder |left Float, right Float| -> Float:
+    return left % right
+;
+
+profile_float_power |base Float, exponent Float| -> Float:
+    return base ^ exponent
+;
+
+profile_float_negate |value Float| -> Float:
+    return -value
+;
+
+profile_int_to_float |value Int| -> Float:
+    converted Float = cast value
+    return converted
+;
+
+profile_int_divide |numerator Int, denominator Int| -> Float:
+    return numerator / denominator
+;
+
+fixed_u64_u32_divide |numerator U64, denominator U32| -> F64:
+    return numerator / denominator
+;
+
 fixed_i64_above_int32 = identity_i64(2147483648)
 fixed_i64_equal = if fixed_i64_above_int32 is identity_i64(2147483648) then [:fixed-i64-exact] else [:failed-fixed-i64-exact]
 fixed_i64_order = if fixed_i64_above_int32 > identity_i64(2147483647) then [:fixed-i64-above-int32] else [:failed-fixed-i64-above-int32]
@@ -190,5 +231,20 @@ byte_ordered = if less_byte(byte_low, byte_high) then [:byte-low-before-high] el
 byte_reverse = if less_byte(byte_high, byte_low) is false then [:byte-high-not-before-low] else [:failed-byte-high-not-before-low]
 byte_equal = if equal_byte(byte_high, byte_same) then [:byte-high-equals-copy] else [:failed-byte-high-equals-copy]
 byte_not_equal = if equal_byte(byte_low, byte_high) is false then [:byte-low-not-equal-high] else [:failed-byte-low-not-equal-high]
+
+assert(profile_float_add(0.1, 0.2) is 0.3)
+assert(profile_float_subtract(6.5, 1.25) is 5.25)
+assert(profile_float_multiply(1.5, 2.0) is 3.0)
+assert(profile_float_divide(7.5, 2.5) is 3.0)
+assert(profile_float_remainder(-5.5, 2.0) is -1.5)
+assert(profile_float_remainder(5.5, -2.0) is 1.5)
+assert(profile_float_power(16.0, 0.5) is 4.0)
+assert(profile_float_power(2.0, -2.0) is 0.25)
+assert(profile_float_negate(1.5) is -1.5)
+assert(profile_float_negate(-1.5) is 1.5)
+assert(profile_int_to_float(16777217) is 16777216.0)
+assert(profile_int_divide(16777217, identity_int(1)) is 16777216.0)
+assert(fixed_u64_u32_divide(18446744073709551615, 3) is identity_f64(6148914691236516864.0))
+assert(profile_int_divide(3, 2) is 1.5)
 
 [:profile-int=[profile_int_value] profile-comparison=[profile_comparison_marker] fixed-i64=[fixed_i64_equal]/[fixed_i64_order] signed-unsigned=[i64_u64_negative_zero]/[u64_i64_zero_negative]/[i64_u64_zero_equal]/[u64_i64_zero_equal]/[i64_u64_zero_not_less]/[u64_i64_zero_not_greater]/[i64_u64_negative_not_equal_max]/[u64_i64_max_not_equal_negative]/[i64_u64_negative_high]/[u64_i64_high_negative]/[i64_u64_zero_high]/[u64_i64_high_zero] mixed-inclusive=[i64_zero_le_u64_zero]/[i64_zero_ge_u64_zero]/[u64_zero_le_i64_zero]/[u64_zero_ge_i64_zero]/[i64_negative_le_u64_max]/[u64_max_ge_i64_negative]/[i64_negative_ge_u64_max_false]/[u64_max_le_i64_negative_false]/[i64_negative_not_u64_max]/[u64_max_not_i64_negative] u64-half-order=[u64_high_half_greater]/[u64_lower_half_less] narrow=[signed_narrow_order]/[signed_narrow_reverse]/[unsigned_narrow_order]/[unsigned_narrow_reverse]/[u32_high_order]/[u32_low_reverse] float-mix=[mixed_f32_greater]/[mixed_f64_less]/[mixed_float_not_equal] byte=[byte_ordered]/[byte_reverse]/[byte_equal]/[byte_not_equal] profile-int-edges=[profile_int_zero]/[profile_int_negative]/[profile_int_min]]

@@ -9,8 +9,8 @@ use crate::backends::wasm::emit::instructions::{
     LirBodyEmitContext, ensure_local_abi, local_index, wasm_generation_error,
 };
 use crate::backends::wasm::lir::instructions::{
-    WasmIntegerOperationKind, WasmIntegerOperationOperands, WasmIntegerPowerScratch,
-    WasmIntegerScratch,
+    WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerScratch,
+    WasmNumericOperationOperands,
 };
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
@@ -28,7 +28,7 @@ pub(super) fn emit_checked_integer_operation(
     destination: WasmLirLocalId,
     operator: NumericOperator,
     kind: WasmIntegerOperationKind,
-    operands: WasmIntegerOperationOperands,
+    operands: WasmNumericOperationOperands,
     scratch: WasmIntegerScratch,
     context: &LirBodyEmitContext<'_>,
 ) -> Result<(), CompilerError> {
@@ -40,7 +40,7 @@ pub(super) fn emit_checked_integer_operation(
     ensure_local_abi(destination, carrier, context, "checked integer destination")?;
 
     let (left, right) = match (operator, operands) {
-        (NumericOperator::Negate, WasmIntegerOperationOperands::Unary { operand }) => {
+        (NumericOperator::Negate, WasmNumericOperationOperands::Unary { operand }) => {
             ensure_local_abi(operand, carrier, context, "checked integer operand")?;
             (Some(operand), None)
         }
@@ -51,7 +51,7 @@ pub(super) fn emit_checked_integer_operation(
             | NumericOperator::IntegerDivide
             | NumericOperator::Remainder
             | NumericOperator::Power,
-            WasmIntegerOperationOperands::Binary { left, right },
+            WasmNumericOperationOperands::Binary { left, right },
         ) => {
             ensure_local_abi(left, carrier, context, "checked integer left operand")?;
             ensure_local_abi(right, carrier, context, "checked integer right operand")?;

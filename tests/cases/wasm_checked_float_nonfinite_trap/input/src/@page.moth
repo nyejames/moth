@@ -1,0 +1,5 @@
+overflow_float |value F64| -> F64:
+    return value * 2.0
+;
+
+result = overflow_float(1.7976931348623157e308)
