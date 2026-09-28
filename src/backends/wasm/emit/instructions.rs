@@ -149,24 +149,10 @@ pub(crate) fn emit_statement(
             )?));
         }
         WasmLirStmt::StringFromI64 { dst, value } => {
-            let value_type = local_type(*value, context, "StringFromI64 value")?;
-            function.instruction(&Instruction::LocalGet(local_index(*value, context)?));
-            match value_type {
-                WasmAbiType::I32 => {
-                    function.instruction(&Instruction::I64ExtendI32S);
-                }
-                WasmAbiType::I64 => {}
-                other => {
-                    return Err(wasm_generation_error(format!(
-                        "Wasm StringFromI64 requires an Int carrier, found {other:?}"
-                    )));
-                }
-            }
-            function.instruction(&Instruction::Call(helper_index(
-                plan,
-                WasmRuntimeHelper::StringFromI64,
-            )?));
-            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+            emit_integer_to_string(function, *dst, *value, context, plan, true)?;
+        }
+        WasmLirStmt::StringFromU64 { dst, value } => {
+            emit_integer_to_string(function, *dst, *value, context, plan, false)?;
         }
         WasmLirStmt::StringFinish { dst, buffer } => {
             function.instruction(&Instruction::LocalGet(local_index(*buffer, context)?));
@@ -405,6 +391,46 @@ pub(crate) fn emit_statement(
         }
     }
 
+    Ok(())
+}
+
+fn emit_integer_to_string(
+    function: &mut Function,
+    dst: WasmLirLocalId,
+    value: WasmLirLocalId,
+    context: &LirBodyEmitContext<'_>,
+    plan: &WasmEmitPlan,
+    signed: bool,
+) -> Result<(), CompilerError> {
+    let operation = if signed {
+        "StringFromI64"
+    } else {
+        "StringFromU64"
+    };
+    ensure_local_abi(dst, WasmAbiType::Handle, context, operation)?;
+    let value_type = local_type(value, context, operation)?;
+    function.instruction(&Instruction::LocalGet(local_index(value, context)?));
+    match (value_type, signed) {
+        (WasmAbiType::I32, true) => {
+            function.instruction(&Instruction::I64ExtendI32S);
+        }
+        (WasmAbiType::I32, false) => {
+            function.instruction(&Instruction::I64ExtendI32U);
+        }
+        (WasmAbiType::I64, _) => {}
+        (other, _) => {
+            return Err(wasm_generation_error(format!(
+                "Wasm {operation} requires an I32 or I64 integer carrier, found {other:?}"
+            )));
+        }
+    }
+    let helper = if signed {
+        WasmRuntimeHelper::StringFromI64
+    } else {
+        WasmRuntimeHelper::StringFromU64
+    };
+    function.instruction(&Instruction::Call(helper_index(plan, helper)?));
+    function.instruction(&Instruction::LocalSet(local_index(dst, context)?));
     Ok(())
 }
 

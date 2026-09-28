@@ -553,10 +553,11 @@ fn validate_wasm_reactive_features(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable runtime cast outside Wasm's infallible expression conversions.
+/// Reports the first reachable runtime cast outside Wasm's supported expression conversions.
 ///
-/// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 expression conversions plus
-///       Byte/U8; fallible pairs and statement casts remain gated.
+/// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 numeric conversions,
+///       integer-to-String casts, plus Byte/U8; fallible pairs, Float formatting and statement
+///       casts remain gated.
 /// WHY: target validation consumes retained cast evidence before lowering, preserving authored
 ///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
@@ -593,6 +594,7 @@ fn wasm_supports_runtime_cast(
         BuiltinCastPolicyId::NumericConversion { source, target } => {
             wasm_supports_numeric_conversion(source, target, numeric_profile)
         }
+        BuiltinCastPolicyId::NumericToString(source) => source.is_integer(),
         BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => true,
         _ => false,
     }

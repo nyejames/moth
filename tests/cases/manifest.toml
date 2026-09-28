@@ -12992,10 +12992,10 @@ contract = "backend.target_gate.unreachable_fixed_width_cross_module_constant_ig
 role = "backend"
 
 [[case]]
-id = "fixed_width_reachable_value_js_runs_wasm_gated"
-path = "fixed_width_reachable_value_js_runs_wasm_gated"
-tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
-contract = "backend.fixed_width.reachable_value_html_js_success_html_wasm_gate"
+id = "fixed_width_reachable_value_runtime"
+path = "fixed_width_reachable_value_runtime"
+tags = ["integration", "numeric", "html-wasm", "runtime", "reachability"]
+contract = "backend.fixed_width.reachable_value_runtime"
 role = "backend"
 
 [[case]]
@@ -13055,10 +13055,10 @@ contract = "language.numbers.fixed_width_option_default_wrong_type_rejected"
 role = "primary"
 
 [[case]]
-id = "fixed_width_imported_constant_js_runs_wasm_gated"
-path = "fixed_width_imported_constant_js_runs_wasm_gated"
-tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability", "dependencies"]
-contract = "backend.fixed_width.imported_constant_html_js_success_html_wasm_gate"
+id = "fixed_width_imported_constant_runtime"
+path = "fixed_width_imported_constant_runtime"
+tags = ["integration", "numeric", "html-wasm", "runtime", "reachability", "dependencies"]
+contract = "backend.fixed_width.imported_constant_runtime"
 role = "backend"
 
 [[case]]
@@ -13220,6 +13220,13 @@ id = "wasm_scalar_profile_comparison_runtime"
 path = "wasm_scalar_profile_comparison_runtime"
 tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
 contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_integer_numeric_to_string_runtime"
+path = "wasm_integer_numeric_to_string_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "casts", "html-wasm"]
+contract = "backend.html_wasm.infallible_integer_to_string_casts"
 role = "backend"
 
 [[case]]

@@ -37,8 +37,10 @@ fixed-width operators and casts, and folded numeric operations. HTML-JS
 executes fixed-width and `Byte` values; experimental HTML-Wasm executes fixed
 integers, `Byte`, `F32` and `F64` with checked trap-mode arithmetic, infallible
 numeric expression casts that do not involve `F16`, plus `Byte -> U8` and
-`U8 -> Byte`. Other builtin runtime casts remain gated, including fallible casts,
-defined conversions involving `Bool`, `Char`, `Error` or `String` (including
-`Char -> Int` and numeric parsing from or formatting to `String`), and
-statement-form casts. Recoverable numeric errors remain gated. The `Number`/`NumberN`
+`U8 -> Byte`. It also supports infallible integer-to-`String` expression casts
+from profile `Int` and fixed signed/unsigned integer types. Remaining builtin
+runtime casts stay gated, including fallible casts, conversions involving
+`Bool`, `Char` or `Error` (including `Char -> Int`), parsing from `String`,
+`Float`-family formatting to `String`, and statement-form casts. Recoverable
+numeric errors remain gated. The `Number`/`NumberN`
 family is not implemented. See @../progress (Progress) for current support.

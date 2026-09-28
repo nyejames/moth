@@ -89,6 +89,11 @@ pub(crate) fn emit_helper_function(
             // local 6: unsigned magnitude
             Function::new(vec![(5, ValType::I32), (1, ValType::I64)])
         }
+        WasmRuntimeHelper::StringFromU64 => {
+            // param 0: value_u64 | locals 1..4: buffer_handle, region, cursor, digit_count
+            // local 5: unsigned magnitude
+            Function::new(vec![(4, ValType::I32), (1, ValType::I64)])
+        }
         WasmRuntimeHelper::StringPtr
         | WasmRuntimeHelper::StringLen
         | WasmRuntimeHelper::Release
@@ -477,8 +482,8 @@ pub(crate) fn emit_helper_function(
         }
         WasmRuntimeHelper::StringFromI64 => {
             // WHAT: format a signed i64 as its canonical base-10 UTF-8 bytes.
-            // WHY: string interpolation must preserve the full signed profile-Int range,
-            //      including i64::MIN, which has no positive signed i64 magnitude.
+            // WHY: numeric text conversion must preserve the full signed range, including
+            //      i64::MIN, which has no positive signed i64 magnitude.
             let string_new_buffer_index = plan
                 .helper_indices
                 .get(&WasmRuntimeHelper::StringNewBuffer)
@@ -597,6 +602,9 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::Call(string_finish_index));
             function.instruction(&Instruction::Return);
         }
+        WasmRuntimeHelper::StringFromU64 => {
+            emit_string_from_u64(&mut function, plan, alloc_index)?;
+        }
         WasmRuntimeHelper::Release | WasmRuntimeHelper::DropIfOwned => {
             // WHAT: release/drop helpers are conservative no-ops for both string and vec handles.
             // WHY: ownership-eliding/free semantics are introduced incrementally after baseline correctness.
@@ -618,6 +626,103 @@ pub(crate) fn emit_helper_function(
     }
     function.instruction(&Instruction::End);
     Ok(function)
+}
+
+fn emit_string_from_u64(
+    function: &mut Function,
+    plan: &WasmEmitPlan,
+    alloc_index: u32,
+) -> Result<(), CompilerError> {
+    let string_new_buffer_index = plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::StringNewBuffer)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Wasm emission missing rt_string_new_buffer helper index",
+            )
+            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        })?;
+    let string_finish_index = plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::StringFinish)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Wasm emission missing rt_string_finish helper index",
+            )
+            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        })?;
+
+    const VALUE_I64: u32 = 0;
+    const BUFFER_HANDLE: u32 = 1;
+    const REGION: u32 = 2;
+    const CURSOR: u32 = 3;
+    const DIGIT_COUNT: u32 = 4;
+    const MAGNITUDE: u32 = 5;
+
+    // U64 needs at most 20 decimal digits; the existing string runtime owns the returned handle.
+    function.instruction(&Instruction::Call(string_new_buffer_index));
+    function.instruction(&Instruction::LocalSet(BUFFER_HANDLE));
+    function.instruction(&Instruction::I32Const(20));
+    function.instruction(&Instruction::Call(alloc_index));
+    function.instruction(&Instruction::LocalSet(REGION));
+    function.instruction(&Instruction::LocalGet(REGION));
+    function.instruction(&Instruction::I32Const(19));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::LocalSet(CURSOR));
+    function.instruction(&Instruction::LocalGet(VALUE_I64));
+    function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+    function.instruction(&Instruction::I32Const(0));
+    function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+    function.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(10));
+    function.instruction(&Instruction::I64RemU);
+    function.instruction(&Instruction::I32WrapI64);
+    function.instruction(&Instruction::I32Const(48));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::I32Store8(byte_memarg(0)));
+
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Sub);
+    function.instruction(&Instruction::LocalSet(CURSOR));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(10));
+    function.instruction(&Instruction::I64DivU);
+    function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+    // The do-while loop emits one digit for zero as well as for nonzero values.
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(0));
+    function.instruction(&Instruction::I64Ne);
+    function.instruction(&Instruction::BrIf(0));
+    function.instruction(&Instruction::End);
+
+    // Publish only the suffix written; StringFinish materializes the usual {ptr, len} handle.
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::I32Store(memarg(0)));
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Store(memarg(4)));
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Store(memarg(8)));
+
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::Call(string_finish_index));
+    function.instruction(&Instruction::Return);
+    Ok(())
 }
 
 fn memarg(offset: u64) -> MemArg {

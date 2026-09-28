@@ -1169,6 +1169,52 @@ fn scalar_storage_executes_in_node_with_compact_bytes_and_typed_loads() {
 }
 
 #[test]
+fn integer_text_helpers_return_exact_utf8_bytes_from_node_instantiated_wasm() {
+    let module = build_integer_string_conversion_lir_module();
+    let mut request = WasmBackendRequest::default();
+    request.export_policy.helper_exports.export_memory = true;
+
+    let result = emit_lir_to_wasm_module(&module, &request).expect("integer text LIR should emit");
+    validate_wasm(&result.wasm_bytes);
+    let sections = collect_section_order(&result.wasm_bytes);
+    assert!(
+        !sections.iter().any(|section| section == "import"),
+        "integer string conversion must not add a host import"
+    );
+
+    let node_body = r#"
+const cases = [
+  ["signed_i32", -2147483648, "-2147483648"],
+  ["unsigned_i32", -1, "4294967295"],
+  ["signed_i64", -9223372036854775808n, "-9223372036854775808"],
+  ["signed_i64", 9223372036854775807n, "9223372036854775807"],
+  ["unsigned_i64", BigInt.asIntN(64, 18446744073709551615n), "18446744073709551615"],
+  ["unsigned_i64", 0n, "0"],
+];
+const view = new DataView(instance.exports.memory.buffer);
+const results = [];
+for (const [name, input, expected] of cases) {
+  const handle = instance.exports[name](input);
+  const pointer = view.getUint32(handle, true);
+  const length = view.getUint32(handle + 4, true);
+  const actual = new TextDecoder().decode(
+    new Uint8Array(instance.exports.memory.buffer, pointer, length));
+  if (actual !== expected) {
+    throw new Error(`${name}: expected ${expected}, got ${actual}`);
+  }
+  results.push(`${name}|${actual}`);
+}
+process.stdout.write(results.join("\n"));
+"#;
+    let output = run_wasm_node_script(&result.wasm_bytes, node_body);
+    let actual = String::from_utf8(output).expect("Node integer string results should be UTF-8");
+    assert_eq!(
+        actual,
+        "signed_i32|-2147483648\nunsigned_i32|4294967295\nsigned_i64|-9223372036854775808\nsigned_i64|9223372036854775807\nunsigned_i64|18446744073709551615\nunsigned_i64|0"
+    );
+}
+
+#[test]
 fn binary16_scalar_storage_rounds_directly_and_traps_nonfinite_values() {
     let module = build_binary16_scalar_storage_boundary_module();
     let mut request = WasmBackendRequest::default();
@@ -2435,6 +2481,81 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
         }],
         memory_plan: WasmMemoryPlan::default(),
     }
+}
+
+fn build_integer_string_conversion_lir_module() -> WasmLirModule {
+    let cases = [
+        ("signed_i32", WasmAbiType::I32, true),
+        ("unsigned_i32", WasmAbiType::I32, false),
+        ("signed_i64", WasmAbiType::I64, true),
+        ("unsigned_i64", WasmAbiType::I64, false),
+    ];
+    let mut functions = Vec::with_capacity(cases.len());
+    let mut exports = Vec::with_capacity(cases.len());
+    for (index, (name, input_type, signed)) in cases.into_iter().enumerate() {
+        let (function, export) =
+            integer_string_conversion_function(index as u32, name, input_type, signed);
+        functions.push(function);
+        exports.push(export);
+    }
+    WasmLirModule {
+        functions,
+        imports: vec![],
+        exports,
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    }
+}
+
+fn integer_string_conversion_function(
+    function_id: u32,
+    export_name: &str,
+    input_type: WasmAbiType,
+    signed: bool,
+) -> (WasmLirFunction, WasmExport) {
+    let input = WasmLirLocalId(0);
+    let output = WasmLirLocalId(1);
+    let conversion = if signed {
+        WasmLirStmt::StringFromI64 {
+            dst: output,
+            value: input,
+        }
+    } else {
+        WasmLirStmt::StringFromU64 {
+            dst: output,
+            value: input,
+        }
+    };
+    let id = WasmLirFunctionId(function_id);
+    let function = WasmLirFunction {
+        id,
+        debug_name: format!("integer_to_string_{export_name}"),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![input_type],
+            results: vec![WasmAbiType::Handle],
+        },
+        locals: vec![
+            WasmLirLocal {
+                id: input,
+                name: Some("value".to_owned()),
+                ty: input_type,
+                role: WasmLocalRole::Param,
+            },
+            local(output.0, WasmAbiType::Handle, "string_handle"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![conversion],
+            terminator: WasmLirTerminator::Return { value: Some(output) },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let export = WasmExport {
+        export_name: export_name.to_owned(),
+        kind: WasmExportKind::Function(id),
+    };
+    (function, export)
 }
 
 fn execute_wasm_checked_exports_in_node(

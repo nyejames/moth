@@ -75,12 +75,14 @@ current compiler and backend support. The Alpha compiler resolves the `Bool`,
 `Int`, `Float`, `String`, `Char` and `Error` targets, plus the fixed-width
 integer, fixed binary float and `Byte` targets for numeric and text conversions.
 Fixed-width casts fold at compile time. HTML-JS executes fixed-width numeric and
-`Byte` runtime values. HTML-Wasm executes infallible numeric expression casts that
-do not involve `F16`, plus `Byte -> U8` and `U8 -> Byte`. Other builtin runtime
-casts remain gated, including fallible casts, defined conversions involving
-`Bool`, `Char`, `Error` or `String` (including `Char -> Int` and numeric parsing
-from or formatting to `String`), and statement-form casts. `Number` and
-`NumberN` targets remain accepted design.
+`Byte` runtime values. HTML-Wasm executes infallible numeric expression casts
+that do not involve `F16`, plus `Byte -> U8` and `U8 -> Byte`. It also supports
+infallible integer-to-`String` expression casts from profile `Int` and fixed
+signed/unsigned integer types. Remaining builtin runtime casts stay gated,
+including fallible casts, conversions involving `Bool`, `Char` or `Error`
+(including `Char -> Int`), parsing from `String`, `Float`-family formatting to
+`String`, and statement-form casts. `Number` and `NumberN` targets remain
+accepted design.
 
 ### Target source
 

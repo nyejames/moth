@@ -217,33 +217,78 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
 }
 
 #[test]
-fn wasm_feature_validation_keeps_numeric_to_string_casts_gated() {
+fn wasm_feature_validation_allows_integer_text_casts_and_keeps_other_text_casts_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let domain = NumericScalar::Fixed(FixedScalar::I32);
-    let module = module_returning_cast_expression(HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::Cast {
-            source: Box::new(numeric_scalar_expression(1, domain)),
-            policy: BuiltinCastPolicyId::NumericToString(domain),
-        },
-        ty: builtin_type_ids::STRING,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    });
+    for domain in [
+        NumericScalar::Int,
+        NumericScalar::Fixed(FixedScalar::I8),
+        NumericScalar::Fixed(FixedScalar::U64),
+    ] {
+        let module = module_returning_cast_expression(HirExpression {
+            id: HirValueId(0),
+            kind: HirExpressionKind::Cast {
+                source: Box::new(numeric_scalar_expression(1, domain)),
+                policy: BuiltinCastPolicyId::NumericToString(domain),
+            },
+            ty: builtin_type_ids::STRING,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        });
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+                external_package_registry: None,
+            },
+            &mut string_table,
+        );
+        assert!(
+            result.is_ok(),
+            "Wasm should allow integer NumericToString casts for {domain:?}"
+        );
+    }
 
-    let diagnostic = wasm_feature_validation_diagnostic(
-        &module,
-        &type_environment,
-        &mut string_table,
-        "Wasm should keep NumericToString casts gated",
-    );
-    assert_unsupported_feature(
-        &diagnostic,
-        &mut string_table,
-        UnsupportedBackendFeatureReason::RuntimeCasts,
-    );
+    for (policy, source, target) in [
+        (
+            BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
+            numeric_scalar_expression(1, NumericScalar::Float),
+            builtin_type_ids::STRING,
+        ),
+        (
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+            typed_expression(1, builtin_type_ids::STRING, None),
+            builtin_type_ids::INT,
+        ),
+    ] {
+        let module = module_returning_cast_expression(HirExpression {
+            id: HirValueId(0),
+            kind: HirExpressionKind::Cast {
+                source: Box::new(source),
+                policy,
+            },
+            ty: target,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        });
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm should keep Float formatting and StringToNumeric casts gated",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::RuntimeCasts,
+        );
+    }
 }
 
 #[test]
@@ -294,7 +339,7 @@ fn wasm_feature_validation_allows_byte_u8_expression_casts() {
 }
 
 #[test]
-fn wasm_feature_validation_rejects_statement_int_to_float_cast() {
+fn wasm_feature_validation_rejects_statement_casts() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let statement = HirStatement {
@@ -329,9 +374,38 @@ fn wasm_feature_validation_rejects_statement_int_to_float_cast() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm should reject statement-shaped casts even for the Int-to-Float policy",
+        "Wasm should reject statement-shaped casts, including Int-to-Float",
     );
 
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RuntimeCasts,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(12),
+        kind: HirStatementKind::CastOp {
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I8)),
+            source: numeric_scalar_expression(13, NumericScalar::Fixed(FixedScalar::I8)),
+            result: None,
+        },
+        span: None,
+    };
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![statement],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should reject statement-shaped NumericToString casts",
+    );
     assert_unsupported_feature(
         &diagnostic,
         &mut string_table,

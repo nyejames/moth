@@ -36,7 +36,9 @@ pub(crate) enum WasmRuntimeHelper {
     /// Compute exact binary64 remainder using significand shift/subtract.
     FloatRemainder,
 
-    /// Convert i64 scalar values into finalized string handles for template interpolation.
+    /// Convert an unsigned i64 bit pattern into a finalized decimal string handle.
+    StringFromU64,
+    /// Convert signed i64 scalar values into finalized string handles.
     StringFromI64,
     /// Allocate an empty Vec-handle header for `Vec<String>` runtime fragments.
     VecNew,

@@ -288,6 +288,15 @@ pub(crate) fn lower_expression(
                 expression,
                 statements,
             ),
+            BuiltinCastPolicyId::NumericToString(source_domain) => {
+                lower_infallible_numeric_to_string(
+                    context,
+                    source_domain,
+                    source,
+                    expression,
+                    statements,
+                )
+            }
             BuiltinCastPolicyId::ByteToU8 => lower_infallible_byte_conversion(
                 context,
                 FixedScalar::Byte,
@@ -443,6 +452,58 @@ fn lower_infallible_numeric_conversion(
         source_domain.name(),
         target_domain.name()
     )))
+}
+
+fn lower_infallible_numeric_to_string(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    source_domain: NumericScalar,
+    source_expression: &HirExpression,
+    target_expression: &HirExpression,
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<ExprLoweringOutput, CompilerError> {
+    let type_environment = context.module_context.type_environment;
+    let profile = context.module_context.request.numeric_profile;
+    if !source_domain.is_integer()
+        || source_expression.ty != source_domain.type_id(type_environment)
+        || target_expression.ty != type_environment.builtins().string
+    {
+        return Err(lir_transformation_error(
+            "Wasm NumericToString cast has inconsistent or non-integer HIR evidence",
+        ));
+    }
+    let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+        return Err(lir_transformation_error(
+            "Wasm NumericToString source has no canonical integer range",
+        ));
+    };
+
+    let source_abi = expression_abi(context, source_expression);
+    if !matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64)
+        || expression_abi(context, target_expression) != WasmAbiType::Handle
+    {
+        return Err(lir_transformation_error(format!(
+            "Wasm NumericToString cannot map {} ({source_abi:?}) to a string handle",
+            source_domain.name()
+        )));
+    }
+
+    let source_value = lower_expression(context, source_expression, statements)?;
+    let dst = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
+    statements.push(if source_minimum < 0 {
+        WasmLirStmt::StringFromI64 {
+            dst,
+            value: source_value.value,
+        }
+    } else {
+        WasmLirStmt::StringFromU64 {
+            dst,
+            value: source_value.value,
+        }
+    });
+    Ok(ExprLoweringOutput {
+        value: dst,
+        prefer_move: false,
+    })
 }
 
 fn lower_infallible_byte_conversion(

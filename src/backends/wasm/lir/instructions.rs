@@ -132,9 +132,15 @@ pub(crate) enum WasmLirStmt {
         buffer: WasmLirLocalId,
         handle: WasmLirLocalId,
     },
-    /// Profile-Int string bridge for template interpolation.
-    /// The emitter sign-extends an I32 carrier; I64 carriers pass directly.
+    /// Convert a signed integer carrier to a finalized decimal string handle.
+    /// The emitter sign-extends I32 carriers; I64 carriers pass directly.
     StringFromI64 {
+        dst: WasmLirLocalId,
+        value: WasmLirLocalId,
+    },
+    /// Convert an unsigned integer carrier to a finalized decimal string handle.
+    /// The emitter zero-extends I32 carriers; I64 carriers pass directly.
+    StringFromU64 {
         dst: WasmLirLocalId,
         value: WasmLirLocalId,
     },

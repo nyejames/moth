@@ -19,10 +19,12 @@ finite range, and a whole number scales exactly into `Number2`. Fixed-width and
 `Byte` cast policies and evidence are implemented in the frontend. HTML-JS
 executes fixed-width and `Byte` runtime casts; HTML-Wasm currently executes
 infallible numeric expression casts that do not involve `F16`, plus
-`Byte -> U8` and `U8 -> Byte`. Other builtin runtime casts remain gated,
-including fallible casts, defined conversions involving `Bool`, `Char`, `Error`
-or `String` (including `Char -> Int` and numeric parsing from or formatting to
-`String`), and statement-form casts. `Number`/`NumberN` remain unimplemented.
+`Byte -> U8` and `U8 -> Byte`. It also supports infallible integer-to-`String`
+expression casts from profile `Int` and fixed signed/unsigned integer types.
+Remaining builtin runtime casts stay gated, including fallible casts,
+conversions involving `Bool`, `Char` or `Error` (including `Char -> Int`),
+parsing from `String`, `Float`-family formatting to `String`, and
+statement-form casts. `Number`/`NumberN` remain unimplemented.
 See @../progress (Progress) for current support.
 
 [codeblock, $code("moth"):

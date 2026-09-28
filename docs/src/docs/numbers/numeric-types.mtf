@@ -151,12 +151,13 @@ The frontend recognises fixed-width types and `Byte`, materialises their literal
 records fixed-width operator facts in HIR, checks their casts, and folds numeric
 operators, casts and text. HTML-JS executes fixed-width numeric and `Byte` runtime
 values. HTML-Wasm executes fixed integers, `Byte`, `F32` and `F64` values,
-comparisons and trap-mode arithmetic, infallible numeric expression casts that
-do not involve `F16`, plus `Byte -> U8` and `U8 -> Byte`. Recoverable numeric
-failures and other builtin runtime casts remain gated, including fallible casts,
-defined conversions involving `Bool`, `Char`, `Error` or `String` (including
-`Char -> Int` and numeric parsing from or formatting to `String`), and
-statement-form casts. The `Number` family is not implemented.
+comparisons and trap-mode arithmetic, infallible numeric expression casts that do
+not involve `F16`, plus `Byte -> U8` and `U8 -> Byte`. It also supports infallible
+integer-to-`String` expression casts from profile `Int` and fixed signed/unsigned
+integer types. Remaining builtin runtime casts stay gated, including fallible
+casts, conversions involving `Bool`, `Char` or `Error` (including `Char -> Int`),
+parsing from `String`, `Float`-family formatting to `String`, and statement-form
+casts. The `Number` family is not implemented.
 
 ### MON data boundary
 

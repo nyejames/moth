@@ -148,7 +148,7 @@ pub(crate) fn build_emit_plan(
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 19] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 20] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -161,6 +161,7 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 19] {
         WasmRuntimeHelper::StringLen,
         WasmRuntimeHelper::StringEqual,
         WasmRuntimeHelper::StringFromI64,
+        WasmRuntimeHelper::StringFromU64,
         WasmRuntimeHelper::VecNew,
         WasmRuntimeHelper::VecPushHandle,
         WasmRuntimeHelper::VecLen,
@@ -222,10 +223,12 @@ pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
             params: vec![Handle, Handle],
             results: vec![I32],
         },
-        WasmRuntimeHelper::StringFromI64 => WasmLirSignature {
-            params: vec![I64],
-            results: vec![Handle],
-        },
+        WasmRuntimeHelper::StringFromI64 | WasmRuntimeHelper::StringFromU64 => {
+            WasmLirSignature {
+                params: vec![I64],
+                results: vec![Handle],
+            }
+        }
         WasmRuntimeHelper::VecNew => WasmLirSignature {
             params: vec![],
             results: vec![Handle],
@@ -276,6 +279,7 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::StringLen => "rt_string_len",
         WasmRuntimeHelper::StringEqual => "rt_string_equal",
         WasmRuntimeHelper::StringFromI64 => "rt_string_from_i64",
+        WasmRuntimeHelper::StringFromU64 => "rt_string_from_u64",
         WasmRuntimeHelper::VecNew => "rt_vec_new",
         WasmRuntimeHelper::VecPushHandle => "rt_vec_push_handle",
         WasmRuntimeHelper::VecLen => "rt_vec_len",
@@ -435,6 +439,7 @@ fn runtime_helper_requirements(
                     | WasmLirStmt::StringPushLiteral { .. }
                     | WasmLirStmt::StringPushHandle { .. }
                     | WasmLirStmt::StringFromI64 { .. }
+                    | WasmLirStmt::StringFromU64 { .. }
                     | WasmLirStmt::StringFinish { .. }
                     | WasmLirStmt::StringEq { .. }
                     | WasmLirStmt::StringNe { .. }
