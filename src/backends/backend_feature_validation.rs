@@ -22,7 +22,6 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, TypeConstructor, TypeId,
 };
@@ -81,8 +80,8 @@ pub struct BackendFeatureValidationInput<'a> {
 /// WHAT: hashmap construction/use, reactive runtime features, runtime casts, checked numeric
 ///       operations, generic runtime values, Moth `Error` values and fallible control flow are
 ///       legal HIR, but this validator reports Wasm features that the target cannot lower. Its
-///       bounded scalar step accepts direct integer/Byte and F32/F64 values while retaining gates
-///       for F16 and aggregates.
+///       bounded scalar step accepts direct integer/Byte and F16/F32/F64 values while retaining
+///       gates for aggregates.
 /// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
@@ -356,8 +355,8 @@ fn signature_type_uses_unsupported_numeric_profile(
 
 /// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
 ///
-/// WHAT: direct integer/Byte and F32/F64 scalar values are accepted, but F16 and aggregate types
-///       containing any fixed scalar remain unsupported.
+/// WHAT: direct fixed scalars, including F16, are accepted, but aggregate types containing any
+///       fixed scalar remain unsupported.
 /// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
@@ -378,7 +377,6 @@ fn validate_fixed_width_scalar_values(
     let module_occurrences =
         first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
             match type_environment.fixed_scalar(type_id) {
-                Some(FixedScalar::F16) => true,
                 Some(_) => false,
                 None => backend_type_facts.contains_fixed_scalar(type_id),
             }
@@ -389,7 +387,6 @@ fn validate_fixed_width_scalar_values(
         let signature_occurrences =
             first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
                 match type_environment.fixed_scalar(type_id) {
-                    Some(FixedScalar::F16) => true,
                     Some(_) => false,
                     None => backend_type_facts.contains_fixed_scalar(type_id),
                 }
@@ -558,8 +555,8 @@ fn validate_wasm_reactive_features(
 
 /// Reports the first reachable runtime cast outside Wasm's infallible expression conversions.
 ///
-/// WHAT: accepts evidence-approved integer and F32/F64 expression conversions plus Byte/U8;
-///       F16, fallible pairs and statement casts remain gated.
+/// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 expression conversions plus
+///       Byte/U8; fallible pairs and statement casts remain gated.
 /// WHY: target validation consumes retained cast evidence before lowering, preserving authored
 ///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
@@ -626,13 +623,18 @@ fn wasm_supports_numeric_conversion(
         target.binary_float_precision(numeric_profile),
     ) {
         (Some(source_precision), Some(target_precision)) => {
-            matches!(
-                (source_precision, target_precision),
-                (
-                    BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64,
-                    BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+            target_precision >= source_precision
+                && matches!(
+                    (source_precision, target_precision),
+                    (
+                        BinaryFloatPrecision::Binary16
+                            | BinaryFloatPrecision::Binary32
+                            | BinaryFloatPrecision::Binary64,
+                        BinaryFloatPrecision::Binary16
+                            | BinaryFloatPrecision::Binary32
+                            | BinaryFloatPrecision::Binary64
+                    )
                 )
-            ) && target_precision >= source_precision
         }
         _ => false,
     }
@@ -641,15 +643,19 @@ fn wasm_supports_numeric_conversion(
 fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile) -> bool {
     matches!(
         domain.binary_float_precision(numeric_profile),
-        Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
+        Some(
+            BinaryFloatPrecision::Binary16
+                | BinaryFloatPrecision::Binary32
+                | BinaryFloatPrecision::Binary64
+        )
     )
 }
 
 /// Reports the first reachable checked numeric operation outside Wasm's trap-mode integer and
 /// binary32/binary64 paths.
 ///
-/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError, F16 and
-///       integer-division-on-float operations remain target-gated.
+/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError and F16-domain
+///       operations remain target-gated independently of direct F16 values.
 /// WHY: lowerers receive only operations whose exact failure mode and semantic precision they
 ///      implement, using the operation/domain facts retained by HIR reachability.
 fn validate_wasm_checked_numeric_ops(

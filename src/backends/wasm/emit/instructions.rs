@@ -278,6 +278,30 @@ pub(crate) fn emit_statement(
             function.instruction(conversion);
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
+        WasmLirStmt::RoundF16 { dst, source } => {
+            ensure_local_abi(
+                *source,
+                WasmAbiType::F32,
+                context,
+                "F16 rounding source",
+            )?;
+            ensure_local_abi(
+                *dst,
+                WasmAbiType::F32,
+                context,
+                "F16 rounding destination",
+            )?;
+            function.instruction(&Instruction::LocalGet(local_index(*source, context)?));
+            function.instruction(&Instruction::Call(helper_index(
+                plan,
+                WasmRuntimeHelper::F32ToF16Bits,
+            )?));
+            function.instruction(&Instruction::Call(helper_index(
+                plan,
+                WasmRuntimeHelper::F16BitsToF32,
+            )?));
+            function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
+        }
         WasmLirStmt::FloatExtend { dst, source } => {
             ensure_local_abi(*source, WasmAbiType::F32, context, "float extension source")?;
             ensure_local_abi(
@@ -325,6 +349,12 @@ pub(crate) fn emit_statement(
             ensure_local_abi(*dst, kind.carrier(), context, "scalar load result")?;
             function.instruction(&Instruction::LocalGet(local_index(*address, context)?));
             function.instruction(&scalar_load_instruction(*kind, *offset));
+            if *kind == WasmScalarStorageKind::F16 {
+                function.instruction(&Instruction::Call(helper_index(
+                    plan,
+                    WasmRuntimeHelper::F16BitsToF32,
+                )?));
+            }
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::StoreScalar {
@@ -337,6 +367,12 @@ pub(crate) fn emit_statement(
             ensure_local_abi(*value, kind.carrier(), context, "scalar store value")?;
             function.instruction(&Instruction::LocalGet(local_index(*address, context)?));
             function.instruction(&Instruction::LocalGet(local_index(*value, context)?));
+            if *kind == WasmScalarStorageKind::F16 {
+                function.instruction(&Instruction::Call(helper_index(
+                    plan,
+                    WasmRuntimeHelper::F32ToF16Bits,
+                )?));
+            }
             function.instruction(&scalar_store_instruction(*kind, *offset));
         }
         WasmLirStmt::BoolAnd { dst, lhs, rhs } => {
@@ -387,7 +423,9 @@ fn scalar_load_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruct
         WasmScalarStorageKind::I8 => Instruction::I32Load8S(memarg),
         WasmScalarStorageKind::U8 => Instruction::I32Load8U(memarg),
         WasmScalarStorageKind::I16 => Instruction::I32Load16S(memarg),
-        WasmScalarStorageKind::U16 => Instruction::I32Load16U(memarg),
+        WasmScalarStorageKind::U16 | WasmScalarStorageKind::F16 => {
+            Instruction::I32Load16U(memarg)
+        }
         WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Load(memarg),
         WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Load(memarg),
         WasmScalarStorageKind::F32 => Instruction::F32Load(memarg),
@@ -399,7 +437,9 @@ fn scalar_store_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruc
     let memarg = scalar_memarg(kind, offset);
     match kind {
         WasmScalarStorageKind::I8 | WasmScalarStorageKind::U8 => Instruction::I32Store8(memarg),
-        WasmScalarStorageKind::I16 | WasmScalarStorageKind::U16 => Instruction::I32Store16(memarg),
+        WasmScalarStorageKind::I16
+        | WasmScalarStorageKind::U16
+        | WasmScalarStorageKind::F16 => Instruction::I32Store16(memarg),
         WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Store(memarg),
         WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Store(memarg),
         WasmScalarStorageKind::F32 => Instruction::F32Store(memarg),

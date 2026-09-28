@@ -1121,6 +1121,124 @@ same <span class='moth-code-operator'>=</span> a <span class='moth-code-operator
 <span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span>condition <span class='moth-code-operator'>=</span> ready, message <span class='moth-code-operator'>=</span> <span class='moth-code-literal'>none</span><span class='moth-code-delimiter'>)</span></code></pre><ul><li>The condition must resolve to <code>Bool</code>.</li><li>The condition is required.</li><li>The message resolves to <code>String?</code> and defaults to <code>none</code>.</li><li>A <code>String</code> promotes to <code>String?</code> through ordinary contextual coercion.</li><li><code>none</code> selects the default failure text, <code>&quot;assertion failed&quot;</code>.</li><li>A present message may be an ordinary infallible expression, including a local string, runtime template or infallible string-producing call.</li><li>Moth does not implicitly stringify other value types for an assertion message.</li><li>Named and positional arguments use the ordinary call rules. Positional arguments must come first, names must be <code>condition</code> or <code>message</code>, and a parameter cannot be supplied twice.</li><li>Mutable access markers are invalid for both parameters.</li><li>Parentheses are required.</li><li>The shared call-argument grammar owns trailing-comma behaviour.</li></ul><p>The message is type checked, generic-inferred, evidence-checked and fully normalized, including nested templates, even when the condition is compile-time <code>true</code>. The normalized inactive message is then replaced with typed <code>none</code> before the AST/HIR boundary, so it publishes no TIR, runtime handoff, reactive metadata, generated-function request or downstream executable fact. An active message is evaluated only on the failure edge. A template-backed message is read as one snapshot at failure and does not create an assertion sink or live subscription. Message construction cannot escape its evaluation through <code>!</code>, <code>?</code>, <code>return</code>, <code>break</code> or <code>continue</code>. Handle fallible work before the assertion and pass its infallible value instead.</p><h3>Failure behaviour</h3><ul><li>Assertions are checked in development and release builds.</li><li>Failure is unrecoverable in Moth source.</li><li>Failure does not produce <code>Error!</code>.</li><li>Postfix <code>!</code> is invalid.</li><li><code>catch</code> is invalid.</li><li>Expected runtime failures should use a typed error path instead.</li></ul><h3>Statement-only contract</h3><p><code>assert</code>:</p><ul><li>cannot be assigned</li><li>cannot be passed as an argument</li><li>cannot be imported or aliased</li><li>cannot appear in template interpolation</li><li>does not produce a value</li></ul><p><code>assert(false)</code> and <code>assert(false, &quot;message&quot;)</code> are statically terminal. <code>assert(false, runtime_message)</code> is also statically terminal after the failure-edge message is lowered.</p><p>They may end a function path that otherwise requires a value.</p><p>A dynamic <code>assert(condition)</code> is not statically terminal because the condition may succeed.</p>
 </div>
 </fieldset></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Runtime failures and termination
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="runtime-failures-and-termination-level"
+                id="runtime-failures-and-termination-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="runtime-failures-and-termination-level"
+                id="runtime-failures-and-termination-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="runtime-failures-and-termination">
+                    Runtime failures and termination
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="runtime-failures-and-termination-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="runtime-failures-and-termination-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+Checked operations and typed errors support recovery. Resource exhaustion
+and host termination remain outside that contract. Choose Advanced for
+the failure catalogue and the Wasm/JavaScript comparison.
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><strong>Development note.</strong> This advanced reference records accepted design. The implicit-failure and entry-error changes are not yet implemented. Check the <a href="../progress">progress matrix</a> for current support. This catalogue may miss cases while Moth is changing rapidly. Update it when operations, runtime limits or backend contracts change.</p><h3>Recoverable failure and termination</h3><p>Moth separates a computation that cannot produce its normal result from an execution environment that can no longer support the program.</p><p>Checked arithmetic produces an implicit built-in failure. Private functions may propagate that failure within a module. An explicit <code>Error!</code> return channel converts escaping built-in failures into the corresponding built-in <code>Error</code>. A custom error channel requires explicit handling or conversion. Exported functions expose their failures through a declared error channel or handle them before returning. An unrepresented failure cannot cross that boundary.</p><p>Expression-wide <code>catch</code> handles the whole selected expression, including argument evaluation. Implicit failures and built-in <code>Error!</code> outcomes may share one catch. The same rule applies to <code>cast expression catch</code>, so its handler may receive an arithmetic failure from the operand as well as a conversion error. Custom error types do not gain automatic conversion. Split an expression when its failure sources need different handling.</p><p>The implicit <code>start</code> has a built-in <code>Error!</code> channel. Its generated caller reports an unsuccessful entry invocation. Returning that error is not a panic and does not publish successful runtime fragments. Handling an error does not undo earlier mutations or IO. Compile-time-known invalid numeric operations remain source diagnostics rather than runtime recovery opportunities.</p><p><code>assert</code> is the only way to author a deliberate panic. A failed assertion is unrecoverable in Moth and remains checked in release builds. <code>catch</code> handles Moth failure channels, not arbitrary JavaScript exceptions or Wasm traps.</p><h3>Termination outside assert</h3><p>The following cases remain outside the recoverable failure system. An infallible source operation promises no recoverable error result, not unlimited memory, stack space or execution time.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> Where it can happen</p></th><th scope="col" style=""><p> What can stop execution</p></th><th scope="col" style=""><p> Why it is not an ordinary failure</p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Growable collection push, map growth, runtime strings and templates, independent copies or allocating Number operations</p></td> <td style=""><p> Allocation exhaustion or refusal by the runtime allocator</p></td> <td style=""><p> Recovery is not a language guarantee. Propagation, cleanup and reporting may themselves need resources. Growable push keeps its no-error-channel contract and traps on allocation exhaustion.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Backing-store growth and runtime storage bookkeeping</p></td> <td style=""><p> An allocation-size, address-space, representable-capacity or runtime limit is exceeded</p></td> <td style=""><p> These are physical storage limits, not permission to wrap an address or corrupt memory. They remain fatal unless the particular API explicitly defines a recoverable limit error.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Recursion, deep call chains and calls into host code</p></td> <td style=""><p> Stack or host call-depth exhaustion</p></td> <td style=""><p> The host may stop execution before enough stack remains for normal Moth error propagation or cleanup. There is no recoverable stack-budget effect.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Foreign bindings, generated code or runtime internals</p></td> <td style=""><p> An unexpected host exception, invalid generated memory access or broken runtime invariant</p></td> <td style=""><p> A fault is not a declared API outcome. The host or tooling may report it, but Moth does not turn arbitrary faults into Error values or promise safe continuation.</p></td>
+        </tr><tr style="">
+             <td style=""><p> The process, browser tab or embedding host</p></td> <td style=""><p> External termination, an execution limit or a host failure</p></td> <td style=""><p> The program cannot require an environment that has stopped executing it to run a handler. Even a final diagnostic is not guaranteed.</p></td>
+        </tr>
+            
+</table><p>A full fixed-capacity collection is different from allocation exhaustion. Fixed <code>push</code> returns <code>Error!</code> when it has no free slot. Invalid collection indices and missing map keys also retain their documented typed error paths. Expected IO errors follow the called API&#39;s declared contract. Resource failure does not silently replace these ordinary errors.</p><p>Fatal resource handling still requires runtime checks that protect memory and storage invariants. Excluding recoverable allocation errors does not authorise unchecked address arithmetic or treating a refused allocation as valid storage. No assertion, fatal runtime fault or external termination guarantees rollback or completion of cleanup.</p><p>A Wasm trap ends the current invocation. It need not end the embedding process. In a JavaScript host it can surface as a <code>WebAssembly.RuntimeError</code>. Conversely, out-of-memory behaviour may include host termination rather than a catchable exception. Tooling that reports an unexpected startup fault is observing that fault, not adding a Moth recovery channel or proving a compiler bug. See the error-condition mappings and resource limits in the <a href="https://webassembly.github.io/spec/js-api/">Wasm JavaScript embedding specification</a>.</p><h3>Checked operations and bare backend behaviour</h3><p>The table compares <strong>Moth&#39;s required result</strong> with selected bare backend operations <strong>without Moth&#39;s semantic checks</strong>. It is not an unchecked Moth mode or a catalogue of exact generated instructions. Helpers and representations may differ. A backend must preserve Moth semantics wherever it supports the feature.</p><p>Arithmetic checks the promoted result domain, not an operand&#39;s storage width. For example, <code>U8 + U8</code> produces <code>U32</code>, so crossing 255 is not itself overflow. Narrowing that result back into <code>U8</code> is a separate checked boundary. Moth <code>/</code> produces a binary floating-point result for integer operands, while <code>//</code> is integer division.</p><p>JavaScript&#39;s <code>Number</code> below means its binary64 primitive, not Moth&#39;s arbitrary-precision <code>Number</code> family. A bare JavaScript <code>Number</code> operation does not enforce an <code>I32</code> or <code>U32</code> range. Bare <code>BigInt</code> operations have no fixed-width overflow limit, but still depend on host resources.</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> Operation or invalid condition</p></th><th scope="col" style=""><p> Moth outcome</p></th><th scope="col" style=""><p> Bare Wasm behaviour</p></th><th scope="col" style=""><p> Bare JavaScript behaviour</p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> Integer addition, subtraction, multiplication or negation exceeds the result domain</p></td> <td style=""><p> Built-in overflow failure</p></td> <td style=""><p> Integer add, subtract and multiply wrap modulo the carrier width. Negation via subtraction wraps too.</p></td> <td style=""><p> Number may exceed the Moth range or round. BigInt keeps the mathematical integer rather than fixed-width wrapping.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Integer // has a zero divisor or the signed result-domain minimum divided by -1</p></td> <td style=""><p> Built-in division or overflow failure</p></td> <td style=""><p> Integer division traps on zero. Signed division also traps on that overflow pair.</p></td> <td style=""><p> BigInt division throws RangeError on zero but has no signed-width overflow. Number division can produce infinity or NaN.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Integer % has a zero divisor</p></td> <td style=""><p> Built-in division failure. Signed minimum % -1 is valid and equals zero.</p></td> <td style=""><p> Integer remainder traps on zero. Signed minimum remainder -1 returns zero.</p></td> <td style=""><p> Number remainder produces NaN on zero. BigInt remainder throws RangeError.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Binary floating-point / has a zero divisor</p></td> <td style=""><p> Built-in division failure</p></td> <td style=""><p> Floating-point division produces infinity or NaN rather than trapping.</p></td> <td style=""><p> Number division produces infinity or NaN.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Binary floating-point arithmetic produces a non-finite result</p></td> <td style=""><p> Built-in invalid-result failure</p></td> <td style=""><p> Floating-point operations admit infinity and NaN.</p></td> <td style=""><p> Number operations admit infinity and NaN.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Integer exponent is invalid or exponentiation exceeds a bounded result domain</p></td> <td style=""><p> Built-in exponent or overflow failure</p></td> <td style=""><p> No scalar exponentiation instruction. A helper&#39;s unchecked integer multiplies can wrap.</p></td> <td style=""><p> Number exponentiation can produce fractional or non-finite results. BigInt rejects negative exponents with RangeError.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Integer narrowing cannot represent the value, including compound-assignment write-back</p></td> <td style=""><p> Explicit fallible cast error, or built-in failure for implicit compound narrowing. The target is written only on success.</p></td> <td style=""><p> Integer wrapping conversions and narrow stores discard high bits rather than range-checking the value.</p></td> <td style=""><p> Ordinary assignment does not narrow. Integer coercions and integer typed-array stores can wrap to their selected widths.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Float-to-integer conversion has an out-of-range truncated result</p></td> <td style=""><p> Explicit fallible cast error, or built-in failure for implicit compound narrowing</p></td> <td style=""><p> Trapping truncation traps on an invalid conversion. Saturating conversion clamps instead.</p></td> <td style=""><p> Math.trunc does not enforce the destination range. Subsequent fixed-width coercion can wrap.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Binary float narrowing rounds to a non-finite value</p></td> <td style=""><p> Explicit fallible cast error, or built-in failure for implicit compound narrowing</p></td> <td style=""><p> f32.demote_f64 can produce infinity. F16 needs its separate representation contract.</p></td> <td style=""><p> Math.fround can produce infinity when rounding to binary32.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Runtime numeric text parsing is invalid, or an exact Number conversion loses required information</p></td> <td style=""><p> Explicit fallible cast error</p></td> <td style=""><p> No general text or decimal-scale conversion instruction. Language helpers define the checks.</p></td> <td style=""><p> Number accepts some spellings Moth rejects. parseInt and parseFloat can accept a prefix. Decimal-scale exactness needs helpers.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Number-family division or remainder has a zero divisor</p></td> <td style=""><p> Built-in division failure. Arbitrary precision removes fixed-width overflow, not invalid operands.</p></td> <td style=""><p> No scalar arbitrary-precision decimal operation. Runtime helpers supply it.</p></td> <td style=""><p> No native Moth decimal-scale operation. A helper using BigInt division must handle its zero-divisor RangeError.</p></td>
+        </tr><tr style="">
+             <td style=""><p> A runtime range step is invalid or a required counter update overflows</p></td> <td style=""><p> Built-in failure under the range contract. Finishing at the last endpoint does not require an overflowing sentinel.</p></td> <td style=""><p> Branches and arithmetic have no Moth range-loop contract.</p></td> <td style=""><p> Loops and arithmetic have no Moth range-loop contract.</p></td>
+        </tr><tr style="">
+             <td style=""><p> Invalid collection index, missing map key or full fixed collection</p></td> <td style=""><p> The operation&#39;s declared Error! result</p></td> <td style=""><p> Linear-memory bounds are not logical collection bounds. Collection helpers enforce the API contract.</p></td> <td style=""><p> Arrays and maps do not implement Moth&#39;s typed error contract. Collection helpers enforce it.</p></td>
+        </tr>
+            
+</table><p>Finite floating-point rounding is permitted. Underflow to a finite subnormal or zero is not an overflow failure. Float-to-integer conversion truncates before checking the integer range. Number scale narrowing instead requires exactness. The <a href="../numbers/">numeric reference</a> and <a href="../casts/">cast reference</a> own the complete operator, promotion and conversion rules.</p><p>The raw comparisons use the <a href="https://webassembly.github.io/spec/core/exec/numerics.html">Wasm numeric semantics</a>, <a href="https://webassembly.github.io/spec/core/exec/instructions.html">Wasm instruction semantics</a>, <a href="https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html">ECMAScript Number and BigInt semantics</a>, <a href="https://tc39.es/ecma262/multipage/abstract-operations.html">ECMAScript numeric conversions</a>, <a href="https://tc39.es/ecma262/multipage/numbers-and-dates.html">ECMAScript Math operations</a> and <a href="https://tc39.es/ecma262/multipage/global-object.html">ECMAScript numeric parsing</a>. These specifications describe the backend primitives, not an alternative Moth language contract.</p><h3>What checks and optimisations promise</h3><p>A backend may remove a check when it proves that the failing case cannot occur. More expensive release analysis may remove more checks, but source acceptance, exported contracts and observable failure order stay the same. Programmer confidence is not an unchecked assumption available to the optimiser.</p><p>Handling a checked failure with <code>assert(false, ...)</code> makes termination explicit. It does not automatically remove the original check. Wasm integer addition wraps rather than traps, so panic-on-overflow still needs detection. A future lowerer may use a native trap only when it preserves the full observable assertion contract, including required message work.</p><p>Explicit wrapping operations and any other wrap-or-trap controls remain unsettled future design. This reference introduces no such syntax or guarantee that they will be added. It can later document accepted controls and their backend costs. Recoverable resource exhaustion is outside Moth&#39;s design scope, not another pending failure effect.</p>
+</div>
+</fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
     <a
         class="doc-pager__link doc-pager__link--previous"

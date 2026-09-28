@@ -16,6 +16,12 @@ pub(crate) fn emit_helper_function(
         WasmRuntimeHelper::FloatRemainder => {
             return Ok(super::float_remainder::emit_float_remainder());
         }
+        WasmRuntimeHelper::F32ToF16Bits => {
+            return Ok(super::binary16::emit_f32_to_f16_bits());
+        }
+        WasmRuntimeHelper::F16BitsToF32 => {
+            return Ok(super::binary16::emit_f16_bits_to_f32());
+        }
         _ => {}
     }
 
@@ -93,7 +99,10 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
         }
-        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => {
+        WasmRuntimeHelper::FloatPower
+        | WasmRuntimeHelper::FloatRemainder
+        | WasmRuntimeHelper::F32ToF16Bits
+        | WasmRuntimeHelper::F16BitsToF32 => {
             unreachable!("pure numeric helpers are dispatched before memory helpers")
         }
     };
@@ -599,11 +608,14 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
         }
-        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => {
+        WasmRuntimeHelper::FloatPower
+        | WasmRuntimeHelper::FloatRemainder
+        | WasmRuntimeHelper::F32ToF16Bits
+        | WasmRuntimeHelper::F16BitsToF32 => {
             unreachable!("pure numeric helpers are dispatched before memory helpers")
         }
-    }
 
+    }
     function.instruction(&Instruction::End);
     Ok(function)
 }

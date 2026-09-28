@@ -2,8 +2,10 @@
 //!
 //! This layer owns binary encoding only. It does not reinterpret frontend semantics.
 //! `instructions` dispatches LIR statements; `checked_integer` and `checked_float` enforce the
-//! resolved numeric domains. Portable power and remainder helpers use only core Wasm instructions.
+//! resolved numeric domains. `binary16` handles compact representation boundaries, while power
+//! and remainder helpers implement portable numerical operations with core Wasm instructions.
 
+mod binary16;
 mod checked_float;
 mod checked_integer;
 pub(crate) mod data;

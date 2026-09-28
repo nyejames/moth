@@ -1156,6 +1156,130 @@ fn synthesizes_export_wrappers_with_stable_names() {
 }
 
 #[test]
+fn exported_f16_parameters_are_rounded_before_the_internal_call() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let f16_type = builtin_type_ids::fixed_scalar(FixedScalar::F16);
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let exported_path = path_fork
+        .try_intern_portable_path("process_half", &mut string_table)
+        .expect("test path fits");
+
+    let start_function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.int,
+    };
+    let exported_function = HirFunction {
+        id: FunctionId(1),
+        entry: BlockId(1),
+        params: vec![LocalId(10)],
+        return_type: f16_type,
+    };
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![
+            (start_function, start_path, HirFunctionOrigin::EntryStart),
+            (exported_function, exported_path, HirFunctionOrigin::Normal),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(
+                    500,
+                    0,
+                    types.int,
+                    RegionId(0),
+                )),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![local(10, f16_type, RegionId(0))],
+                statements: vec![],
+                terminator: HirTerminator::Return(load_local(
+                    501,
+                    LocalId(10),
+                    f16_type,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    );
+
+    let mut export_names = FxHashMap::default();
+    export_names.insert(FunctionId(1), "process_half".to_owned());
+    let request = WasmBackendRequest {
+        export_policy: WasmExportPolicy {
+            exported_functions: vec![FunctionId(1)],
+            export_names,
+            helper_exports: Default::default(),
+        },
+        ..Default::default()
+    };
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &request,
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("F16 export wrapper should lower");
+
+    let WasmExportKind::Function(wrapper_id) = lowered.lir_module.exports[0].kind;
+    let wrapper = lowered
+        .lir_module
+        .functions
+        .iter()
+        .find(|function| function.id == wrapper_id)
+        .expect("export wrapper should be present");
+    assert_eq!(wrapper.signature.params, vec![WasmAbiType::F32]);
+    assert_eq!(wrapper.signature.results, vec![WasmAbiType::F32]);
+
+    let statements = &wrapper.blocks[0].statements;
+    let round_index = statements
+        .iter()
+        .position(|statement| matches!(statement, WasmLirStmt::RoundF16 { .. }))
+        .expect("the wrapper should round its external F32 parameter");
+    let call_index = statements
+        .iter()
+        .position(|statement| matches!(statement, WasmLirStmt::Call { .. }))
+        .expect("the wrapper should call its internal function");
+    assert!(round_index < call_index, "rounding must precede the call");
+
+    let WasmLirStmt::RoundF16 { dst, source } = &statements[round_index] else {
+        unreachable!("the round index selects a RoundF16")
+    };
+    assert_eq!(*source, WasmLirLocalId(0));
+    let WasmLirStmt::Call {
+        dst: Some(call_result),
+        args,
+        ..
+    } = &statements[call_index]
+    else {
+        unreachable!("the call index selects a value-returning Call")
+    };
+    assert_eq!(args, &vec![*dst]);
+    assert!(
+        matches!(
+            &wrapper.blocks[0].terminator,
+            WasmLirTerminator::Return { value: Some(value) } if *value == *call_result
+        ),
+        "the wrapper should return the callee's canonical F32 carrier unchanged"
+    );
+}
+
+#[test]
 fn rejects_invalid_export_request_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

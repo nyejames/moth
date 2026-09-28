@@ -9,6 +9,7 @@ use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmImportId, WasmLirFunctionId, WasmLirSignature, WasmStaticDataId,
 };
 use crate::backends::wasm::request::WasmBackendRequest;
+use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -100,13 +101,16 @@ pub(crate) fn build_emit_plan(
     let memory_helpers_needed = helper_requirements.memory;
     let float_power_needed = helper_requirements.float_power;
     let float_remainder_needed = helper_requirements.float_remainder;
-
+    let f32_to_f16_bits_needed = helper_requirements.f32_to_f16_bits;
+    let f16_bits_to_f32_needed = helper_requirements.f16_bits_to_f32;
     // WHAT: helper ordering is fixed and independent of usage count.
     // WHY: stable helper function indices simplify exports and debug output.
     for helper in helper_emit_order() {
         let helper_is_needed = match helper {
             WasmRuntimeHelper::FloatPower => float_power_needed,
             WasmRuntimeHelper::FloatRemainder => float_remainder_needed,
+            WasmRuntimeHelper::F32ToF16Bits => f32_to_f16_bits_needed,
+            WasmRuntimeHelper::F16BitsToF32 => f16_bits_to_f32_needed,
             _ => memory_helpers_needed,
         };
         if !helper_is_needed {
@@ -144,7 +148,7 @@ pub(crate) fn build_emit_plan(
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 17] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 19] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -165,16 +169,26 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 17] {
         WasmRuntimeHelper::DropIfOwned,
         WasmRuntimeHelper::FloatPower,
         WasmRuntimeHelper::FloatRemainder,
+        WasmRuntimeHelper::F32ToF16Bits,
+        WasmRuntimeHelper::F16BitsToF32,
     ]
 }
 
 pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
-    use WasmAbiType::{F64, Handle, I32, I64};
+    use WasmAbiType::{F32, F64, Handle, I32, I64};
 
     match helper {
         WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => WasmLirSignature {
             params: vec![F64, F64],
             results: vec![F64],
+        },
+        WasmRuntimeHelper::F32ToF16Bits => WasmLirSignature {
+            params: vec![F32],
+            results: vec![I32],
+        },
+        WasmRuntimeHelper::F16BitsToF32 => WasmLirSignature {
+            params: vec![I32],
+            results: vec![F32],
         },
         WasmRuntimeHelper::Alloc => WasmLirSignature {
             params: vec![I32],
@@ -270,6 +284,8 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::DropIfOwned => "rt_drop_if_owned",
         WasmRuntimeHelper::FloatPower => "rt_float_power",
         WasmRuntimeHelper::FloatRemainder => "rt_float_remainder",
+        WasmRuntimeHelper::F32ToF16Bits => "rt_f32_to_f16_bits",
+        WasmRuntimeHelper::F16BitsToF32 => "rt_f16_bits_to_f32",
     }
 }
 
@@ -383,6 +399,8 @@ struct RuntimeHelperRequirements {
     memory: bool,
     float_power: bool,
     float_remainder: bool,
+    f32_to_f16_bits: bool,
+    f16_bits_to_f32: bool,
 }
 
 fn runtime_helper_requirements(
@@ -393,12 +411,26 @@ fn runtime_helper_requirements(
         memory: memory_helpers_exported,
         float_power: false,
         float_remainder: false,
+        f32_to_f16_bits: false,
+        f16_bits_to_f32: false,
     };
 
     for function in &module.functions {
         for block in &function.blocks {
             for statement in &block.statements {
                 match statement {
+                    WasmLirStmt::RoundF16 { .. } => {
+                        requirements.f32_to_f16_bits = true;
+                        requirements.f16_bits_to_f32 = true;
+                    }
+                    WasmLirStmt::LoadScalar {
+                        kind: WasmScalarStorageKind::F16,
+                        ..
+                    } => requirements.f16_bits_to_f32 = true,
+                    WasmLirStmt::StoreScalar {
+                        kind: WasmScalarStorageKind::F16,
+                        ..
+                    } => requirements.f32_to_f16_bits = true,
                     WasmLirStmt::StringNewBuffer { .. }
                     | WasmLirStmt::StringPushLiteral { .. }
                     | WasmLirStmt::StringPushHandle { .. }

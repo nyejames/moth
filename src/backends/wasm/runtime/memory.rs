@@ -9,10 +9,10 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 /// Physical Wasm scalar-memory representation, separate from semantic identity.
 ///
-/// F16 is intentionally absent: accessing its 16-bit storage requires binary16 conversion, which
-/// is not part of this low-level access path.
+/// F16 stores compact binary16 bits while its computation and ABI carrier stays F32.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WasmScalarStorageKind {
+    F16,
     I8,
     U8,
     I16,
@@ -30,7 +30,7 @@ impl WasmScalarStorageKind {
     pub(crate) const fn size(self) -> u32 {
         match self {
             Self::I8 | Self::U8 => 1,
-            Self::I16 | Self::U16 => 2,
+            Self::I16 | Self::U16 | Self::F16 => 2,
             Self::I32 | Self::U32 | Self::F32 => 4,
             Self::I64 | Self::U64 | Self::F64 => 8,
         }
@@ -50,9 +50,11 @@ impl WasmScalarStorageKind {
     /// Wasm computation carrier for loads and stores of this physical kind.
     pub(crate) const fn carrier(self) -> WasmAbiType {
         match self {
-            Self::I8 | Self::U8 | Self::I16 | Self::U16 | Self::I32 | Self::U32 => WasmAbiType::I32,
+            Self::I8 | Self::U8 | Self::I16 | Self::U16 | Self::I32 | Self::U32 => {
+                WasmAbiType::I32
+            }
             Self::I64 | Self::U64 => WasmAbiType::I64,
-            Self::F32 => WasmAbiType::F32,
+            Self::F16 | Self::F32 => WasmAbiType::F32,
             Self::F64 => WasmAbiType::F64,
         }
     }
@@ -60,7 +62,7 @@ impl WasmScalarStorageKind {
     /// Derive supported physical storage from fixed scalar identity.
     ///
     /// `Byte` remains a distinct semantic type but has the same physical octet representation as
-    /// U8. F16 needs binary16 conversion and therefore has no access kind here.
+    /// U8. F16 uses the portable binary16 conversion helpers at the scalar memory boundary.
     #[allow(dead_code)] // Wasm scalar places will consume this when their owning lowering lands.
     pub(crate) const fn from_fixed_scalar(scalar: FixedScalar) -> Option<Self> {
         match scalar {
@@ -72,10 +74,10 @@ impl WasmScalarStorageKind {
             FixedScalar::U32 => Some(Self::U32),
             FixedScalar::I64 => Some(Self::I64),
             FixedScalar::U64 => Some(Self::U64),
+            FixedScalar::F16 => Some(Self::F16),
             FixedScalar::F32 => Some(Self::F32),
             FixedScalar::F64 => Some(Self::F64),
             FixedScalar::Byte => Some(Self::U8),
-            FixedScalar::F16 => None,
         }
     }
 

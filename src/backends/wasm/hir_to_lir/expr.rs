@@ -122,9 +122,14 @@ pub(crate) fn lower_expression(
                     statements.push(WasmLirStmt::ConstF64 { dst, value });
                 }
                 FixedScalar::F16 => {
-                    return Err(lir_transformation_error(
-                        "Wasm lowering does not yet support F16 scalar values",
-                    ));
+                    let value = value.as_f64().ok_or_else(|| {
+                        lir_transformation_error("Wasm lowering received an invalid F16 value")
+                    })?;
+                    // Every canonical binary16 value is exact in F32, including signed zero.
+                    statements.push(WasmLirStmt::ConstF32 {
+                        dst,
+                        value: value as f32,
+                    });
                 }
             }
             Ok(ExprLoweringOutput {
@@ -338,13 +343,6 @@ fn lower_infallible_numeric_conversion(
 
     let source_precision = source_domain.binary_float_precision(profile);
     let target_precision = target_domain.binary_float_precision(profile);
-    if source_precision == Some(BinaryFloatPrecision::Binary16)
-        || target_precision == Some(BinaryFloatPrecision::Binary16)
-    {
-        return Err(lir_transformation_error(
-            "Wasm numeric conversion does not yet support F16",
-        ));
-    }
 
     let source_abi = expression_abi(context, source_expression);
     let target_abi = expression_abi(context, target_expression);
@@ -386,19 +384,34 @@ fn lower_infallible_numeric_conversion(
         if matches!(source_abi, WasmAbiType::I32 | WasmAbiType::I64)
             && matches!(
                 (target_precision, target_abi),
-                (Some(BinaryFloatPrecision::Binary32), WasmAbiType::F32)
-                    | (Some(BinaryFloatPrecision::Binary64), WasmAbiType::F64)
+                (
+                    Some(BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32),
+                    WasmAbiType::F32
+                ) | (Some(BinaryFloatPrecision::Binary64), WasmAbiType::F64)
             )
         {
             let source_value = lower_expression(context, source_expression, statements)?;
-            let dst = context.alloc_temp(target_abi);
+            let float_value = context.alloc_temp(target_abi);
             statements.push(WasmLirStmt::IntegerToFloat {
-                dst,
+                dst: float_value,
                 source: source_value.value,
                 source_signed: source_minimum < 0,
             });
+
+            if target_precision == Some(BinaryFloatPrecision::Binary16) {
+                let dst = context.alloc_temp(WasmAbiType::F32);
+                statements.push(WasmLirStmt::RoundF16 {
+                    dst,
+                    source: float_value,
+                });
+                return Ok(ExprLoweringOutput {
+                    value: dst,
+                    prefer_move: false,
+                });
+            }
+
             return Ok(ExprLoweringOutput {
-                value: dst,
+                value: float_value,
                 prefer_move: false,
             });
         }
@@ -407,7 +420,7 @@ fn lower_infallible_numeric_conversion(
     if matches!(
         (source_precision, target_precision, source_abi, target_abi),
         (
-            Some(BinaryFloatPrecision::Binary32),
+            Some(BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32),
             Some(BinaryFloatPrecision::Binary64),
             WasmAbiType::F32,
             WasmAbiType::F64
@@ -766,6 +779,8 @@ fn comparison_type(
             FloatPrecision::Bits32 => 32,
             FloatPrecision::Bits64 => 64,
         }),
+        // Canonical F16 values use exact F32 carriers, which preserve their comparison semantics.
+        NumericScalar::Fixed(FixedScalar::F16) => WasmScalarComparisonType::Float(32),
         NumericScalar::Fixed(scalar) => match scalar.class() {
             FixedScalarClass::SignedInteger => {
                 WasmScalarComparisonType::SignedInteger(scalar.bit_width() as u8)

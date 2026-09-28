@@ -80,7 +80,6 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
     let f32_scalar = NumericScalar::Fixed(FixedScalar::F32);
     let f64_scalar = NumericScalar::Fixed(FixedScalar::F64);
     let runtime_cast_rejection = Some(UnsupportedBackendFeatureReason::RuntimeCasts);
-    let f16_rejection = Some(UnsupportedBackendFeatureReason::FixedWidthScalarValues);
 
     let cases = [
         // Signed and unsigned integer carriers convert directly to F32 and F64.
@@ -154,9 +153,29 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
             i32_scalar,
             runtime_cast_rejection,
         ),
-        // F16 values remain outside this checkpoint in either direction.
-        (int32_float32, f16_scalar, f32_scalar, f16_rejection),
-        (int32_float32, f32_scalar, f16_scalar, f16_rejection),
+        // F16 carriers widen directly, while fallible narrowing and wide integer pairs stay gated.
+        (int32_float32, f16_scalar, f32_scalar, None),
+        (int64_float64, f16_scalar, f64_scalar, None),
+        (
+            int32_float32,
+            NumericScalar::Fixed(FixedScalar::I16),
+            f16_scalar,
+            None,
+        ),
+        (
+            int32_float32,
+            NumericScalar::Fixed(FixedScalar::I32),
+            f16_scalar,
+            runtime_cast_rejection,
+        ),
+        (int32_float32, f32_scalar, f16_scalar, runtime_cast_rejection),
+        (int32_float32, f64_scalar, f16_scalar, runtime_cast_rejection),
+        (
+            int32_float32,
+            f16_scalar,
+            NumericScalar::Fixed(FixedScalar::I32),
+            runtime_cast_rejection,
+        ),
     ];
 
     for (profile, source, target, expected_rejection) in cases {
@@ -551,12 +570,12 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm should keep F16 arithmetic gated",
+        "Wasm should gate a synthetic F16 operation domain rather than a promoted F32 operation",
     );
     assert_unsupported_feature(
         &diagnostic,
         &mut string_table,
-        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
     );
 }
 
@@ -1110,43 +1129,29 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
 }
 
 #[test]
-fn backend_feature_validation_allows_direct_fixed_scalars_except_f16() {
+fn backend_feature_validation_allows_direct_fixed_scalar_values() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
 
     for scalar in FixedScalar::ALL {
         let module = module_returning_expression(builtin_type_ids::fixed_scalar(scalar), None);
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+                external_package_registry: None,
+            },
+            &mut string_table,
+        );
 
-        if scalar == FixedScalar::F16 {
-            let diagnostic = wasm_feature_validation_diagnostic(
-                &module,
-                &type_environment,
-                &mut string_table,
-                "Wasm should keep rejecting F16 until its value path is implemented",
-            );
-            assert_unsupported_feature(
-                &diagnostic,
-                &mut string_table,
-                UnsupportedBackendFeatureReason::FixedWidthScalarValues,
-            );
-        } else {
-            let reachability = test_reachability(&module);
-            let result = validate_hir_backend_feature_support(
-                BackendFeatureValidationInput {
-                    hir: &module,
-                    reachability: &reachability,
-                    target: BackendTarget::Wasm,
-                    type_environment: Some(&type_environment),
-                    numeric_profile: NumericProfile::STANDARD,
-                    external_package_registry: None,
-                },
-                &mut string_table,
-            );
-            assert!(
-                result.is_ok(),
-                "direct {scalar:?} values should pass the Wasm shape gate"
-            );
-        }
+        assert!(
+            result.is_ok(),
+            "direct {scalar:?} values should pass the Wasm shape gate"
+        );
     }
 }
 
@@ -1154,9 +1159,9 @@ fn backend_feature_validation_allows_direct_fixed_scalars_except_f16() {
 fn backend_feature_validation_rejects_fixed_width_scalars_only_for_wasm() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();
-    // `{U16}?` reaches a fixed-width scalar through option and collection structure.
+    // `{F16}?` reaches a fixed-width scalar through option and collection structure.
     let entries =
-        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U16), None);
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::F16), None);
     let optional_entries = type_environment.intern_option(entries);
     let spanful = Some(SourceSpan::new(
         SourceId::COMPILATION_ROOT,

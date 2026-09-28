@@ -1,5 +1,8 @@
 use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_module;
+use crate::backends::wasm::emit::sections::{
+    build_emit_plan, helper_emit_order, helper_name, helper_signature,
+};
 use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{
@@ -19,10 +22,12 @@ use crate::backends::wasm::request::{
     WasmHelperExportPolicy, WasmTargetFeatures,
 };
 use crate::backends::wasm::runtime::memory::{WasmMemoryPlan, WasmScalarStorageKind};
+use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, int_expression,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
@@ -853,6 +858,7 @@ fn scalar_storage_facts_follow_profile_and_natural_layout() {
         (WasmScalarStorageKind::U8, 1, WasmAbiType::I32),
         (WasmScalarStorageKind::I16, 2, WasmAbiType::I32),
         (WasmScalarStorageKind::U16, 2, WasmAbiType::I32),
+        (WasmScalarStorageKind::F16, 2, WasmAbiType::F32),
         (WasmScalarStorageKind::I32, 4, WasmAbiType::I32),
         (WasmScalarStorageKind::U32, 4, WasmAbiType::I32),
         (WasmScalarStorageKind::I64, 8, WasmAbiType::I64),
@@ -906,6 +912,13 @@ fn scalar_storage_facts_follow_profile_and_natural_layout() {
             WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Float, profile),
             Some(float_kind)
         );
+        assert_eq!(
+            WasmScalarStorageKind::for_numeric_scalar(
+                NumericScalar::Fixed(FixedScalar::F16),
+                profile
+            ),
+            Some(WasmScalarStorageKind::F16)
+        );
     }
     assert_eq!(
         WasmScalarStorageKind::from_fixed_scalar(FixedScalar::Byte),
@@ -913,7 +926,190 @@ fn scalar_storage_facts_follow_profile_and_natural_layout() {
     );
     assert_eq!(
         WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16),
-        None
+        Some(WasmScalarStorageKind::F16)
+    );
+}
+
+#[test]
+fn binary16_helpers_are_planned_only_for_binary16_paths() {
+    let mut memory_request = WasmBackendRequest::default();
+    memory_request.export_policy.helper_exports.export_memory = true;
+    let memory_plan = build_emit_plan(&WasmLirModule::default(), &memory_request)
+        .expect("memory helper planning should succeed");
+    assert!(
+        !memory_plan
+            .helper_indices
+            .contains_key(&WasmRuntimeHelper::F32ToF16Bits)
+    );
+    assert!(
+        !memory_plan
+            .helper_indices
+            .contains_key(&WasmRuntimeHelper::F16BitsToF32)
+    );
+
+    let round_plan = build_emit_plan(
+        &build_round_f16_lir_module(),
+        &WasmBackendRequest::default(),
+    )
+    .expect("binary16 helper planning should succeed");
+    assert_eq!(
+        helper_signature(WasmRuntimeHelper::F32ToF16Bits),
+        WasmLirSignature {
+            params: vec![WasmAbiType::F32],
+            results: vec![WasmAbiType::I32],
+        }
+    );
+    assert_eq!(
+        helper_signature(WasmRuntimeHelper::F16BitsToF32),
+        WasmLirSignature {
+            params: vec![WasmAbiType::I32],
+            results: vec![WasmAbiType::F32],
+        }
+    );
+    assert_eq!(
+        helper_name(WasmRuntimeHelper::F32ToF16Bits),
+        "rt_f32_to_f16_bits"
+    );
+    assert_eq!(
+        helper_name(WasmRuntimeHelper::F16BitsToF32),
+        "rt_f16_bits_to_f32"
+    );
+    let helper_order = helper_emit_order();
+    let to_half_index = helper_order
+        .iter()
+        .position(|helper| *helper == WasmRuntimeHelper::F32ToF16Bits)
+        .expect("F32-to-binary16 helper should have a stable position");
+    let from_half_index = helper_order
+        .iter()
+        .position(|helper| *helper == WasmRuntimeHelper::F16BitsToF32)
+        .expect("binary16-to-F32 helper should have a stable position");
+    assert!(to_half_index < from_half_index);
+    let f32_to_f16 = round_plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::F32ToF16Bits)
+        .copied()
+        .expect("rounding needs F32-to-binary16 conversion");
+    let f16_to_f32 = round_plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::F16BitsToF32)
+        .copied()
+        .expect("rounding needs binary16-to-F32 conversion");
+    assert!(f32_to_f16 < f16_to_f32);
+    assert!(round_plan.heap_top_global_index.is_none());
+    assert!(
+        !round_plan
+            .helper_indices
+            .contains_key(&WasmRuntimeHelper::Alloc)
+    );
+}
+
+#[test]
+fn binary16_rounding_matches_rust_for_f32_inputs_and_traps_invalid_values() {
+    let module = build_round_f16_lir_module();
+    let result =
+        emit_lir_to_wasm_module(&module, &WasmBackendRequest::default()).expect("rounding LIR");
+    validate_wasm(&result.wasm_bytes);
+
+    let min_subnormal = f32::from_bits(0x3380_0000);
+    let min_subnormal_tie = f32::from_bits(0x3300_0000);
+    let normal_subnormal_tie = 2f32.powi(-14) - 2f32.powi(-25);
+    let even_normal_tie = 1.0 + 2f32.powi(-11);
+    let odd_normal_tie = 1.0 + 3.0 * 2f32.powi(-11);
+    let overflow_tie = 65520.0f32;
+    let mut inputs = vec![
+        0.0,
+        -0.0,
+        min_subnormal_tie,
+        -min_subnormal_tie,
+        min_subnormal,
+        3.0 * min_subnormal_tie,
+        5.0 * min_subnormal_tie,
+        normal_subnormal_tie,
+        f32::from_bits(normal_subnormal_tie.to_bits() - 1),
+        f32::from_bits(normal_subnormal_tie.to_bits() + 1),
+        even_normal_tie,
+        odd_normal_tie,
+        f32::from_bits(even_normal_tie.to_bits() - 1),
+        f32::from_bits(even_normal_tie.to_bits() + 1),
+        65504.0,
+        f32::from_bits(overflow_tie.to_bits() - 1),
+        overflow_tie,
+        f32::from_bits(overflow_tie.to_bits() + 1),
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NAN,
+    ];
+    let mut random_bits = 0x5a17_39cdu32;
+    for _ in 0..128 {
+        random_bits = random_bits
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        inputs.push(f32::from_bits(random_bits));
+    }
+
+    let input_bits = inputs
+        .iter()
+        .map(|value| format!("0x{:08x}", value.to_bits()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_body = r#"
+const inputs = [__INPUT_BITS__];
+const view = new DataView(new ArrayBuffer(4));
+const results = [];
+for (let index = 0; index < inputs.length; index += 1) {
+  view.setUint32(0, inputs[index], true);
+  const value = view.getFloat32(0, true);
+  try {
+    const rounded = instance.exports.round(value);
+    view.setFloat32(0, rounded, true);
+    results.push(`${index}|ok|${view.getUint32(0, true).toString(16).padStart(8, "0")}`);
+  } catch (error) {
+    if (error !== null
+        && typeof error === "object"
+        && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype) {
+      results.push(`${index}|trap`);
+    } else {
+      throw error;
+    }
+  }
+}
+const arithmetic = instance.exports.f32_add();
+view.setFloat32(0, arithmetic, true);
+results.push(`f32|${view.getUint32(0, true).toString(16).padStart(8, "0")}`);
+process.stdout.write(results.join("\n"));
+"#
+    .replace("__INPUT_BITS__", &input_bits);
+    let output = run_wasm_node_script(&result.wasm_bytes, &node_body);
+    let actual = String::from_utf8(output)
+        .expect("Node binary16 results should be UTF-8")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(actual.len(), inputs.len() + 1);
+
+    for (index, (input, actual)) in inputs.iter().zip(&actual).enumerate() {
+        let rounded = round_f64_to_f16(f64::from(*input));
+        if rounded.is_finite() {
+            assert_eq!(
+                actual.as_str(),
+                format!("{index}|ok|{:08x}", (rounded as f32).to_bits()).as_str(),
+                "binary16 mismatch for F32 bits {:08x}",
+                input.to_bits()
+            );
+        } else {
+            assert_eq!(
+                actual.as_str(),
+                format!("{index}|trap").as_str(),
+                "invalid F16 result did not trap for F32 bits {:08x}",
+                input.to_bits()
+            );
+        }
+    }
+    let arithmetic_midpoint = 1.0f32 + 2f32.powi(-11);
+    assert_eq!(
+        actual[inputs.len()].as_str(),
+        format!("f32|{:08x}", arithmetic_midpoint.to_bits()).as_str(),
+        "F32 arithmetic stays unrounded until the explicit RoundF16 boundary"
     );
 }
 
@@ -933,7 +1129,7 @@ fn scalar_storage_executes_in_node_with_compact_bytes_and_typed_loads() {
     let unsigned_i64 = 0xfedc_ba98_7654_3210u64 as i64;
     let negative_zero_f32 = -0.0f32;
     let negative_zero_f64 = -0.0f64;
-    let mut expected = vec![0u8; 120];
+    let mut expected = vec![0u8; 152];
     expected[..64].fill(b'~');
     expected[1] = 0xfe;
     expected[2] = 0xfe;
@@ -956,7 +1152,158 @@ fn scalar_storage_executes_in_node_with_compact_bytes_and_typed_loads() {
     expected[104..108].copy_from_slice(&negative_zero_f32.to_bits().to_le_bytes());
     // Keep 108..112 untouched so the F64 round trip remains naturally aligned.
     expected[112..120].copy_from_slice(&negative_zero_f64.to_bits().to_le_bytes());
+
+    expected[120..122].copy_from_slice(&0x8000u16.to_le_bytes());
+    expected[122..124].copy_from_slice(&1u16.to_le_bytes());
+    expected[124..126].copy_from_slice(&0x7bffu16.to_le_bytes());
+    expected[126..128].copy_from_slice(&0xa55au16.to_le_bytes());
+    expected[128..130].copy_from_slice(&0x8000u16.to_le_bytes());
+    expected[130..132].copy_from_slice(&1u16.to_le_bytes());
+    expected[132..134].copy_from_slice(&0x7bffu16.to_le_bytes());
+    expected[134..136].copy_from_slice(&0xa55au16.to_le_bytes());
+    expected[140..144].copy_from_slice(&negative_zero_f32.to_bits().to_le_bytes());
+    expected[144..148].copy_from_slice(&(2f32.powi(-24)).to_bits().to_le_bytes());
+    expected[148..152].copy_from_slice(&(65504.0f32).to_bits().to_le_bytes());
+
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn binary16_scalar_storage_rounds_directly_and_traps_nonfinite_values() {
+    let module = build_binary16_scalar_storage_boundary_module();
+    let mut request = WasmBackendRequest::default();
+    request.export_policy.helper_exports.export_memory = true;
+
+    let result = emit_lir_to_wasm_module(&module, &request).expect("binary16 storage LIR");
+    validate_wasm(&result.wasm_bytes);
+    let node_body = r#"
+const assert = require("node:assert/strict");
+const view = new DataView(instance.exports.memory.buffer);
+const isExactRuntimeError = error => error !== null
+    && typeof error === "object"
+    && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype;
+
+view.setUint8(2, 0xa5);
+const input = new DataView(new ArrayBuffer(4));
+input.setUint32(0, 0x3f801001, true);
+instance.exports.store_f16(input.getFloat32(0, true));
+assert.equal(view.getUint16(0, true), 0x3c01,
+    "F16 store must round the non-canonical F32 directly to 0x3c01");
+assert.equal(view.getUint8(2), 0xa5,
+    "F16 store must leave the following byte untouched");
+const loaded = instance.exports.load_f16();
+const loadedBits = new DataView(new ArrayBuffer(4));
+loadedBits.setFloat32(0, loaded, true);
+assert.equal(loadedBits.getUint32(0, true), 0x3f802000,
+    "normal F16 load must return the rounded finite value");
+
+view.setUint16(0, 0x3555, true);
+assert.throws(() => instance.exports.store_f16(65520.0), isExactRuntimeError,
+    "F16 overflow store must trap with WebAssembly.RuntimeError");
+const afterOverflow = view.getUint16(0, true);
+assert.equal(afterOverflow, 0x3555,
+    "trapping F16 store must not publish an overflow result");
+
+for (const invalidBits of [0x7c00, 0xfe00]) {
+  view.setUint16(0, invalidBits, true);
+  assert.throws(() => instance.exports.load_f16(), isExactRuntimeError,
+      `F16 load of 0x${invalidBits.toString(16)} must trap with WebAssembly.RuntimeError`);
+}
+"#;
+    run_wasm_node_script(&result.wasm_bytes, node_body);
+}
+
+fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
+    let f16_kind = WasmScalarStorageKind::from_fixed_scalar(FixedScalar::F16)
+        .expect("F16 has fixed scalar storage");
+
+    let source = WasmLirLocalId(0);
+    let store_address = WasmLirLocalId(1);
+    let store_function = WasmLirFunction {
+        id: WasmLirFunctionId(0),
+        debug_name: "store_f16".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![WasmAbiType::F32],
+            results: vec![],
+        },
+        locals: vec![
+            WasmLirLocal {
+                id: source,
+                name: Some("source".to_owned()),
+                ty: WasmAbiType::F32,
+                role: WasmLocalRole::Param,
+            },
+            local(store_address.0, WasmAbiType::I32, "address"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![
+                WasmLirStmt::ConstI32 {
+                    dst: store_address,
+                    value: 0,
+                },
+                WasmLirStmt::StoreScalar {
+                    address: store_address,
+                    offset: 0,
+                    value: source,
+                    kind: f16_kind,
+                },
+            ],
+            terminator: WasmLirTerminator::Return { value: None },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+
+    let load_address = WasmLirLocalId(0);
+    let loaded = WasmLirLocalId(1);
+    let load_function = WasmLirFunction {
+        id: WasmLirFunctionId(1),
+        debug_name: "load_f16".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![WasmAbiType::F32],
+        },
+        locals: vec![
+            local(load_address.0, WasmAbiType::I32, "address"),
+            local(loaded.0, WasmAbiType::F32, "loaded"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![
+                WasmLirStmt::ConstI32 {
+                    dst: load_address,
+                    value: 0,
+                },
+                WasmLirStmt::LoadScalar {
+                    dst: loaded,
+                    address: load_address,
+                    offset: 0,
+                    kind: f16_kind,
+                },
+            ],
+            terminator: WasmLirTerminator::Return { value: Some(loaded) },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+
+    WasmLirModule {
+        functions: vec![store_function, load_function],
+        imports: vec![],
+        exports: vec![
+            WasmExport {
+                export_name: "store_f16".to_owned(),
+                kind: WasmExportKind::Function(WasmLirFunctionId(0)),
+            },
+            WasmExport {
+                export_name: "load_f16".to_owned(),
+                kind: WasmExportKind::Function(WasmLirFunctionId(1)),
+            },
+        ],
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    }
 }
 
 #[test]
@@ -1799,6 +2146,96 @@ fn checked_float_operation_function(
     (function, export)
 }
 
+fn build_round_f16_lir_module() -> WasmLirModule {
+    let source = WasmLirLocalId(0);
+    let rounded = WasmLirLocalId(1);
+    let round_function = WasmLirFunction {
+        id: WasmLirFunctionId(0),
+        debug_name: "round_f16".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![WasmAbiType::F32],
+            results: vec![WasmAbiType::F32],
+        },
+        locals: vec![
+            WasmLirLocal {
+                id: source,
+                name: Some("source".to_owned()),
+                ty: WasmAbiType::F32,
+                role: WasmLocalRole::Param,
+            },
+            local(rounded.0, WasmAbiType::F32, "rounded"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![WasmLirStmt::RoundF16 {
+                dst: rounded,
+                source,
+            }],
+            terminator: WasmLirTerminator::Return {
+                value: Some(rounded),
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+
+    let left = WasmLirLocalId(0);
+    let right = WasmLirLocalId(1);
+    let sum = WasmLirLocalId(2);
+    let f32_add_function = WasmLirFunction {
+        id: WasmLirFunctionId(1),
+        debug_name: "f32_add_without_half_rounding".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![],
+            results: vec![WasmAbiType::F32],
+        },
+        locals: vec![
+            local(left.0, WasmAbiType::F32, "left"),
+            local(right.0, WasmAbiType::F32, "right"),
+            local(sum.0, WasmAbiType::F32, "sum"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![
+                WasmLirStmt::ConstF32 {
+                    dst: left,
+                    value: 1.0,
+                },
+                WasmLirStmt::ConstF32 {
+                    dst: right,
+                    value: 2f32.powi(-11),
+                },
+                WasmLirStmt::CheckedFloatOp {
+                    dst: sum,
+                    operator: NumericOperator::Add,
+                    precision: BinaryFloatPrecision::Binary32,
+                    operands: WasmNumericOperationOperands::Binary { left, right },
+                },
+            ],
+            terminator: WasmLirTerminator::Return { value: Some(sum) },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+
+    WasmLirModule {
+        functions: vec![round_function, f32_add_function],
+        imports: vec![],
+        exports: vec![
+            WasmExport {
+                export_name: "round".to_owned(),
+                kind: WasmExportKind::Function(WasmLirFunctionId(0)),
+            },
+            WasmExport {
+                export_name: "f32_add".to_owned(),
+                kind: WasmExportKind::Function(WasmLirFunctionId(1)),
+            },
+        ],
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    }
+}
+
 fn build_scalar_storage_lir_module() -> WasmLirModule {
     let address = WasmLirLocalId(0);
     let fixed_kind = |scalar| {
@@ -1815,6 +2252,7 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
     let f64_kind = fixed_kind(FixedScalar::F64);
     let i64_kind = fixed_kind(FixedScalar::I64);
     let f32_kind = fixed_kind(FixedScalar::F32);
+    let f16_kind = fixed_kind(FixedScalar::F16);
 
     let one_byte_start = 0;
     let two_byte_start = 3;
@@ -1865,6 +2303,18 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
             dst: WasmLirLocalId(10),
             value: -0.0,
         },
+        WasmLirStmt::ConstF32 {
+            dst: WasmLirLocalId(21),
+            value: f32::from_bits(0x3380_0000),
+        },
+        WasmLirStmt::ConstF32 {
+            dst: WasmLirLocalId(22),
+            value: 65504.0,
+        },
+        WasmLirStmt::ConstI32 {
+            dst: WasmLirLocalId(23),
+            value: 0xa55a,
+        },
     ];
 
     statements.extend([
@@ -1880,6 +2330,12 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
         scalar_store(10, eight_byte_start + 2 * i64_kind.stride(), f64_kind),
     ]);
     statements.extend([
+        scalar_store(7, 119, f16_kind),
+        scalar_store(21, 121, f16_kind),
+        scalar_store(22, 123, f16_kind),
+        scalar_store(23, 125, u16_kind),
+    ]);
+    statements.extend([
         scalar_load(11, one_byte_start, i8_kind),
         scalar_load(12, one_byte_start + i8_kind.stride(), u8_kind),
         scalar_load(13, two_byte_start, i16_kind),
@@ -1892,6 +2348,12 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
         scalar_load(20, eight_byte_start + 2 * i64_kind.stride(), f64_kind),
     ]);
     statements.extend([
+        scalar_load(24, 119, f16_kind),
+        scalar_load(25, 121, f16_kind),
+        scalar_load(26, 123, f16_kind),
+        scalar_load(27, 125, u16_kind),
+    ]);
+    statements.extend([
         scalar_store(11, 63, u32_kind),
         scalar_store(12, 67, u32_kind),
         scalar_store(13, 71, u32_kind),
@@ -1902,6 +2364,15 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
         scalar_store(19, 95, u64_kind),
         scalar_store(17, 103, f32_kind),
         scalar_store(20, 111, f64_kind),
+    ]);
+    statements.extend([
+        scalar_store(24, 127, f16_kind),
+        scalar_store(25, 129, f16_kind),
+        scalar_store(26, 131, f16_kind),
+        scalar_store(27, 133, u16_kind),
+        scalar_store(24, 139, f32_kind),
+        scalar_store(25, 143, f32_kind),
+        scalar_store(26, 147, f32_kind),
     ]);
 
     let locals = vec![
@@ -1926,6 +2397,13 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
         local(18, WasmAbiType::I64, "loaded_i64"),
         local(19, WasmAbiType::I64, "loaded_u64"),
         local(20, WasmAbiType::F64, "loaded_f64"),
+        local(21, WasmAbiType::F32, "source_f16_subnormal"),
+        local(22, WasmAbiType::F32, "source_f16_max"),
+        local(23, WasmAbiType::I32, "adjacent_sentinel"),
+        local(24, WasmAbiType::F32, "loaded_f16_zero"),
+        local(25, WasmAbiType::F32, "loaded_f16_subnormal"),
+        local(26, WasmAbiType::F32, "loaded_f16_max"),
+        local(27, WasmAbiType::I32, "loaded_adjacent_sentinel"),
     ];
     WasmLirModule {
         functions: vec![WasmLirFunction {
@@ -2052,7 +2530,7 @@ fn scalar_store(value: u32, offset: u32, kind: WasmScalarStorageKind) -> WasmLir
 fn execute_wasm_in_node(wasm_bytes: &[u8]) -> Vec<u8> {
     const NODE_BODY: &str = r#"
 instance.exports.run();
-process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 120));
+process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 152));
 "#;
     run_wasm_node_script(wasm_bytes, NODE_BODY)
 }

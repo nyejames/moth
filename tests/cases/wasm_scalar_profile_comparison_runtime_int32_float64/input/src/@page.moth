@@ -34,6 +34,37 @@ identity_f64 |value F64| -> F64:
     return value
 ;
 
+identity_f16 |value F16| -> F16:
+    return value
+;
+
+equal_f16 |left F16, right F16| -> Bool:
+    return left is right
+;
+
+less_f16 |left F16, right F16| -> Bool:
+    return left < right
+;
+
+rebind_f16 |value F16, replacement F16| -> F16:
+    rebound ~F16 = copy value
+    if rebound is value:
+        rebound = replacement
+    else
+        rebound = value
+    ;
+    return rebound
+;
+
+f16_from_i16 |value I16| -> F16:
+    converted F16 = cast value
+    return converted
+;
+
+add_f16 |left F16, right F16| -> F32:
+    return left + right
+;
+
 identity_byte |value Byte| -> Byte:
     return value
 ;
@@ -200,3 +231,26 @@ assert(fixed_u64_u32_divide(18446744073709551615, 3) is identity_f64(61489146912
 assert(profile_int_divide(3, 2) is 1.5)
 
 [:profile-int=[profile_int_value] profile-comparison=[profile_comparison_marker] fixed-i64=[fixed_i64_equal]/[fixed_i64_order] signed-unsigned=[i64_u64_negative_zero]/[u64_i64_zero_negative]/[i64_u64_zero_equal]/[u64_i64_zero_equal]/[i64_u64_zero_not_less]/[u64_i64_zero_not_greater]/[i64_u64_negative_not_equal_max]/[u64_i64_max_not_equal_negative]/[i64_u64_negative_high]/[u64_i64_high_negative]/[i64_u64_zero_high]/[u64_i64_high_zero] narrow=[signed_narrow_order]/[signed_narrow_reverse]/[unsigned_narrow_order]/[unsigned_narrow_reverse]/[u32_high_order]/[u32_low_reverse] float-mix=[mixed_f32_greater]/[mixed_f64_less]/[mixed_float_not_equal] byte=[byte_ordered]/[byte_reverse]/[byte_equal]/[byte_not_equal]]
+
+f16_above_midpoint = identity_f16(1.00048828125000000000001)
+f16_expected_above = identity_f16(1.0009765625)
+f16_at_midpoint = identity_f16(1.00048828125)
+f16_one = identity_f16(1.0)
+f16_direct_marker = if equal_f16(f16_above_midpoint, f16_expected_above) then [:f16-above-midpoint-rounds-up] else [:failed-f16-above-midpoint-rounding]
+f16_midpoint_marker = if equal_f16(f16_at_midpoint, f16_one) and less_f16(f16_at_midpoint, f16_above_midpoint) then [:f16-midpoint-ties-to-even-one] else [:failed-f16-midpoint-ties-to-even]
+
+f16_rebound = rebind_f16(f16_above_midpoint, f16_one)
+f16_rebind_marker = if equal_f16(f16_rebound, f16_one) and less_f16(f16_rebound, f16_above_midpoint) then [:f16-local-rebind-returned-f16] else [:failed-f16-local-rebind-return]
+
+f16_from_2049 = f16_from_i16(2049)
+f16_from_2051 = f16_from_i16(2051)
+f16_integer_cast_marker = if equal_f16(f16_from_2049, identity_f16(2048.0)) and equal_f16(f16_from_2051, identity_f16(2052.0)) then [:i16-to-f16-ties-even] else [:failed-i16-to-f16-ties-even]
+
+f16_sum = add_f16(f16_one, f16_expected_above)
+f16_arithmetic_marker = if f16_sum is identity_f32(2.0009765625) and f16_sum is not identity_f32(2.0) then [:f16-f16-add-stays-f32] else [:failed-f16-f16-add-f32-result]
+
+f16_min_subnormal = identity_f16(0.000000059604644775390625)
+f16_next_subnormal = identity_f16(0.00000011920928955078125)
+f16_subnormal_marker = if f16_min_subnormal is not identity_f16(0.0) and less_f16(f16_min_subnormal, f16_next_subnormal) then [:f16-min-subnormal-preserved] else [:failed-f16-min-subnormal]
+
+[:f16-profile=[f16_direct_marker]/[f16_midpoint_marker]/[f16_rebind_marker]/[f16_integer_cast_marker]/[f16_arithmetic_marker]/[f16_subnormal_marker]]

@@ -209,6 +209,11 @@ pub(crate) enum WasmLirStmt {
         source: WasmLirLocalId,
         source_signed: bool,
     },
+    /// Round an F32 computation carrier at an explicit semantic F16 boundary.
+    RoundF16 {
+        dst: WasmLirLocalId,
+        source: WasmLirLocalId,
+    },
     /// Widen an F32 carrier to F64 without changing its value.
     FloatExtend {
         dst: WasmLirLocalId,
