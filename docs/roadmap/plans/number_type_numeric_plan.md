@@ -3,7 +3,7 @@
 ## Status
 
 - Status: active on numeric-type-expanding.
-- Current slice: Phase 5 recoverable numeric `Error!` operations, fallible scalar casts and success-only compound stores.
+- Current slice (Phase 5 scope adjusted): finish supported Wasm `F16`, then numeric-to-String formatting, infallible conversions and trap-mode paths. Check parity only for supported JS/Wasm scalars. Recoverable numeric operations and fallible casts remain target-rejected; add structured diagnostics for other reachable unsupported `Error` paths.
 - Blockers: none. The generic-instantiation scaling blocker is fixed: generated sidecars intern into the requester's live string and path tables and build their materialisation context only when they defer nested requests (`bench-scaling` n^1.40 against the n^1.70 budget).
 - Delivered: Slice 1a. The builder-selected `NumericProfile` is threaded through the config, module, single-file, template and backend boundaries. Profile-width `Int`/`Float` literals, folds, casts, struct defaults, capacities and const ranges are covered for all four combinations. Slice 5a now lowers supported Wasm scalar paths in every profile; MON materialises at the standard profile until Phase 6.
 - Delivered: Slice 1b. `I8`..`U64`, `F16`/`F32`/`F64` and `Byte` are builtin type keywords with distinct canonical identities (`FixedScalar`), preserved through generic instances, sidecars and import projection. The initial backend gates have since narrowed through Slices 4 and 5a. Lowercase spellings such as `byte` and `u8` join the existing keyword-shadow reservation.
@@ -35,7 +35,7 @@
 - Delivered: checked integer trap-mode arithmetic and infallible integer expression conversions. Retained operation/failure-mode facts admit only supported paths. Exact signed/unsigned 32/64-bit emission checks overflow, zero divisors, signed-minimum division and negation, and full-width exponentiation. Generated in-place updates compute into a temporary only when the destination aliases an operand. Range lowering snapshots source-place bounds and steps, preserving their evaluated values without changing ordinary source alias semantics. Independent machine-arithmetic, gate and range-snapshot reviews have no unresolved required findings. Fresh `just validate` passed 5,496 unit tests, 2,126/2,126 integration outcomes, documentation checks, audits, benchmark preflight and all three scaling budgets. The paired dynamic range regression passes on HTML-JS and instantiated Wasm.
 - Delivered: checked Float/F32/F64 trap-mode arithmetic and infallible numeric expression casts except `F16`, plus `Byte <-> U8`. Wasm uses native rounded float operations, explicit zero-divisor and finite-result traps, a pure binary64 significand remainder helper and demand-emitted fdlibm power. Compiler constant folding and HTML-JS float power use the same fdlibm operation order: a dynamic 212-case differential corpus checks exact Rust/JS/instantiated-Wasm result bits, while paired Moth source compares folded and runtime F32/F64 powers. Four numeric profiles execute paired float arithmetic, integer-to-float conversion and fixed-integer `/` cases; explicit source traps distinguish non-finite results and zero divisors from recoverable errors. Existing numeric-text, `F16`, other builtin and statement casts, recoverable `Error!`, external finite-value validation and unsupported aggregates/host operations remain gated. Independent arithmetic, power-port, regression-strength and status/gate reviews have no unresolved required findings. Fresh `just validate` passed 5,502 compiler unit tests, 2,136/2,136 integration outcomes, documentation checks, zero-finding source and dependency audits, benchmark preflight and all three scaling budgets. The release documentation build generated 77 files.
 - Known K1 conformance gap: a `#` constant referenced in a runtime expression can defer a source-known overflow to runtime. Reproduced on HTML-JS for `maximum #Int` at both Int32 and Int64 maxima followed by `maximum + 1` in a runtime function: compilation succeeds and the checked operation traps. The Phase 8 constant-consumption gate below must close this gap before the frontend claims final numeric semantic authority for Wasm; optional range-proof work cannot decide source validity.
-- Next action: implement recoverable numeric `Error!` operations, fallible scalar casts and success-only compound stores through the existing Wasm error carrier. Then implement `F16`, numeric text and external finite-value boundaries, and finish the remaining instantiated parity/trap gates without treating scalar layout as aggregate-runtime support.
+- Next action: add structured Wasm target diagnostics for unsupported `Error` values and fallible control flow, then finish supported `F16`, numeric-to-String formatting, infallible conversions and trap-mode paths. Check parity only for supported JS/Wasm scalars. Wasm `Error!` recovery is not part of this numeric slice: its full payload/ABI belongs to later mixed-target Wasm work after validated physical planning and structured LIR. A host trap cannot replace recoverable `Error!`.
 
 ## Goal and delivery order
 
@@ -449,9 +449,11 @@ I32::MAX are valid and must survive construction, propagation and host glue.
 
 Update compiler-created errors, builtin cast evidence, helper literals, Core and
 Builder errors, opaque/foreign error projections, public interfaces, defaults,
-formatting and tests together. The Wasm carrier remains i32 with U32 semantics.
-This changes the builtin runtime Error, not CompilerDiagnostic codes, process-local
-IDs, the Rust MON MonErrorCode enum or every Rust integer used by diagnostics.
+formatting and tests together. When Wasm lowers Error, its `U32` code uses an
+ordinary i32 carrier with unsigned semantics; this numeric plan does not
+implement the Error aggregate. This changes the builtin runtime Error, not
+CompilerDiagnostic codes, process-local IDs, the Rust MON MonErrorCode enum or
+every Rust integer used by diagnostics.
 Retain one final Error representation and no signed-code compatibility path.
 
 ## Ownership and activation map
@@ -559,19 +561,31 @@ profile without a second runtime value or error model.
 
 ### Phase 5: Wasm fixed scalar lowering
 
-- [ ] Add or reuse i32/i64/f32/f64 operations and actual scalar size/alignment/stride
+- [ ] Add or reuse i32/i64/f32/f64 operations and scalar size/alignment/stride
   metadata. Use signed/unsigned load8/load16 and narrow stores where appropriate.
-- [ ] Implement checked 32/64-bit arithmetic, conversions, division/remainder and
-  power helpers plus finite float validation. Preserve Moth failure paths instead
-  of leaking host arithmetic traps where Error! recovery is required.
+- [ ] Finish supported checked 32/64-bit arithmetic, conversions, division/remainder
+  and power helpers plus finite-float validation in trap mode where specified.
+  Finish supported infallible numeric conversions; never substitute a host trap
+  for a reachable operation whose source semantics require recoverable `Error!`.
 - [ ] Implement portable binary16 conversion and direct-rounding cases. Exercise
   parameters, locals, results, storage and arithmetic-produced F32 values.
-- [ ] Run one semantic parity corpus on JS and instantiated Wasm. Inspect emitted
-  memory operations and raw stored bytes. Keep Number and unsupported aggregate/
-  host features explicitly target-rejected. Preserve later HTML/WIT boundaries.
+- [ ] Lower supported numeric-to-String formatting and finite-value checks without
+  a recoverable `Error!` path. Keep fallible String-to-numeric parsing target-rejected.
+- [ ] Keep reachable `ReturnError` numeric operations and fallible runtime casts
+  (including compound-assignment store conversions) target-rejected. Add
+  structured diagnostics for other reachable fallible control flow and source
+  `Error` values before Wasm lowering, with source provenance. Existing Wasm
+  has no compiler-owned aggregate layout or nominal `Error` path. Preserve
+  source semantics and JS support; the next implicit-failures work may reject
+  unsupported Wasm combinations without substituting traps.
+- [ ] Run a semantic parity corpus only over supported JS/Wasm scalar behavior.
+  Inspect emitted scalar-memory operations and raw stored bytes. Keep unsupported
+  aggregate/host features target-rejected; preserve later HTML/WIT boundaries.
 
-Exit: real scalar execution and compact-memory evidence, without claiming the
-later aggregate/runtime or mixed-target implementation has been delivered.
+Exit: supported scalar execution and compact-memory evidence, without claiming
+recoverable Wasm `Error!` handling or aggregate/runtime support. The full Wasm
+`Error` payload/ABI is owned by later mixed-target Wasm work with validated
+physical planning and structured LIR.
 
 ### Phase 6: Existing-language and MON consumers
 
@@ -626,9 +640,12 @@ with a truthful Wasm deferral and one shared semantic value policy.
 - [ ] Migrate builtin Error.code to U32 with default zero, preserving messages,
   constructor order and existing code values. Update every producer and consumer,
   cast, public interface and foreign projection in the same coherent slice.
-- [ ] Prove codes above I32::MAX round-trip through JS/Wasm and MON's U32 schema.
-  Reject negative/oversized code construction and require casts from Int variables.
-  Keep compiler diagnostics and Rust MON error enums outside the migration.
+- [ ] Prove codes above I32::MAX round-trip through supported JS Error paths
+  and MON's U32 schema. Require structured Wasm target rejection of reachable
+  Error values until later aggregate/runtime work provides Error construction,
+  propagation and field access. Reject negative/oversized code construction
+  and require casts from Int variables. Keep compiler diagnostics and Rust MON
+  error enums outside the migration.
 
 Exit: one unsigned runtime error-code contract, no old signed-code fallback and
 compile-time diagnosis of source-known numeric failures at constant-consumption sites.
@@ -671,7 +688,7 @@ typed receivers/public interfaces, not only formatted output that erases types.
 | Maps/sorting contract | Fixed integer/Byte keys, extreme-value equality/hash/order, duplicate MON keys/defaults, rejection of float/Number keys and no subtraction-based comparator. |
 | MON | Outside-crate owned round trips, all widths and profiles, signed zero, scale 256, strict 3.0/1e3-to-integer rejection, bounded large exact input/default/output expansion and unchanged literal-only reading. |
 | Number | Scales 0/1/256, invalid scales, exact literals, mixed fixed integers, per-operation half-even ties including negative values, exact narrowing, zero divisors, canonical formatting, generic JS execution and reachable Wasm rejection. |
-| Error.code | U32 default/identity, unchanged existing codes, I32::MAX+1 and U32::MAX, negative/oversized rejection, explicit Int conversion, source/Core/backend-produced errors and normal Error! recovery. |
+| Error.code | U32 default/identity, unchanged existing codes, I32::MAX+1 and U32::MAX, negative/oversized rejection, explicit Int conversion, source/Core/backend-produced errors and normal Error! recovery on supported JS paths; structured Wasm rejection of reachable Error values until later aggregate/runtime support. |
 | Optimisation | Same result, error and side-effect order with checks retained/elided, no HIR mutation, Number rounding preserved and no optimiser-dependent source acceptance. |
 
 These are coverage requirements, not a request for one fixture per matrix cell.
