@@ -5,7 +5,9 @@ use crate::backends::wasm::lir::instructions::{
     WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
 };
 use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage};
-use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirFunctionId, WasmLirLocalId};
+use crate::backends::wasm::lir::types::{
+    WasmAbiType, WasmLirFunctionId, WasmLirLocalId, WasmLocalRole,
+};
 use crate::backends::wasm::request::{
     WasmBackendRequest, WasmDebugFlags, WasmExportPolicy, WasmFunctionEmissionPolicy,
 };
@@ -17,6 +19,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
@@ -31,6 +34,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1335,6 +1339,190 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
             .msg
             .contains("missing stable export name for FunctionId(0)")
     );
+}
+
+fn validate_float_test_module(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+    type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+) -> crate::compiler_frontend::hir::module::HirModule {
+    let int_type = type_environment.builtins().int;
+    let float_type = type_environment.builtins().float;
+    let start_path = path_fork
+        .try_intern_portable_path("main", string_table)
+        .expect("test path fits");
+    let validator_path = path_fork
+        .try_intern_portable_path("validate_float", string_table)
+        .expect("test path fits");
+
+    build_module(
+        path_fork,
+        string_table,
+        vec![
+            (
+                HirFunction {
+                    id: FunctionId(0),
+                    entry: BlockId(0),
+                    params: vec![],
+                    return_type: int_type,
+                },
+                start_path,
+                HirFunctionOrigin::EntryStart,
+            ),
+            (
+                HirFunction {
+                    id: FunctionId(1),
+                    entry: BlockId(1),
+                    params: vec![LocalId(10)],
+                    return_type: float_type,
+                },
+                validator_path,
+                HirFunctionOrigin::Normal,
+            ),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(
+                    100,
+                    0,
+                    int_type,
+                    RegionId(0),
+                )),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![
+                    local(10, float_type, RegionId(0)),
+                    local(20, float_type, RegionId(0)),
+                ],
+                statements: vec![statement(
+                    102,
+                    HirStatementKind::ValidateFloat {
+                        source: load_local(101, LocalId(10), float_type, RegionId(0)),
+                        failure_mode: NumericFailureMode::Trap,
+                        result: LocalId(20),
+                    },
+                    2,
+                )],
+                terminator: HirTerminator::Return(load_local(
+                    103,
+                    LocalId(20),
+                    float_type,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    )
+}
+
+#[test]
+fn lowers_validate_float_with_profile_precision_and_local_value_path() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, _) = build_type_environment();
+    let module = validate_float_test_module(&mut path_fork, &mut string_table, &type_environment);
+
+    for (float_precision, expected_carrier, expected_precision) in [
+        (
+            FloatPrecision::Bits32,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+        (
+            FloatPrecision::Bits64,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+    ] {
+        let profile = NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision,
+        };
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("Float validator should be lowered");
+        let source_local = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::Param)
+            .expect("source Float parameter should have a LIR local");
+        let result_local = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::UserLocal)
+            .expect("result Float local should have a LIR local");
+
+        assert_eq!(function.signature.params, vec![expected_carrier], "{profile}");
+        assert_eq!(function.signature.results, vec![expected_carrier], "{profile}");
+        assert_eq!(source_local.ty, expected_carrier, "{profile}");
+        assert_eq!(result_local.ty, expected_carrier, "{profile}");
+        assert_eq!(
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .filter(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+                .count(),
+            1,
+            "{profile} should lower exactly one validation"
+        );
+
+        let validation_block = function
+            .blocks
+            .iter()
+            .find(|block| {
+                block
+                    .statements
+                    .iter()
+                    .any(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+            })
+            .expect("validation block should be present");
+        let validation = validation_block
+            .statements
+            .iter()
+            .find(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+            .expect("ValidateFloat statement should be present");
+        let WasmLirStmt::ValidateFloat {
+            dst,
+            source,
+            precision,
+        } = validation
+        else {
+            unreachable!("the selected statement is ValidateFloat")
+        };
+        assert_eq!(*source, source_local.id, "{profile}");
+        assert_eq!(*dst, result_local.id, "{profile}");
+        assert_eq!(*precision, expected_precision, "{profile}");
+        assert!(
+            matches!(
+                &validation_block.terminator,
+                WasmLirTerminator::Return { value: Some(value) } if *value == *dst
+            ),
+            "{profile} should return the validated destination unchanged"
+        );
+    }
 }
 
 #[test]

@@ -1,7 +1,8 @@
-//! Trap-mode checked binary-float operation emission.
+//! Trap-mode checked binary-float operation and boundary validation emission.
 //!
 //! WHAT: emits F32/F64 arithmetic with explicit zero-divisor and post-rounding finite checks;
-//!       power and remainder call pure Wasm helpers rather than host imports.
+//!       power and remainder call pure Wasm helpers rather than host imports. Trap-mode
+//!       `ValidateFloat` reuses the same native-precision finite check.
 //! WHY: native Wasm float instructions produce infinities and NaNs instead of trapping, but Moth
 //!      treats every binary-float value as finite and checked failures use the numeric trap path.
 
@@ -16,6 +17,29 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use wasm_encoder::{BlockType, Function, Instruction};
+
+pub(super) fn emit_validate_float(
+    function: &mut Function,
+    destination: WasmLirLocalId,
+    source: WasmLirLocalId,
+    precision: BinaryFloatPrecision,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let abi_type = match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => {
+            return Err(wasm_generation_error(
+                "Wasm Float validation does not support F16".to_owned(),
+            ));
+        }
+    };
+    ensure_local_abi(source, abi_type, context, "Float validation source")?;
+    ensure_local_abi(destination, abi_type, context, "Float validation destination")?;
+
+    function.instruction(&Instruction::LocalGet(local_index(source, context)?));
+    emit_finite_float_check(function, destination, precision, context)
+}
 
 pub(super) fn emit_checked_float_operation(
     function: &mut Function,
@@ -92,7 +116,18 @@ pub(super) fn emit_checked_float_operation(
 
     // Native F32 operations and helper-result demotion have already rounded at the semantic
     // precision. Check that rounded value so a finite wider helper result cannot hide F32 overflow.
+    emit_finite_float_check(function, destination, precision, context)
+}
+
+fn emit_finite_float_check(
+    function: &mut Function,
+    destination: WasmLirLocalId,
+    precision: BinaryFloatPrecision,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
     let destination_index = local_index(destination, context)?;
+    // Store the original scalar before using abs only for the finite comparison. In particular,
+    // the destination retains the source sign bit when the validated value is negative zero.
     function.instruction(&Instruction::LocalTee(destination_index));
     match precision {
         BinaryFloatPrecision::Binary32 => {
@@ -105,7 +140,11 @@ pub(super) fn emit_checked_float_operation(
             function.instruction(&Instruction::F64Const(f64::MAX.into()));
             function.instruction(&Instruction::F64Le);
         }
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 was rejected above"),
+        BinaryFloatPrecision::Binary16 => {
+            return Err(wasm_generation_error(
+                "Wasm finite Float checks do not support F16".to_owned(),
+            ));
+        }
     }
     function.instruction(&Instruction::I32Eqz);
     function.instruction(&Instruction::If(BlockType::Empty));

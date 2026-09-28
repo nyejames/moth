@@ -442,12 +442,12 @@ pub(crate) struct ReachableNumericOpUse {
 
 /// A reachable compiler-owned Float formatting or validation statement.
 ///
-/// WHY: backends that do not yet implement Moth Float formatting or external-Float boundary
-///      validation must reject the reachable HIR operation before lowering instead of failing with a
-///      backend-internal error.
+/// WHY: backend feature validation needs the statement's exact failure mode and source span to
+///      distinguish supported trap-mode boundary checks from unsupported formatting/recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableFloatStatementUse {
     pub(crate) kind: ReachableFloatStatementKind,
+    pub(crate) failure_mode: NumericFailureMode,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -904,21 +904,31 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
-            HirStatementKind::FormatFloat { source, .. } => {
+            HirStatementKind::FormatFloat {
+                source,
+                failure_mode,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
+                        failure_mode: *failure_mode,
                         span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
-            HirStatementKind::ValidateFloat { source, .. } => {
+            HirStatementKind::ValidateFloat {
+                source,
+                failure_mode,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
+                        failure_mode: *failure_mode,
                         span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, span);

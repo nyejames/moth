@@ -650,10 +650,10 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Float formatting and boundary validation</td>
- <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper and validator coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Moth-owned Float formatting is used for AST folding, runtime template interpolation and casts. External Float success returns are validated before ordinary Moth code observes them.</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper and validator coverage; HIR-to-LIR and generated instantiated Wasm proofs cover trap-mode Float finite validation only.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML / HTML-Wasm</td>
+ <td style="padding: 0.1em 0.5em; "> The frontend folds Float text. JS/HTML use Moth-owned Float formatting for runtime template interpolation and casts, and validate external Float success returns before ordinary Moth code observes them. HTML-Wasm only validates Float values as finite in trap mode after carrier conversion; non-finite values trap through native `unreachable`, while finite -0 is preserved. Source-level external Float execution is unavailable until Wasm import/metadata support exists. HTML-Wasm does not support Float-family text formatting or ReturnError validation.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

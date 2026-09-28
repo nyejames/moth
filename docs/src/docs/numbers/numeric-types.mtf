@@ -150,14 +150,21 @@ This reference owns the accepted contract for the complete numeric family.
 The frontend recognises fixed-width types and `Byte`, materialises their literals,
 records fixed-width operator facts in HIR, checks their casts, and folds numeric
 operators, casts and text. HTML-JS executes fixed-width numeric and `Byte` runtime
-values. HTML-Wasm executes fixed integers, `Byte`, `F32` and `F64` values,
-comparisons and trap-mode arithmetic, infallible numeric expression casts that do
-not involve `F16`, plus `Byte -> U8` and `U8 -> Byte`. It also supports infallible
-integer-to-`String` expression casts from profile `Int` and fixed signed/unsigned
-integer types. Remaining builtin runtime casts stay gated, including fallible
-casts, conversions involving `Bool`, `Char` or `Error` (including `Char -> Int`),
-parsing from `String`, `Float`-family formatting to `String`, and statement-form
-casts. The `Number` family is not implemented.
+values and uses Moth-owned `Float` formatting for runtime template interpolation
+and casts. HTML-JS validates successful external `Float` returns before ordinary
+Moth code observes them. HTML-Wasm executes fixed
+integers, `Byte`, `F32` and `F64` values, comparisons and trap-mode arithmetic,
+infallible numeric expression casts that do not involve `F16`, plus `Byte -> U8`
+and `U8 -> Byte`. It also supports infallible integer-to-`String` expression
+casts from profile `Int` and fixed signed/unsigned integer types. For Float
+boundaries, HTML-Wasm only supports trap-mode finite validation after carrier
+conversion; HIR-to-LIR lowering and generated, instantiated Wasm modules are
+covered, but source-level external `Float` calls cannot execute until Wasm
+import/metadata support exists. HTML-Wasm does not support recoverable
+(`ReturnError`) validation, `Float`-family formatting to `String`, or `Float`
+parsing from `String`. Other remaining builtin runtime casts stay gated,
+including conversions involving `Bool`, `Char` or `Error` (including
+`Char -> Int`), and statement-form casts. The `Number` family is not implemented.
 
 ### MON data boundary
 

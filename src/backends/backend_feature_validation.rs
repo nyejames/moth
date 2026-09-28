@@ -111,8 +111,8 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
-            // statement casts, formatting/boundary validation, generic values and the later
-            // Error-value/fallible-control-flow checks.
+            // statement casts, formatting, generic values and the later Error-value/fallible-
+            // control-flow checks. Trap-mode ValidateFloat is lowered natively.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -700,19 +700,21 @@ fn wasm_supports_checked_numeric_op(
     ) && numeric_op.op.operator != NumericOperator::IntegerDivide
 }
 
-/// Reports the first reachable Float formatting or validation statement for the Wasm target.
+/// Reports the first reachable Float formatting or unsupported validation statement for Wasm.
 ///
-/// WHAT: Moth Float formatting and external-Float boundary validation are valid HIR, but
-///       HTML-Wasm does not yet implement the helper and trap/recoverability contract for
-///       `HirStatementKind::FormatFloat` or `HirStatementKind::ValidateFloat`.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of letting Wasm LIR
-///      lowering report an infrastructure failure.
+/// WHAT: trap-mode external-Float boundary validation is supported, while Float formatting and
+///       recoverable validation remain target-gated.
+/// WHY: target validation consumes the exact failure mode retained by HIR reachability so Wasm
+///      never substitutes a trap for a recoverable `ReturnError` contract.
 fn validate_wasm_float_statements(
     float_statements: &[ReachableFloatStatementUse],
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(float_statement) = float_statements.first() else {
+    let Some(float_statement) = float_statements.iter().find(|statement| {
+        statement.kind == ReachableFloatStatementKind::FormatFloat
+            || statement.failure_mode != NumericFailureMode::Trap
+    }) else {
         return Ok(());
     };
 

@@ -426,6 +426,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
             vec![float_statement(
                 10,
                 ReachableFloatStatementKind::FormatFloat,
+                NumericFailureMode::Trap,
                 span,
             )],
             HirTerminator::Return(unit_expression(0)),
@@ -447,8 +448,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
 }
 
 #[test]
-fn wasm_feature_validation_rejects_reachable_validate_float() {
-    let span = None;
+fn wasm_feature_validation_allows_reachable_trap_validate_float() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -459,7 +459,46 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
             vec![float_statement(
                 10,
                 ReachableFloatStatementKind::ValidateFloat,
-                span,
+                NumericFailureMode::Trap,
+                None,
+            )],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm should allow reachable trap-mode ValidateFloat statements"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_return_error_validate_float() {
+    let span = test_source_span(13);
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![float_statement(
+                10,
+                ReachableFloatStatementKind::ValidateFloat,
+                NumericFailureMode::ReturnError,
+                Some(span),
             )],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -469,7 +508,7 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
         &module,
         &type_environment,
         &mut string_table,
-        "Wasm validation should reject reachable ValidateFloat",
+        "Wasm validation should reject reachable ReturnError ValidateFloat",
     );
 
     assert_unsupported_feature(
@@ -477,6 +516,7 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
         &mut string_table,
         UnsupportedBackendFeatureReason::FloatBoundaryValidation,
     );
+    assert_eq!(diagnostic.primary_span, Some(span));
 }
 
 #[test]
@@ -753,6 +793,7 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
                 vec![float_statement(
                     10,
                     ReachableFloatStatementKind::FormatFloat,
+                    NumericFailureMode::Trap,
                     span,
                 )],
                 HirTerminator::Return(unit_expression(1)),
@@ -2081,9 +2122,9 @@ fn int_mul_op() -> HirNumericOp {
 fn float_statement(
     id: u32,
     kind: ReachableFloatStatementKind,
+    failure_mode: NumericFailureMode,
     span: Option<SourceSpan>,
 ) -> HirStatement {
-    let failure_mode = NumericFailureMode::Trap;
     let source = HirExpression {
         id: HirValueId(id + 100),
         kind: HirExpressionKind::Float(1.5),

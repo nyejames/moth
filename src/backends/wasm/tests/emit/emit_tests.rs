@@ -313,7 +313,7 @@ fn checked_float_machine_boundaries_execute_with_native_traps() {
             2.0,
         ),
         checked_float_binary_case(
-            "f32_power_overflow",
+            "f32_finite_f64_demotes_to_infinity",
             BinaryFloatPrecision::Binary32,
             NumericOperator::Power,
             2.0,
@@ -407,6 +407,105 @@ fn checked_float_machine_boundaries_execute_with_native_traps() {
             "{} should trap through Wasm unreachable, found {actual_value:?}",
             case.name
         );
+    }
+}
+
+#[test]
+fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
+    let module = build_float_validation_lir_module();
+    let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("Float validation LIR should emit");
+    validate_wasm(&result.wasm_bytes);
+
+    let f32_inputs = [
+        "7f7fffff", // largest finite
+        "00000001", // smallest subnormal
+        "80000000", // negative zero
+        "7fc00000", // NaN
+        "7f800000", // positive infinity
+        "ff800000", // negative infinity
+        "7fefffffffffffff", // finite F64 rounds to positive F32 infinity at the boundary
+        "ffefffffffffffff", // finite F64 rounds to negative F32 infinity at the boundary
+    ];
+    let f64_inputs = [
+        "7fefffffffffffff", // largest finite
+        "0000000000000001", // smallest subnormal
+        "8000000000000000", // negative zero
+        "7ff8000000000000", // NaN
+        "7ff0000000000000", // positive infinity
+        "fff0000000000000", // negative infinity
+    ];
+    let export_specs: [(&str, BinaryFloatPrecision, &[&str]); 4] = [
+        (
+            "validate_f32_distinct",
+            BinaryFloatPrecision::Binary32,
+            &f32_inputs,
+        ),
+        (
+            "validate_f32_alias",
+            BinaryFloatPrecision::Binary32,
+            &f32_inputs,
+        ),
+        (
+            "validate_f64_distinct",
+            BinaryFloatPrecision::Binary64,
+            &f64_inputs,
+        ),
+        (
+            "validate_f64_alias",
+            BinaryFloatPrecision::Binary64,
+            &f64_inputs,
+        ),
+    ];
+    let actual = execute_wasm_float_validation_in_node(&result.wasm_bytes, &export_specs);
+    assert_eq!(
+        actual.len(),
+        export_specs
+            .iter()
+            .map(|(_, _, inputs)| inputs.len())
+            .sum::<usize>(),
+    );
+
+    let mut actual_rows = actual.iter();
+    for (name, precision, inputs) in export_specs {
+        for input_bits in inputs {
+            let actual = actual_rows
+                .next()
+                .expect("Node should report every validation result");
+            let mut fields = actual.splitn(4, '|');
+            assert_eq!(fields.next(), Some(name));
+            assert_eq!(fields.next(), Some(*input_bits));
+            let status = fields.next().expect("Node result should include status");
+            let value = fields.next().expect("Node result should include bits or trap");
+
+            let finite = match precision {
+                BinaryFloatPrecision::Binary32 if input_bits.len() == 16 => {
+                    (f64::from_bits(u64::from_str_radix(input_bits, 16).unwrap()) as f32).is_finite()
+                }
+                BinaryFloatPrecision::Binary32 => {
+                    f32::from_bits(u32::from_str_radix(input_bits, 16).unwrap()).is_finite()
+                }
+                BinaryFloatPrecision::Binary64 => {
+                    f64::from_bits(u64::from_str_radix(input_bits, 16).unwrap()).is_finite()
+                }
+                BinaryFloatPrecision::Binary16 => {
+                    panic!("Float validation tests require F32 or F64")
+                }
+            };
+            if finite {
+                assert_eq!(status, "ok", "{name} should accept {input_bits}");
+                assert_eq!(
+                    value, *input_bits,
+                    "{name} should preserve the exact finite bits for {input_bits}"
+                );
+            } else {
+                assert_eq!(status, "trap", "{name} should trap for {input_bits}");
+                assert!(
+                    value.contains("unreachable"),
+                    "{name} should trap through Wasm unreachable, found {value:?}"
+                );
+            }
+        }
     }
 }
 
@@ -2116,6 +2215,66 @@ fn build_checked_float_operation_module(cases: &[CheckedFloatOperationCase]) -> 
     module
 }
 
+fn build_float_validation_lir_module() -> WasmLirModule {
+    let cases = [
+        ("validate_f32_distinct", BinaryFloatPrecision::Binary32, false),
+        ("validate_f32_alias", BinaryFloatPrecision::Binary32, true),
+        ("validate_f64_distinct", BinaryFloatPrecision::Binary64, false),
+        ("validate_f64_alias", BinaryFloatPrecision::Binary64, true),
+    ];
+    let mut module = WasmLirModule::default();
+    for (index, (name, precision, aliases_source)) in cases.into_iter().enumerate() {
+        let function_id = WasmLirFunctionId(index as u32);
+        let source = WasmLirLocalId(0);
+        let destination = if aliases_source {
+            source
+        } else {
+            WasmLirLocalId(1)
+        };
+        let carrier = match precision {
+            BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+            BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+            BinaryFloatPrecision::Binary16 => panic!("Float validation requires F32 or F64"),
+        };
+        let mut locals = vec![WasmLirLocal {
+            id: source,
+            name: Some("source".to_owned()),
+            ty: carrier,
+            role: WasmLocalRole::Param,
+        }];
+        if !aliases_source {
+            locals.push(local(destination.0, carrier, "validated"));
+        }
+        module.functions.push(WasmLirFunction {
+            id: function_id,
+            debug_name: name.to_owned(),
+            origin: WasmLirFunctionOrigin::ExportWrapper,
+            signature: WasmLirSignature {
+                params: vec![carrier],
+                results: vec![carrier],
+            },
+            locals,
+            blocks: vec![WasmLirBlock {
+                id: WasmLirBlockId(0),
+                statements: vec![WasmLirStmt::ValidateFloat {
+                    dst: destination,
+                    source,
+                    precision,
+                }],
+                terminator: WasmLirTerminator::Return {
+                    value: Some(destination),
+                },
+            }],
+            linkage: WasmFunctionLinkage::ExportedWrapper,
+        });
+        module.exports.push(WasmExport {
+            export_name: name.to_owned(),
+            kind: WasmExportKind::Function(function_id),
+        });
+    }
+    module
+}
+
 fn checked_float_operation_function(
     function_id: WasmLirFunctionId,
     case: &CheckedFloatOperationCase,
@@ -2627,6 +2786,79 @@ process.stdout.write(results.join("\n"));
                     .to_owned(),
             )
         })
+        .collect()
+}
+
+fn execute_wasm_float_validation_in_node(
+    wasm_bytes: &[u8],
+    export_specs: &[(&str, BinaryFloatPrecision, &[&str])],
+) -> Vec<String> {
+    const NODE_BODY: &str = r#"
+const results = [];
+const view = new DataView(new ArrayBuffer(8));
+for (const [name, precision, inputBits] of __EXPORT_SPECS__) {
+  for (const bits of inputBits) {
+    let input;
+    if (precision === "f32" && bits.length === 16) {
+      // The host ABI converts a finite f64 argument to the f32 parameter before validation.
+      view.setBigUint64(0, BigInt(`0x${bits}`), true);
+      input = view.getFloat64(0, true);
+    } else if (precision === "f32") {
+      view.setUint32(0, Number.parseInt(bits, 16), true);
+      input = view.getFloat32(0, true);
+    } else {
+      view.setBigUint64(0, BigInt(`0x${bits}`), true);
+      input = view.getFloat64(0, true);
+    }
+    try {
+      const value = instance.exports[name](input);
+      let rendered;
+      if (precision === "f32") {
+        view.setFloat32(0, value, true);
+        rendered = view.getUint32(0, true).toString(16).padStart(8, "0");
+      } else {
+        view.setFloat64(0, value, true);
+        rendered = view.getBigUint64(0, true).toString(16).padStart(16, "0");
+      }
+      results.push(`${name}|${bits}|ok|${rendered}`);
+    } catch (error) {
+      if (error !== null
+          && typeof error === "object"
+          && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype) {
+        results.push(`${name}|${bits}|trap|${String(error.message)}`);
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+process.stdout.write(results.join("\n"));
+"#;
+    let export_specs = export_specs
+        .iter()
+        .map(|(name, precision, input_bits)| {
+            let precision = match precision {
+                BinaryFloatPrecision::Binary32 => "\"f32\"",
+                BinaryFloatPrecision::Binary64 => "\"f64\"",
+                BinaryFloatPrecision::Binary16 => {
+                    panic!("Float validation observations require F32 or F64")
+                }
+            };
+            let input_bits = input_bits
+                .iter()
+                .map(|bits| format!("{bits:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{name:?}, {precision}, [{input_bits}]]")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_body = NODE_BODY.replace("__EXPORT_SPECS__", &format!("[{export_specs}]"));
+    let output = run_wasm_node_script(wasm_bytes, &node_body);
+    String::from_utf8(output)
+        .expect("Node Float validation results should be UTF-8")
+        .lines()
+        .map(str::to_owned)
         .collect()
 }
 

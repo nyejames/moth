@@ -263,10 +263,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Float formatting and boundary validation]
-            [: Supported]
-            [: Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper and validator coverage.]
-            [: JS / HTML]
-            [: Moth-owned Float formatting is used for AST folding, runtime template interpolation and casts. External Float success returns are validated before ordinary Moth code observes them.]
+            [: Partial]
+            [: Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper and validator coverage; HIR-to-LIR and generated instantiated Wasm proofs cover trap-mode Float finite validation only.]
+            [: JS / HTML / HTML-Wasm]
+            [: The frontend folds Float text. JS/HTML use Moth-owned Float formatting for runtime template interpolation and casts, and validate external Float success returns before ordinary Moth code observes them. HTML-Wasm only validates Float values as finite in trap mode after carrier conversion; non-finite values trap through native `unreachable`, while finite -0 is preserved. Source-level external Float execution is unavailable until Wasm import/metadata support exists. HTML-Wasm does not support Float-family text formatting or ReturnError validation.]
         ]
 
         [data:

@@ -228,6 +228,15 @@ pub(crate) fn emit_statement(
                 function, *dst, *operator, *kind, *operands, *scratch, context,
             )?;
         }
+        WasmLirStmt::ValidateFloat {
+            dst,
+            source,
+            precision,
+        } => {
+            super::checked_float::emit_validate_float(
+                function, *dst, *source, *precision, context,
+            )?;
+        }
         WasmLirStmt::CheckedFloatOp {
             dst,
             operator,

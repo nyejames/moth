@@ -202,6 +202,12 @@ pub(crate) enum WasmLirStmt {
         operands: WasmNumericOperationOperands,
         scratch: WasmIntegerScratch,
     },
+    /// Trap on non-finite input and write the validated profile-precision Float to `dst`.
+    ValidateFloat {
+        dst: WasmLirLocalId,
+        source: WasmLirLocalId,
+        precision: BinaryFloatPrecision,
+    },
     /// Trap-mode checked float arithmetic in its profile-resolved semantic precision.
     CheckedFloatOp {
         dst: WasmLirLocalId,
