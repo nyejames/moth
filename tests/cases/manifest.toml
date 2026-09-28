@@ -4528,6 +4528,13 @@ contract = "language.bindings.mutable_marker_on_assignment_target_rejected"
 role = "boundary"
 
 [[case]]
+id = "mutable_parameter_wasm_rejected"
+path = "mutable_parameter_wasm_rejected"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_function_parameters_rejected"
+role = "backend"
+
+[[case]]
 id = "mutable_reassignment_print"
 path = "mutable_reassignment_print"
 tags = ["integration", "language"]

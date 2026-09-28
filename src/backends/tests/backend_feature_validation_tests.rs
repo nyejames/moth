@@ -28,6 +28,7 @@ use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
@@ -213,6 +214,111 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
                 panic!("cast gate returned an infrastructure error: {error:?}")
             }
         }
+    }
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_mutable_parameters_for_both_int_widths() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let span = test_source_span(43);
+    let module = mutable_parameter_module(builtin_type_ids::INT, true, Some(span), true, false);
+    let reachability = test_reachability(&module);
+
+    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+        let error = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile {
+                    int_width,
+                    float_precision: FloatPrecision::Bits64,
+                },
+                external_package_registry: None,
+            },
+            &mut string_table,
+        )
+        .expect_err("Wasm must reject selected mutable function parameters");
+
+        let BackendFeatureValidationError::Diagnostic(diagnostic) = error else {
+            panic!("mutable-parameter gate returned an infrastructure error");
+        };
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::MutableFunctionParameters,
+        );
+        assert_eq!(diagnostic.primary_span, Some(span));
+    }
+}
+
+#[test]
+fn wasm_mutable_parameter_gate_ignores_unselected_helpers_and_mutable_locals() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let span = test_source_span(51);
+    let cases = [
+        (
+            "unselected mutable helper",
+            mutable_parameter_module(builtin_type_ids::INT, true, Some(span), false, false),
+            BackendTarget::Wasm,
+        ),
+        (
+            "immutable parameter and mutable local",
+            mutable_parameter_module(builtin_type_ids::INT, false, Some(span), true, true),
+            BackendTarget::Wasm,
+        ),
+        (
+            "JavaScript mutable parameter",
+            mutable_parameter_module(builtin_type_ids::INT, true, Some(span), true, false),
+            BackendTarget::Js,
+        ),
+    ];
+
+    for (description, module, target) in cases {
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+                external_package_registry: None,
+            },
+            &mut string_table,
+        );
+        assert!(result.is_ok(), "{description} should remain supported");
+    }
+}
+
+#[test]
+fn wasm_mutable_parameter_gate_preserves_existing_type_reason_precedence() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let aggregate_type =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+    let span = test_source_span(59);
+
+    for (parameter_type, expected_reason) in [
+        (
+            aggregate_type,
+            UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+        ),
+        (error_type, UnsupportedBackendFeatureReason::ErrorValues),
+    ] {
+        let module = mutable_parameter_module(parameter_type, true, Some(span), true, false);
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "pre-existing unsupported type reasons should precede mutable-parameter rejection",
+        );
+        assert_unsupported_feature(&diagnostic, &mut string_table, expected_reason);
+        assert_eq!(diagnostic.primary_span, Some(span));
     }
 }
 
@@ -2018,6 +2124,70 @@ fn function_with_signature(
         params,
         return_type,
     }
+}
+
+fn mutable_parameter_module(
+    parameter_type: TypeId,
+    parameter_mutable: bool,
+    parameter_span: Option<SourceSpan>,
+    helper_reachable: bool,
+    include_mutable_local: bool,
+) -> HirModule {
+    let mut start_statements = Vec::new();
+    if helper_reachable {
+        start_statements.push(HirStatement {
+            id: HirNodeId(10),
+            kind: HirStatementKind::Call {
+                target: CallTarget::Local(FunctionId(1)),
+                args: vec![typed_expression(11, parameter_type, None)],
+                result: None,
+            },
+            span: None,
+        });
+    }
+
+    let mut helper_locals = vec![HirLocal {
+        id: LocalId(1),
+        ty: parameter_type,
+        mutable: parameter_mutable,
+        region: RegionId(0),
+        span: parameter_span,
+    }];
+    if include_mutable_local {
+        helper_locals.push(HirLocal {
+            id: LocalId(2),
+            ty: builtin_type_ids::INT,
+            mutable: true,
+            region: RegionId(0),
+            span: Some(test_source_span(67)),
+        });
+    }
+
+    hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function_with_signature(
+                FunctionId(1),
+                BlockId(1),
+                vec![LocalId(1)],
+                builtin_type_ids::NONE,
+            ),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                start_statements,
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block_with_locals(
+                BlockId(1),
+                helper_locals,
+                vec![],
+                HirTerminator::Return(unit_expression(2)),
+            ),
+        ],
+    )
 }
 
 fn block(id: BlockId, statements: Vec<HirStatement>, terminator: HirTerminator) -> HirBlock {

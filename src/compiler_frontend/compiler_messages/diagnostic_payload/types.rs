@@ -150,6 +150,7 @@ pub enum UnsupportedBackendFeatureReason {
     ExternalNumericProfileBoundary,
     ErrorValues,
     FallibleControlFlow,
+    MutableFunctionParameters,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -170,6 +171,7 @@ impl UnsupportedBackendFeatureReason {
             Self::ExternalNumericProfileBoundary => "external numeric-profile boundary",
             Self::ErrorValues => "Moth Error values",
             Self::FallibleControlFlow => "fallible control flow",
+            Self::MutableFunctionParameters => "mutable function parameters",
         }
     }
 }

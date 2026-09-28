@@ -874,10 +874,10 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Named arguments and call-site mutability</td>
- <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad function-call, constructor-call, duplicate, unknown, missing, ordering and tilde diagnostics coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Fresh rvalues can satisfy mutable parameters without <code>~</code>. Existing places still require explicit <code>~</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML-JS / HTML-Wasm</td>
+ <td style="padding: 0.1em 0.5em; "> Fresh rvalues can satisfy mutable parameters without <code>~</code>. Existing places still require explicit <code>~</code>. HTML-JS preserves normal write-through; HTML-Wasm rejects reachable mutable function parameters because its call-argument ABI has no writable argument slot.</td>
         </tr>
             
 

@@ -843,6 +843,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::ExternalNumericProfileBoundary => "unsupported_backend_feature.external_numeric_profile_boundary",
     &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
     &UnsupportedBackendFeatureReason::FallibleControlFlow => "unsupported_backend_feature.fallible_control_flow",
+    &UnsupportedBackendFeatureReason::MutableFunctionParameters => "unsupported_backend_feature.mutable_function_parameters",
     },
 
     NumberLiteralErrorReason => {

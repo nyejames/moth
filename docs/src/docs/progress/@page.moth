@@ -487,10 +487,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Named arguments and call-site mutability]
-            [: Supported]
+            [: Partial]
             [: Broad function-call, constructor-call, duplicate, unknown, missing, ordering and tilde diagnostics coverage.]
-            [: JS / HTML]
-            [: Fresh rvalues can satisfy mutable parameters without [$html:<code>~</code>]. Existing places still require explicit [$html:<code>~</code>].]
+            [: HTML-JS / HTML-Wasm]
+            [: Fresh rvalues can satisfy mutable parameters without [$html:<code>~</code>]. Existing places still require explicit [$html:<code>~</code>]. HTML-JS preserves normal write-through; HTML-Wasm rejects reachable mutable function parameters because its call-argument ABI has no writable argument slot.]
         ]
     ]
 ]

@@ -144,8 +144,8 @@ pub fn validate_hir_backend_feature_support(
                 input.target,
                 string_table,
             )?;
-            // Keep the existing type, cast and numeric gates ahead of these broader deferred
-            // features so their more specific diagnostics retain precedence.
+            // Keep every pre-existing Wasm feature diagnostic ahead of this ABI gate so narrower
+            // type, operation, and host-boundary reasons retain their established precedence.
             validate_wasm_error_values(
                 input.hir,
                 input.type_environment,
@@ -156,6 +156,12 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_fallible_control_flow(
                 input.hir,
                 reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_mutable_function_parameters(
+                input.hir,
+                reachability.backend_selection(),
                 input.target,
                 string_table,
             )?;
@@ -883,6 +889,92 @@ fn validate_wasm_fallible_control_flow(
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports a selected mutable parameter that Wasm cannot lower with write-through semantics.
+///
+/// WHAT: examines only declared parameters of selected functions; mutable locals remain supported.
+/// WHY: Wasm call lowering currently passes parameter values instead of writable locations, so
+///      accepting `~` parameters would silently lose mutations when a callee returns.
+fn validate_wasm_mutable_function_parameters(
+    hir: &HirModule,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let mut block_by_id = None;
+    let mut has_spanless_mutable_parameter = false;
+
+    for function in &hir.functions {
+        if !selection.contains_function(function.id) {
+            continue;
+        }
+        if function.params.is_empty() {
+            continue;
+        }
+
+        let entry_block = block_by_id
+            .get_or_insert_with(|| {
+                let mut block_by_id = FxHashMap::default();
+                for block in &hir.blocks {
+                    block_by_id.entry(block.id).or_insert(block);
+                }
+                block_by_id
+            })
+            .get(&function.entry)
+            .copied();
+        let Some(entry_block) = entry_block else {
+            return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                CompilerError::compiler_error(format!(
+                    "Backend feature validation could not resolve entry block {:?} \
+                     for selected function {:?}",
+                    function.entry, function.id,
+                )),
+            )));
+        };
+
+        for parameter_id in &function.params {
+            let Some(parameter) = entry_block
+                .locals
+                .iter()
+                .find(|local| local.id == *parameter_id)
+            else {
+                return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                    CompilerError::compiler_error(format!(
+                        "Backend feature validation could not resolve parameter {parameter_id:?} \
+                         in selected function {:?}",
+                        function.id,
+                    )),
+                )));
+            };
+
+            if !parameter.mutable {
+                continue;
+            }
+
+            if let Some(span) = parameter.span {
+                let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+                    string_table.intern(target.as_str()),
+                    UnsupportedBackendFeatureReason::MutableFunctionParameters,
+                    Some(span),
+                );
+                return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+            }
+
+            has_spanless_mutable_parameter = true;
+        }
+    }
+
+    if has_spanless_mutable_parameter {
+        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::MutableFunctionParameters,
+            None,
+        );
+        return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+    }
+
+    Ok(())
 }
 
 /// A reachable unsupported value, with optional source provenance.

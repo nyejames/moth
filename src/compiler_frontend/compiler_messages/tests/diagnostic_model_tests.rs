@@ -282,6 +282,26 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
 }
 
 #[test]
+fn mutable_function_parameter_feature_exposes_stable_reason_key() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern("Wasm"),
+        UnsupportedBackendFeatureReason::MutableFunctionParameters,
+        span(source_path),
+    );
+
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0064");
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("unsupported_backend_feature.mutable_function_parameters")
+    );
+}
+
+#[test]
 fn non_utf8_output_folder_reason_has_stable_identity_and_rendering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
