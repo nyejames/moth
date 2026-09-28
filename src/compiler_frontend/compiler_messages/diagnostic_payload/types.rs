@@ -148,6 +148,8 @@ pub enum UnsupportedBackendFeatureReason {
     CrossModuleCalls,
     RuntimeAssertionMessages,
     ExternalNumericProfileBoundary,
+    ErrorValues,
+    FallibleControlFlow,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -166,6 +168,8 @@ impl UnsupportedBackendFeatureReason {
             Self::CrossModuleCalls => "cross-module calls",
             Self::RuntimeAssertionMessages => "runtime assertion messages",
             Self::ExternalNumericProfileBoundary => "external numeric-profile boundary",
+            Self::ErrorValues => "Moth Error values",
+            Self::FallibleControlFlow => "fallible control flow",
         }
     }
 }

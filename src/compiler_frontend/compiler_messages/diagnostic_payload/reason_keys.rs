@@ -841,6 +841,8 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",
     &UnsupportedBackendFeatureReason::ExternalNumericProfileBoundary => "unsupported_backend_feature.external_numeric_profile_boundary",
+    &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
+    &UnsupportedBackendFeatureReason::FallibleControlFlow => "unsupported_backend_feature.fallible_control_flow",
     },
 
     NumberLiteralErrorReason => {

@@ -16,4 +16,4 @@ float_code = nonfinite_float() catch |float_err|:
     then float_err.code
 ;
 
-io.line([: numeric recovery codes=[int_code]/[float_code]])
+[: numeric recovery codes=[int_code]/[float_code]]

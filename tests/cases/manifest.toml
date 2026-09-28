@@ -314,6 +314,20 @@ contract = "language.builtins.error_kind_name_user_available"
 role = "primary"
 
 [[case]]
+id = "error_values_html_wasm_unsupported"
+path = "error_values_html_wasm_unsupported"
+tags = ["integration", "errors", "diagnostics", "html-wasm"]
+contract = "backend.html_wasm.error_values_unsupported"
+role = "backend"
+
+[[case]]
+id = "custom_error_fallible_control_flow_html_wasm_unsupported"
+path = "custom_error_fallible_control_flow_html_wasm_unsupported"
+tags = ["integration", "errors", "diagnostics", "html-wasm"]
+contract = "backend.html_wasm.fallible_control_flow_unsupported"
+role = "backend"
+
+[[case]]
 id = "choice_basic_declaration_and_use"
 path = "choice_basic_declaration_and_use"
 tags = ["integration", "language", "choices"]

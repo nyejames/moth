@@ -10,6 +10,9 @@ use crate::backends::backend_feature_validation::{
 };
 use crate::backends::external_package_validation::BackendTarget;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind, UnsupportedBackendFeatureReason,
 };
@@ -43,7 +46,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -769,6 +772,340 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
     assert!(
         result.is_ok(),
         "Wasm validation should ignore generic runtime values in unreachable helpers"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_canonical_error_values() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let nested_error_type = type_environment.intern_tuple(vec![error_type]);
+    let (_, error_member_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([FieldDefinition {
+            name: PathId::ROOT,
+            type_id: error_type,
+            span: None,
+        }]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let authored_span = test_source_span(7);
+
+    let cases = [
+        (
+            module_returning_expression(error_type, Some(authored_span)),
+            Some(authored_span),
+        ),
+        (module_returning_expression(error_type, None), None),
+        (
+            module_returning_expression(nested_error_type, Some(authored_span)),
+            Some(authored_span),
+        ),
+        (
+            module_returning_expression(error_member_type, Some(authored_span)),
+            Some(authored_span),
+        ),
+    ];
+
+    for (module, expected_span) in cases {
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm should reject reachable values containing the canonical builtin Error type",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::ErrorValues,
+        );
+        assert_eq!(
+            diagnostic.primary_span, expected_span,
+            "Error-value diagnostics should use the authored reachable occurrence"
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_allows_js() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let _builtin_error_type = register_test_builtin_error_type(&mut type_environment);
+    let (_, custom_error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let carrier_type =
+        type_environment.intern_fallible_carrier(builtin_type_ids::STRING, custom_error_type);
+    let authored_span = test_source_span(13);
+    let mut branch_module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::FallibleBranch {
+                    result: typed_expression(0, carrier_type, None),
+                    success_block: BlockId(1),
+                    error_block: BlockId(2),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::ReturnSuccess(typed_expression(1, builtin_type_ids::STRING, None)),
+            ),
+            block(
+                BlockId(2),
+                vec![],
+                HirTerminator::ReturnError(typed_expression(2, custom_error_type, None)),
+            ),
+        ],
+    );
+    branch_module
+        .side_table
+        .map_terminator_span(BlockId(0), authored_span);
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &branch_module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should reject reachable fallible flow over a custom error channel",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FallibleControlFlow,
+    );
+    assert_eq!(diagnostic.primary_span, Some(authored_span));
+
+    let reachability = test_reachability(&branch_module);
+    let js_result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &branch_module,
+            reachability: &reachability,
+            target: BackendTarget::Js,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
+        },
+        &mut string_table,
+    );
+    assert!(
+        js_result.is_ok(),
+        "JS validation should continue to allow reachable fallible control flow"
+    );
+
+    for terminator in [
+        HirTerminator::ReturnSuccess(unit_expression(3)),
+        HirTerminator::ReturnError(typed_expression(4, custom_error_type, None)),
+    ] {
+        let mut module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![block(BlockId(0), vec![], terminator)],
+        );
+        module
+            .side_table
+            .map_terminator_span(BlockId(0), authored_span);
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm should reject reachable fallible return terminators",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::FallibleControlFlow,
+        );
+        assert_eq!(diagnostic.primary_span, Some(authored_span));
+    }
+}
+
+#[test]
+fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable_helpers() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let carrier_type =
+        type_environment.intern_fallible_carrier(builtin_type_ids::STRING, error_type);
+    let unreachable_span = test_source_span(21);
+    let mut module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::ReturnSuccess(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::FallibleBranch {
+                    result: typed_expression(1, carrier_type, None),
+                    success_block: BlockId(2),
+                    error_block: BlockId(3),
+                },
+            ),
+            block(
+                BlockId(2),
+                vec![],
+                HirTerminator::ReturnSuccess(typed_expression(2, builtin_type_ids::STRING, None)),
+            ),
+            block(
+                BlockId(3),
+                vec![],
+                HirTerminator::ReturnError(typed_expression(3, error_type, None)),
+            ),
+        ],
+    );
+    module
+        .side_table
+        .map_terminator_span(BlockId(1), unreachable_span);
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "synthetic reachable fallible control flow should still be rejected",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FallibleControlFlow,
+    );
+    assert_eq!(
+        diagnostic.primary_span, None,
+        "an unreachable authored terminator must not supply provenance for synthetic HIR"
+    );
+
+    let mut unreachable_only_module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function_with_signature(FunctionId(1), BlockId(1), vec![], error_type),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::ReturnError(typed_expression(1, error_type, Some(unreachable_span))),
+            ),
+        ],
+    );
+    unreachable_only_module
+        .side_table
+        .map_terminator_span(BlockId(1), unreachable_span);
+    let reachability = test_reachability(&unreachable_only_module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &unreachable_only_module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+            external_package_registry: None,
+        },
+        &mut string_table,
+    );
+    assert!(
+        result.is_ok(),
+        "unreachable Error values and fallible helpers must not block Wasm validation"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_flow() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let numeric_result_type =
+        type_environment.intern_fallible_carrier(builtin_type_ids::INT, error_type);
+    let numeric_module = hir_module(
+        FunctionId(0),
+        vec![function_with_signature(
+            FunctionId(0),
+            BlockId(0),
+            vec![],
+            numeric_result_type,
+        )],
+        vec![block_with_locals(
+            BlockId(0),
+            vec![HirLocal {
+                id: LocalId(9000),
+                ty: numeric_result_type,
+                mutable: true,
+                region: RegionId(0),
+                span: None,
+            }],
+            vec![numeric_op_statement_with_failure(
+                10,
+                int_add_op(),
+                None,
+                NumericFailureMode::ReturnError,
+            )],
+            HirTerminator::ReturnError(typed_expression(0, error_type, None)),
+        )],
+    );
+    let numeric_diagnostic = wasm_feature_validation_diagnostic(
+        &numeric_module,
+        &type_environment,
+        &mut string_table,
+        "checked numeric failures should retain precedence over Error values and fallible terminators",
+    );
+    assert_unsupported_feature(
+        &numeric_diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+    );
+
+    let cast_result_type =
+        type_environment.intern_fallible_carrier(builtin_type_ids::INT, error_type);
+    let fallible_cast_module = hir_module(
+        FunctionId(0),
+        vec![function_with_signature(
+            FunctionId(0),
+            BlockId(0),
+            vec![],
+            cast_result_type,
+        )],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::ReturnSuccess(numeric_cast_expression(
+                0,
+                NumericScalar::Float,
+                NumericScalar::Int,
+            )),
+        )],
+    );
+    let cast_diagnostic = wasm_feature_validation_diagnostic(
+        &fallible_cast_module,
+        &type_environment,
+        &mut string_table,
+        "fallible casts should retain precedence over Error values and fallible terminators",
+    );
+    assert_unsupported_feature(
+        &cast_diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RuntimeCasts,
     );
 }
 
@@ -1719,6 +2056,30 @@ fn module_returning_expression(ty: TypeId, span: Option<SourceSpan>) -> HirModul
             HirTerminator::Return(typed_expression(0, ty, span)),
         )],
     )
+}
+
+fn register_test_builtin_error_type(type_environment: &mut TypeEnvironment) -> TypeId {
+    let (_, error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    type_environment
+        .register_canonical_identity(
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+            error_type,
+        )
+        .expect("synthetic Error type should receive the builtin canonical identity");
+    error_type
+}
+
+fn test_source_span(start: u32) -> SourceSpan {
+    let mut extended_spans = ExtendedSpanBuilder::default();
+    let local_span = LocalSpan::exact(start, 1, &mut extended_spans)
+        .expect("small test source ranges should fit inline");
+    SourceSpan::new(SourceId::COMPILATION_ROOT, local_span)
 }
 
 fn module_returning_cast_expression(expression: HirExpression) -> HirModule {

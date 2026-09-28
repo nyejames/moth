@@ -1,0 +1,15 @@
+Failure = |
+    message String,
+|
+
+load_message |fail Bool| -> String, Failure!:
+    if fail:
+        return! Failure("authored custom failure")
+    ;
+    return "success"
+;
+
+message = load_message(true) catch |err|:
+    then [:recovered=[err.message]]
+;
+[:[message]]

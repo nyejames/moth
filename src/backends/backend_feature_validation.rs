@@ -11,6 +11,9 @@ use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fall
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, UnsupportedBackendFeatureReason,
@@ -76,9 +79,10 @@ pub struct BackendFeatureValidationInput<'a> {
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
 ///
 /// WHAT: hashmap construction/use, reactive runtime features, runtime casts, checked numeric
-///       operations, and generic runtime values are legal HIR, but this validator reports Wasm
-///       features that the target cannot lower. Its bounded scalar step accepts direct fixed
-///       integer/Byte and F32/F64 values while retaining gates for F16 and aggregates.
+///       operations, generic runtime values, Moth `Error` values and fallible control flow are
+///       legal HIR, but this validator reports Wasm features that the target cannot lower. Its
+///       bounded scalar step accepts direct integer/Byte and F32/F64 values while retaining gates
+///       for F16 and aggregates.
 /// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
@@ -108,7 +112,8 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
-            // statement casts, formatting/boundary validation, and generic runtime values.
+            // statement casts, formatting/boundary validation, generic values and the later
+            // Error-value/fallible-control-flow checks.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -135,6 +140,21 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_generic_runtime_values(
                 input.hir,
                 input.type_environment,
+                reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
+            // Keep the existing type, cast and numeric gates ahead of these broader deferred
+            // features so their more specific diagnostics retain precedence.
+            validate_wasm_error_values(
+                input.hir,
+                input.type_environment,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_fallible_control_flow(
+                input.hir,
                 reachability.backend_selection().blocks(),
                 input.target,
                 string_table,
@@ -205,7 +225,7 @@ fn validate_js_external_numeric_profile_boundaries(
         target,
         "external numeric-profile boundaries",
     )?;
-    let mut backend_type_facts = BackendTypeFacts::new(type_environment);
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, None);
 
     for call in calls {
         let Some(function) = registry.get_function_by_id(call.function_id) else {
@@ -351,7 +371,7 @@ fn validate_fixed_width_scalar_values(
         target,
         "fixed-width numeric and Byte values",
     )?;
-    let mut backend_type_facts = BackendTypeFacts::new(type_environment);
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, None);
 
     // Reachable block occurrences take source precedence over return signatures. Within each pass,
     // a source-mapped occurrence wins over earlier generated HIR that has no source provenance.
@@ -737,6 +757,106 @@ fn validate_wasm_generic_runtime_values(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::GenericRuntimeValues,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports a reachable value whose type directly or structurally contains the builtin `Error`.
+///
+/// WHAT: Wasm does not yet have a runtime representation for compiler-owned Error values.
+/// WHY: canonical identity distinguishes the builtin type from user nominals with similar
+///      spelling or shape, while the shared occurrence traversal retains reachable source sites.
+fn validate_wasm_error_values(
+    hir: &HirModule,
+    type_environment: Option<&TypeEnvironment>,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let type_environment = require_type_environment(type_environment, target, "Error values")?;
+    let error_type_id = type_environment.type_id_for_canonical_identity(
+        &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+    );
+    let Some(error_type_id) = error_type_id else {
+        return Ok(());
+    };
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, Some(error_type_id));
+
+    let module_occurrences =
+        first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
+            backend_type_facts.contains_error(type_id)
+        });
+    let occurrence = if let Some(authored) = module_occurrences.authored {
+        Some(authored)
+    } else {
+        let signature_occurrences =
+            first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
+                backend_type_facts.contains_error(type_id)
+            });
+        signature_occurrences
+            .authored
+            .or(module_occurrences.spanless_fallback)
+            .or(signature_occurrences.spanless_fallback)
+    };
+
+    let Some(occurrence) = occurrence else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::ErrorValues,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports reachable fallible terminators, which Wasm lowering cannot yet represent.
+///
+/// WHAT: rejects `FallibleBranch`, `ReturnSuccess` and `ReturnError` only in selected blocks.
+/// WHY: exact terminator spans are the authored control-flow site; synthetic HIR remains spanless
+///      instead of inheriting provenance from a neighboring construct.
+fn validate_wasm_fallible_control_flow(
+    hir: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let mut spanless_fallback = None;
+    let mut authored_occurrence = None;
+
+    for block in &hir.blocks {
+        if !reachable_blocks.contains(&block.id)
+            || !matches!(
+                &block.terminator,
+                HirTerminator::FallibleBranch { .. }
+                    | HirTerminator::ReturnSuccess(_)
+                    | HirTerminator::ReturnError(_)
+            )
+        {
+            continue;
+        }
+
+        let occurrence = ReachableTypeOccurrence {
+            span: hir.side_table.terminator_span(block.id).copied(),
+        };
+        if occurrence.span.is_some() {
+            authored_occurrence = Some(occurrence);
+            break;
+        }
+        spanless_fallback.get_or_insert(occurrence);
+    }
+
+    let Some(occurrence) = authored_occurrence.or(spanless_fallback) else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::FallibleControlFlow,
         occurrence.span,
     );
 
@@ -1153,20 +1273,22 @@ where
 
 /// Memoised semantic type facts used by backend feature gates.
 ///
-/// WHAT: records fixed-width scalars, Moth `Int`, and Moth `Float` through constructed and nominal
-///       type structure.
+/// WHAT: records Error values, fixed-width scalars, Moth `Int` and Moth `Float` through constructed
+///       and nominal type structure.
 /// WHY: backend gates classify overlapping reachable types, so one cycle-safe walk owns the
 ///      structural traversal and memoises facts per `TypeId`.
 struct BackendTypeFacts<'environment> {
     type_environment: &'environment TypeEnvironment,
+    error_type_id: Option<TypeId>,
     memo: FxHashMap<TypeId, BackendTypeVisit>,
     visiting: FxHashSet<TypeId>,
 }
 
 impl<'environment> BackendTypeFacts<'environment> {
-    fn new(type_environment: &'environment TypeEnvironment) -> Self {
+    fn new(type_environment: &'environment TypeEnvironment, error_type_id: Option<TypeId>) -> Self {
         Self {
             type_environment,
+            error_type_id,
             memo: FxHashMap::default(),
             visiting: FxHashSet::default(),
         }
@@ -1174,6 +1296,10 @@ impl<'environment> BackendTypeFacts<'environment> {
 
     fn contains_fixed_scalar(&mut self, type_id: TypeId) -> bool {
         self.visit(type_id).contains_fixed_scalar
+    }
+
+    fn contains_error(&mut self, type_id: TypeId) -> bool {
+        self.visit(type_id).contains_error
     }
 
     fn contains_external_numeric(
@@ -1215,7 +1341,10 @@ impl<'environment> BackendTypeFacts<'environment> {
             return BackendTypeVisit::EMPTY;
         };
 
-        let mut visit = BackendTypeVisit::EMPTY;
+        let mut visit = BackendTypeVisit {
+            contains_error: self.error_type_id == Some(type_id),
+            ..BackendTypeVisit::EMPTY
+        };
         match definition {
             TypeDefinition::Builtin(builtin) => match builtin.key {
                 BuiltinTypeKey::FixedScalar(_) => visit.contains_fixed_scalar = true,
@@ -1273,6 +1402,7 @@ impl<'environment> BackendTypeFacts<'environment> {
 
 #[derive(Clone, Copy)]
 struct BackendTypeVisit {
+    contains_error: bool,
     contains_fixed_scalar: bool,
     contains_int: bool,
     contains_float: bool,
@@ -1281,6 +1411,7 @@ struct BackendTypeVisit {
 
 impl BackendTypeVisit {
     const EMPTY: Self = Self {
+        contains_error: false,
         contains_fixed_scalar: false,
         contains_int: false,
         contains_float: false,
@@ -1288,6 +1419,7 @@ impl BackendTypeVisit {
     };
 
     fn merge(&mut self, other: Self) {
+        self.contains_error |= other.contains_error;
         self.contains_fixed_scalar |= other.contains_fixed_scalar;
         self.contains_int |= other.contains_int;
         self.contains_float |= other.contains_float;
