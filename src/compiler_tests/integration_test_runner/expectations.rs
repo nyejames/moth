@@ -77,6 +77,8 @@ struct BackendExpectationToml {
     #[serde(default)]
     runtime_error_contains: Option<Vec<String>>,
     #[serde(default)]
+    runtime_trap_contains: Option<Vec<String>>,
+    #[serde(default)]
     math_random_samples: Option<Vec<f64>>,
     #[serde(default)]
     artifacts_must_not_exist: Vec<String>,
@@ -310,9 +312,17 @@ fn parse_matrix_expectation_file(
                 contains_in_order: backend_expectation.rendered_output_contains_in_order,
                 contains_exactly_once: backend_expectation.rendered_output_contains_exactly_once,
                 runtime_error_contains: backend_expectation.runtime_error_contains,
+                runtime_trap_contains: backend_expectation.runtime_trap_contains,
                 math_random_samples: backend_expectation.math_random_samples,
             },
         )?;
+        if !rendered_output.runtime_trap_contains.is_empty() && backend_id != BackendId::HtmlWasm {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses 'runtime_trap_contains', which is only supported for the 'html_wasm' backend.",
+                path.display(),
+                context
+            )));
+        }
 
         let has_authored_expected_warning = matches!(&warnings, WarningExpectation::Exact(_));
         if success_contract.is_some()
@@ -338,7 +348,8 @@ fn parse_matrix_expectation_file(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
                  'rendered_output_not_contains', 'rendered_output_contains_in_order', \
-                 'rendered_output_contains_exactly_once', or 'runtime_error_contains'.",
+                 'rendered_output_contains_exactly_once', 'runtime_error_contains', or \
+                 'runtime_trap_contains'.",
                 path.display(),
                 context
             )));
@@ -912,6 +923,7 @@ struct AuthoredRenderedOutput {
     contains_in_order: Option<Vec<String>>,
     contains_exactly_once: Option<Vec<String>>,
     runtime_error_contains: Option<Vec<String>>,
+    runtime_trap_contains: Option<Vec<String>>,
     math_random_samples: Option<Vec<f64>>,
 }
 
@@ -927,8 +939,16 @@ fn parse_rendered_output_expectation(
         contains_in_order,
         contains_exactly_once,
         runtime_error_contains,
+        runtime_trap_contains,
         math_random_samples,
     } = authored;
+    if runtime_error_contains.is_some() && runtime_trap_contains.is_some() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} must not combine 'runtime_trap_contains' with 'runtime_error_contains'.",
+            path.display(),
+            context
+        )));
+    }
 
     if exact.is_some()
         && (!contains.is_empty()
@@ -1005,6 +1025,21 @@ fn parse_rendered_output_expectation(
         "runtime_error_contains",
         &runtime_error_contains,
     )?;
+    let runtime_trap_contains_was_authored = runtime_trap_contains.is_some();
+    let runtime_trap_contains = runtime_trap_contains.unwrap_or_default();
+    if runtime_trap_contains_was_authored && runtime_trap_contains.is_empty() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} requires 'runtime_trap_contains' to contain at least one entry.",
+            path.display(),
+            context
+        )));
+    }
+    validate_rendered_output_strings(
+        path,
+        context,
+        "runtime_trap_contains",
+        &runtime_trap_contains,
+    )?;
     if let Some(samples) = &math_random_samples {
         for (index, sample) in samples.iter().enumerate() {
             if !sample.is_finite() || !(0.0..1.0).contains(sample) {
@@ -1024,6 +1059,7 @@ fn parse_rendered_output_expectation(
         contains_in_order,
         contains_exactly_once,
         runtime_error_contains,
+        runtime_trap_contains,
         math_random_samples,
     })
 }

@@ -7826,6 +7826,13 @@ contract = "language.assert.false_terminal_satisfies_non_unit_return_acceptance"
 role = "primary"
 
 [[case]]
+id = "assert_dynamic_runtime_trap"
+path = "assert_dynamic_runtime_trap"
+tags = ["integration", "language", "assert", "control-flow", "html-wasm", "runtime"]
+contract = "backend.html_wasm.assert_dynamic_runtime_trap"
+role = "primary"
+
+[[case]]
 id = "assert_dynamic_not_terminal"
 path = "assert_dynamic_not_terminal"
 tags = ["integration", "language", "assert", "control-flow"]

@@ -16,12 +16,140 @@ use super::super::assertions::{
 use super::super::types::{ArtifactKind, GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, FailureKind, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::{
-    VALID_HTML, build_result_with_index_html, build_result_with_output_files, success_test_case,
+    VALID_HTML, VALID_HTML_WASM, build_result_with_index_html, build_result_with_output_files,
+    success_test_case,
 };
 use crate::build_system::build::FileKind;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use std::path::PathBuf;
 use std::time::Duration;
+use wasm_encoder::{
+    CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, MemArg,
+    MemorySection, MemoryType, Module, TypeSection, ValType,
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestWasmTrap {
+    Unreachable,
+    OutOfBoundsLoad,
+}
+
+fn wasm_module_with_trap(trap: TestWasmTrap) -> Vec<u8> {
+    let trap_result_types = match trap {
+        TestWasmTrap::Unreachable => Vec::new(),
+        TestWasmTrap::OutOfBoundsLoad => vec![ValType::I32],
+    };
+
+    let mut module = Module::new();
+    let mut types = TypeSection::new();
+    types.ty().function(Vec::new(), vec![ValType::I32]);
+    types.ty().function(Vec::new(), trap_result_types);
+    module.section(&types);
+
+    let mut functions = FunctionSection::new();
+    for _ in 0..4 {
+        functions.function(0);
+    }
+    functions.function(1);
+    module.section(&functions);
+
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: 1,
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+    module.section(&memories);
+
+    let mut exports = ExportSection::new();
+    exports.export("memory", ExportKind::Memory, 0);
+    for (index, name) in ["moth_start", "moth_str_ptr", "moth_str_len", "moth_release"]
+        .iter()
+        .enumerate()
+    {
+        exports.export(name, ExportKind::Func, index as u32);
+    }
+    exports.export("trap", ExportKind::Func, 4);
+    module.section(&exports);
+
+    let mut code = CodeSection::new();
+    for _ in 0..4 {
+        let mut function = Function::new(Vec::new());
+        function.instruction(&Instruction::I32Const(0));
+        function.instruction(&Instruction::End);
+        code.function(&function);
+    }
+
+    let mut trap_function = Function::new(Vec::new());
+    match trap {
+        TestWasmTrap::Unreachable => {
+            trap_function.instruction(&Instruction::Unreachable);
+        }
+        TestWasmTrap::OutOfBoundsLoad => {
+            trap_function.instruction(&Instruction::I32Const(65_536));
+            trap_function.instruction(&Instruction::I32Load(MemArg {
+                offset: 0,
+                align: 2,
+                memory_index: 0,
+            }));
+        }
+    }
+    trap_function.instruction(&Instruction::End);
+    code.function(&trap_function);
+    module.section(&code);
+
+    module.finish()
+}
+
+fn wasm_trap_page_script(wasm_bytes: &[u8], body: &str) -> String {
+    format!(
+        "const __moth_test_module = new WebAssembly.Module(new Uint8Array({wasm_bytes:?}));\n\
+         const __moth_test_instance = new WebAssembly.Instance(__moth_test_module, {{}});\n\
+         {body}\n"
+    )
+}
+
+fn wasm_bootstrap_script(body: &str) -> String {
+    format!(
+        "async function __moth_instantiate_wasm(wasm_url, imports) {{\n\
+         const bytes = await fetch(wasm_url).then((response) => response.arrayBuffer());\n\
+         return WebAssembly.instantiate(bytes, imports);\n\
+         }}\n\
+         (async () => {{\n\
+         const {{ instance }} = await __moth_instantiate_wasm(\"./page.wasm\", {{}});\n\
+         {body}\n\
+         }})();\n"
+    )
+}
+
+fn validate_wasm_page(
+    page_js: String,
+    wasm_bytes: Vec<u8>,
+    rendered_output: RenderedOutputExpectation,
+) -> (bool, Option<FailureKind>, Option<String>) {
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output,
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML_WASM.to_owned()),
+        ),
+        (PathBuf::from("page.js"), FileKind::Js(page_js)),
+        (PathBuf::from("page.wasm"), FileKind::Wasm(wasm_bytes)),
+    ]);
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    (result.passed, result.failure_kind, result.failure_reason)
+}
 
 // ─── Fragment expectation checks ────────────────────────────────────────────
 
@@ -535,38 +663,270 @@ fn html_wasm_rendered_output_waits_for_bootstrap_completion() {
 }
 
 #[test]
-fn html_wasm_rendered_output_captures_plain_runtime_errors() {
+fn html_wasm_rendered_output_keeps_plain_moth_errors_separate_from_traps() {
     let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
     std::fs::write(
         temp_dir.path().join("page.js"),
         r#"console.log("before");
-throw new Error("wasm runtime trap");
+throw new Error("wasm runtime error");
 "#,
     )
     .expect("runtime-error bootstrap fixture should be written");
 
     let output = execute_wasm_harness_for_test(temp_dir.path())
-        .expect("plain Error from HTML-Wasm page execution should be reported as runtime output");
+        .expect("plain Error from HTML-Wasm page execution should remain runtime output");
 
     assert_eq!(output.combined_output(), "before");
-    assert_eq!(output.runtime_error_message(), Some("wasm runtime trap"));
+    assert_eq!(output.runtime_error_message(), Some("wasm runtime error"));
+    assert!(
+        matches!(
+            output.events().last(),
+            Some(RuntimeEvent::RuntimeError { message }) if message == "wasm runtime error"
+        ),
+        "a plain Error must retain the Moth runtime-error event type"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before'); throw new Error('wasm runtime error');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["wasm runtime error".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(passed, "the Moth Error expectation should pass: {reason:?}");
+    assert_eq!(kind, None);
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before'); throw new Error('wasm runtime error');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["wasm runtime error".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "a Moth Error must not satisfy a Wasm trap expectation"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("Moth runtime Error occurred")),
+        "the mismatch should name the observed terminal type: {reason:?}"
+    );
 }
 
 #[test]
-fn html_wasm_runtime_error_from_webassembly_remains_a_harness_failure() {
+fn html_wasm_instantiated_trap_is_terminal_and_requires_a_matching_expectation() {
     let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
-    std::fs::write(
-        temp_dir.path().join("page.js"),
-        r#"throw new WebAssembly.RuntimeError("wasm trap");
-"#,
-    )
-    .expect("Wasm trap fixture should be written");
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let page_js = wasm_trap_page_script(
+        &module,
+        concat!(
+            "console.log('before Wasm trap'); ",
+            "queueMicrotask(() => console.log('after Wasm trap')); ",
+            "__moth_test_instance.exports.trap();"
+        ),
+    );
+    std::fs::write(temp_dir.path().join("page.js"), page_js)
+        .expect("instantiated-Wasm bootstrap fixture should be written");
 
-    let error = execute_wasm_harness_for_test(temp_dir.path())
-        .expect_err("WebAssembly.RuntimeError should not satisfy a Moth runtime-error expectation");
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("an instantiated Wasm trap should be a terminal runtime event");
 
-    assert_eq!(error.kind, RenderHarnessErrorKind::ExitStatus);
-    assert!(error.message.contains("wasm trap"), "{}", error.message);
+    assert_eq!(output.combined_output(), "before Wasm trap");
+    assert_eq!(output.runtime_error_message(), None);
+    assert_eq!(
+        output.events(),
+        &[
+            RuntimeEvent::Console {
+                text: "before Wasm trap".to_owned(),
+            },
+            RuntimeEvent::WasmTrap {
+                message: "unreachable".to_owned(),
+            },
+        ]
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script(
+            "console.log('before Wasm trap'); instance.exports.trap(); console.log('after Wasm trap');",
+        ),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            contains: vec!["before Wasm trap".to_owned()],
+            not_contains: vec!["after Wasm trap".to_owned()],
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(passed, "the explicit matching trap should pass: {reason:?}");
+    assert_eq!(kind, None);
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            contains: vec!["before Wasm trap".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "an unexpected Wasm trap must fail a text-only contract"
+    );
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unexpected uncaught WebAssembly trap")),
+        "the unexpected trap should remain visible: {reason:?}"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["bounds".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(!passed, "a mismatched trap fragment must fail");
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unreachable")),
+        "the mismatch should retain the actual trap message: {reason:?}"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "a Wasm trap must not satisfy a Moth Error expectation"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("WebAssembly trap occurred")),
+        "the mismatch should name the observed terminal type: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_unhandled_rejection_captures_an_instantiated_trap() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let page_js = wasm_trap_page_script(
+        &module,
+        concat!(
+            "console.log('before rejected Wasm trap'); ",
+            "void Promise.resolve().then(() => __moth_test_instance.exports.trap());"
+        ),
+    );
+    std::fs::write(temp_dir.path().join("page.js"), page_js)
+        .expect("unhandled-rejection Wasm fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("the unhandled-rejection path should classify Wasm traps consistently");
+
+    assert_eq!(output.combined_output(), "before rejected Wasm trap");
+    assert!(matches!(
+        output.events().last(),
+        Some(RuntimeEvent::WasmTrap { message }) if message == "unreachable"
+    ));
+}
+
+#[test]
+fn html_wasm_success_without_a_trap_does_not_satisfy_a_trap_expectation() {
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('completed normally');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("no WebAssembly trap occurred")),
+        "the mismatch should explain normal completion: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_bounds_trap_does_not_match_an_unreachable_expectation() {
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::OutOfBoundsLoad),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        !passed,
+        "a bounds trap must not satisfy the 'unreachable' contract"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("out of bounds")),
+        "the mismatch should name the actual bounds trap: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_non_runtime_engine_errors_and_other_values_remain_harness_failures() {
+    for (page_js, thrown) in [
+        (
+            "throw new TypeError('invalid generated operation');",
+            "TypeError",
+        ),
+        (
+            "throw new WebAssembly.CompileError('invalid module');",
+            "CompileError",
+        ),
+        (
+            "throw new WebAssembly.LinkError('missing import');",
+            "LinkError",
+        ),
+        (
+            "class SpoofTrap extends WebAssembly.RuntimeError {} throw new SpoofTrap('subclass trap');",
+            "subclass trap",
+        ),
+        ("throw 'other thrown value';", "other thrown value"),
+    ] {
+        let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+        std::fs::write(temp_dir.path().join("page.js"), page_js)
+            .expect("engine-error bootstrap fixture should be written");
+
+        let error = execute_wasm_harness_for_test(temp_dir.path())
+            .expect_err("non-trap engine failures must remain harness failures");
+
+        assert_eq!(error.kind, RenderHarnessErrorKind::ExitStatus, "{thrown}");
+        assert!(
+            error.message.contains(thrown),
+            "the harness failure should retain {thrown}: {}",
+            error.message
+        );
+    }
 }
 
 #[test]
@@ -692,6 +1052,18 @@ fn rendered_output_rejects_unknown_or_malformed_runtime_events() {
             r#"{"events":[{"type":"runtime_error","message":"first"},{"type":"runtime_error","message":"second"}]}"#,
             "must be the final event",
         ),
+        (
+            r#"{"events":[{"type":"wasm_trap","message":"unreachable"},{"type":"console","text":"after trap"}]}"#,
+            "must be the final event",
+        ),
+        (
+            r#"{"events":[{"type":"wasm_trap","message":"unreachable","extra":true}]}"#,
+            "unknown field 'extra'",
+        ),
+        (
+            r#"{"events":[{"type":"wasm_trap"}]}"#,
+            "missing string field 'message'",
+        ),
     ] {
         let error =
             parse_harness_output(json).expect_err("malformed runtime events must fail decoding");
@@ -771,18 +1143,18 @@ fn rendered_output_captures_plain_errors_rejected_by_page_promises() {
 }
 
 #[test]
-fn rendered_output_runtime_error_ends_the_run_before_queued_page_work() {
-    // Reactive flushes are queued microtasks. They must not append output after the trap, and a
-    // later throw from them must not replace the first runtime error.
+fn rendered_output_moth_error_ends_the_run_before_queued_page_work() {
+    // Reactive flushes are queued microtasks. They must not append output after the Moth Error,
+    // and a later throw from them must not replace the first error.
     let (passed, kind, reason) = validate_html_script(
         concat!(
-            "queueMicrotask(() => { console.log('after trap'); throw new Error('second trap'); }); ",
-            "console.log('before trap'); ",
-            "throw new Error('first trap');",
+            "queueMicrotask(() => { console.log('after error'); throw new Error('second error'); }); ",
+            "console.log('before error'); ",
+            "throw new Error('first error');",
         ),
         RenderedOutputExpectation {
-            exact: Some("before trap".to_owned()),
-            runtime_error_contains: vec!["first trap".to_owned()],
+            exact: Some("before error".to_owned()),
+            runtime_error_contains: vec!["first error".to_owned()],
             ..Default::default()
         },
     );
@@ -823,6 +1195,25 @@ fn rendered_output_does_not_treat_other_throws_as_a_moth_runtime_error() {
             "harness failure should surface the thrown message: {reason:?}"
         );
     }
+}
+
+#[test]
+fn html_runtime_does_not_classify_an_instantiated_wasm_trap_as_a_moth_error() {
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let script = wasm_trap_page_script(&module, "__moth_test_instance.exports.trap();");
+    let (passed, kind, reason) = validate_html_script(
+        &script,
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        !passed,
+        "HTML must retain its engine-failure lane: {reason:?}"
+    );
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
 }
 
 #[test]
@@ -883,11 +1274,11 @@ fn rendered_output_expected_runtime_error_requires_an_error_to_occur() {
 }
 
 #[test]
-fn rendered_output_unexpected_runtime_error_is_a_harness_failure() {
+fn rendered_output_unexpected_moth_error_is_a_harness_failure() {
     let (passed, kind, reason) = validate_html_script(
-        "console.log('output before trap'); throw new Error('unexpected runtime trap'); console.log('output after trap');",
+        "console.log('output before error'); throw new Error('unexpected runtime error'); console.log('output after error');",
         RenderedOutputExpectation {
-            contains: vec!["output after trap".to_owned()],
+            contains: vec!["output after error".to_owned()],
             ..Default::default()
         },
     );
@@ -897,7 +1288,7 @@ fn rendered_output_unexpected_runtime_error_is_a_harness_failure() {
     assert!(
         reason
             .as_deref()
-            .is_some_and(|message| message.contains("unexpected runtime trap")),
+            .is_some_and(|message| message.contains("unexpected runtime error")),
         "failure should surface the uncaught runtime message: {reason:?}"
     );
 }

@@ -1090,6 +1090,52 @@ fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
 }
 
 #[test]
+fn runtime_trap_contains_rejects_wrong_backend_mode_and_fragments() {
+    for (name, expectation_text, expected_message) in [
+        (
+            "html_backend",
+            "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = [\"unreachable\"]\n",
+            "only supported for the 'html_wasm' backend",
+        ),
+        (
+            "failure_mode",
+            "[backends.html_wasm]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nruntime_trap_contains = [\"unreachable\"]\n",
+            "runtime_trap_contains",
+        ),
+        (
+            "empty_list",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = []\n",
+            "requires 'runtime_trap_contains' to contain at least one entry",
+        ),
+        (
+            "empty_fragment",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = [\"\"]\n",
+            "empty 'runtime_trap_contains'",
+        ),
+        (
+            "combined_with_runtime_error",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_error_contains = [\"assertion failed\"]\nruntime_trap_contains = [\"unreachable\"]\n",
+            "must not combine 'runtime_trap_contains' with 'runtime_error_contains'",
+        ),
+    ] {
+        let (_root, case_root) =
+            write_fixture(&format!("runtime_trap_contains_{name}"), expectation_text);
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("invalid runtime_trap_contains contract '{name}' should be rejected");
+        };
+
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract
+        );
+        assert!(
+            error.message.contains(expected_message),
+            "unexpected error for '{name}': {error}"
+        );
+    }
+}
+
+#[test]
 fn runtime_error_contains_rejects_failure_mode_and_lists_rendered_fields() {
     let (_root, case_root) = write_fixture(
         "runtime_error_contains_failure_mode",

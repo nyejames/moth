@@ -357,7 +357,7 @@ Audit cannot be combined with filters or `--list`. It writes the reporting-owned
 expectation facts, hard-policy violations and primary-less contract-family advisories. The report
 is review input only; it never deletes, merges or rewrites fixtures.
 
-The schema 8 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
+The schema 10 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
 expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered
 and exact-once runtime contracts separately. Per-backend fields keep `baseline_applied`,
 `acceptance_only`, `assertion_kinds`, `golden_present`, `golden_mode`, every rendered-output form,
@@ -378,6 +378,9 @@ finished — and the inventory replaced `repository_commit` with `repository_rev
 a discovered `commit`, `not_a_repository`, or `unknown` with the reason discovery failed. A failed
 discovery and a genuine absence are different facts, and a report that names neither its command
 nor its build cannot be told apart from a stale one.
+
+Schema 10 distinguishes explicit Wasm trap assertions from uncaught Moth runtime Error
+assertions in per-backend counts and summary totals.
 
 Reports are written to a sibling temporary file and renamed into place, so a reader never sees a
 partial file. Before the work begins, each report is replaced by one whose run says `completed:
@@ -404,18 +407,22 @@ contractual.
 Choose the narrowest field that owns the behaviour:
 
 - `rendered_output_exact` protects the complete combined output and is mutually exclusive with other
-  text-output fields. It may accompany `runtime_error_contains`; exact comparison normalizes line
-  endings only and preserves every other whitespace difference.
+  text-output fields. It may accompany `runtime_error_contains` or `runtime_trap_contains`.
+  Exact comparison normalizes line endings only and preserves every other whitespace difference.
 - `rendered_output_contains_in_order` protects the relative order of two or more fragments.
 - `rendered_output_contains_exactly_once` protects activation, mounting and helper output from
   duplication.
 - `rendered_output_contains` and `rendered_output_not_contains` protect required and forbidden
   fragments when complete output isn't the contract.
-- `runtime_error_contains` protects the message of an uncaught runtime trap or assertion stop that
-  ends page execution. The first such error ends the run, and text assertions check only output
-  captured before it. Only values thrown as `new Error(...)` count; subclasses, engine errors such
-  as `TypeError` and `WebAssembly.RuntimeError` remain harness failures. Without this field, an
-  uncaught runtime error fails the case.
+- `runtime_error_contains` protects the message of an uncaught Moth runtime Error that ends page
+  execution. Only values thrown as `new Error(...)` count. This field does not observe recovered
+  `Error!` results, which need ordinary output assertions.
+- `runtime_trap_contains` protects an uncaught `WebAssembly.RuntimeError` message on `html_wasm`.
+  It requires success mode and at least one non-empty fragment. It cannot accompany
+  `runtime_error_contains`: a host trap never satisfies a Moth Error expectation.
+- Either terminal outcome ends the run. Text assertions check only output captured before it.
+  An unrequested terminal outcome fails the case. Other engine errors, including `TypeError`,
+  `WebAssembly.CompileError` and `WebAssembly.LinkError`, remain harness failures.
 
 [codeblock, $code("toml"):
     [backends.html]
@@ -434,6 +441,16 @@ Use a runtime-error contract when the case's intended result is a terminating ru
     mode = "success"
     warnings = "forbid"
     runtime_error_contains = ["Int operation overflowed"]
+]
+
+Use a separate Wasm trap contract for an emitted checked stop. A different engine trap, such as
+an out-of-bounds memory access, does not satisfy this `unreachable` expectation:
+
+[codeblock, $code("toml"):
+    [backends.html_wasm]
+    mode = "success"
+    warnings = "forbid"
+    runtime_trap_contains = ["unreachable"]
 ]
 
 Use exact output for small deterministic behaviours such as loop or map operation results. Use

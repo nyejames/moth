@@ -539,8 +539,8 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Assertions</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage.</td>
- <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage. Dynamic default-message failures execute on HTML and instantiated HTML-Wasm with distinct Error and trap observations.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML / HTML-Wasm</td>
  <td style="padding: 0.1em 0.5em; "> <code>assert</code> is a statement-only language intrinsic. It is always checked, unrecoverable and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default, fully folded and unreachable literal-true runtime messages but rejects reachable runtime construction. Literal-true messages are fully type/generic/evidence checked and normalized, then replaced with typed <code>none</code> before HIR, so no TIR, runtime handoff, reactive metadata, generated request or executable fact is published. Message construction cannot escape its evaluation through <code>!</code>, <code>?</code>, return, break or continue. Authored propagation locations remain distinct from ordinary call mapping. <code>assert(false)</code> is statically terminal.</td>
         </tr>
 
@@ -1081,7 +1081,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Wasm payload/runtime parity</td>
  <td style="padding: 0.1em 0.5em; "> Experimental</td>
- <td style="padding: 0.1em 0.5em; "> Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive and external-call cases. The four-profile <code>wasm_scalar_profile_comparison_runtime</code> corpus executes emitted Wasm for scalar calls, exact fixed comparisons, unsigned Byte ordering, direct Int64-to-Float32 rounding and signed Int text. Compact scalar memory, checked numeric failure paths and F16 remain pending.</td>
+ <td style="padding: 0.1em 0.5em; "> Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive and external-call cases. The four-profile <code>wasm_scalar_profile_comparison_runtime</code> corpus executes emitted Wasm for scalar calls, exact fixed comparisons, unsigned Byte ordering, direct Int64-to-Float32 rounding and signed Int text. Emitter tests execute compact scalar loads/stores and inspect raw bytes, strides and signed zero without claiming source aggregate support. The shared runtime harness distinguishes explicit Wasm traps from Moth Error outcomes. Checked numeric failure paths and F16 remain pending.</td>
  <td style="padding: 0.1em 0.5em; "> Backend parity progress belongs here, not repeated in every feature row.</td>
         </tr>
             

@@ -155,14 +155,24 @@ fn validate_rendered_output_result(
     rendered: &RenderedOutput,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let actual = rendered.runtime_error_message();
-    if expectation.runtime_error_contains.is_empty()
-        && let Some(message) = actual
-    {
-        return Some((
-            format!("rendered_output: unexpected uncaught Moth runtime Error: {message}"),
-            FailureKind::HarnessFailed,
-        ));
+    let actual_error = rendered.runtime_error_message();
+    let actual_trap = rendered.runtime_trap_message();
+    let expects_error = !expectation.runtime_error_contains.is_empty();
+    let expects_trap = !expectation.runtime_trap_contains.is_empty();
+
+    if !expects_error && !expects_trap {
+        if let Some(message) = actual_error {
+            return Some((
+                format!("rendered_output: unexpected uncaught Moth runtime Error: {message}"),
+                FailureKind::HarnessFailed,
+            ));
+        }
+        if let Some(message) = actual_trap {
+            return Some((
+                format!("rendered_output: unexpected uncaught WebAssembly trap: {message}"),
+                FailureKind::HarnessFailed,
+            ));
+        }
     }
 
     if let Some(failure) =
@@ -171,28 +181,71 @@ fn validate_rendered_output_result(
         return Some(failure);
     }
 
-    if expectation.runtime_error_contains.is_empty() {
-        return None;
-    }
+    if expects_error {
+        let Some(actual) = actual_error else {
+            if let Some(trap_message) = actual_trap {
+                return Some((
+                    format!(
+                        "rendered_output: expected an uncaught Moth runtime Error containing {:?}, but a WebAssembly trap occurred with message {trap_message:?}.",
+                        expectation.runtime_error_contains
+                    ),
+                    FailureKind::RenderedOutputMismatch,
+                ));
+            }
 
-    let Some(actual) = actual else {
-        return Some((
-            format!(
-                "rendered_output: expected an uncaught Moth runtime Error containing {:?}, but no runtime error occurred.",
-                expectation.runtime_error_contains
-            ),
-            FailureKind::RenderedOutputMismatch,
-        ));
-    };
-
-    for fragment in &expectation.runtime_error_contains {
-        if !actual.contains(fragment) {
             return Some((
                 format!(
-                    "rendered_output: runtime error message did not contain required fragment '{fragment}'.\nActual runtime error:\n{actual}"
+                    "rendered_output: expected an uncaught Moth runtime Error containing {:?}, but no runtime error occurred.",
+                    expectation.runtime_error_contains
                 ),
                 FailureKind::RenderedOutputMismatch,
             ));
+        };
+
+        for fragment in &expectation.runtime_error_contains {
+            if !actual.contains(fragment) {
+                return Some((
+                    format!(
+                        "rendered_output: runtime error message did not contain required fragment '{fragment}'.\nActual runtime error:\n{actual}"
+                    ),
+                    FailureKind::RenderedOutputMismatch,
+                ));
+            }
+        }
+
+        return None;
+    }
+
+    if expects_trap {
+        let Some(actual) = actual_trap else {
+            if let Some(error_message) = actual_error {
+                return Some((
+                    format!(
+                        "rendered_output: expected an uncaught WebAssembly trap containing {:?}, but an uncaught Moth runtime Error occurred with message {error_message:?}.",
+                        expectation.runtime_trap_contains
+                    ),
+                    FailureKind::RenderedOutputMismatch,
+                ));
+            }
+
+            return Some((
+                format!(
+                    "rendered_output: expected an uncaught WebAssembly trap containing {:?}, but no WebAssembly trap occurred.",
+                    expectation.runtime_trap_contains
+                ),
+                FailureKind::RenderedOutputMismatch,
+            ));
+        };
+
+        for fragment in &expectation.runtime_trap_contains {
+            if !actual.contains(fragment) {
+                return Some((
+                    format!(
+                        "rendered_output: WebAssembly trap message did not contain required fragment '{fragment}'.\nActual WebAssembly trap message:\n{actual}"
+                    ),
+                    FailureKind::RenderedOutputMismatch,
+                ));
+            }
         }
     }
 
@@ -305,6 +358,7 @@ pub(crate) struct RenderedOutput {
 pub(crate) enum RuntimeEvent {
     Console { text: String },
     FragmentInsert { id: String, html: String },
+    WasmTrap { message: String },
     RuntimeError { message: String },
 }
 
@@ -317,10 +371,21 @@ pub(crate) struct SlotOutput {
 
 impl RenderedOutput {
     pub(crate) fn runtime_error_message(&self) -> Option<&str> {
-        self.events.iter().find_map(|event| match event {
-            RuntimeEvent::RuntimeError { message } => Some(message.as_str()),
-            RuntimeEvent::Console { .. } | RuntimeEvent::FragmentInsert { .. } => None,
-        })
+        match self.events.last()? {
+            RuntimeEvent::RuntimeError { message } => Some(message),
+            RuntimeEvent::Console { .. }
+            | RuntimeEvent::FragmentInsert { .. }
+            | RuntimeEvent::WasmTrap { .. } => None,
+        }
+    }
+
+    fn runtime_trap_message(&self) -> Option<&str> {
+        match self.events.last()? {
+            RuntimeEvent::WasmTrap { message } => Some(message),
+            RuntimeEvent::Console { .. }
+            | RuntimeEvent::FragmentInsert { .. }
+            | RuntimeEvent::RuntimeError { .. } => None,
+        }
     }
 
     #[cfg(test)]
@@ -359,7 +424,7 @@ impl RenderedOutput {
             match event {
                 RuntimeEvent::Console { text } => parts.push(text.to_owned()),
                 RuntimeEvent::FragmentInsert { html, .. } => parts.push(html.to_owned()),
-                RuntimeEvent::RuntimeError { .. } => {}
+                RuntimeEvent::RuntimeError { .. } | RuntimeEvent::WasmTrap { .. } => {}
             }
         }
 
@@ -396,11 +461,12 @@ fn execute_html_in_node(
     })
 }
 
-const NODE_TERMINAL_PROTOCOL: &str = r#"// A Moth runtime error is a value thrown as `new Error(message)`; subclasses and engine errors
-// such as TypeError are codegen or harness faults. The first one ends the run; the summary is
-// serialized synchronously so host work queued before the throw cannot append events after it.
-// Target adapters may veto a summary with a harness error before events are serialized.
+const NODE_TERMINAL_PROTOCOL: &str = r#"// A Moth runtime Error is a value thrown as `new Error(message)`; subclasses and
+// non-Wasm engine errors such as TypeError remain harness faults. Only the HTML-Wasm adapter
+// recognizes WebAssembly.RuntimeError as a Wasm trap. The first terminal event ends the run;
+// summary serialization is synchronous so queued host work cannot extend its event prefix.
 let __moth_summary_error_hook = null;
+let __moth_runtime_trap_message_hook = null;
 let __moth_finished = false;
 function __moth_write_summary() {
     if (__moth_finished) return;
@@ -427,10 +493,24 @@ function __moth_report_harness_failure(error) {
 }
 function __moth_handle_runtime_error(error) {
     if (__moth_finished) return;
-    if (error !== null && typeof error === 'object' && Object.getPrototypeOf(error) === Error.prototype) {
+    if (error !== null && typeof error === "object" && Object.getPrototypeOf(error) === Error.prototype) {
         __moth_events.push({ type: 'runtime_error', message: String(error.message) });
         __moth_write_summary();
         return;
+    }
+    if (__moth_runtime_trap_message_hook !== null) {
+        let message;
+        try {
+            message = __moth_runtime_trap_message_hook(error);
+        } catch (classifier_error) {
+            __moth_report_harness_failure(classifier_error);
+            return;
+        }
+        if (message !== null) {
+            __moth_events.push({ type: 'wasm_trap', message });
+            __moth_write_summary();
+            return;
+        }
     }
     __moth_report_harness_failure(error);
 }
@@ -551,6 +631,15 @@ globalThis.fetch = async (url) => {
 
 const NODE_WASM_HARNESS_SUFFIX: &str = r#"
 
+__moth_runtime_trap_message_hook = (error) => {
+    if (error !== null
+        && typeof error === "object"
+        && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype) {
+        return String(error.message);
+    }
+    return null;
+};
+
 (async () => {
     try {
         const page_js = fs.readFileSync(path.join(__moth_wasm_dir, "page.js"), "utf8");
@@ -559,7 +648,6 @@ const NODE_WASM_HARNESS_SUFFIX: &str = r#"
         await new Promise((resolve) => setImmediate(resolve));
         __moth_write_summary();
     } catch (error) {
-        // WebAssembly.RuntimeError remains a harness failure until Phase 5 defines Wasm trap surfacing.
         __moth_handle_runtime_error(error);
     }
 })();
@@ -598,18 +686,20 @@ pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderH
     };
 
     let mut events = Vec::with_capacity(events_array.len());
-    let mut runtime_error_seen = false;
+    let mut terminal_event_seen = false;
     for (index, event_value) in events_array.iter().enumerate() {
-        if runtime_error_seen {
+        if terminal_event_seen {
             return Err(invalid_harness_output(
-                "a runtime_error event must be the final event".to_owned(),
+                "a runtime_error or wasm_trap event must be the final event".to_owned(),
             ));
         }
         let event = decode_runtime_event(index, event_value).map_err(invalid_harness_output)?;
-        runtime_error_seen = matches!(&event, RuntimeEvent::RuntimeError { .. });
+        terminal_event_seen = matches!(
+            &event,
+            RuntimeEvent::RuntimeError { .. } | RuntimeEvent::WasmTrap { .. }
+        );
         events.push(event);
     }
-
     Ok(RenderedOutput { events })
 }
 
@@ -637,6 +727,12 @@ fn decode_runtime_event(index: usize, value: &serde_json::Value) -> Result<Runti
             reject_unknown_fields(object, &["type", "message"], &format!("event {index}"))?;
             let message = required_string_field(object, "message", &format!("event {index}"))?;
             Ok(RuntimeEvent::RuntimeError { message })
+        }
+
+        "wasm_trap" => {
+            reject_unknown_fields(object, &["type", "message"], &format!("event {index}"))?;
+            let message = required_string_field(object, "message", &format!("event {index}"))?;
+            Ok(RuntimeEvent::WasmTrap { message })
         }
 
         other => Err(format!("event {index} has unknown type '{other}'")),
