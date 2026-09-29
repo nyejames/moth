@@ -84,11 +84,11 @@ pub mod first_party_js;
 /// - `Schema::with_profile` selects the numeric profile a schema prepares
 ///   under; schemas prepared without it use `NumericProfile::STANDARD`
 ///   (`Int32`/`Float64`). Fixed widths and `Byte` are profile-independent.
+///     
 /// Encoding a `Value::String` always encodes string data. It never guesses
 /// that the text resembles MON and should be inserted raw or decoded. Decoded
-/// values outlive and release the input text without a caller-retained backing
-/// buffer; the public boundary has no borrowed document view and publishes no
-/// partial result on failure.
+/// values outlive and release the input text without a caller-retained backing buffer;
+/// the public boundary has no borrowed document view and publishes no partial result on failure.
 ///
 /// ```
 /// use moth::mon::{

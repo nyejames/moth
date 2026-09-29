@@ -1309,10 +1309,11 @@ impl<'environment> BackendTypeFacts<'environment> {
             ..BackendTypeVisit::EMPTY
         };
         match definition {
-            TypeDefinition::Builtin(builtin) => match builtin.key {
-                BuiltinTypeKey::FixedScalar(_) => visit.contains_fixed_scalar = true,
-                _ => {}
-            },
+            TypeDefinition::Builtin(builtin) => {
+                if let BuiltinTypeKey::FixedScalar(_) = builtin.key {
+                    visit.contains_fixed_scalar = true
+                }
+            }
             TypeDefinition::Struct(struct_definition) => {
                 for field in struct_definition.fields.iter() {
                     visit.merge(self.visit(field.type_id));

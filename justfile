@@ -38,11 +38,11 @@ validate-common:
 # still exercised under the normal validation configuration.
 [unix]
 validate-unit-tests:
-    CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 cargo test --workspace --quiet -- --format terse
+    CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=4 RAYON_NUM_THREADS=4 cargo test --workspace --quiet -- --format terse
 
 [windows]
 validate-unit-tests:
-    $env:CARGO_BUILD_JOBS = "1"; $env:CARGO_INCREMENTAL = "0"; $env:CARGO_PROFILE_DEV_DEBUG = "0"; $env:CARGO_PROFILE_TEST_DEBUG = "0"; $env:RUST_TEST_THREADS = "1"; $env:RAYON_NUM_THREADS = "1"; cargo test --workspace --quiet -- --format terse
+    $env:CARGO_BUILD_JOBS = "4"; $env:CARGO_INCREMENTAL = "1"; $env:CARGO_PROFILE_DEV_DEBUG = "0"; $env:CARGO_PROFILE_TEST_DEBUG = "0"; $env:RUST_TEST_THREADS = "4"; $env:RAYON_NUM_THREADS = "4"; cargo test --workspace --quiet -- --format terse
 
 
 ship:
