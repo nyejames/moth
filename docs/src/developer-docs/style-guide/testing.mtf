@@ -464,16 +464,13 @@ difference, so a whitespace-only difference does not print as two identical line
 
 The harness parses the emitted page for a supported script shape and rejects everything else rather
 than guessing:
-
 - a classic inline script is executed
-- `type="module"` is rejected as unsupported. The harness materializes no emitted glue, provider or
-  runtime module and no import map, so it cannot run the module graph the HTML backend emits when a
-  bundle import preamble is present. Executing it as a classic script would report a failure that
-  did not happen
+- exactly one inline `type="module"` script is executed as a native ES module with
+  its validated relative JS graph staged; mixed classic+module pages, multiple module
+  scripts and any import map are rejected by name
 - an external `src`, an unknown `type`, `nomodule`, `async`, and a malformed or unterminated tag are
   each rejected by name
 - the page script include must appear exactly once inside the body
-
 #### Harness failure classes
 
 A harness problem is never reported as a case failure. `RenderHarnessError` names which boundary

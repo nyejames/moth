@@ -840,7 +840,6 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",
-    &UnsupportedBackendFeatureReason::ExternalNumericProfileBoundary => "unsupported_backend_feature.external_numeric_profile_boundary",
     &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
     &UnsupportedBackendFeatureReason::FallibleControlFlow => "unsupported_backend_feature.fallible_control_flow",
     &UnsupportedBackendFeatureReason::MutableFunctionParameters => "unsupported_backend_feature.mutable_function_parameters",

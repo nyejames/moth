@@ -26,8 +26,9 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::test_support::{
-    TestExternalAbiType as ExternalAbiType, TestExternalAccessKind as ExternalAccessKind,
+    TestExternalAccessKind as ExternalAccessKind,
     TestExternalReturnAlias as ExternalReturnAlias,
+    TestExternalReturnType as ExternalReturnType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
@@ -1800,7 +1801,7 @@ fn host_mutable_parameter_requires_mutable_access() {
         "host_mut",
         vec![ExternalAccessKind::Mutable],
         ExternalReturnAlias::Fresh,
-        ExternalAbiType::Void,
+        ExternalReturnType::Void,
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
@@ -1861,7 +1862,7 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
         "host_mut_ok",
         vec![ExternalAccessKind::Mutable],
         ExternalReturnAlias::Fresh,
-        ExternalAbiType::Void,
+        ExternalReturnType::Void,
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
@@ -1921,7 +1922,7 @@ fn host_shared_parameter_is_shared_only() {
         "host_shared",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::Fresh,
-        ExternalAbiType::Void,
+        ExternalReturnType::Void,
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
@@ -2196,7 +2197,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         "alias_arg_result",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![0]),
-        ExternalAbiType::I32,
+        ExternalReturnType::NativeInt,
     );
     let original = symbol("original", &mut path_fork, &mut string_table);
     let returned = symbol("returned", &mut path_fork, &mut string_table);
@@ -2387,7 +2388,7 @@ fn unresolved_or_mismatched_host_signature_errors() {
         "one_arg",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::Fresh,
-        ExternalAbiType::Void,
+        ExternalReturnType::Void,
     );
 
     let missing_host =
@@ -2531,7 +2532,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
         "bad_alias_host",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![1]),
-        ExternalAbiType::I32,
+        ExternalReturnType::NativeInt,
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 

@@ -10,12 +10,18 @@ use crate::backends::js::{
     builtin_error_code_js_field_name, builtin_error_message_js_field_name,
     external_module_export_glue_function_name,
 };
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::ExternalPackageId;
+use crate::compiler_frontend::external_packages::{
+    ExternalAbiType, ExternalPackageId, ExternalSignatureType,
+};
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 /// Generate the glue module ES module source.
 pub(super) fn generate_glue_module_source(
@@ -70,26 +76,52 @@ pub(super) fn generate_glue_module_source(
                 &export.raw_import_name,
                 release_build,
                 numeric_profile,
-            ));
+                &export.parameter_types,
+                &export.return_types,
+            )?);
         } else {
             source.push_str(&generate_infallible_wrapper(
                 &wrapper_name,
                 &export.raw_import_name,
-            ));
+                &export.parameter_types,
+                &export.return_types,
+                numeric_profile,
+            )?);
         }
     }
 
     Ok(source)
 }
 
-/// Generates a non-fallible wrapper that forwards all arguments and returns the raw result.
-pub(super) fn generate_infallible_wrapper(wrapper_name: &str, export_name: &str) -> String {
-    format!(
-        "export function {wrapper_name}(...args) {{
-    return {export_name}(...args);
-}}
-"
-    )
+/// Generates an infallible wrapper and adapts the raw export to its registered signature.
+pub(super) fn generate_infallible_wrapper(
+    wrapper_name: &str,
+    export_name: &str,
+    parameter_types: &[ExternalSignatureType],
+    return_types: &[ExternalSignatureType],
+    numeric_profile: NumericProfile,
+) -> Result<String, CompilerError> {
+    validate_supported_signature(
+        wrapper_name,
+        parameter_types,
+        return_types,
+        numeric_profile,
+    )?;
+    let arguments = prepare_call_arguments(parameter_types, numeric_profile);
+    let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
+    let return_body = adapted_return_body(
+        return_adapter,
+        &format!("{export_name}({})", arguments.arguments),
+        numeric_profile,
+        "    ",
+        false,
+        false,
+    );
+
+    Ok(format!(
+        "export function {wrapper_name}({}) {{\n{}{return_body}\n}}",
+        arguments.parameters, arguments.prelude,
+    ))
 }
 
 /// Generates a fallible wrapper that validates the external result shape and converts it to
@@ -103,11 +135,21 @@ pub(super) fn generate_fallible_wrapper(
     export_name: &str,
     release_build: bool,
     numeric_profile: NumericProfile,
-) -> String {
-    let int_carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, numeric_profile)
-        .expect("Int always has a JavaScript numeric carrier");
+    parameter_types: &[ExternalSignatureType],
+    return_types: &[ExternalSignatureType],
+) -> Result<String, CompilerError> {
+    validate_supported_signature(
+        wrapper_name,
+        parameter_types,
+        return_types,
+        numeric_profile,
+    )?;
+    let arguments = prepare_call_arguments(parameter_types, numeric_profile);
+    let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
     let zero_code = JsNumericCarrier::int_literal(0, numeric_profile)
         .expect("zero always fits the Int profile");
+    let int_carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, numeric_profile)
+        .expect("Int always has a JavaScript numeric carrier");
     let returned_error_code = match int_carrier {
         JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. } => {
             let (minimum, maximum) = int_carrier
@@ -141,45 +183,244 @@ pub(super) fn generate_fallible_wrapper(
         &returned_error_code,
         release_build,
     );
-
     let invalid_wrapper_handling = if release_build {
         format!("        return {{ tag: \"err\", value: {invalid_error} }};")
     } else {
         format!(
-            "        throw new Error(
-            \"Invalid result wrapper from external function '{wrapper_name}': \" +
-            \"expected {{ ok: boolean, value? }} or {{ ok: false, error: {{ code, message }} }}\"
-        );"
+            "        throw new Error(\n            \"Invalid result wrapper from external function '{wrapper_name}': \" +\n            \"expected {{ ok: boolean, value? }} or {{ ok: false, error: {{ code, message }} }}\"\n        );"
         )
     };
+    let success_return = adapted_return_body(
+        return_adapter,
+        "result.value",
+        numeric_profile,
+        "            ",
+        true,
+        release_build,
+    );
 
-    format!(
-        "export function {wrapper_name}(...args) {{
-    let result;
-    try {{
-        result = {export_name}(...args);
-    }} catch (e) {{
-        return {{ tag: \"err\", value: {catch_error} }};
-    }}
+    Ok(format!(
+        "export function {wrapper_name}({}) {{\n{}    let result;\n    try {{\n        result = {export_name}({});\n    }} catch (e) {{\n        return {{ tag: \"err\", value: {catch_error} }};\n    }}\n\n    if (result && typeof result.ok === \"boolean\") {{\n        if (result.ok === true) {{\n{success_return}\n        }}\n        if (result.ok === false) {{\n            const error = result.error || {{ message: \"Unknown error\", code: 0 }};\n            const errorMessage = error.message || \"Unknown error\";\n            const errorCode = error.code;\n            return {{ tag: \"err\", value: {returned_error} }};\n        }}\n    }}\n\n{invalid_wrapper_handling}\n}}",
+        arguments.parameters, arguments.prelude, arguments.arguments,
+    ))
+}
 
-    if (result && typeof result.ok === \"boolean\") {{
-        if (result.ok === true) {{
-            return {{ tag: \"ok\", value: result.value }};
-        }}
-        if (result.ok === false) {{
-            const error = result.error || {{ message: \"Unknown error\", code: 0 }};
-            const errorMessage = error.message || \"Unknown error\";
-            const errorCode = error.code;
-            return {{ tag: \"err\", value: {returned_error} }};
-        }}
-    }}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReturnAdapter {
+    Identity,
+    NativeInt64,
+    NativeFloat32,
+    AbiI32,
+    AbiF64,
+}
 
-{invalid_wrapper_handling}
-}}
-"
+struct PreparedCallArguments {
+    parameters: String,
+    arguments: String,
+    prelude: String,
+}
+
+fn validate_supported_signature(
+    wrapper_name: &str,
+    parameter_types: &[ExternalSignatureType],
+    return_types: &[ExternalSignatureType],
+    numeric_profile: NumericProfile,
+) -> Result<(), CompilerError> {
+    if parameter_types
+        .iter()
+        .chain(return_types)
+        .any(contains_optional_numeric_payload)
+    {
+        return Err(CompilerError::compiler_error(format!(
+            "HTML JS glue cannot adapt optional numeric signature metadata for external function '{wrapper_name}'."
+        )));
+    }
+
+    if return_types.len() > 1
+        && return_types
+            .iter()
+            .any(|value_type| return_adapter_for_type(value_type, numeric_profile) != ReturnAdapter::Identity)
+    {
+        return Err(CompilerError::compiler_error(format!(
+            "HTML JS glue cannot adapt multiple numeric success slots for external function '{wrapper_name}'."
+        )));
+    }
+
+    Ok(())
+}
+
+fn contains_optional_numeric_payload(signature_type: &ExternalSignatureType) -> bool {
+    match signature_type {
+        ExternalSignatureType::Optional(inner) => {
+            is_numeric_signature_type(inner) || contains_optional_numeric_payload(inner)
+        }
+        _ => false,
+    }
+}
+
+fn is_numeric_signature_type(signature_type: &ExternalSignatureType) -> bool {
+    matches!(
+        signature_type,
+        ExternalSignatureType::NativeInt
+            | ExternalSignatureType::NativeFloat
+            | ExternalSignatureType::Abi(ExternalAbiType::I32 | ExternalAbiType::F64)
     )
 }
 
+fn return_adapter_for_signature(
+    return_types: &[ExternalSignatureType],
+    numeric_profile: NumericProfile,
+) -> ReturnAdapter {
+    return_types
+        .first()
+        .map(|value_type| return_adapter_for_type(value_type, numeric_profile))
+        .unwrap_or(ReturnAdapter::Identity)
+}
+
+fn return_adapter_for_type(
+    value_type: &ExternalSignatureType,
+    numeric_profile: NumericProfile,
+) -> ReturnAdapter {
+    match value_type {
+        ExternalSignatureType::NativeInt if numeric_profile.int_width == IntWidth::Bits64 => {
+            ReturnAdapter::NativeInt64
+        }
+        ExternalSignatureType::NativeFloat
+            if numeric_profile.float_precision == FloatPrecision::Bits32 =>
+        {
+            ReturnAdapter::NativeFloat32
+        }
+        ExternalSignatureType::Abi(ExternalAbiType::I32) => ReturnAdapter::AbiI32,
+        ExternalSignatureType::Abi(ExternalAbiType::F64) => ReturnAdapter::AbiF64,
+        _ => ReturnAdapter::Identity,
+    }
+}
+
+fn prepare_call_arguments(
+    parameter_types: &[ExternalSignatureType],
+    numeric_profile: NumericProfile,
+) -> PreparedCallArguments {
+    let mut parameters = String::new();
+    let mut arguments = String::new();
+    let mut prelude = String::new();
+
+    for (index, parameter_type) in parameter_types.iter().enumerate() {
+        if index > 0 {
+            parameters.push_str(", ");
+            arguments.push_str(", ");
+        }
+        write!(&mut parameters, "arg{index}")
+            .expect("writing generated wrapper parameters into a String cannot fail");
+
+        if matches!(
+            parameter_type,
+            ExternalSignatureType::NativeInt
+                if numeric_profile.int_width == IntWidth::Bits64
+        ) {
+            writeln!(
+                &mut prelude,
+                "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native Int64 parameter must be a BigInt\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"Native Int64 parameter is not exactly representable as a JavaScript Number\");\n    }}"
+            )
+            .expect("writing generated wrapper checks into a String cannot fail");
+            write!(&mut arguments, "__moth_arg{index}_number")
+                .expect("writing generated wrapper arguments into a String cannot fail");
+        } else {
+            if matches!(
+                parameter_type,
+                ExternalSignatureType::Abi(ExternalAbiType::I32)
+            ) {
+                writeln!(
+                    &mut prelude,
+                    "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < -2147483648 || arg{index} > 2147483647) {{\n        throw new RangeError(\"External I32 parameter is outside signed 32-bit range\");\n    }}"
+                )
+                .expect("writing generated wrapper checks into a String cannot fail");
+            }
+            write!(&mut arguments, "arg{index}")
+                .expect("writing generated wrapper arguments into a String cannot fail");
+        }
+    }
+
+    PreparedCallArguments {
+        parameters,
+        arguments,
+        prelude,
+    }
+}
+
+fn adapted_return_body(
+    adapter: ReturnAdapter,
+    value_expression: &str,
+    numeric_profile: NumericProfile,
+    indent: &str,
+    fallible: bool,
+    release_build: bool,
+) -> String {
+    let success_value = |expression: &str| {
+        if fallible {
+            format!("{{ tag: \"ok\", value: {expression} }}")
+        } else {
+            expression.to_owned()
+        }
+    };
+
+    match adapter {
+        ReturnAdapter::Identity => {
+            format!("{indent}return {};", success_value(value_expression))
+        }
+        ReturnAdapter::NativeFloat32 => {
+            let raw_value = "__moth_external_float32_raw";
+            let adapted_value = "__moth_external_float32";
+            let returned_value = success_value(adapted_value);
+            format!(
+                "{indent}const {raw_value} = {value_expression};\n{indent}const {adapted_value} = typeof {raw_value} === \"number\" ? Math.fround({raw_value}) : Number.NaN;\n{indent}return {returned_value};"
+            )
+        }
+        ReturnAdapter::NativeInt64 => {
+            let returned_value = success_value("__moth_external_integer");
+            // Safe JavaScript integers are a strict subset of Int64, so check bounds before BigInt conversion.
+            let minimum = numeric_profile.int_width.min_value();
+            let maximum = numeric_profile.int_width.max_value();
+            format!(
+                "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"External native Int64 result is not a safe integer within the Moth Int64 range\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
+            )
+        }
+        ReturnAdapter::AbiI32 => {
+            let returned_value = success_value("__moth_external_i32");
+            format!(
+                "{indent}const __moth_external_i32 = {value_expression};\n{indent}if (typeof __moth_external_i32 !== \"number\" || !Number.isInteger(__moth_external_i32) || __moth_external_i32 < -2147483648 || __moth_external_i32 > 2147483647) {{\n{indent}    throw new RangeError(\"External I32 result is outside signed 32-bit range\");\n{indent}}}\n{indent}return {returned_value};"
+            )
+        }
+        ReturnAdapter::AbiF64 => {
+            let value = "__moth_external_f64";
+            let returned_value = success_value(value);
+            let invalid_value = if fallible {
+                let error = float_boundary_error_source(numeric_profile, release_build);
+                format!("{indent}    return {{ tag: \"err\", value: {error} }};")
+            } else {
+                format!(
+                    "{indent}    throw new RangeError(\"{}\");",
+                    BuiltinErrorCode::FloatBoundaryNonFinite.default_message()
+                )
+            };
+            format!(
+                "{indent}const {value} = {value_expression};\n{indent}if (!Number.isFinite({value})) {{\n{invalid_value}\n{indent}}}\n{indent}return {returned_value};"
+            )
+        }
+    }
+}
+
+fn float_boundary_error_source(
+    numeric_profile: NumericProfile,
+    release_build: bool,
+) -> String {
+    let error = BuiltinErrorCode::FloatBoundaryNonFinite;
+    let message = format!("{:?}", error.default_message());
+    let code = JsNumericCarrier::int_literal(error.as_i32() as i64, numeric_profile)
+        .expect("Float boundary error code fits every Int profile");
+    internal_error_object_source(&message, &code, release_build)
+}
+
+/// Generates an internal Error object with profile/build-specific field names.
 fn internal_error_object_source(
     message_expression: &str,
     code_expression: &str,

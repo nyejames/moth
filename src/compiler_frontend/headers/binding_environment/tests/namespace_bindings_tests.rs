@@ -797,7 +797,7 @@ fn external_nested_namespace_tree_builds_correctly() {
             ExternalConstantId(102),
             ExternalConstantDef {
                 name: "DEFAULT".to_owned(),
-                data_type: ExternalAbiType::I32,
+                data_type: ExternalAbiType::I32.into(),
                 value: ExternalConstantValue::Int(1),
             },
         )
@@ -1961,7 +1961,7 @@ fn binding_provider_with_members(
                 symbol_id,
                 ExternalConstantDef {
                     name: name.to_owned(),
-                    data_type: ExternalAbiType::I32,
+                    data_type: ExternalAbiType::I32.into(),
                     value: ExternalConstantValue::Int(1),
                 },
             )

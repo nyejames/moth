@@ -6,7 +6,6 @@
 //! structured source diagnostic instead of a backend-internal lowering error.
 
 use crate::backends::external_package_validation::BackendTarget;
-use crate::backends::js::JsNumericCarrier;
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
@@ -22,15 +21,10 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{
-    BuiltinTypeConstructor, BuiltinTypeKey, TypeConstructor, TypeId,
-};
+use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
-use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalJsLowering, ExternalPackageRegistry, ExternalSignatureType,
-};
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
@@ -40,7 +34,7 @@ use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureM
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
-    HirBackendSelection, HirReachability, ReachableAssertionMessageUse, ReachableExternalCall,
+    HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
     ReachableNumericOpUse, ReachableReactiveSinkKind, ReachableReactiveSinkUse,
     ReachableReactiveTemplateUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
@@ -64,7 +58,7 @@ pub enum BackendFeatureValidationError {
 /// Explicit build-owned selection consumed by backend feature validation.
 ///
 /// WHAT: backend-neutral validation receives the exact reachable union, active target, selected
-///       numeric profile, optional module type environment and optional external-package registry.
+///       numeric profile, and optional module type environment.
 #[derive(Clone, Debug)]
 pub struct BackendFeatureValidationInput<'a> {
     pub hir: &'a HirModule,
@@ -72,7 +66,6 @@ pub struct BackendFeatureValidationInput<'a> {
     pub target: BackendTarget,
     pub type_environment: Option<&'a TypeEnvironment>,
     pub numeric_profile: NumericProfile,
-    pub external_package_registry: Option<&'a ExternalPackageRegistry>,
 }
 
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
@@ -144,8 +137,8 @@ pub fn validate_hir_backend_feature_support(
                 input.target,
                 string_table,
             )?;
-            // Keep every pre-existing Wasm feature diagnostic ahead of this ABI gate so narrower
-            // type, operation, and host-boundary reasons retain their established precedence.
+            // Keep every pre-existing Wasm feature diagnostic ahead of the Error-value and
+            // fallible-control-flow checks so narrower type and operation reasons retain priority.
             validate_wasm_error_values(
                 input.hir,
                 input.type_environment,
@@ -167,15 +160,6 @@ pub fn validate_hir_backend_feature_support(
             )?;
         }
         BackendTarget::Js => {
-            validate_js_external_numeric_profile_boundaries(
-                &reachability.reachable_external_calls,
-                input.external_package_registry,
-                input.type_environment,
-                input.numeric_profile,
-                input.target,
-                string_table,
-            )?;
-
             // JS supports V1 top-level runtime fragment sinks, but not reactive template values
             // flowing into external/host calls such as `io.line(...)`.
             validate_js_reactive_sinks(
@@ -188,176 +172,6 @@ pub fn validate_hir_backend_feature_support(
     }
 
     Ok(())
-}
-
-/// Rejects numeric Moth carriers that the current external-module glue cannot adapt safely.
-///
-/// WHAT: checks reachable external ES-module exports against their fixed I32/F64 signatures and
-///       the concrete types crossing each selected call boundary.
-/// WHY: generated glue currently forwards host values without adapting numeric carriers, so
-///      BigInt/Number mixing and unrounded Float32 values must be rejected before JS lowering.
-fn validate_js_external_numeric_profile_boundaries(
-    calls: &[ReachableExternalCall],
-    external_package_registry: Option<&ExternalPackageRegistry>,
-    type_environment: Option<&TypeEnvironment>,
-    numeric_profile: NumericProfile,
-    target: BackendTarget,
-    string_table: &mut StringTable,
-) -> Result<(), BackendFeatureValidationError> {
-    let int_uses_bigint = matches!(
-        JsNumericCarrier::for_scalar(NumericScalar::Int, numeric_profile),
-        Some(JsNumericCarrier::BigInteger { .. })
-    );
-    let float_uses_binary32 = matches!(
-        JsNumericCarrier::for_scalar(NumericScalar::Float, numeric_profile),
-        Some(JsNumericCarrier::BinaryFloat {
-            precision: BinaryFloatPrecision::Binary32,
-        })
-    );
-
-    if (!int_uses_bigint && !float_uses_binary32) || calls.is_empty() {
-        return Ok(());
-    }
-
-    let Some(registry) = external_package_registry else {
-        return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-            CompilerError::compiler_error(
-                "JavaScript numeric-profile boundary validation requires the external-package registry",
-            ),
-        )));
-    };
-    let type_environment = require_type_environment(
-        type_environment,
-        target,
-        "external numeric-profile boundaries",
-    )?;
-    let mut backend_type_facts = BackendTypeFacts::new(type_environment, None);
-
-    for call in calls {
-        let Some(function) = registry.get_function_by_id(call.function_id) else {
-            return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-                CompilerError::compiler_error(format!(
-                    "Reachable external call {:?} is missing its registered function definition",
-                    call.function_id
-                )),
-            )));
-        };
-        if !matches!(
-            function.lowerings.js.as_ref(),
-            Some(ExternalJsLowering::ExternalModuleExport { .. })
-        ) {
-            continue;
-        }
-
-        let signature_crosses_unsupported_numeric = function.parameters.iter().any(|parameter| {
-            signature_type_uses_unsupported_numeric_profile(
-                &parameter.language_type,
-                int_uses_bigint,
-                float_uses_binary32,
-            )
-        }) || function.returns.iter().any(|returned| {
-            signature_type_uses_unsupported_numeric_profile(
-                &returned.value_type,
-                int_uses_bigint,
-                float_uses_binary32,
-            )
-        });
-
-        let argument_crosses_unsupported_numeric = call.argument_types.iter().any(|type_id| {
-            backend_type_facts.contains_external_numeric(
-                *type_id,
-                int_uses_bigint,
-                float_uses_binary32,
-            )
-        });
-        let result_crosses_unsupported_numeric = match call.result_type {
-            Some(result_type) => {
-                let success_type = if function.is_fallible() {
-                    external_fallible_success_type(result_type, type_environment)?
-                } else {
-                    Some(result_type)
-                };
-                success_type.is_some_and(|type_id| {
-                    backend_type_facts.contains_external_numeric(
-                        type_id,
-                        int_uses_bigint,
-                        float_uses_binary32,
-                    )
-                })
-            }
-            None => false,
-        };
-
-        if !signature_crosses_unsupported_numeric
-            && !argument_crosses_unsupported_numeric
-            && !result_crosses_unsupported_numeric
-        {
-            continue;
-        }
-
-        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-            string_table.intern(target.as_str()),
-            UnsupportedBackendFeatureReason::ExternalNumericProfileBoundary,
-            call.span,
-        );
-        return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
-    }
-
-    Ok(())
-}
-
-/// Error-code values on the fallible channel are compiler-owned Moth `Error` values, not raw
-/// numeric results from an external signature. Only inspect the success payload here.
-fn external_fallible_success_type(
-    result_type: TypeId,
-    type_environment: &TypeEnvironment,
-) -> Result<Option<TypeId>, BackendFeatureValidationError> {
-    let Some(TypeDefinition::Constructed(carrier)) = type_environment.get(result_type) else {
-        return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-            CompilerError::compiler_error(
-                "Fallible external call result is missing its constructed carrier type",
-            ),
-        )));
-    };
-    if carrier.constructor != TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) {
-        return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-            CompilerError::compiler_error(
-                "Fallible external call result does not use the fallible carrier constructor",
-            ),
-        )));
-    }
-
-    let [success_type, _error_type] = carrier.arguments.as_ref() else {
-        return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-            CompilerError::compiler_error(
-                "Fallible external call result carrier does not contain success and error types",
-            ),
-        )));
-    };
-
-    Ok(Some(*success_type))
-}
-
-fn signature_type_uses_unsupported_numeric_profile(
-    signature_type: &ExternalSignatureType,
-    int_uses_bigint: bool,
-    float_uses_binary32: bool,
-) -> bool {
-    match signature_type {
-        ExternalSignatureType::Abi(ExternalAbiType::I32) => int_uses_bigint,
-        ExternalSignatureType::Abi(ExternalAbiType::F64) => float_uses_binary32,
-        ExternalSignatureType::Optional(inner) => signature_type_uses_unsupported_numeric_profile(
-            inner,
-            int_uses_bigint,
-            float_uses_binary32,
-        ),
-        // Error is converted by the compiler-owned fallible glue. Inferred signatures are checked
-        // against concrete HIR argument and result types below.
-        ExternalSignatureType::Abi(_)
-        | ExternalSignatureType::BuiltinError
-        | ExternalSignatureType::External(_)
-        | ExternalSignatureType::StringContent => false,
-    }
 }
 
 /// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
@@ -1432,8 +1246,8 @@ where
 
 /// Memoised semantic type facts used by backend feature gates.
 ///
-/// WHAT: records Error values, fixed-width scalars, Moth `Int` and Moth `Float` through constructed
-///       and nominal type structure.
+/// WHAT: records Error values and fixed-width scalars through constructed and nominal type
+///       structure.
 /// WHY: backend gates classify overlapping reachable types, so one cycle-safe walk owns the
 ///      structural traversal and memoises facts per `TypeId`.
 struct BackendTypeFacts<'environment> {
@@ -1459,16 +1273,6 @@ impl<'environment> BackendTypeFacts<'environment> {
 
     fn contains_error(&mut self, type_id: TypeId) -> bool {
         self.visit(type_id).contains_error
-    }
-
-    fn contains_external_numeric(
-        &mut self,
-        type_id: TypeId,
-        int_uses_bigint: bool,
-        float_uses_binary32: bool,
-    ) -> bool {
-        let visit = self.visit(type_id);
-        (int_uses_bigint && visit.contains_int) || (float_uses_binary32 && visit.contains_float)
     }
 
     /// A recursive nominal cycle is provisional until its outer walk completes.
@@ -1507,8 +1311,6 @@ impl<'environment> BackendTypeFacts<'environment> {
         match definition {
             TypeDefinition::Builtin(builtin) => match builtin.key {
                 BuiltinTypeKey::FixedScalar(_) => visit.contains_fixed_scalar = true,
-                BuiltinTypeKey::Int => visit.contains_int = true,
-                BuiltinTypeKey::Float => visit.contains_float = true,
                 _ => {}
             },
             TypeDefinition::Struct(struct_definition) => {
@@ -1563,8 +1365,6 @@ impl<'environment> BackendTypeFacts<'environment> {
 struct BackendTypeVisit {
     contains_error: bool,
     contains_fixed_scalar: bool,
-    contains_int: bool,
-    contains_float: bool,
     open_cycle: bool,
 }
 
@@ -1572,16 +1372,12 @@ impl BackendTypeVisit {
     const EMPTY: Self = Self {
         contains_error: false,
         contains_fixed_scalar: false,
-        contains_int: false,
-        contains_float: false,
         open_cycle: false,
     };
 
     fn merge(&mut self, other: Self) {
         self.contains_error |= other.contains_error;
         self.contains_fixed_scalar |= other.contains_fixed_scalar;
-        self.contains_int |= other.contains_int;
-        self.contains_float |= other.contains_float;
         self.open_cycle |= other.open_cycle;
     }
 }

@@ -19,9 +19,10 @@ use super::synthetic_build_results::{
     VALID_HTML, VALID_HTML_WASM, build_result_with_index_html, build_result_with_output_files,
     success_test_case,
 };
-use crate::build_system::build::FileKind;
+use crate::build_system::build::{DeferredResourceOutput, FileKind};
+use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 use crate::compiler_tests::test_fs::assert_path_missing;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use wasm_encoder::{
     CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, MemArg,
@@ -265,7 +266,9 @@ fn rendered_output_exact_accepts_empty_captured_text_only() {
 
 #[track_caller]
 fn extracted_scripts(html: &str) -> Vec<String> {
-    extract_executable_scripts(html).expect("supported script shapes should be extracted")
+    extract_executable_scripts(html)
+        .expect("supported script shapes should be extracted")
+        .classic
 }
 
 #[track_caller]
@@ -410,22 +413,273 @@ fn script_extraction_ignores_elements_whose_name_merely_starts_with_script() {
 }
 
 #[test]
-fn script_extraction_rejects_module_scripts() {
-    // The harness concatenates inline sources into one classic script in a workspace holding no
-    // emitted glue, provider or runtime module and no import map. Accepting a module block would
-    // execute the page's real module graph under a different runtime model, which is the exact
-    // claim this owner exists to stop.
+fn script_extraction_retains_one_module_separately_from_classic_sources() {
+    let scripts = extract_executable_scripts(
+        r#"<script type="module">import { run } from "./run.js"; run();</script>"#,
+    )
+    .expect("one inline module script is supported");
+
+    assert!(scripts.classic.is_empty());
+    assert_eq!(
+        scripts.module.as_deref(),
+        Some(r#"import { run } from "./run.js"; run();"#)
+    );
+}
+
+#[test]
+fn script_extraction_rejects_mixed_and_multiple_module_scripts() {
     for html in [
-        r#"<script type="module">import { f } from "./_moth/js/glue/module-a.js"; f();</script>"#,
-        r#"<SCRIPT TYPE="Module">run()</SCRIPT>"#,
+        r#"<script>classic()</script><script type="module">module()</script>"#,
+        r#"<script type="module">first()</script><script type="text/javascript">classic()</script>"#,
+        r#"<script type="module">first()</script><script type="module">second()</script>"#,
     ] {
-        let message = rejected_script_shape(html, "a module script must be rejected, not executed");
-        assert!(message.contains("module"), "{message}");
+        let message = rejected_script_shape(
+            html,
+            "mixed executable modes and multiple modules are unsupported",
+        );
         assert!(
-            message.contains("import map") || message.contains("module semantics"),
-            "the rejection must say why the harness cannot run it: {message}"
+            message.contains("mixes classic") || message.contains("multiple inline module"),
+            "{message}"
         );
     }
+}
+
+#[test]
+fn script_extraction_rejects_import_maps_for_module_execution() {
+    let message = rejected_script_shape(
+        concat!(
+            r#"<script type="importmap">{ not: valid JSON }</script>"#,
+            r#"<script type="module">import "bare";</script>"#,
+        ),
+        "Node cannot reproduce browser import-map resolution",
+    );
+    assert!(message.contains("import map"), "{message}");
+    assert!(message.contains("Node's native ESM loader"), "{message}");
+}
+
+#[test]
+fn module_harness_stages_relative_imports_and_preserves_console_and_dom_events() {
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="application/json">{"ignored": true}</script>
+  <script type="module">
+import { state } from "./nested/dep.js";
+console.log("module", state);
+document.getElementById("slot").insertAdjacentHTML("beforeend", state);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("dependency\nmodule ready\nready".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::Html(html)),
+        (
+            PathBuf::from("nested/dep.js"),
+            FileKind::Js("console.log('dependency'); export const state = 'ready';".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "module imports should run in order through the rendered-output protocol: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn module_harness_stages_deferred_js_by_indexed_path_and_skips_other_resources() {
+    let javascript_source = tempfile::NamedTempFile::new()
+        .expect("the deferred JavaScript source should have a real temporary file");
+    std::fs::write(
+        javascript_source.path(),
+        "export const external_value = 'from deferred export';",
+    )
+    .expect("the deferred JavaScript source should be writable");
+
+    let image_source =
+        tempfile::NamedTempFile::new().expect("the deferred image source should have a file");
+    std::fs::write(image_source.path(), b"<svg></svg>")
+        .expect("the deferred image source should be writable");
+
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="module">
+import { external_value } from "./nested/providers/external_int.js";
+console.log(external_value);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("from deferred export".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let mut build_result = build_result_with_index_html(&html);
+    let javascript_source_id = build_result
+        .project
+        .resource_inputs
+        .register_source(
+            javascript_source
+                .path()
+                .canonicalize()
+                .expect("the deferred JavaScript source should canonicalize"),
+        );
+    let image_source_id = build_result
+        .project
+        .resource_inputs
+        .register_source(
+            image_source
+                .path()
+                .canonicalize()
+                .expect("the deferred image source should canonicalize"),
+        );
+    build_result.project.deferred_resources = vec![
+        DeferredResourceOutput {
+            relative_output_path: PathBuf::from("nested/providers/external_int.js"),
+            source_id: javascript_source_id,
+        },
+        DeferredResourceOutput {
+            relative_output_path: PathBuf::from("assets/logo.svg"),
+            source_id: image_source_id,
+        },
+    ];
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "the imported export should execute from its deferred source: {:?}",
+        result.failure_reason
+    );
+    let retained_build = result
+        .build_result
+        .expect("a successful rendered-output result should retain its build");
+    let resource_records = retained_build.project.resource_inputs.records();
+    assert!(
+        matches!(
+            resource_records[0].content(),
+            ResourceContentState::Read { .. }
+        ),
+        "the imported deferred JavaScript source should be read"
+    );
+    assert_eq!(
+        resource_records[1].content(),
+        ResourceContentState::Unhashed,
+        "rendering JavaScript should leave non-JavaScript resources unread"
+    );
+}
+
+#[test]
+fn module_harness_reports_a_missing_deferred_javascript_source_as_a_harness_failure() {
+    let javascript_source = tempfile::NamedTempFile::new()
+        .expect("the deferred JavaScript source should have a real temporary file");
+    std::fs::write(javascript_source.path(), "export const external_value = 'unused';")
+        .expect("the deferred JavaScript source should be writable");
+    let javascript_source_path = javascript_source
+        .path()
+        .canonicalize()
+        .expect("the deferred JavaScript source should canonicalize");
+
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="module">
+import { external_value } from "./nested/providers/external_int.js";
+console.log(external_value);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("unused".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let mut build_result = build_result_with_index_html(&html);
+    let source_id = build_result
+        .project
+        .resource_inputs
+        .register_source(javascript_source_path);
+    build_result
+        .project
+        .deferred_resources
+        .push(DeferredResourceOutput {
+            relative_output_path: PathBuf::from("nested/providers/external_int.js"),
+            source_id,
+        });
+    drop(javascript_source);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "an unreadable resource must not pass rendering");
+    assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+    let reason = result
+        .failure_reason
+        .expect("the unreadable resource should have a harness failure reason");
+    assert!(
+        reason.contains("failed to read deferred JavaScript artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn module_harness_reports_import_maps_as_harness_failures() {
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="importmap">{ not: valid JSON }</script>
+  <script type="module">import "bare"; console.log("must not run");</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("must not run".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result = build_result_with_output_files(vec![(
+        PathBuf::from("index.html"),
+        FileKind::Html(html),
+    )]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(!result.passed, "an import map must not execute under native ESM");
+    assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+    let reason = result
+        .failure_reason
+        .expect("the unsupported import-map shape has a failure reason");
+    assert!(reason.contains("import map"), "{reason}");
+    assert!(reason.contains("Node's native ESM loader"), "{reason}");
 }
 
 #[test]
@@ -603,6 +857,24 @@ fn node_harness_reports_a_workspace_file_it_cannot_write() {
         "a workspace write failure is a workspace failure: {error:?}"
     );
     assert!(error.message.contains("harness.js"), "{}", error.message);
+}
+
+#[test]
+fn node_harness_rejects_unsafe_workspace_paths() {
+    with_harness_workspace(|workspace| {
+        for unsafe_path in [
+            Path::new("../outside.js"),
+            Path::new("/absolute.js"),
+            Path::new("nested\\windows.js"),
+        ] {
+            let error = workspace
+                .write_relative(unsafe_path, "must not escape")
+                .expect_err("workspace writes must reject traversal, absolute and backslash paths");
+            assert_eq!(error.kind, RenderHarnessErrorKind::Workspace);
+        }
+        Ok(())
+    })
+    .expect("the workspace should clean up after rejecting unsafe paths");
 }
 
 // ─── Required artifacts ─────────────────────────────────────────────────────
@@ -1361,9 +1633,46 @@ fn rendered_output_node_is_not_invoked_without_a_rendered_assertion() {
 }
 
 #[test]
-fn rendered_output_rejects_a_module_script_before_executing_the_page() {
-    // Extraction-level coverage is not enough: this proves the executing entry point refuses the
-    // page rather than concatenating a module body into the classic harness script.
+fn rendered_output_executes_a_module_page_whose_import_graph_is_staged() {
+    // Entry-point coverage beyond extraction: the executing entry point must import the page
+    // module natively with its staged JS graph rather than concatenating the module body
+    // into the classic harness script.
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("dependency\nmodule ready\nready".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let module_page = VALID_HTML.replace(
+        "  </body>",
+        "  <script type=\"module\">\nimport { state } from \"./nested/dep.js\";\nconsole.log(\"module\", state);\ndocument.getElementById(\"slot\").insertAdjacentHTML(\"beforeend\", state);\n</script>\n  </body>",
+    );
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::Html(module_page)),
+        (
+            PathBuf::from("nested/dep.js"),
+            FileKind::Js("console.log('dependency'); export const state = 'ready';".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "a module page with a staged import graph must execute natively: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn rendered_output_rejects_a_mixed_classic_and_module_page_before_execution() {
+    // Mixed classic+module pages remain unsupported even though module-only pages execute.
     let expectation = SuccessExpectation {
         warnings: WarningExpectation::Forbid,
         success_contract: None,
@@ -1378,7 +1687,7 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let module_page = VALID_HTML.replace(
         "  </body>",
-        "<script type=\"module\">\nimport { render } from \"./_moth/js/glue/module-a.js\";\nrender();\n</script>\n  </body>",
+        "  <script>classic();</script>\n<script type=\"module\">\nimport { render } from \"./_moth/js/glue/module-a.js\";\nrender();\n</script>\n  </body>",
     );
 
     let result = validate_success_result(
@@ -1389,7 +1698,7 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
 
     assert!(
         !result.passed,
-        "a module page cannot claim runtime evidence"
+        "a mixed classic/module page cannot claim runtime evidence"
     );
     assert_eq!(
         result.failure_kind,
@@ -1400,8 +1709,8 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
         result
             .failure_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("module")),
-        "failure must name the unsupported module shape: {:?}",
+            .is_some_and(|reason| reason.contains("mixes classic")),
+        "failure must name the unsupported mixed shape: {:?}",
         result.failure_reason
     );
 }

@@ -44,7 +44,8 @@ use super::{
     BackendId, CaseExecutionResult, FailureExpectation, FailureKind, SuccessExpectation,
     TestCaseSpec,
 };
-use crate::build_system::build::BuildResult;
+use crate::build_system::build::{BuildResult, DeferredResourceOutput, OutputFile};
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -126,7 +127,10 @@ pub(crate) fn validate_golden_outputs(
     build_result: &BuildResult,
     golden: &GoldenExpectation,
 ) -> Option<(String, FailureKind)> {
-    let index = match artifacts::BuiltArtifactIndex::build(build_result) {
+    let index = match artifacts::BuiltArtifactIndex::build(
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+    ) {
         Ok(index) => index,
         Err(error) => {
             return Some((
@@ -144,7 +148,11 @@ pub(crate) fn validate_golden_outputs(
 /// rather than by matching prose.
 #[cfg(test)]
 pub(crate) fn build_artifact_index_error(build_result: &BuildResult) -> Option<ArtifactIndexError> {
-    artifacts::BuiltArtifactIndex::build(build_result).err()
+    artifacts::BuiltArtifactIndex::build(
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+    )
+    .err()
 }
 
 #[cfg(test)]
@@ -157,7 +165,7 @@ pub(crate) fn validate_rendered_output_fragments(
 
 pub(crate) fn validate_success_result(
     case: &TestCaseSpec,
-    build_result: BuildResult,
+    mut build_result: BuildResult,
     expectation: &SuccessExpectation,
 ) -> CaseExecutionResult {
     if let Some(reason) =
@@ -166,12 +174,15 @@ pub(crate) fn validate_success_result(
         return fail(build_result, reason, FailureKind::ExpectationViolation);
     }
 
-    // The artifact-consuming assertions borrow `build_result` through the index, so they run
-    // in their own scope and hand back an owned reason. That keeps the index alive for exactly
-    // as long as the assertions need it and leaves `build_result` movable into the result.
-    if let Some((reason, kind)) =
-        validate_indexed_success_assertions(case, &build_result, expectation)
-    {
+    // The index borrows the output slices while rendered-output execution reads the disjoint
+    // resource registry. This scope ends before moving the whole result into its owner.
+    if let Some((reason, kind)) = validate_indexed_success_assertions(
+        case,
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+        &mut build_result.project.resource_inputs,
+        expectation,
+    ) {
         return fail(build_result, reason, kind);
     }
 
@@ -194,10 +205,12 @@ pub(crate) fn validate_success_result(
 ///      later assertion would silently inspect whichever artifact won a first-match lookup.
 fn validate_indexed_success_assertions(
     case: &TestCaseSpec,
-    build_result: &BuildResult,
+    output_files: &[OutputFile],
+    deferred_resources: &[DeferredResourceOutput],
+    resource_inputs: &mut ResourceInputRegistry,
     expectation: &SuccessExpectation,
 ) -> Option<(String, FailureKind)> {
-    let index = match artifacts::BuiltArtifactIndex::build(build_result) {
+    let index = match artifacts::BuiltArtifactIndex::build(output_files, deferred_resources) {
         Ok(index) => index,
         Err(error) => {
             return Some((
@@ -239,7 +252,11 @@ fn validate_indexed_success_assertions(
         let rendered_output_result = if case.backend_id == BackendId::HtmlWasm {
             rendered_output::validate_wasm_rendered_output(&index, &expectation.rendered_output)
         } else {
-            rendered_output::validate_rendered_output(&index, &expectation.rendered_output)
+            rendered_output::validate_rendered_output(
+                &index,
+                resource_inputs,
+                &expectation.rendered_output,
+            )
         };
         if let Some(failure) = rendered_output_result {
             return Some(failure);

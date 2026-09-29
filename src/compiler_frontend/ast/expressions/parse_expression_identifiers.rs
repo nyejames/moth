@@ -6,8 +6,9 @@
 
 use super::choice_constructor::parse_choice_construct;
 use super::error::ExpressionParseError;
-use super::expression::{Expression, ExpressionKind};
+use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
+use super::external_namespace_members::project_external_constant;
 use super::function_calls::{
     ExternalFunctionCallParseInput, parse_external_function_call_expression,
 };
@@ -31,7 +32,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidAssignmentTargetReason,
     InvalidTemplateSlotReason, InvalidThisUsageReason, NameNamespace,
 };
-use crate::compiler_frontend::external_packages::ExternalConstantValue;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -340,25 +340,14 @@ pub(super) fn parse_identifier_or_call(
         }
 
         let value_mode = ValueMode::ImmutableOwned;
-        let const_expr = match const_def.value {
-            ExternalConstantValue::Float(value) => Expression::float_from_external_constant(
-                value,
-                context.numeric_profile.float_precision,
-                identifier,
-                span,
-                value_mode,
-            )?,
-            // Foreign constants keep their ABI shape; only the Moth `Int` projection
-            // widens to `i64` here. The foreign `I32` payload fits every width.
-            ExternalConstantValue::Int(value) => {
-                Expression::int(i64::from(value), span, value_mode)
-            }
-            ExternalConstantValue::StringSlice(value) => {
-                let string_id = string_table.intern(value);
-                Expression::string_slice(string_id, span, value_mode)
-            }
-            ExternalConstantValue::Bool(value) => Expression::bool(value, span, value_mode),
-        };
+        let const_expr = project_external_constant(
+            const_def,
+            identifier,
+            span,
+            context.numeric_profile.float_precision,
+            value_mode,
+            string_table,
+        )?;
 
         push_expression_operand(
             token_stream,

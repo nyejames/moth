@@ -571,6 +571,8 @@ fn validate_external_signature_type_is_registered(
 ) -> Result<(), ExpressionParseError> {
     match signature_type {
         ExternalSignatureType::Abi(_)
+        | ExternalSignatureType::NativeInt
+        | ExternalSignatureType::NativeFloat
         | ExternalSignatureType::BuiltinError
         | ExternalSignatureType::StringContent => Ok(()),
         ExternalSignatureType::External(type_id) => {

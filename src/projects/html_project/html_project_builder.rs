@@ -544,9 +544,6 @@ impl HtmlProjectBuilder {
                 target: backend_target,
                 type_environment: Some(&module.executable.type_environment),
                 numeric_profile,
-                external_package_registry: Some(
-                    module.link_facts.external_package_registry.as_ref(),
-                ),
             },
             string_table,
         )
@@ -586,9 +583,6 @@ impl HtmlProjectBuilder {
                     target: backend_target,
                     type_environment: Some(&linked.module.executable.type_environment),
                     numeric_profile,
-                    external_package_registry: Some(
-                        linked.module.link_facts.external_package_registry.as_ref(),
-                    ),
                 },
                 string_table,
             )

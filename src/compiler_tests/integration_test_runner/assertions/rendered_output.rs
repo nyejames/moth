@@ -14,15 +14,21 @@ use super::artifacts::BuiltArtifactIndex;
 use super::html_scripts::extract_executable_scripts;
 use super::node_harness::{RenderHarnessError, run_node_script, with_harness_workspace};
 use crate::build_system::build::OutputFile;
+use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_tests::integration_test_runner::types::RenderedOutputExpectation;
 use std::io::Write;
 use std::path::Path;
 
 pub(super) fn validate_rendered_output(
     index: &BuiltArtifactIndex<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    let rendered = match execute_html_in_node(index, expectation.math_random_samples.as_deref()) {
+    let rendered = match execute_html_in_node(
+        index,
+        resource_inputs,
+        expectation.math_random_samples.as_deref(),
+    ) {
         Ok(output) => output,
         Err(error) => return Some((error.message, FailureKind::HarnessFailed)),
     };
@@ -106,8 +112,11 @@ pub(crate) fn required_text_artifact_for_test(
     relative_path: &str,
     kind: ArtifactKind,
 ) -> Result<(), RenderHarnessError> {
-    let index = BuiltArtifactIndex::build(build_result)
-        .expect("the artifact-boundary seam needs an unambiguous artifact set");
+    let index = BuiltArtifactIndex::build(
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+    )
+    .expect("the artifact-boundary seam needs an unambiguous artifact set");
 
     required_text_artifact(&index, relative_path, kind).map(|_| ())
 }
@@ -439,12 +448,15 @@ impl RenderedOutput {
 /// assertions can observe batched reactive flushes queued by the page bundle.
 fn execute_html_in_node(
     index: &BuiltArtifactIndex<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
     math_random_samples: Option<&[f64]>,
 ) -> Result<RenderedOutput, RenderHarnessError> {
     let html = required_text_artifact(index, "index.html", ArtifactKind::Html)?;
-
     let scripts = extract_executable_scripts(html)?;
-    if scripts.is_empty() {
+    let module_source = scripts.module.as_deref();
+    if scripts.classic.is_empty()
+        && module_source.is_none_or(|source| source.trim().is_empty())
+    {
         return Err(RenderHarnessError::script_shape(
             "rendered_output: no executable <script> blocks found in 'index.html'. \
              Ensure the fixture produces runtime output."
@@ -452,10 +464,48 @@ fn execute_html_in_node(
         ));
     }
 
-    let harness = build_node_harness(&scripts, math_random_samples);
-
     with_harness_workspace(|workspace| {
-        let harness_path = workspace.write("harness.js", &harness)?;
+        let harness_path = if let Some(module_source) = module_source {
+            let module_path = Path::new("index.html").with_file_name("page.mjs");
+            if index.contains("page.mjs") {
+                return Err(RenderHarnessError::artifact(
+                    "rendered_output: the emitted module cannot be staged as 'page.mjs' because \
+                     that path is already occupied by a build artifact."
+                        .to_owned(),
+                ));
+            }
+
+            workspace.write("package.json", "{\"type\":\"module\"}\n")?;
+            for (relative_path, source) in index.javascript_artifacts() {
+                workspace.write_relative(Path::new(relative_path), source.as_bytes())?;
+            }
+            for (relative_path, resource) in index.deferred_javascript_artifacts() {
+                let source = resource_inputs
+                    .read_source(resource.source_id)
+                    .map_err(|error| {
+                        RenderHarnessError::artifact(format!(
+                            "rendered_output: failed to read deferred JavaScript artifact \
+                             '{relative_path}': {}",
+                            error.msg
+                        ))
+                    })?;
+                workspace.write_relative(Path::new(relative_path), source)?;
+            }
+            workspace.write_relative(&module_path, module_source)?;
+
+            let module_specifier = format!(
+                "./{}",
+                module_path
+                    .to_str()
+                    .expect("the fixed inline module path is valid UTF-8")
+            );
+            let harness = build_node_module_harness(&module_specifier, math_random_samples);
+            workspace.write("harness.cjs", &harness)?
+        } else {
+            let harness = build_node_harness(&scripts.classic, math_random_samples);
+            workspace.write("harness.js", &harness)?
+        };
+
         let run = run_node_script(&harness_path, workspace.path())?;
         parse_harness_output(run.stdout.trim())
     })
@@ -542,6 +592,61 @@ const document = {
 };
 
 "#;
+    let random_setup = build_math_random_setup(math_random_samples);
+
+    let suffix = r#"
+setImmediate(__moth_write_summary);
+"#;
+
+    format!(
+        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}{}\n{suffix}",
+        scripts.join("\n")
+    )
+}
+
+/// Builds the CJS entry point for one inline native-ESM page module.
+///
+/// The page and all emitted JS artifacts are staged in the same relative tree. Setting the
+/// document stub on `globalThis` lets the imported ESM observe the same DOM and console event
+/// protocol as the classic harness.
+fn build_node_module_harness(
+    module_specifier: &str,
+    math_random_samples: Option<&[f64]>,
+) -> String {
+    let prefix = r#"const __moth_events = [];
+const __moth_slot_by_id = new Map();
+globalThis.console.log = (...args) => __moth_events.push({ type: 'console', text: args.map(String).join(' ') });
+function __moth_get_slot(id) {
+    if (!__moth_slot_by_id.has(id)) {
+        const slot = {
+            id,
+            innerHTML: "",
+            insertAdjacentHTML: (_, html) => {
+                const text = String(html);
+                slot.innerHTML += text;
+                __moth_events.push({ type: 'fragment_insert', id: String(id), html: text });
+            }
+        };
+        __moth_slot_by_id.set(id, slot);
+    }
+    return __moth_slot_by_id.get(id);
+}
+globalThis.document = {
+    getElementById: __moth_get_slot
+};
+
+"#;
+    let random_setup = build_math_random_setup(math_random_samples);
+    let module_specifier = serde_json::to_string(module_specifier)
+        .expect("the inline module specifier is a valid string");
+
+    format!(
+        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}import({module_specifier})\n\
+         .then(() => setImmediate(__moth_write_summary), __moth_handle_runtime_error);\n"
+    )
+}
+
+fn build_math_random_setup(math_random_samples: Option<&[f64]>) -> String {
     let samples_json = math_random_samples
         .map(|samples| {
             serde_json::to_string(samples)
@@ -577,15 +682,7 @@ __moth_summary_error_hook = () => {
 }
 "#,
     );
-
-    let suffix = r#"
-setImmediate(__moth_write_summary);
-"#;
-
-    format!(
-        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}{}\n{suffix}",
-        scripts.join("\n")
-    )
+    random_setup
 }
 
 /// HTML-Wasm harness adapter source, composed with the shared terminal protocol.

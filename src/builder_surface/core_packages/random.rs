@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
+    ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalParameter,
@@ -24,7 +24,10 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
             ExternalFunctionSpec {
                 name: "random_float".to_owned(),
                 parameters: Vec::new(),
-                returns: external_success_returns(ExternalAbiType::F64, ExternalReturnAlias::Fresh),
+                returns: external_success_returns(
+                    ExternalSignatureType::NativeFloat,
+                    ExternalReturnAlias::Fresh,
+                ),
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -37,7 +40,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
         .expect("builtin random_float registration should not collide");
 
     let int_param = ExternalParameter {
-        language_type: ExternalSignatureType::Abi(ExternalAbiType::I32),
+        language_type: ExternalSignatureType::NativeInt,
         access_kind: ExternalAccessKind::Shared,
     };
 
@@ -47,7 +50,10 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
             ExternalFunctionSpec {
                 name: "random_int".to_owned(),
                 parameters: vec![int_param.clone(), int_param],
-                returns: external_success_returns(ExternalAbiType::I32, ExternalReturnAlias::Fresh),
+                returns: external_success_returns(
+                    ExternalSignatureType::NativeInt,
+                    ExternalReturnAlias::Fresh,
+                ),
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(

@@ -9,7 +9,7 @@
 
 use std::fmt;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -186,6 +186,55 @@ impl HarnessWorkspace {
         std::fs::write(&path, contents).map_err(|error| {
             RenderHarnessError::workspace(format!(
                 "rendered_output: failed to write harness file '{}': {error}",
+                path.display()
+            ))
+        })?;
+
+        Ok(path)
+    }
+
+    /// Writes one validated relative file path, creating its parent directories inside the
+    /// workspace as needed.
+    ///
+    /// Artifact paths have already passed `BuiltArtifactIndex`'s output-path validation. This
+    /// second boundary check prevents a future caller from using this filesystem helper with an
+    /// absolute path or traversal component.
+    pub(crate) fn write_relative(
+        &self,
+        relative_path: &Path,
+        contents: impl AsRef<[u8]>,
+    ) -> Result<PathBuf, RenderHarnessError> {
+        // Backslash is checked against the path text (not only components) because Windows
+        // treats it as a separator and would otherwise split it away before this guard runs.
+        if relative_path.as_os_str().as_encoded_bytes().contains(&b'\\') {
+            return Err(RenderHarnessError::workspace(format!(
+                "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."
+            )));
+        }
+        let safe_components = relative_path.components().all(|component| {
+            matches!(component, Component::Normal(_))
+        });
+        if relative_path.as_os_str().is_empty() || !safe_components {
+            return Err(RenderHarnessError::workspace(format!(
+                "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."
+            )));
+        }
+
+        let path = self.directory.path().join(relative_path);
+        let parent = path.parent().ok_or_else(|| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: relative harness path '{relative_path:?}' has no parent directory."
+            ))
+        })?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: failed to create harness artifact directory '{}': {error}",
+                parent.display()
+            ))
+        })?;
+        std::fs::write(&path, contents).map_err(|error| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: failed to write harness artifact '{}': {error}",
                 path.display()
             ))
         })?;

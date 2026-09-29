@@ -130,7 +130,9 @@ fn register_dummy_draw_function(
             ExternalFunctionSpec {
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::I32)],
+                returns: vec![ExternalReturnSlot::fresh(
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
@@ -177,7 +179,9 @@ fn register_dummy_use_widget_function(
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::I32)],
+                returns: vec![ExternalReturnSlot::fresh(
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
@@ -308,7 +312,9 @@ fn register_dummy_draw_function_with_js_lowering(
             ExternalFunctionSpec {
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::I32)],
+                returns: vec![ExternalReturnSlot::fresh(
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction("draw".to_owned())),

@@ -10,13 +10,12 @@
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
@@ -373,15 +372,12 @@ pub(crate) enum ReachableMapUseKind {
 
 /// A reachable external call at the HIR statement that invokes it.
 ///
-/// WHY: backend validation needs the stable function ID, exact diagnostic location, and concrete
-///       call value types without rescanning HIR after reachability has been selected.
+/// WHY: backend validation needs the stable function ID and exact diagnostic location without
+///       rescanning HIR after reachability has been selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableExternalCall {
     pub(crate) function_id: ExternalFunctionId,
-    pub(crate) statement_id: HirNodeId,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) argument_types: Vec<TypeId>,
-    pub(crate) result_type: Option<TypeId>,
 }
 
 /// A reachable reactive template-backed value.
@@ -753,15 +749,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         for statement in &block.statements {
             self.collect_runtime_feature_uses_from_statement(statement);
 
-            let HirStatementKind::Call {
-                target,
-                args,
-                result,
-            } = &statement.kind
-            else {
+            let HirStatementKind::Call { target, .. } = &statement.kind else {
                 continue;
             };
-
             match target {
                 CallTarget::Local(function_id) => {
                     if self.seen_user_calls.insert(*function_id) {
@@ -797,21 +787,11 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     self.direct_facts
                         .reachable_external_functions
                         .insert(*function_id);
-                    let result_type = result.and_then(|result_id| {
-                        block
-                            .locals
-                            .iter()
-                            .find(|local| local.id == result_id)
-                            .map(|local| local.ty)
-                    });
                     self.direct_facts
                         .reachable_external_calls
                         .push(ReachableExternalCall {
                             function_id: *function_id,
-                            statement_id: statement.id,
                             span: statement.span,
-                            argument_types: args.iter().map(|argument| argument.ty).collect(),
-                            result_type,
                         });
                 }
             }

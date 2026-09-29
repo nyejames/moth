@@ -6,7 +6,7 @@
 //!      same normalized set of emitted artifacts.
 
 use super::super::{ArtifactAssertion, ArtifactKind};
-use crate::build_system::build::{BuildResult, FileKind, OutputFile};
+use crate::build_system::build::{DeferredResourceOutput, FileKind, OutputFile};
 use crate::build_system::output::{OutputPathIdentity, output_path_identity};
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -29,7 +29,7 @@ pub(super) struct BuiltArtifactIndex<'a> {
 /// writer after output preflight. They still occupy a unique output path.
 enum IndexedArtifact<'a> {
     File(&'a OutputFile),
-    DeferredResource,
+    DeferredResource(&'a DeferredResourceOutput),
 }
 
 /// Why a build result could not produce a usable artifact index.
@@ -87,13 +87,16 @@ impl<'a> BuiltArtifactIndex<'a> {
     /// output-path policy the writer enforces, so the harness cannot accept a destination the
     /// writer would reject or fold case differently than production does. `portable_path_text`
     /// is used only for lookup keys, sorted display and failure reporting.
-    pub(super) fn build(build_result: &'a BuildResult) -> Result<Self, ArtifactIndexError> {
+    pub(super) fn build(
+        output_files: &'a [OutputFile],
+        deferred_resources: &'a [DeferredResourceOutput],
+    ) -> Result<Self, ArtifactIndexError> {
         let mut by_path: BTreeMap<String, IndexedArtifact<'a>> = BTreeMap::new();
         // `Page.js` and `page.js` are distinct spellings but one canonical identity, so
         // collisions are decided on the identity and reported with the spellings.
         let mut spelling_by_identity = HashMap::new();
 
-        for output in &build_result.project.output_files {
+        for output in output_files {
             if matches!(output.file_kind(), FileKind::NotBuilt) {
                 continue;
             }
@@ -105,10 +108,10 @@ impl<'a> BuiltArtifactIndex<'a> {
             )?;
         }
 
-        for deferred in &build_result.project.deferred_resources {
+        for deferred in deferred_resources {
             insert_indexed_path(
                 &deferred.relative_output_path,
-                IndexedArtifact::DeferredResource,
+                IndexedArtifact::DeferredResource(deferred),
                 &mut by_path,
                 &mut spelling_by_identity,
             )?;
@@ -120,7 +123,7 @@ impl<'a> BuiltArtifactIndex<'a> {
     pub(super) fn get(&self, relative_path: &str) -> Option<&'a OutputFile> {
         match self.by_path.get(&portable_path_text(relative_path))? {
             IndexedArtifact::File(output) => Some(*output),
-            IndexedArtifact::DeferredResource => None,
+            IndexedArtifact::DeferredResource(_) => None,
         }
     }
 
@@ -131,6 +134,42 @@ impl<'a> BuiltArtifactIndex<'a> {
     /// Every built artifact path, in portable sorted order.
     pub(super) fn paths(&self) -> Vec<&str> {
         self.by_path.keys().map(String::as_str).collect()
+    }
+
+    /// In-memory JavaScript files in the validated portable output set.
+    ///
+    /// The rendered-output module harness stages these exact paths so Node's native ESM loader
+    /// can resolve the generated relative import graph without reading fixture or output folders.
+    pub(super) fn javascript_artifacts<'index>(
+        &'index self,
+    ) -> impl Iterator<Item = (&'index str, &'index str)> + 'index {
+        self.by_path.iter().filter_map(|(path, artifact)| match artifact {
+            IndexedArtifact::File(output) => match output.file_kind() {
+                FileKind::Js(source) => Some((path.as_str(), source.as_str())),
+                _ => None,
+            },
+            IndexedArtifact::DeferredResource(_) => None,
+        })
+    }
+
+    /// Deferred JavaScript resources in the validated portable output set.
+    ///
+    /// Other deferred resources stay unread because rendered-output execution needs only the
+    /// native ESM import graph, not every resource the backend plans to emit.
+    pub(super) fn deferred_javascript_artifacts<'index>(
+        &'index self,
+    ) -> impl Iterator<Item = (&'index str, &'index DeferredResourceOutput)> + 'index {
+        self.by_path.iter().filter_map(|(path, artifact)| {
+            let IndexedArtifact::DeferredResource(resource) = artifact else {
+                return None;
+            };
+
+            let is_javascript = Path::new(path)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                == Some("js");
+            is_javascript.then_some((path.as_str(), *resource))
+        })
     }
 
     /// Whether an artifact was produced at the authored relative path.
@@ -176,7 +215,7 @@ pub(super) fn validate_artifact_assertions(
                     return Some(reason);
                 }
             }
-            IndexedArtifact::DeferredResource => {
+            IndexedArtifact::DeferredResource(_) => {
                 if assertion.kind != ArtifactKind::Binary {
                     return Some(format!(
                         "Artifact '{}' expected kind '{}', but produced a deferred resource.",

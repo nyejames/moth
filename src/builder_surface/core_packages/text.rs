@@ -27,37 +27,37 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
         &'static str,
         &'static str,
         Vec<ExternalParameter>,
-        ExternalAbiType,
+        ExternalSignatureType,
     )] = &[
         (
             "length",
             "__moth_text_length",
             vec![text_param.clone()],
-            ExternalAbiType::I32,
+            ExternalSignatureType::NativeInt,
         ),
         (
             "is_empty",
             "__moth_text_is_empty",
             vec![text_param.clone()],
-            ExternalAbiType::Bool,
+            ExternalSignatureType::Abi(ExternalAbiType::Bool),
         ),
         (
             "contains",
             "__moth_text_contains",
             vec![text_param.clone(), text_param.clone()],
-            ExternalAbiType::Bool,
+            ExternalSignatureType::Abi(ExternalAbiType::Bool),
         ),
         (
             "starts_with",
             "__moth_text_starts_with",
             vec![text_param.clone(), text_param.clone()],
-            ExternalAbiType::Bool,
+            ExternalSignatureType::Abi(ExternalAbiType::Bool),
         ),
         (
             "ends_with",
             "__moth_text_ends_with",
             vec![text_param.clone(), text_param],
-            ExternalAbiType::Bool,
+            ExternalSignatureType::Abi(ExternalAbiType::Bool),
         ),
     ];
 

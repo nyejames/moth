@@ -33,7 +33,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::Abi(ExternalAbiType::I32),
+                        language_type: ExternalSignatureType::NativeInt,
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
@@ -64,7 +64,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Mutable,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::Abi(ExternalAbiType::I32),
+                        language_type: ExternalSignatureType::NativeInt,
                         access_kind: ExternalAccessKind::Shared,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
@@ -161,7 +161,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Mutable,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::Abi(ExternalAbiType::I32),
+                        language_type: ExternalSignatureType::NativeInt,
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
@@ -192,7 +192,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(ExternalAbiType::I32, ExternalReturnAlias::Fresh),
+                returns: external_success_returns(
+                    ExternalSignatureType::NativeInt,
+                    ExternalReturnAlias::Fresh,
+                ),
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(

@@ -13631,8 +13631,8 @@ role = "primary"
 [[case]]
 id = "external_numeric_profile_int_boundary"
 path = "external_numeric_profile_int_boundary"
-tags = ["integration", "numeric", "external", "diagnostics", "int64"]
-contract = "backend.html.external_numeric_profile_boundary_rejected"
+tags = ["integration", "numeric", "external", "runtime", "int64"]
+contract = "backend.html.external_numeric_profile_int64_safe_number_bridge"
 role = "backend"
 
 [[case]]
@@ -13640,6 +13640,13 @@ id = "external_numeric_profile_error_code"
 path = "external_numeric_profile_error_code"
 tags = ["integration", "numeric", "external", "runtime", "int64"]
 contract = "language.numeric.external_error_code_uses_int64_carrier"
+role = "backend"
+
+[[case]]
+id = "external_numeric_profile_float32_overflow"
+path = "external_numeric_profile_float32_overflow"
+tags = ["integration", "numeric", "external", "runtime", "float32", "int64"]
+contract = "backend.html.external_numeric_profile_float32_overflow_error"
 role = "backend"
 
 [[case]]
@@ -13669,3 +13676,17 @@ path = "numeric_float_whole_literal_int64_float64"
 tags = ["integration", "numeric", "numeric-profile", "float64"]
 contract = "language.numeric.whole_float_literal_destination_int64_float64"
 role = "primary"
+
+[[case]]
+id = "core_math_profile_int64_float32"
+path = "core_math_profile_int64_float32"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int64", "float32"]
+contract = "language.numeric.core_math_native_float_int64_float32_profile"
+role = "boundary"
+
+[[case]]
+id = "core_math_profile_int32_float64"
+path = "core_math_profile_int32_float64"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int32", "float64"]
+contract = "language.numeric.core_math_native_float_int32_float64_profile"
+role = "boundary"

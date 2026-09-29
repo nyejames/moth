@@ -189,7 +189,6 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
                 target: BackendTarget::Wasm,
                 type_environment: Some(&type_environment),
                 numeric_profile: profile,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -236,7 +235,6 @@ fn wasm_feature_validation_rejects_reachable_mutable_parameters_for_both_int_wid
                     int_width,
                     float_precision: FloatPrecision::Bits64,
                 },
-                external_package_registry: None,
             },
             &mut string_table,
         )
@@ -286,7 +284,6 @@ fn wasm_mutable_parameter_gate_ignores_unselected_helpers_and_mutable_locals() {
                 target,
                 type_environment: Some(&type_environment),
                 numeric_profile: NumericProfile::STANDARD,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -353,7 +350,6 @@ fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_
                 target: BackendTarget::Wasm,
                 type_environment: Some(&type_environment),
                 numeric_profile: NumericProfile::STANDARD,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -434,7 +430,6 @@ fn wasm_feature_validation_allows_byte_u8_expression_casts() {
                 target: BackendTarget::Wasm,
                 type_environment: Some(&type_environment),
                 numeric_profile: NumericProfile::STANDARD,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -551,7 +546,6 @@ fn wasm_feature_validation_allows_reachable_trap_format_float_under_each_profile
                     int_width: IntWidth::Bits64,
                     float_precision,
                 },
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -624,7 +618,6 @@ fn wasm_feature_validation_allows_reachable_trap_validate_float() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -691,7 +684,6 @@ fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -796,7 +788,6 @@ fn wasm_feature_validation_allows_trap_float_operations_without_f16() {
                         target: BackendTarget::Wasm,
                         type_environment: Some(&type_environment),
                         numeric_profile: profile,
-                        external_package_registry: None,
                     },
                     &mut string_table,
                 );
@@ -911,7 +902,6 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -960,7 +950,6 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1049,7 +1038,6 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1179,7 +1167,6 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
             target: BackendTarget::Js,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1306,7 +1293,6 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1409,7 +1395,6 @@ fn backend_feature_validation_allows_direct_fixed_scalar_values() {
                 target: BackendTarget::Wasm,
                 type_environment: Some(&type_environment),
                 numeric_profile: NumericProfile::STANDARD,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -1446,7 +1431,6 @@ fn backend_feature_validation_rejects_fixed_width_scalars_only_for_wasm() {
                     target,
                     type_environment: Some(&type_environment),
                     numeric_profile: NumericProfile::STANDARD,
-                    external_package_registry: None,
                 },
                 &mut string_table,
             );
@@ -1777,7 +1761,6 @@ fn backend_feature_validation_ignores_unreachable_fixed_width_scalars() {
                 target,
                 type_environment: Some(&type_environment),
                 numeric_profile: NumericProfile::STANDARD,
-                external_package_registry: None,
             },
             &mut string_table,
         );
@@ -1809,7 +1792,6 @@ fn backend_gate_accepts_default_and_folded_assertion_messages() {
                     target,
                     type_environment: Some(&type_environment),
                     numeric_profile: NumericProfile::STANDARD,
-                    external_package_registry: None,
                 },
                 &mut string_table,
             );
@@ -1835,7 +1817,6 @@ fn wasm_gate_rejects_reachable_runtime_assertion_messages() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     ) {
@@ -1868,7 +1849,6 @@ fn js_gate_accepts_reachable_runtime_assertion_messages() {
             target: BackendTarget::Js,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1922,7 +1902,6 @@ fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
             target: BackendTarget::Wasm,
             type_environment: Some(&type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         &mut string_table,
     );
@@ -1963,7 +1942,6 @@ fn feature_validation_diagnostic(
             target,
             type_environment: Some(type_environment),
             numeric_profile: NumericProfile::STANDARD,
-            external_package_registry: None,
         },
         string_table,
     )

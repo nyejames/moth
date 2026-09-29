@@ -1,0 +1,5 @@
+@core/math as math
+
+pi #= math.PI
+absolute_pi = math.abs(math.PI)
+io.line([: core_math_profile_int64_float32 pi=[pi] abs=[absolute_pi]])

@@ -154,12 +154,13 @@ impl ExternalReturnSlot {
 
 /// Builder-friendly signature constructor for one-slot success metadata.
 pub fn external_success_returns(
-    success_type: ExternalAbiType,
+    success_type: impl Into<ExternalSignatureType>,
     success_alias: ExternalReturnAlias,
 ) -> Vec<ExternalReturnSlot> {
+    let success_type = success_type.into();
     match success_type.to_datatype() {
         Some(_) => vec![ExternalReturnSlot {
-            value_type: success_type.into(),
+            value_type: success_type,
             alias: success_alias,
         }],
         None => Vec::new(),
@@ -198,7 +199,8 @@ impl ExternalConstantValue {
 pub struct ExternalConstantDef {
     /// Leaf symbol name within its package.
     pub name: String,
-    pub data_type: ExternalAbiType,
+    /// Semantic signature type visible to Moth callers.
+    pub data_type: ExternalSignatureType,
     pub value: ExternalConstantValue,
 }
 
