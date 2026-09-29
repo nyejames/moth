@@ -838,15 +838,13 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     // ids through the global attribution gate (`register_timing_boundary` only checks global
     // `attribution_active()`, then mints the id from `collection.id`). That session-sharing
     // turned `failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion`
-    // red (`left: 2, right: 1`) when unguarded compile tests overlapped it. This test pins the
-    // mechanism with barriers so it does not depend on a libtest schedule: one failing fixture
-    // plus one concurrent failing fixture must yield two boundaries and two unfinished modules.
-    // Do not delete this test and the `lock_counter_test()` guards it documents; a future
-    // caller-side capture model must keep the victim assertions whole-snapshot exact.
-
-    // A scoped worker run is enough: the session is already active before the spawn, and the
-    // scope join happens before `finish()`, so the worker always overlaps the session. The test
-    // needs overlap with the session, not simultaneous execution of both compiles.
+    // red (`left: 2, right: 1`) when unguarded compile tests overlapped it. The pinning here is
+    // the ordering a scoped worker gives: the session is already active before the spawn and the
+    // scope join happens before `finish()`, so the worker always overlaps the session without
+    // simultaneous execution of both compiles. One failing fixture plus one concurrent failing
+    // fixture must yield two boundaries and two unfinished modules. Do not delete this test and
+    // the `lock_counter_test()` guards it documents; a future caller-side capture model must
+    // keep the victim assertions whole-snapshot exact.
     let dir_a = dir_a_temp.path().to_path_buf();
     fs::write(
         dir_a.join("config.moth"),

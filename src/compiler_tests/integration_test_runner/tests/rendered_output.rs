@@ -863,6 +863,7 @@ fn node_harness_probe_reads_the_major_version_from_versioned_output() {
     assert_eq!(parse_node_major_for_test("garbage"), None);
 }
 
+#[cfg(unix)]
 #[test]
 fn node_harness_probe_rejects_a_runtime_below_node_24_by_executable_and_version() {
     use std::os::unix::fs::PermissionsExt;
