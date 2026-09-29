@@ -27,7 +27,7 @@ infrastructure or auditing the complete gate policy.
 
     [td:
         [: Choose direct compiler or Cargo invocation]
-        [: `Compiler invocation`]
+        [: `Compiler invocation` and `Shared Cargo defaults`]
     ]
 
     [td:
@@ -96,6 +96,11 @@ infrastructure or auditing the complete gate policy.
             - the checklist for the selected final gate
         ]
     ]
+
+    [td:
+        [: Manage build reuse or target disk usage]
+        [: `Shared Cargo defaults` and `Cache maintenance`]
+    ]
 ]
 
 ### Compiler invocation
@@ -116,6 +121,43 @@ Cargo from the repository root:
     cargo run --quiet -- build docs --release
 ]
 
+### Shared Cargo defaults
+
+`rust-toolchain.toml` selects the unpinned `stable` channel with Clippy and
+rustfmt. Recipes use plain Cargo commands, without a separate toolchain or
+version check. CI updates the channel selected by this file through rustup,
+without a setup action injecting a different incremental-compilation policy.
+An installed stable channel can still be older than another machine's. Record
+`rustc -vV`, `cargo clippy -V` and `cargo fmt --version` when comparing results.
+Explicit user toolchain overrides remain the caller's responsibility.
+
+`Cargo.toml` owns one dev profile, inherited by test: no debug information,
+incremental compilation enabled and the normal debug assertions and overflow
+checks retained. Release and profiling keep their existing settings. The
+workspace warning policy denies warnings for both packages in direct Cargo
+commands and recipes. It does not change dependency lint policy.
+
+`.cargo/config.toml` defaults Cargo build jobs, Rust test threads and Rayon
+threads to four. Environment overrides and explicit command options remain
+available. For example, lower all three bounds on a smaller host:
+
+[codeblock, $code("bash"):
+    CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 just validate
+]
+
+The defaults are concurrency bounds, not an aggregate memory limit. Preserve
+one effective configuration during timing comparisons. Changing compiler,
+features, profile settings or environment flags can require different artifacts.
+Source edits can reuse dependencies and incremental state from earlier builds.
+
+`just clippy` runs exactly `cargo clippy`. `just fmt` runs exactly `cargo fmt`,
+and `just fmt-check` runs `cargo fmt --check`. These retain Cargo's package and
+target defaults. Broader coverage is explicit: `just clippy-features` checks the
+workspace and all targets under the standard feature set, and
+`just fmt-workspace-check` runs `cargo fmt --all --check`. They use the same
+Rust tools and warning/formatting rules, but intentionally select more code.
+A bare Cargo command does not claim that broader coverage.
+
 ### Choose the final gate by scope
 
 [table:
@@ -125,8 +167,18 @@ Cargo from the repository root:
     ]
 
     [td:
-        [: Code-bearing or mixed change]
-        [: `just validate`]
+        [: Ordinary code-bearing or mixed change]
+        [: `just validate`, plus affected feature lanes]
+    ]
+
+    [td:
+        [: Performance-sensitive compiler work]
+        [: `just validate` and `just validate-perf`, plus affected feature lanes]
+    ]
+
+    [td:
+        [: Validation infrastructure, Cargo/toolchain policy, timer erasure or release readiness]
+        [: `just validate-full`]
     ]
 
     [td:
@@ -135,7 +187,9 @@ Cargo from the repository root:
     ]
 ]
 
-The `justfile` is the executable authority for the full code-bearing gate.
+The `justfile` is the executable authority for these gates. `ship`, `release`
+and release CI use `validate-full`. A routine validation pass is not a claim
+that performance, feature-matrix or release-artifact checks ran.
 
 ### Code-bearing final gate
 
@@ -160,7 +214,8 @@ Run the probe directly to check the selected runtime before a full gate:
     node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 ]
 
-Before declaring a non-trivial code-bearing slice complete, run:
+Before declaring a non-trivial code-bearing slice complete, run the gate
+selected by scope. The ordinary gate is:
 
 [codeblock, $code("bash"):
     just validate
@@ -176,10 +231,15 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
+        [: Formatting check]
+        [: `just fmt-check`]
+        [: The same default formatting scope as `cargo fmt`, without writing source]
+    ]
+
+    [td:
         [: Clippy]
-        [: `just ci-clippy-native`]
-        [: Native-host linting of every workspace target under the explicit standard feature set,
-        warnings denied]
+        [: `just clippy`]
+        [: The same package, target and feature defaults as direct `cargo clippy`]
     ]
 
     [td:
@@ -192,10 +252,8 @@ Before declaring a non-trivial code-bearing slice complete, run:
     [td:
         [: **Rust unit tests**]
         [: `just validate-unit-tests`]
-        [: Rust unit and subsystem tests across the complete workspace, in the
-        workspace-unified feature configuration, with one Cargo build job, one
-        test-harness thread, one Rayon worker, no incremental compilation and
-        zero dev/test debug info]
+        [: Rust unit and subsystem tests across the complete workspace, using
+        the shared Cargo defaults and workspace-unified feature configuration]
     ]
 
     [td:
@@ -207,20 +265,7 @@ Before declaring a non-trivial code-bearing slice complete, run:
     [td:
         [: Documentation check]
         [: `cargo run --quiet -- check docs --terse`]
-        [: Moth docs-source checking inside the full gate]
-    ]
-
-    [td:
-        [: Benchmark sanity check]
-        [: `cargo run --package xtask --bin xtask -- bench-ci`]
-        [: Complete benchmark preflight followed by bounded non-recording measurements]
-    ]
-
-    [td:
-        [: Complexity budgets]
-        [: `cargo run --package xtask --bin xtask -- bench-scaling`]
-        [: Fits the growth exponent of every declared scaling series against
-        its declared input sizes and fails when one exceeds its budget]
+        [: Moth docs-source checking inside the routine gate]
     ]
 
     [td:
@@ -243,43 +288,86 @@ Before declaring a non-trivial code-bearing slice complete, run:
     ]
 
     [td:
-        [: Timer erasure gate]
-        [: `just timers-erasure-check`]
-        [: Builds a no-timer release binary and proves that no timer-only
-        marker, and no name from the schema-owned metric inventory, survives
-        into its bytes]
+        [: Cache maintenance]
+        [: `just cache-maintain`]
+        [: After successful checks, prune old timing reports and report a soft
+        disk budget while preserving build artifacts and current test reports]
     ]
 ]
 
-The `validate-unit-tests` recipe is the memory-bounded Rust test lane used by
-both `just validate` and `just ci-gate-unit-tests`. It constrains Cargo build
-parallelism, test-harness threads, Rayon workers, incremental compilation and
-dev/test debug information. Integration tests and performance benchmarks retain
-their normal commands and thread settings because those lanes are themselves
-part of the behaviour being validated.
-
-- `ci-clippy-native` lints the native host only, across every workspace target and the explicit
-  standard feature set. It deliberately excludes the opt-in `boracle` feature.
-- Warnings are denied.
-- Cross-target linting is CI's job: the gate matrix runs `clippy` on Linux, macOS and Windows.
-- The workspace test command includes the compiler, CLI and `xtask` packages.
-- That command is not the default configuration. `xtask` depends on `moth` with
-  `features = ["timers"]`, and Cargo unifies features across one resolve graph, so
-  `cargo test --workspace` always builds the compiler with `timers` enabled. The default
-  configuration and each standard feature configuration are covered by `just test-feature-matrix`, not by
-  `just validate`.
-- `bench-ci` preflights every benchmark manifest case once, then measures only the quick CLI and
-  frontend subsets with three iterations.
-- `bench-ci` does not update local history or tracked benchmark summaries.
-- `bench-scaling` answers the question history cannot. Every other benchmark mode compares a case
-  against its own recorded past, so it detects change; a cost that has been superlinear since the
-  day it was written never changes and never reports. The scaling lane measures the same metric at
-  several declared input sizes and holds the fitted exponent to a budget. It writes no history
-  either. `benchmarks/README.md > Scaling Series` owns the authoring rules.
+The workspace test command includes the compiler, CLI and `xtask` packages.
+It is not the default configuration. `xtask` depends on `moth` with
+`features = ["timers"]`, and Cargo unifies features across one resolve graph.
+The default configuration and each standard feature configuration are covered
+by `just test-feature-matrix`, not by `just validate`.
 
 The integration command loads the complete canonical suite and applies the shared hard-policy
 evaluator before selection or compilation. This makes missing ownership, duplicate primaries and
 other hard suite-policy findings part of the normal validation gate.
+
+#### Performance and full gates
+
+`just validate-perf` runs `bench-ci` and `bench-scaling`, then cache maintenance.
+`bench-ci` preflights every standard benchmark case once, then measures the quick
+CLI and frontend subsets with three iterations. Scaling fits the declared metric
+against input size and fails on a budget violation or unmeasurable series. Both
+commands are non-recording. They retain their existing workloads and budgets.
+
+`just validate-full` runs the routine gate, workspace formatting, standard-feature
+Clippy, the executing feature matrix, the test honesty audit, performance checks
+and the exact no-timer release-artifact check. It finishes with cache maintenance.
+Boracle, its campaign, stress and recording benchmarks remain explicit opt-in work.
+
+Standard-feature Clippy checks every workspace target and deliberately excludes
+Boracle. Linux, macOS and Windows CI use the same feature selection. The timer
+erasure gate builds the no-timer release binary and rejects every timer-only
+marker and every name from the schema-owned metric inventory in its bytes.
+Routine source audit retains the complementary timer-source rules.
+
+The full gate deliberately covers more than the previous local recipe because
+it also executes the feature matrix and honesty audit. Compare identical scopes
+when measuring build improvements. Moving release builds out of routine
+validation is a scheduling change, not evidence that release compilation got faster.
+
+### Cache maintenance
+
+The `xtask/src/cache.rs` owner queries Cargo metadata for the selected target
+directory. It prunes only regular `cargo-timings/cargo-timing-*.html` reports
+with recognised timestamp spelling. It retains the newest ten, every report
+less than a day old, future-dated reports, the latest-report alias and unknown
+files. Symbolic links and Windows reparse points are not followed. A redirected
+target or timing-report root is rejected before deletion.
+
+Maintenance reports logical file bytes, with hard links counted per path.
+This can differ from allocated disk space reported by `du`. The default soft
+budget is 32 GiB, adjustable with positive integer `MOTH_CACHE_BUDGET_GIB`.
+Exceeding it prints advice, not automatic Cargo-artifact deletion or a failed
+test verdict. Invalid configuration or housekeeping IO errors fail the command.
+Maintenance after a failed gate is skipped so failure evidence stays intact.
+
+Run maintenance with other Cargo invocations stopped. Preserve compiler
+artifacts, dependencies, incremental state, benchmark workspaces and test reports.
+This policy does not impose a hard disk cap or identify every stale Cargo file.
+Cargo owns its artifact layout and no per-run timestamp proves an artifact is
+unneeded by a later configuration.
+
+For deliberate eviction, stop editor and agent builds sharing this target,
+preview the selected files and then apply package-scoped Cargo cleaning:
+
+[codeblock, $code("bash"):
+    just cache-evict-preview
+    just cache-evict
+]
+
+This evicts current Moth and xtask dev/test artifacts too, so the next run pays
+a rebuild. It preserves unrelated dependencies and release builds. It is never
+automatically triggered by the size warning and may not bring all target usage
+under budget. Use a one-time clean for a profile migration, not after each run.
+
+Cargo target overrides apply to maintenance through metadata. Existing benchmark
+compiler helpers still assume repository-local `target/release` and
+`target/profiling` paths. Use normal per-worktree targets for full validation
+until those helpers have a separately verified artifact-path change.
 
 ### Test honesty audit
 
@@ -301,7 +389,7 @@ the single owner of what that file says. The inventory has four parts:
   for the category. These never fail the audit. `is_err`, `contains` and `any` are review
   categories on purpose: a gate that failed on each of them would be turned off within a week.
 - The declared ledger, read from `docs/roadmap/evidence/honesty_ledger.json`. Every entry must
-  carry a severity, a status, a description, a disposition and an owning phase; a duplicate code,
+  carry a severity, a status, a description, a disposition and an owning phase. A duplicate code,
   a missing decision or an open hard finding fails the audit.
 - The composed audits. The source audit and the feature-lane check are run, not read, so the
   verdict never depends on when somebody last ran them. The integration suite inventory is read,
@@ -352,7 +440,7 @@ have one owner:
 
 It walks `src` and `xtask/src` once, applies every broad-source rule, and reports typed findings
 with the file each was found in. Only the audit's own implementation files are exempt, because they
-necessarily contain the fragments the rules search for; their rules are proved against fixture text
+necessarily contain the fragments the rules search for. Their rules are proved against fixture text
 instead. A source file that cannot be read is a finding, not a file the audit skips.
 
 Add a broad-source ban here rather than as a test. A ban that lives in a test reads one file, calls
@@ -415,8 +503,8 @@ The `boracle` feature is an opt-in developer lane. `just boracle` owns its forma
 feature-enabled Clippy and smoke test. The `boracle-campaign` lane, using `boracle_campaign`, is a
 separate opt-in developer lane owned by `just boracle-campaign`. It was measured at roughly 61
 seconds against roughly 8 seconds for the default lane, so it cannot belong in the default lane.
-Both lanes are intentionally excluded from `just validate`, `just test-feature-matrix` and ordinary
-CI gates.
+Both lanes are intentionally excluded from `just validate`, `just validate-full`,
+`just test-feature-matrix` and ordinary CI gates.
 
 Lanes use `cargo test -p <package>` rather than `--workspace` because Cargo unifies features across
 one resolve graph. `xtask` requires `moth` with `timers`, so no workspace-wide command can run the
@@ -424,19 +512,26 @@ default configuration.
 
 `just feature-lane-check` proves the mapping without running a lane, and is part of `just validate`.
 The report distinguishes standard and opt-in lane owners. Adding a Cargo feature means adding it
-to a standard or opt-in lane in the same change; the check fails otherwise.
+to a standard or opt-in lane in the same change. The check fails otherwise.
+Run affected executing lanes for feature-gated work even when the routine gate passes.
 
 ### CI gates
 
-`just validate` is the local gate and is deliberately fail-fast: the first failure stops the run.
+`just validate` is the routine local gate and is deliberately fail-fast: the first failure stops
+the run. `just validate-full` provides all standard families as one fail-fast command.
 
-CI does not work that way. Each validation family is its own job, so one failure never stops
+CI reports each validation family as its own job, so one failure never stops
 another from reporting:
 
 [table:
     [th:
         [: **Gate**]
         [: **Command**]
+    ]
+
+    [td:
+        [: `format`]
+        [: `just ci-gate-format`]
     ]
 
     [td:
@@ -501,12 +596,12 @@ upload `target/test-reports/` whether they passed or failed, because a failed ru
 evidence a reviewer needs most.
 
 `unit-tests` and `feature-matrix` overlap on purpose. `unit-tests` runs the workspace-unified
-command a developer runs locally; `feature-matrix` runs the configurations that command cannot
+command a developer runs locally. `feature-matrix` runs the configurations that command cannot
 reach.
 
-The release workflow keeps the single fail-fast `just validate`. A tag build only needs to know
-whether the revision is releasable, and the split gates have already reported on every push to the
-default branch.
+The release workflow uses `just validate-full`. The split gates report on pushes
+to main and manual workflow dispatch. Creating a PR does not itself trigger this
+workflow, and no CI result may be claimed without an actual completed run.
 
 ### Platform policy
 
@@ -568,7 +663,7 @@ compiler is an alternative way to run the same documentation gate, not an
 extra gate.
 
 If any non-documentation file changed, the documentation-only exception does
-not apply. Use the full code-bearing gate.
+not apply. Use the code-bearing gate selected by scope.
 
 ### Fast iteration commands
 
@@ -590,7 +685,12 @@ not apply. Use the full code-bearing gate.
 
     [td:
         [: Clippy iteration]
-        [: `just ci-clippy-native`]
+        [: `cargo clippy` or `just clippy`]
+    ]
+
+    [td:
+        [: Standard-feature Clippy]
+        [: `just clippy-features`]
     ]
 
     [td:
@@ -664,22 +764,28 @@ not apply. Use the full code-bearing gate.
     ]
 
     [td:
-        [: Complete code-bearing gate]
+        [: Routine code-bearing gate]
         [: `just validate`]
+    ]
+
+    [td:
+        [: All standard validation families]
+        [: `just validate-full`]
     ]
 ]
 
-Passing one targeted command does not imply a code-bearing slice passes the
-complete gate.
+Passing one targeted command does not imply a code-bearing slice passes its
+required gate.
 
 ### Formatting
 
-- Run `cargo fmt` when Rust files changed.
-- `just validate` does not currently format source automatically.
+- Run `cargo fmt` when Rust files changed, or `cargo fmt --all` for workspace changes.
+- `just validate` checks default-scope formatting without writing source.
+- `just validate-full` also checks formatting throughout the workspace.
 - Do not solve formatting failures through lint suppression.
 - Documentation-only changes do not require Rust formatting.
 
-The `ship` recipe formats before validation, while `validate` itself does not.
+The `ship` recipe formats the workspace before full validation.
 
 ### Generated documentation
 
@@ -725,9 +831,15 @@ pure refactor or prose-only correction.
 
 ### Benchmark safety
 
-- `just validate` uses non-recording `bench-ci`.
-- `bench-ci` validates every benchmark case before it measures the quick subset. It replaces the
-  full ten-iteration CLI and frontend checks inside the normal validation gate.
+- `just validate-perf` and `just validate-full` use non-recording `bench-ci` and scaling checks.
+- `bench-ci` preflights every standard case before measuring the quick subset.
+- `bench-validate` preflights all manifest cases and still builds a release compiler.
+  It is not a cheap replacement for the routine correctness gate.
+- CLI benchmarks retain the release compiler. Frontend and scaling work remains
+  in-process in the dev-built xtask. This change does not claim to optimise or
+  unify those measurement configurations.
+- Keep toolchain, build flags and thread counts fixed when comparing timings.
+  The shared four-thread default differs from an earlier unset Rayon setting.
 - Use `just bench-check` and `just bench-frontend-check` for deliberate full-suite performance
   evidence. Both commands remain non-recording.
 - Do not run or commit recording benchmark output unless performance history is
@@ -758,7 +870,7 @@ Before declaring a non-trivial code-bearing slice complete, check:
 - Documentation was rebuilt when required.
 - Generated output was not edited manually.
 - Benchmark history was not changed accidentally.
-- `just validate` passes.
+- `just validate` and every additional gate required by scope pass.
 
 ### Documentation-only completion checklist
 

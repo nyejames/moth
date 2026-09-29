@@ -14,9 +14,7 @@ env:
 
 jobs:
   validate:
-    # Deliberately the fail-fast recipe rather than the split gates. The split gates report every
-    # family independently on every push to main; a tag build only needs to know whether this
-    # revision is releasable, and stopping at the first failure answers that sooner.
+    # Release keeps every standard gate, including the expensive release-artifact checks.
     name: Validate before release
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -25,10 +23,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
+          rustup update "$toolchain" --no-self-update
+          rustc -vV
+          cargo clippy -V
+          cargo fmt --version
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5
@@ -44,7 +47,7 @@ jobs:
 
       - name: Run validation
         timeout-minutes: 30
-        run: just validate
+        run: just validate-full
 
   build:
     name: Build ${{ matrix.target }}
@@ -81,10 +84,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
+          rustup update "$toolchain" --no-self-update
+          rustup target add "${{ matrix.target }}" --toolchain "$toolchain"
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5

@@ -35,12 +35,14 @@ jobs:
           - macos-latest
           - windows-latest
         gate:
+          - format
           - clippy
           - unit-tests
           - feature-matrix
           - integration
           - docs
           - benchmarks
+          - scaling
           - timers-erasure
           - source-audit
           - first-party-deps
@@ -50,10 +52,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # The checked-in toolchain selects Rust and its components. Avoid setup-action
+      # environment defaults that silently turn incremental compilation off in CI.
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
+          rustup update "$toolchain" --no-self-update
+          rustc -vV
+          cargo clippy -V
+          cargo fmt --version
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5
@@ -98,8 +107,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
+          rustup update "$toolchain" --no-self-update
+          rustc -vV
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5
