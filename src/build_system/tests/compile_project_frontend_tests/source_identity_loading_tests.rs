@@ -91,10 +91,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
 
 #[test]
 fn registered_source_database_retains_exact_text_for_multiple_compiled_sources() {
-    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
-    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
-    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test (see
-    // `unguarded_parallel_compile_registers_into_an_active_timing_session`).
+    // Hold the shared instrumentation lock; see the mechanism test below.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
@@ -150,10 +147,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
 
 #[test]
 fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
-    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
-    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
-    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test (see
-    // `unguarded_parallel_compile_registers_into_an_active_timing_session`).
+    // Hold the shared instrumentation lock; see the mechanism test below.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
@@ -203,10 +197,7 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
 
 #[test]
 fn unselected_preload_read_failure_stays_inert() {
-    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
-    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
-    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test (see
-    // `unguarded_parallel_compile_registers_into_an_active_timing_session`).
+    // Hold the shared instrumentation lock; see the mechanism test below.
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
@@ -852,6 +843,10 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     // plus one concurrent failing fixture must yield two boundaries and two unfinished modules.
     // Do not delete this test and the `lock_counter_test()` guards it documents; a future
     // caller-side capture model must keep the victim assertions whole-snapshot exact.
+
+    // A scoped worker run is enough: the session is already active before the spawn, and the
+    // scope join happens before `finish()`, so the worker always overlaps the session. The test
+    // needs overlap with the session, not simultaneous execution of both compiles.
     let dir_a = dir_a_temp.path().to_path_buf();
     fs::write(
         dir_a.join("config.moth"),
@@ -883,33 +878,52 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         &mut BuilderSurface::with_mandatory_core(),
         &mut string_table,
     );
-    assert!(
-        result_a.is_err(),
-        "first fixture should fail before the concurrent compile starts"
+    let Err(messages_a) = result_a else {
+        panic!("first fixture should fail before the concurrent compile starts");
+    };
+    assert_has_diagnostic_code(&messages_a, "MOTH-SYNTAX-0019");
+    assert_eq!(
+        messages_a.error_count(),
+        1,
+        "first fixture should fail with exactly the syntax diagnostic before the concurrent compile starts: {:#?}",
+        messages_a
     );
-    let arrived = std::sync::Arc::new(std::sync::Barrier::new(2));
-    let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+
     std::thread::scope(|scope| {
-        let arrived_worker = std::sync::Arc::clone(&arrived);
-        let release_worker = std::sync::Arc::clone(&release);
-        scope.spawn(move || {
-            let mut thread_string_table = StringTable::new();
-            let thread_style = StyleDirectiveRegistry::built_ins();
-            let mut thread_config = Config::new(dir_b.clone());
-            let mut thread_surface = BuilderSurface::with_mandatory_core();
-            arrived_worker.wait();
-            release_worker.wait();
-            let _ = compile_project_frontend(
-                &mut thread_config,
-                BuildProfile::Dev,
-                None,
-                &thread_style,
-                &mut thread_surface,
-                &mut thread_string_table,
-            );
-        });
-        arrived.wait();
-        release.wait();
+        scope
+            .spawn(move || {
+                let mut thread_string_table = StringTable::new();
+                let thread_style = StyleDirectiveRegistry::built_ins();
+                let mut thread_config = Config::new(dir_b.clone());
+                let mut thread_surface = BuilderSurface::with_mandatory_core();
+                let thread_error = match compile_project_frontend(
+                    &mut thread_config,
+                    BuildProfile::Dev,
+                    None,
+                    &thread_style,
+                    &mut thread_surface,
+                    &mut thread_string_table,
+                ) {
+                    Err(error) => error,
+                    Ok(_) => panic!("second fixture should fail its existing preparation lane"),
+                };
+
+                // The concurrent fixture must fail for the infrastructure file-error reason, not
+                // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
+                let error_value = thread_error
+                    .infrastructure_error()
+                    .expect("concurrent failure should remain an infrastructure file error");
+                assert_eq!(&error_value.error_type, &ErrorType::File);
+                assert!(
+                    error_value
+                        .msg
+                        .contains("Error reading file when adding new moth files to parse"),
+                    "second fixture should stay in the infrastructure file-error lane: {}",
+                    error_value.msg
+                );
+            })
+            .join()
+            .expect("concurrent compile worker should not panic");
     });
     let snapshot = timing_session.finish();
     let boundary_count = snapshot.boundaries.len();
