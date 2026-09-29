@@ -424,7 +424,7 @@ mod detailed {
     }
 
     /// Read a batch of counters directly, for focused merge-rejection counter tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "timers"))]
     pub(crate) fn frontend_counter_test_values(counters: &[FrontendCounter]) -> Vec<usize> {
         counters
             .iter()
