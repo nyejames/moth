@@ -143,6 +143,24 @@ A slice is code-bearing if it changes Rust, compiler or build-system sources,
 libraries, tests, benchmarks, manifests, scripts, configuration or any other
 non-documentation implementation file.
 
+#### JavaScript runtime prerequisite
+
+The integration lane executes the emitted JavaScript with the `node`
+executable found on `PATH`. Emitted F16 values call native `Math.f16round`,
+which landed in Node 24, so validation needs Node 24 or newer as the selected
+runtime. The integration runner probes the runtime once and reports the
+executable and version as a fatal infrastructure failure instead of letting
+individual F16 fixtures crash with engine errors. Installations such as nvm,
+version managers and system packages may all be present on the host; the one
+that matters is whichever executable wins `PATH` at validation time, so keep
+that installation current.
+
+Run the probe directly to check the selected runtime before a full gate:
+
+[codeblock, $code("bash"):
+    node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
+]
+
 Before declaring a non-trivial code-bearing slice complete, run:
 
 [codeblock, $code("bash"):

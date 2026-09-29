@@ -26,8 +26,9 @@ pub(crate) use goldens::discover_golden_expectation;
 pub(crate) use html_scripts::extract_executable_scripts;
 #[cfg(test)]
 pub(crate) use node_harness::{
-    RenderHarnessError, RenderHarnessErrorKind, run_node_script_within,
-    run_script_with_executable_for_test, with_harness_workspace,
+    RenderHarnessError, RenderHarnessErrorKind, parse_node_major_for_test,
+    probe_node_runtime_for_test, run_node_script_within, run_script_with_executable_for_test,
+    with_harness_workspace,
 };
 #[cfg(test)]
 pub(crate) use rendered_output::{RuntimeEvent, SlotOutput, parse_harness_output};

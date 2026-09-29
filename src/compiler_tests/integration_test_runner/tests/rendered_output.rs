@@ -9,9 +9,10 @@
 
 use super::super::assertions::{
     RenderHarnessErrorKind, RuntimeEvent, SlotOutput, execute_wasm_harness_for_test,
-    extract_executable_scripts, parse_harness_output, required_text_artifact_for_test,
-    run_node_script_within, run_script_with_executable_for_test,
-    validate_rendered_output_fragments, validate_success_result, with_harness_workspace,
+    extract_executable_scripts, parse_harness_output, parse_node_major_for_test,
+    probe_node_runtime_for_test, required_text_artifact_for_test, run_node_script_within,
+    run_script_with_executable_for_test, validate_rendered_output_fragments,
+    validate_success_result, with_harness_workspace,
 };
 use super::super::types::{ArtifactKind, GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, FailureKind, SuccessExpectation, WarningExpectation};
@@ -837,6 +838,57 @@ fn node_harness_reports_a_missing_interpreter_as_a_spawn_failure() {
             .contains("moth_render_harness_interpreter_that_does_not_exist"),
         "{}",
         error.message
+    );
+}
+
+#[test]
+fn node_harness_probe_reports_an_unstartable_runtime_by_name() {
+    // An unsupported runtime fails every produced page at the same lane, so the probe boundary
+    // must name the executable that failed rather than a generic process message.
+    let error = probe_node_runtime_for_test("moth_render_harness_interpreter_that_does_not_exist")
+        .expect_err("an interpreter that cannot start must fail the runtime probe");
+
+    assert!(
+        error.contains("moth_render_harness_interpreter_that_does_not_exist"),
+        "{error}"
+    );
+}
+
+#[test]
+fn node_harness_probe_reads_the_major_version_from_versioned_output() {
+    assert_eq!(parse_node_major_for_test("v25.5.0"), Some(25));
+    assert_eq!(parse_node_major_for_test("v24.0.0"), Some(24));
+    assert_eq!(parse_node_major_for_test("v21.6.1"), Some(21));
+    assert_eq!(parse_node_major_for_test(""), None);
+    assert_eq!(parse_node_major_for_test("garbage"), None);
+}
+
+#[test]
+fn node_harness_probe_rejects_a_runtime_below_node_24_by_executable_and_version() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A stub interpreter stands in for a runtime whose version string is well-formed but too old,
+    // so the fatal message's executable and version interpolation is exercised end to end.
+    let error = with_harness_workspace(|workspace| {
+        let interpreter =
+            workspace.write("old_node_version.sh", "#!/bin/sh\necho \"v21.6.1\"\n")?;
+        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755))
+            .expect("test should be able to make the stub interpreter executable");
+        let error = probe_node_runtime_for_test(
+            interpreter
+                .to_str()
+                .expect("tempfile workspace paths are valid UTF-8"),
+        )
+        .expect_err("an interpreter below Node 24 must fail the runtime probe");
+        Ok(error)
+    })
+    .expect("the workspace should complete the below-24 probe");
+
+    assert!(
+        error.contains("v21.6.1")
+            && error.contains("Node 24")
+            && error.contains("old_node_version.sh"),
+        "{error}"
     );
 }
 
