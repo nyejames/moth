@@ -561,6 +561,43 @@ pub(crate) fn materialize_fixed_scalar(
     }
 }
 
+/// Materialise already validated normalized text at one fixed scalar destination.
+///
+/// WHAT: the token-free counterpart of [`materialize_fixed_scalar`]. The caller has already
+///       validated the literal grammar through [`parse_numeric_literal`] and kept the unsigned,
+///       separator-free magnitude plus its sign, so this reads that magnitude directly. Signed
+///       widths use their own exact range, unsigned widths and `Byte` reject every negative
+///       spelling and range-check their own maximum, and binary floats round once at their own
+///       precision (`F16` through the binary16 owner, which owns its double-rounding guard).
+/// WHY:  a literal-only consumer such as the MON reader has neither a
+///       [`NumericLiteralToken`] nor a `StringTable`, and must still share this module's
+///       separator, sign, range and rounding policy instead of growing a second numeric parser.
+pub(crate) fn materialize_normalized_fixed_scalar(
+    normalized: &str,
+    negative: bool,
+    scalar: FixedScalar,
+) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
+    let sign = if negative {
+        NumericLiteralSign::Negative
+    } else {
+        NumericLiteralSign::Positive
+    };
+
+    match scalar.class() {
+        FixedScalarClass::SignedInteger => {
+            materialize_signed_fixed_scalar(normalized, sign, scalar)
+        }
+
+        FixedScalarClass::UnsignedInteger | FixedScalarClass::Octet => {
+            materialize_unsigned_fixed_scalar(normalized, sign, scalar)
+        }
+
+        FixedScalarClass::BinaryFloat => {
+            materialize_binary_float_fixed_scalar(normalized, sign, scalar)
+        }
+    }
+}
+
 /// Materialise a whole-number magnitude into one signed fixed scalar.
 ///
 /// WHAT: positive magnitudes parse as `i64`, and negative magnitudes parse as `u64` and negate by

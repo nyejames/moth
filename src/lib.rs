@@ -62,7 +62,10 @@ pub mod first_party_js;
 /// This is the sole public MON root. It accepts caller-owned UTF-8 MON text and
 /// returns owned data values; it never compiles a module, evaluates a Moth
 /// program, reads a file, discovers a project, or writes a build output.
-/// `compiler_frontend` stays crate-private and no MON path exposes its internals.
+/// The reader, writer and prepared-schema owners stay crate-private; the only
+/// compiler-owned facts the boundary publishes are the numeric profile
+/// selection (`NumericProfile`, `IntWidth`, `FloatPrecision`) consumed by
+/// `Schema::with_profile`.
 ///
 /// The accepted operations share one prepared schema:
 ///
@@ -78,7 +81,9 @@ pub mod first_party_js;
 /// - `decode_document_bytes` behaves like `decode_document` for raw
 ///   bytes and reports invalid UTF-8 through `MonErrorCode::InvalidUtf8`
 ///   with a byte span.
-///
+/// - `Schema::with_profile` selects the numeric profile a schema prepares
+///   under; schemas prepared without it use `NumericProfile::STANDARD`
+///   (`Int32`/`Float64`). Fixed widths and `Byte` are profile-independent.
 /// Encoding a `Value::String` always encodes string data. It never guesses
 /// that the text resembles MON and should be inserted raw or decoded. Decoded
 /// values outlive and release the input text without a caller-retained backing
@@ -138,6 +143,9 @@ pub mod first_party_js;
 /// assert!(failure.span.is_some());
 /// ```
 pub mod mon {
+    pub use crate::compiler_frontend::datatypes::numeric_profile::{
+        FloatPrecision, IntWidth, NumericProfile,
+    };
     pub use crate::compiler_frontend::mon::{
         Field, Limits, MonError, MonErrorCode, PathSegment, PreparedSchema, Schema, SchemaType,
         Span, Value, Variant, decode_document, decode_document_bytes, encode_document,

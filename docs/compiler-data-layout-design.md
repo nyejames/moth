@@ -1496,16 +1496,15 @@ public operation and type names are defined by `docs/compiler-design-overview.md
 Compiler-retained numeric text remains owned by the numeric token side store.
 The MON reader borrows original token spelling from caller input and retains a
 bounded owned normalized string until the schema selects a destination. The
-accepted end state has the prepared schema record the numeric profile its
-`Int` and `Float` entries use, defaulting to the standard profile for a
-standalone Rust caller, and has the reader materialise every supported fixed
-width and `Byte` through the same shared numeric policies. Queued support: the
-delivered codec captures no profile, offers no fixed-width or `Byte` schema
-variant, limits a declared decimal scale to 0 through 18 and fixes live `Int`
-and `Float` entries at `Int32` and `Float64`. Exact decimal scale capacity
-covers 0 to 256 only in that accepted end state, so `Number`'s scales need no
-second parser and no value routes through a binary float in that design. The
-normalized buffer's decoded-byte accounting is described below. Compiler
+prepared schema records the numeric profile its `Int` and `Float` entries use,
+defaulting to the standard profile for a standalone Rust caller, and the
+reader materialises every supported fixed width and `Byte` through the same
+shared numeric policies. The delivered codec captures the profile through
+`Schema::with_profile`, offers every fixed-width and `Byte` schema variant,
+accepts a declared decimal scale of 0 through 256 and fixes unprofiled live
+`Int` and `Float` entries at `Int32` and `Float64`, so `Number`'s scales need no
+second parser and no value routes through a binary float. The normalized
+buffer's decoded-byte accounting is described below. Compiler
 diagnostic storage stays in the compact diagnostic architecture, and MON never
 becomes source compilation. The MON literal-data format itself is owned by
 `docs/src/docs/mon/mon-format.mtf`.
@@ -1572,8 +1571,8 @@ formatting. `Float` materialisation follows the numeric authority and rejects
 non-finite source values and conversion results, emitting `-0.0` for negative
 zero and `0` for positive zero while decoding preserves the sign bit.
 
-In the accepted end state, materialisation for a fixed width, `Byte`, `Int` or
-`Float` uses the schema's recorded profile and the same shared numeric policies
+Materialisation for a fixed width, `Byte`, `Int` or `Float` uses the schema's
+recorded profile and the same shared numeric policies
 the compiler uses, so a schema entry never invents a private conversion rule of
 its own. Whole-number and decimal or exponent categories stay strict: decimal or
 exponent spelling cannot satisfy an integer or `Byte` entry even when its value
@@ -1652,7 +1651,7 @@ when decoding, and field or element path where available.
   sizes, ownership and failure-lane contracts.
 - No later diagnostic storage work: compact diagnostic records, side stores and
   the failure lanes keep their owners and their deferred-work list.
-- No build profile, project configuration or compiler token store: in the accepted end state, MON schema preparation records its own numeric profile and reads no command, builder or source-owned numeric record; the delivered codec captures no profile.
+- No build profile, project configuration or compiler token store: MON schema preparation records its own numeric profile and reads no command, builder or source-owned numeric record; the profile arrives only through `Schema::with_profile`.
 
 ## Failure architecture
 

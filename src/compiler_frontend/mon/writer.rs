@@ -4,6 +4,7 @@
 //! Rendering is kept deliberately separate from validation so a caller only receives a complete
 //! `String` on success; a failure never exposes the private output buffer.
 
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::numeric_text::format::format_finite_float;
 
@@ -124,10 +125,13 @@ impl<'a> Writer<'a> {
             }
             (Value::Char(value), PreparedType::Char) => self.write_char(*value),
             (Value::String(value), PreparedType::String) => self.write_string(value),
-            (Value::Int(value), PreparedType::Int) => self.write_number(&value.to_string()),
-            (Value::Float(value), PreparedType::Float) => self.write_float(*value),
+            (Value::Int(value), PreparedType::Int { .. }) => self.write_number(&value.to_string()),
+            (Value::Float(value), PreparedType::Float { precision }) => {
+                self.write_float(*value, BinaryFloatPrecision::from(*precision))
+            }
             (Value::Integer(value), PreparedType::Integer)
             | (Value::Decimal(value), PreparedType::Decimal { .. }) => self.write_number(value),
+            (value, PreparedType::Fixed(scalar)) => self.write_fixed(value, *scalar),
             (
                 Value::Record(fields),
                 PreparedType::Record {
@@ -364,15 +368,53 @@ impl<'a> Writer<'a> {
         self.push_str(text)
     }
 
-    fn write_float(&mut self, value: f64) -> Result<(), MonError> {
+    /// Write one explicit-width scalar or `Byte` value.
+    ///
+    /// WHY: completion already checked the value's family and materialised a binary float at its
+    ///      own precision, so this only renders the payload. A structured internal-invariant guard
+    ///      keeps a future prepared-schema change from silently emitting another width's value.
+    fn write_fixed(&mut self, value: &Value, scalar: FixedScalar) -> Result<(), MonError> {
+        if value.fixed_scalar() != Some(scalar) {
+            return self.fail(
+                MonErrorCode::InternalInvariant,
+                "validated MON value did not match its prepared schema",
+            );
+        }
+
+        match value {
+            Value::I8(payload) => self.write_number(&payload.to_string()),
+            Value::I16(payload) => self.write_number(&payload.to_string()),
+            Value::I32(payload) => self.write_number(&payload.to_string()),
+            Value::I64(payload) => self.write_number(&payload.to_string()),
+            Value::U8(payload) => self.write_number(&payload.to_string()),
+            Value::U16(payload) => self.write_number(&payload.to_string()),
+            Value::U32(payload) => self.write_number(&payload.to_string()),
+            Value::U64(payload) => self.write_number(&payload.to_string()),
+            Value::Byte(payload) => self.write_number(&payload.to_string()),
+            Value::F16(payload) => self.write_float(*payload, BinaryFloatPrecision::Binary16),
+            Value::F32(payload) => self.write_float(*payload, BinaryFloatPrecision::Binary32),
+            Value::F64(payload) => self.write_float(*payload, BinaryFloatPrecision::Binary64),
+            _ => self.fail(
+                MonErrorCode::InternalInvariant,
+                "validated MON value did not match its prepared schema",
+            ),
+        }
+    }
+
+    /// Write one finite binary-float value at its own precision.
+    ///
+    /// Negative zero keeps its sign as `-0.0` because the shared formatter normalises it to `0`,
+    /// which would lose a value the reader can distinguish. Every other value uses the shared
+    /// shortest round-trippable text for its precision, so an `F16`/`F32` value never prints more
+    /// digits than its own precision carries.
+    fn write_float(&mut self, value: f64, precision: BinaryFloatPrecision) -> Result<(), MonError> {
         if !value.is_finite() {
             return self.fail(MonErrorCode::NonFiniteFloat, "Float values must be finite");
         }
         let text = if value == 0.0 && value.is_sign_negative() {
             "-0.0".to_owned()
         } else {
-            // MON is compiled at STANDARD until Phase 6, so Float precision stays fixed here.
-            format_finite_float(value, BinaryFloatPrecision::Binary64).map_err(|_| {
+            format_finite_float(value, precision).map_err(|_| {
                 MonError::new(
                     MonErrorCode::NonFiniteFloat,
                     None,

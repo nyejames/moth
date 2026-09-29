@@ -139,16 +139,15 @@ Conversion is strict about categories:
   zero: negative zero writes `-0.0` and positive zero writes `0`.
 
 `Int` and `Float` destinations are profile-dependent, and fixed-width schemas are
-profile-independent. The delivered public schema takes no profile input: it
-materialises `Int` at `Int32` and `Float` at `Float64` for standalone Rust
-callers, and limits a declared decimal scale to `0` through `18`. Schema
-preparation capturing the compilation's numeric profile, and the widened `0`
-through `256` scale capacity, are accepted end-state design and remain queued.
+profile-independent. The public schema selects its numeric profile with
+`Schema::with_profile`: schemas that never select a profile materialise `Int`
+at `Int32` and `Float` at `Float64` for standalone Rust callers, and a declared
+decimal scale covers `0` through `256`.
 
 Large integer and exact decimal data are retained and round-tripped without a
 second arithmetic runtime. Unsupported concrete adapters fail explicitly
 rather than narrowing or converting through Float. The added widths, `Byte`,
-profile capture and the widened scale range are accepted end-state design; see
+profile capture and the widened scale range are delivered; see
 @../progress (Progress) for current support.
 
 ### Structs and choices
