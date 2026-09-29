@@ -10,8 +10,8 @@ use crate::backends::wasm::lir::types::{
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
-use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use rustc_hash::FxHashMap;
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
@@ -302,18 +302,8 @@ pub(crate) fn emit_statement(
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
         WasmLirStmt::RoundF16 { dst, source } => {
-            ensure_local_abi(
-                *source,
-                WasmAbiType::F32,
-                context,
-                "F16 rounding source",
-            )?;
-            ensure_local_abi(
-                *dst,
-                WasmAbiType::F32,
-                context,
-                "F16 rounding destination",
-            )?;
+            ensure_local_abi(*source, WasmAbiType::F32, context, "F16 rounding source")?;
+            ensure_local_abi(*dst, WasmAbiType::F32, context, "F16 rounding destination")?;
             function.instruction(&Instruction::LocalGet(local_index(*source, context)?));
             function.instruction(&Instruction::Call(helper_index(
                 plan,
@@ -454,9 +444,24 @@ fn emit_float_range_candidate(
     ensure_local_abi(step, carrier, context, "float range step")?;
     ensure_local_abi(end, carrier, context, "float range end")?;
     ensure_local_abi(scratch, carrier, context, "float range candidate scratch")?;
-    ensure_local_abi(ascending, WasmAbiType::I32, context, "float range direction")?;
-    ensure_local_abi(in_range_dst, WasmAbiType::I32, context, "float range Bool result")?;
-    ensure_local_abi(candidate_dst, carrier, context, "float range candidate destination")?;
+    ensure_local_abi(
+        ascending,
+        WasmAbiType::I32,
+        context,
+        "float range direction",
+    )?;
+    ensure_local_abi(
+        in_range_dst,
+        WasmAbiType::I32,
+        context,
+        "float range Bool result",
+    )?;
+    ensure_local_abi(
+        candidate_dst,
+        carrier,
+        context,
+        "float range candidate destination",
+    )?;
 
     let (add_opcode, subtract_opcode, ascending_compare, descending_compare) = match precision {
         BinaryFloatPrecision::Binary32 => (
@@ -582,7 +587,12 @@ fn emit_float_to_string(
         BinaryFloatPrecision::Binary32 => (WasmAbiType::F32, 32),
         BinaryFloatPrecision::Binary64 => (WasmAbiType::F64, 64),
     };
-    ensure_local_abi(dst, WasmAbiType::Handle, context, "StringFromFloat destination")?;
+    ensure_local_abi(
+        dst,
+        WasmAbiType::Handle,
+        context,
+        "StringFromFloat destination",
+    )?;
     ensure_local_abi(value, value_abi, context, "StringFromFloat source")?;
 
     function.instruction(&Instruction::LocalGet(local_index(value, context)?));
@@ -613,9 +623,7 @@ fn scalar_load_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruct
         WasmScalarStorageKind::I8 => Instruction::I32Load8S(memarg),
         WasmScalarStorageKind::U8 => Instruction::I32Load8U(memarg),
         WasmScalarStorageKind::I16 => Instruction::I32Load16S(memarg),
-        WasmScalarStorageKind::U16 | WasmScalarStorageKind::F16 => {
-            Instruction::I32Load16U(memarg)
-        }
+        WasmScalarStorageKind::U16 | WasmScalarStorageKind::F16 => Instruction::I32Load16U(memarg),
         WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Load(memarg),
         WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Load(memarg),
         WasmScalarStorageKind::F32 => Instruction::F32Load(memarg),
@@ -627,9 +635,9 @@ fn scalar_store_instruction(kind: WasmScalarStorageKind, offset: u32) -> Instruc
     let memarg = scalar_memarg(kind, offset);
     match kind {
         WasmScalarStorageKind::I8 | WasmScalarStorageKind::U8 => Instruction::I32Store8(memarg),
-        WasmScalarStorageKind::I16
-        | WasmScalarStorageKind::U16
-        | WasmScalarStorageKind::F16 => Instruction::I32Store16(memarg),
+        WasmScalarStorageKind::I16 | WasmScalarStorageKind::U16 | WasmScalarStorageKind::F16 => {
+            Instruction::I32Store16(memarg)
+        }
         WasmScalarStorageKind::I32 | WasmScalarStorageKind::U32 => Instruction::I32Store(memarg),
         WasmScalarStorageKind::I64 | WasmScalarStorageKind::U64 => Instruction::I64Store(memarg),
         WasmScalarStorageKind::F32 => Instruction::F32Store(memarg),

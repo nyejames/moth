@@ -7,15 +7,13 @@
 //!      non-finite result would leak an unrepresentable value into every later stage.
 
 use super::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::external_namespace_members::{
-    project_external_constant,
-};
+use crate::compiler_frontend::ast::expressions::external_namespace_members::project_external_constant;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantValue, ExternalPackageRegistry,
 };

@@ -65,16 +65,17 @@ pub(crate) fn validate_map_key_type(
     span: Option<SourceSpan>,
 ) -> Result<(), CompilerDiagnostic> {
     let builtins = type_environment.builtins();
-    let is_supported_fixed_scalar = type_environment
-        .fixed_scalar(key_type_id)
-        .is_some_and(|scalar| {
-            matches!(
-                scalar.class(),
-                FixedScalarClass::SignedInteger
-                    | FixedScalarClass::UnsignedInteger
-                    | FixedScalarClass::Octet
-            )
-        });
+    let is_supported_fixed_scalar =
+        type_environment
+            .fixed_scalar(key_type_id)
+            .is_some_and(|scalar| {
+                matches!(
+                    scalar.class(),
+                    FixedScalarClass::SignedInteger
+                        | FixedScalarClass::UnsignedInteger
+                        | FixedScalarClass::Octet
+                )
+            });
     let is_supported_scalar = key_type_id == builtins.string
         || key_type_id == builtins.int
         || key_type_id == builtins.bool

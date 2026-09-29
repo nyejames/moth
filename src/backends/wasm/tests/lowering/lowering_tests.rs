@@ -20,10 +20,10 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::datatypes::numeric_profile::{
     FloatPrecision, IntWidth, NumericProfile,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
@@ -32,10 +32,10 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1198,12 +1198,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(
-                    500,
-                    0,
-                    types.int,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(int_expression(500, 0, types.int, RegionId(0))),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1387,12 +1382,7 @@ fn validate_float_test_module(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(
-                    100,
-                    0,
-                    int_type,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(int_expression(100, 0, int_type, RegionId(0))),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1475,8 +1465,16 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
             .find(|local| local.role == WasmLocalRole::UserLocal)
             .expect("result Float local should have a LIR local");
 
-        assert_eq!(function.signature.params, vec![expected_carrier], "{profile}");
-        assert_eq!(function.signature.results, vec![expected_carrier], "{profile}");
+        assert_eq!(
+            function.signature.params,
+            vec![expected_carrier],
+            "{profile}"
+        );
+        assert_eq!(
+            function.signature.results,
+            vec![expected_carrier],
+            "{profile}"
+        );
         assert_eq!(source_local.ty, expected_carrier, "{profile}");
         assert_eq!(result_local.ty, expected_carrier, "{profile}");
         assert_eq!(
@@ -1569,12 +1567,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(
-                    200,
-                    0,
-                    types.int,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(int_expression(200, 0, types.int, RegionId(0))),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1646,9 +1639,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
         let float_constants = statements
             .iter()
             .filter_map(|statement| match statement {
-                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => {
-                    Some(*dst)
-                }
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => Some(*dst),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1707,9 +1698,21 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
         .expect("test path fits");
 
     for (scalar, expected_precision, expected_carrier) in [
-        (FixedScalar::F16, BinaryFloatPrecision::Binary16, WasmAbiType::F32),
-        (FixedScalar::F32, BinaryFloatPrecision::Binary32, WasmAbiType::F32),
-        (FixedScalar::F64, BinaryFloatPrecision::Binary64, WasmAbiType::F64),
+        (
+            FixedScalar::F16,
+            BinaryFloatPrecision::Binary16,
+            WasmAbiType::F32,
+        ),
+        (
+            FixedScalar::F32,
+            BinaryFloatPrecision::Binary32,
+            WasmAbiType::F32,
+        ),
+        (
+            FixedScalar::F64,
+            BinaryFloatPrecision::Binary64,
+            WasmAbiType::F64,
+        ),
     ] {
         let source = expression(
             501,
@@ -1799,9 +1802,7 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
         let float_constants = statements
             .iter()
             .filter_map(|statement| match statement {
-                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => {
-                    Some(*dst)
-                }
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => Some(*dst),
                 _ => None,
             })
             .collect::<Vec<_>>();

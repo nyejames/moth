@@ -294,20 +294,22 @@ fn lowers_range_loop_with_index_binding() {
         "expected value + index binding assignments"
     );
 
-
     let has_index_increment = module.blocks.iter().any(|block| {
-        block.statements.iter().any(|statement| match &statement.kind {
-            HirStatementKind::NumericOp {
-                op:
-                    HirNumericOp {
-                        operator: NumericOperator::Add,
-                        domain: NumericScalar::Int,
-                    },
-                operands: HirNumericOperands::Binary { right, .. },
-                ..
-            } => matches!(right.kind, HirExpressionKind::Int(1)),
-            _ => false,
-        })
+        block
+            .statements
+            .iter()
+            .any(|statement| match &statement.kind {
+                HirStatementKind::NumericOp {
+                    op:
+                        HirNumericOp {
+                            operator: NumericOperator::Add,
+                            domain: NumericScalar::Int,
+                        },
+                    operands: HirNumericOperands::Binary { right, .. },
+                    ..
+                } => matches!(right.kind, HirExpressionKind::Int(1)),
+                _ => false,
+            })
     });
 
     assert!(

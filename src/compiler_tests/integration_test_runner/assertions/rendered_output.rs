@@ -454,9 +454,7 @@ fn execute_html_in_node(
     let html = required_text_artifact(index, "index.html", ArtifactKind::Html)?;
     let scripts = extract_executable_scripts(html)?;
     let module_source = scripts.module.as_deref();
-    if scripts.classic.is_empty()
-        && module_source.is_none_or(|source| source.trim().is_empty())
-    {
+    if scripts.classic.is_empty() && module_source.is_none_or(|source| source.trim().is_empty()) {
         return Err(RenderHarnessError::script_shape(
             "rendered_output: no executable <script> blocks found in 'index.html'. \
              Ensure the fixture produces runtime output."

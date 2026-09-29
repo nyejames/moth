@@ -406,8 +406,7 @@ impl ExternalPackageRegistry {
         if !matches!(
             (&constant.data_type, constant.value),
             (
-                ExternalSignatureType::NativeInt
-                    | ExternalSignatureType::Abi(ExternalAbiType::I32),
+                ExternalSignatureType::NativeInt | ExternalSignatureType::Abi(ExternalAbiType::I32),
                 ExternalConstantValue::Int(_)
             ) | (
                 ExternalSignatureType::NativeFloat
@@ -1189,9 +1188,7 @@ pub(crate) mod test_support {
         fn from(value: TestExternalReturnType) -> Self {
             match value {
                 TestExternalReturnType::NativeInt => ExternalSignatureType::NativeInt,
-                TestExternalReturnType::Void => {
-                    ExternalSignatureType::Abi(ExternalAbiType::Void)
-                }
+                TestExternalReturnType::Void => ExternalSignatureType::Abi(ExternalAbiType::Void),
             }
         }
     }

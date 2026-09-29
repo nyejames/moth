@@ -351,12 +351,7 @@ fn lower_validate_float(
     // Lower the boundary value once; ValidateFloat's emitter reads it before writing the result,
     // so an in-place result can reuse the source local without a copy.
     let lowered_source = lower_expression(context, source, statements)?;
-    if context
-        .local_type_by_id
-        .get(&lowered_source.value)
-        .copied()
-        != Some(expected_carrier)
-    {
+    if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
             "Wasm Float validation source does not use the profile carrier {expected_carrier:?}"
         )));
@@ -421,12 +416,7 @@ fn lower_format_float(
 
     // Evaluate the source once; its semantic Float precision remains explicit in LIR.
     let lowered_source = lower_expression(context, source, statements)?;
-    if context
-        .local_type_by_id
-        .get(&lowered_source.value)
-        .copied()
-        != Some(expected_carrier)
-    {
+    if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
             "Wasm Float formatting source does not use the profile carrier {expected_carrier:?}"
         )));
@@ -614,16 +604,24 @@ fn lower_float_range_candidate(
         ));
     }
 
-    let candidate_dst = context.local_map.get(&candidate_result).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
-            "Wasm lowering could not resolve float range candidate local {candidate_result:?}"
-        ))
-    })?;
-    let in_range_dst = context.local_map.get(&in_range_result).copied().ok_or_else(|| {
-        lir_transformation_error(format!(
-            "Wasm lowering could not resolve float range Bool local {in_range_result:?}"
-        ))
-    })?;
+    let candidate_dst = context
+        .local_map
+        .get(&candidate_result)
+        .copied()
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm lowering could not resolve float range candidate local {candidate_result:?}"
+            ))
+        })?;
+    let in_range_dst = context
+        .local_map
+        .get(&in_range_result)
+        .copied()
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm lowering could not resolve float range Bool local {in_range_result:?}"
+            ))
+        })?;
     if context.local_type_by_id.get(&candidate_dst).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
             "Wasm float range candidate destination does not use carrier {expected_carrier:?}"

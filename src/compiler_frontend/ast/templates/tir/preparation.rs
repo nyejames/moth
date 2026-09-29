@@ -191,10 +191,7 @@ impl PreparationFacts {
 }
 
 impl<'scope> PreparationWalk<'scope> {
-    fn new(
-        mode: TemplatePreparationMode,
-        source_scope: Option<&'scope ScopeContext>,
-    ) -> Self {
+    fn new(mode: TemplatePreparationMode, source_scope: Option<&'scope ScopeContext>) -> Self {
         Self {
             visiting_templates: HashSet::new(),
             visiting_nodes: HashSet::new(),

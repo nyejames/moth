@@ -146,8 +146,7 @@ pub(crate) fn build_emit_plan(
     } = plan_static_data_layout(module, float_format_needed)?;
     let heap_top_global_index = memory_helpers_needed.then_some(0);
     let initial_memory_pages = if float_format_needed {
-        let required_pages =
-            heap_base / 65_536 + (heap_base % 65_536 != 0) as u32;
+        let required_pages = heap_base / 65_536 + (heap_base % 65_536 != 0) as u32;
         module.memory_plan.initial_pages.max(required_pages)
     } else {
         module.memory_plan.initial_pages
@@ -258,12 +257,10 @@ pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
             params: vec![Handle, Handle],
             results: vec![I32],
         },
-        WasmRuntimeHelper::StringFromI64 | WasmRuntimeHelper::StringFromU64 => {
-            WasmLirSignature {
-                params: vec![I64],
-                results: vec![Handle],
-            }
-        }
+        WasmRuntimeHelper::StringFromI64 | WasmRuntimeHelper::StringFromU64 => WasmLirSignature {
+            params: vec![I64],
+            results: vec![Handle],
+        },
         WasmRuntimeHelper::FloatToDecimal => WasmLirSignature {
             params: vec![F64, I32],
             results: vec![I64, I32],
@@ -553,13 +550,11 @@ fn plan_static_data_layout(
         })?;
         data_offsets.insert(segment.id, cursor);
         data_lengths.insert(segment.id, len);
-        cursor = cursor
-            .checked_add(len)
-            .ok_or_else(|| {
-                static_data_layout_error(
-                    "Wasm static data layout overflowed u32 address space while planning data segments",
-                )
-            })?;
+        cursor = cursor.checked_add(len).ok_or_else(|| {
+            static_data_layout_error(
+                "Wasm static data layout overflowed u32 address space while planning data segments",
+            )
+        })?;
     }
 
     cursor = align_to(cursor, 8).ok_or_else(|| {

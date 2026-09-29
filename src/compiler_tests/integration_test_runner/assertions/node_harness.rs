@@ -206,14 +206,18 @@ impl HarnessWorkspace {
     ) -> Result<PathBuf, RenderHarnessError> {
         // Backslash is checked against the path text (not only components) because Windows
         // treats it as a separator and would otherwise split it away before this guard runs.
-        if relative_path.as_os_str().as_encoded_bytes().contains(&b'\\') {
+        if relative_path
+            .as_os_str()
+            .as_encoded_bytes()
+            .contains(&b'\\')
+        {
             return Err(RenderHarnessError::workspace(format!(
                 "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."
             )));
         }
-        let safe_components = relative_path.components().all(|component| {
-            matches!(component, Component::Normal(_))
-        });
+        let safe_components = relative_path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
         if relative_path.as_os_str().is_empty() || !safe_components {
             return Err(RenderHarnessError::workspace(format!(
                 "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."

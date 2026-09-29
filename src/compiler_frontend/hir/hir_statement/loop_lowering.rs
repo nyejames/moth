@@ -15,10 +15,14 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, binary_operation_domain};
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, binary_operation_domain,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -85,7 +89,6 @@ struct RangeLoopTypes {
     int_type: TypeId,
 }
 
-
 #[derive(Clone, Copy)]
 struct RangeLoopRuntime {
     blocks: RangeLoopBlocks,
@@ -96,8 +99,7 @@ struct RangeLoopRuntime {
 fn uses_float_range_candidate(domain: NumericScalar) -> bool {
     matches!(
         domain,
-        NumericScalar::Float
-            | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
+        NumericScalar::Float | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
     )
 }
 
@@ -287,10 +289,16 @@ impl<'a> HirBuilder<'a> {
             self.create_block(parent_region, span_ref, "for-step-candidate-descending")?;
         let step_candidate_check =
             self.create_block(parent_region, span_ref, "for-step-candidate-check")?;
-        let step_candidate_ascending_check =
-            self.create_block(parent_region, span_ref, "for-step-candidate-ascending-check")?;
-        let step_candidate_descending_check =
-            self.create_block(parent_region, span_ref, "for-step-candidate-descending-check")?;
+        let step_candidate_ascending_check = self.create_block(
+            parent_region,
+            span_ref,
+            "for-step-candidate-ascending-check",
+        )?;
+        let step_candidate_descending_check = self.create_block(
+            parent_region,
+            span_ref,
+            "for-step-candidate-descending-check",
+        )?;
         let step_stall_check =
             self.create_block(parent_region, span_ref, "for-step-stall-check")?;
         let step_stall_failure =
@@ -381,7 +389,6 @@ impl<'a> HirBuilder<'a> {
             int_type: builtin_type_ids::INT,
         })
     }
-
 
     fn numeric_op_for_binding(&self, binding: TypeId, operator: NumericOperator) -> HirNumericOp {
         let domain = NumericScalar::from_type_id(binding, &self.type_environment)
@@ -481,7 +488,6 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-
         // `by` is optional for integer ranges; its unit default belongs to the selected domain.
         if let Some(step_expression) = &range.step {
             let lowered_step = self.lower_expression_value_to_current_block(step_expression)?;
@@ -523,7 +529,6 @@ impl<'a> HirBuilder<'a> {
             },
             span_ref,
         )?;
-
 
         let ascending_current = self.make_expression(
             span_ref,
@@ -686,7 +691,6 @@ impl<'a> HirBuilder<'a> {
         )?;
         self.emit_jump_from_current_block(blocks.header_selector, span_ref, "for.step.abs.done")
     }
-
 
     fn emit_range_loop_header_checks(
         &mut self,
@@ -914,8 +918,7 @@ impl<'a> HirBuilder<'a> {
         }
         self.set_current_block(blocks.step_stall_check, span_ref)?;
         let stall_region = self.current_region_or_error(span_ref)?;
-        let current =
-            self.range_loop_local(locals.current, types.binding, span_ref, stall_region);
+        let current = self.range_loop_local(locals.current, types.binding, span_ref, stall_region);
         let candidate =
             self.range_loop_local(locals.next_value, types.binding, span_ref, stall_region);
         let stalled = self.range_loop_comparison(
@@ -1006,12 +1009,8 @@ impl<'a> HirBuilder<'a> {
         })?;
         self.set_current_block(blocks.step, span_ref)?;
         let step_region = self.current_region_or_error(span_ref)?;
-        let ascending = self.range_loop_local(
-            locals.ascending,
-            types.bool_type,
-            span_ref,
-            step_region,
-        );
+        let ascending =
+            self.range_loop_local(locals.ascending, types.bool_type, span_ref, step_region);
         self.emit_range_loop_branch(
             ascending,
             blocks.step_ascending_check,
@@ -1137,8 +1136,12 @@ impl<'a> HirBuilder<'a> {
             self.range_loop_local(locals.current, types.binding, span_ref, candidate_region);
         let step = self.range_loop_local(locals.step, types.binding, span_ref, candidate_region);
         let end = self.range_loop_local(locals.end, types.binding, span_ref, candidate_region);
-        let ascending =
-            self.range_loop_local(locals.ascending, types.bool_type, span_ref, candidate_region);
+        let ascending = self.range_loop_local(
+            locals.ascending,
+            types.bool_type,
+            span_ref,
+            candidate_region,
+        );
         let in_range_result = locals.candidate_in_range.ok_or_else(|| {
             CompilerError::compiler_error(
                 "Float range candidate lowering is missing its Bool result local",
@@ -1209,7 +1212,6 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
-
     fn emit_range_loop_step_direction_check(
         &mut self,
         runtime: RangeLoopRuntime,
@@ -1224,7 +1226,10 @@ impl<'a> HirBuilder<'a> {
         let (block, distance_block) = if ascending {
             (blocks.step_ascending_check, blocks.step_ascending_distance)
         } else {
-            (blocks.step_descending_check, blocks.step_descending_distance)
+            (
+                blocks.step_descending_check,
+                blocks.step_descending_distance,
+            )
         };
 
         self.set_current_block(block, span_ref)?;
@@ -1242,13 +1247,16 @@ impl<'a> HirBuilder<'a> {
                 region,
             )
         } else {
-            let current =
-                self.range_loop_local(locals.current, types.binding, span_ref, region);
+            let current = self.range_loop_local(locals.current, types.binding, span_ref, region);
             let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
             let zero_for_current = self.range_loop_zero_literal(types, span_ref, region);
             let current_sign = self.range_loop_comparison(
                 current,
-                if ascending { HirBinOp::Lt } else { HirBinOp::Ge },
+                if ascending {
+                    HirBinOp::Lt
+                } else {
+                    HirBinOp::Ge
+                },
                 zero_for_current,
                 types,
                 span_ref,
@@ -1257,7 +1265,11 @@ impl<'a> HirBuilder<'a> {
             let zero_for_end = self.range_loop_zero_literal(types, span_ref, region);
             let end_sign = self.range_loop_comparison(
                 zero_for_end,
-                if ascending { HirBinOp::Le } else { HirBinOp::Ge },
+                if ascending {
+                    HirBinOp::Le
+                } else {
+                    HirBinOp::Ge
+                },
                 end,
                 types,
                 span_ref,
@@ -1316,8 +1328,7 @@ impl<'a> HirBuilder<'a> {
         };
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let current =
-            self.range_loop_local(locals.current, types.binding, span_ref, region);
+        let current = self.range_loop_local(locals.current, types.binding, span_ref, region);
         let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
         let (left, right) = if ascending {
             (end, current)
@@ -1325,18 +1336,8 @@ impl<'a> HirBuilder<'a> {
             (current, end)
         };
         let subtract = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
-        self.emit_checked_numeric_assignment(
-            distance_local,
-            subtract,
-            left,
-            right,
-            span_ref,
-        )?;
-        self.emit_jump_from_current_block(
-            blocks.step_distance_check,
-            span_ref,
-            "for.step.distance",
-        )
+        self.emit_checked_numeric_assignment(distance_local, subtract, left, right, span_ref)?;
+        self.emit_jump_from_current_block(blocks.step_distance_check, span_ref, "for.step.distance")
     }
 
     fn emit_range_loop_candidate_update(
@@ -1357,8 +1358,7 @@ impl<'a> HirBuilder<'a> {
         };
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let current =
-            self.range_loop_local(locals.current, types.binding, span_ref, region);
+        let current = self.range_loop_local(locals.current, types.binding, span_ref, region);
         let step = self.range_loop_local(locals.step, types.binding, span_ref, region);
         let operator = if ascending {
             NumericOperator::Add
@@ -1399,8 +1399,7 @@ impl<'a> HirBuilder<'a> {
         };
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let candidate =
-            self.range_loop_local(locals.next_value, types.binding, span_ref, region);
+        let candidate = self.range_loop_local(locals.next_value, types.binding, span_ref, region);
         let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
         let within_bound_op = match (ascending, end_kind) {
             (true, RangeEndKind::Exclusive) => HirBinOp::Lt,
@@ -1408,14 +1407,8 @@ impl<'a> HirBuilder<'a> {
             (false, RangeEndKind::Exclusive) => HirBinOp::Gt,
             (false, RangeEndKind::Inclusive) => HirBinOp::Ge,
         };
-        let within_bound = self.range_loop_comparison(
-            candidate,
-            within_bound_op,
-            end,
-            types,
-            span_ref,
-            region,
-        );
+        let within_bound =
+            self.range_loop_comparison(candidate, within_bound_op, end, types, span_ref, region);
         self.emit_range_loop_branch(
             within_bound,
             blocks.step_stall_check,
@@ -1508,13 +1501,7 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::FixedScalar(zero)
             }
         };
-        self.make_expression(
-            span_ref,
-            kind,
-            types.binding,
-            ValueKind::Const,
-            region,
-        )
+        self.make_expression(span_ref, kind, types.binding, ValueKind::Const, region)
     }
 
     fn range_loop_unit_literal(
@@ -1537,13 +1524,7 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::FixedScalar(one)
             }
         };
-        self.make_expression(
-            span_ref,
-            kind,
-            types.binding,
-            ValueKind::Const,
-            region,
-        )
+        self.make_expression(span_ref, kind, types.binding, ValueKind::Const, region)
     }
 
     pub(super) fn lower_collection_loop_statement_impl(
@@ -1895,16 +1876,14 @@ impl<'a> HirBuilder<'a> {
         };
 
         if let Some(step_ty) = step_ty {
-            let Some(step_domain) =
-                NumericScalar::from_type_id(step_ty, &self.type_environment)
+            let Some(step_domain) = NumericScalar::from_type_id(step_ty, &self.type_environment)
             else {
                 return_hir_transformation_error!(
                     "Range loop step did not lower to a numeric scalar type",
                     self.hir_error_location(span_ref)
                 );
             };
-            let Some(promoted) =
-                binary_operation_domain(NumericOperator::Add, domain, step_domain)
+            let Some(promoted) = binary_operation_domain(NumericOperator::Add, domain, step_domain)
             else {
                 return_hir_transformation_error!(
                     "Range loop step has no common numeric promotion domain",

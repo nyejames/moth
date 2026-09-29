@@ -1,9 +1,9 @@
 use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_module;
+use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::emit::sections::{
     build_emit_plan, helper_emit_order, helper_name, helper_signature,
 };
-use crate::backends::wasm::emit::module::emit_lir_to_wasm_module;
 use crate::backends::wasm::lir::function::{WasmLirBlock, WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::{
     WasmCalleeRef, WasmIntegerOperationKind, WasmIntegerPowerScratch, WasmIntegerScratch,
@@ -27,8 +27,6 @@ use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, int_expression,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
-use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
-use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_profile::{
@@ -39,6 +37,8 @@ use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
@@ -419,12 +419,12 @@ fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
     validate_wasm(&result.wasm_bytes);
 
     let f32_inputs = [
-        "7f7fffff", // largest finite
-        "00000001", // smallest subnormal
-        "80000000", // negative zero
-        "7fc00000", // NaN
-        "7f800000", // positive infinity
-        "ff800000", // negative infinity
+        "7f7fffff",         // largest finite
+        "00000001",         // smallest subnormal
+        "80000000",         // negative zero
+        "7fc00000",         // NaN
+        "7f800000",         // positive infinity
+        "ff800000",         // negative infinity
         "7fefffffffffffff", // finite F64 rounds to positive F32 infinity at the boundary
         "ffefffffffffffff", // finite F64 rounds to negative F32 infinity at the boundary
     ];
@@ -477,11 +477,14 @@ fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
             assert_eq!(fields.next(), Some(name));
             assert_eq!(fields.next(), Some(*input_bits));
             let status = fields.next().expect("Node result should include status");
-            let value = fields.next().expect("Node result should include bits or trap");
+            let value = fields
+                .next()
+                .expect("Node result should include bits or trap");
 
             let finite = match precision {
                 BinaryFloatPrecision::Binary32 if input_bits.len() == 16 => {
-                    (f64::from_bits(u64::from_str_radix(input_bits, 16).unwrap()) as f32).is_finite()
+                    (f64::from_bits(u64::from_str_radix(input_bits, 16).unwrap()) as f32)
+                        .is_finite()
                 }
                 BinaryFloatPrecision::Binary32 => {
                     f32::from_bits(u32::from_str_radix(input_bits, 16).unwrap()).is_finite()
@@ -1493,12 +1496,10 @@ process.stdout.write(rows.join("\n"));
 
     let promoted_f32 = f32::from_bits(0x3dcccccd);
     let promoted_f64 = f64::from(promoted_f32);
-    let promoted_f32_text =
-        format_finite_float(promoted_f64, BinaryFloatPrecision::Binary32)
-            .expect("finite promoted F32 probe should format");
-    let promoted_f64_text =
-        format_finite_float(promoted_f64, BinaryFloatPrecision::Binary64)
-            .expect("finite promoted F64 probe should format");
+    let promoted_f32_text = format_finite_float(promoted_f64, BinaryFloatPrecision::Binary32)
+        .expect("finite promoted F32 probe should format");
+    let promoted_f64_text = format_finite_float(promoted_f64, BinaryFloatPrecision::Binary64)
+        .expect("finite promoted F64 probe should format");
     assert_ne!(
         promoted_f32_text, promoted_f64_text,
         "the F32/F64 probe must distinguish precision for promoted F32 bits 3dcccccd"
@@ -1651,7 +1652,9 @@ fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
                     kind: f16_kind,
                 },
             ],
-            terminator: WasmLirTerminator::Return { value: Some(loaded) },
+            terminator: WasmLirTerminator::Return {
+                value: Some(loaded),
+            },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -2440,9 +2443,17 @@ fn build_checked_float_operation_module(cases: &[CheckedFloatOperationCase]) -> 
 
 fn build_float_validation_lir_module() -> WasmLirModule {
     let cases = [
-        ("validate_f32_distinct", BinaryFloatPrecision::Binary32, false),
+        (
+            "validate_f32_distinct",
+            BinaryFloatPrecision::Binary32,
+            false,
+        ),
         ("validate_f32_alias", BinaryFloatPrecision::Binary32, true),
-        ("validate_f64_distinct", BinaryFloatPrecision::Binary64, false),
+        (
+            "validate_f64_distinct",
+            BinaryFloatPrecision::Binary64,
+            false,
+        ),
         ("validate_f64_alias", BinaryFloatPrecision::Binary64, true),
     ];
     let mut module = WasmLirModule::default();
@@ -2929,7 +2940,9 @@ fn integer_string_conversion_function(
         blocks: vec![WasmLirBlock {
             id: WasmLirBlockId(0),
             statements: vec![conversion],
-            terminator: WasmLirTerminator::Return { value: Some(output) },
+            terminator: WasmLirTerminator::Return {
+                value: Some(output),
+            },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -2942,9 +2955,21 @@ fn integer_string_conversion_function(
 
 fn build_float_string_conversion_lir_module() -> WasmLirModule {
     let cases = [
-        ("string_f16", WasmAbiType::F32, BinaryFloatPrecision::Binary16),
-        ("string_f32", WasmAbiType::F32, BinaryFloatPrecision::Binary32),
-        ("string_f64", WasmAbiType::F64, BinaryFloatPrecision::Binary64),
+        (
+            "string_f16",
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary16,
+        ),
+        (
+            "string_f32",
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+        (
+            "string_f64",
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
     ];
     let mut functions = Vec::with_capacity(cases.len());
     let mut exports = Vec::with_capacity(cases.len());
@@ -2976,7 +3001,9 @@ fn build_float_string_conversion_lir_module() -> WasmLirModule {
                     value: input,
                     precision,
                 }],
-                terminator: WasmLirTerminator::Return { value: Some(output) },
+                terminator: WasmLirTerminator::Return {
+                    value: Some(output),
+                },
             }],
             linkage: WasmFunctionLinkage::ExportedWrapper,
         });
@@ -3007,7 +3034,7 @@ fn float_text_f32_cases() -> Vec<u32> {
         0x7f7f_ffff,
         0xff7f_ffff,
         0x3d_cc_cc_cd, // 0.1, also used by the promoted-precision comparison.
-        0x477f_e000, // 65504, the largest finite F16 value.
+        0x477f_e000,   // 65504, the largest finite F16 value.
     ];
     for value in [1.0e-6f32, 1.0e21f32] {
         push_f32_neighbor_bits(&mut bits, value.to_bits());
@@ -3019,9 +3046,7 @@ fn float_text_f32_cases() -> Vec<u32> {
     let mut state = 0x5a17_39cdu32;
     let mut random_count = 0;
     while random_count < 128 {
-        state = state
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223);
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         if state & 0x7f80_0000 != 0x7f80_0000 {
             bits.push(state);
             random_count += 1;
@@ -3101,8 +3126,6 @@ fn push_float_text_expectation(
         .unwrap_or_else(|error| panic!("{precision_name} bits {bits}: {error}"));
     expected.push(format!("{precision_name}|{bits}|{text}"));
 }
-
-
 
 fn execute_wasm_checked_exports_in_node(
     wasm_bytes: &[u8],

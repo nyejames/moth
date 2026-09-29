@@ -143,13 +143,15 @@ impl<'a> BuiltArtifactIndex<'a> {
     pub(super) fn javascript_artifacts<'index>(
         &'index self,
     ) -> impl Iterator<Item = (&'index str, &'index str)> + 'index {
-        self.by_path.iter().filter_map(|(path, artifact)| match artifact {
-            IndexedArtifact::File(output) => match output.file_kind() {
-                FileKind::Js(source) => Some((path.as_str(), source.as_str())),
-                _ => None,
-            },
-            IndexedArtifact::DeferredResource(_) => None,
-        })
+        self.by_path
+            .iter()
+            .filter_map(|(path, artifact)| match artifact {
+                IndexedArtifact::File(output) => match output.file_kind() {
+                    FileKind::Js(source) => Some((path.as_str(), source.as_str())),
+                    _ => None,
+                },
+                IndexedArtifact::DeferredResource(_) => None,
+            })
     }
 
     /// Deferred JavaScript resources in the validated portable output set.

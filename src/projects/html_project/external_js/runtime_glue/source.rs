@@ -101,12 +101,7 @@ pub(super) fn generate_infallible_wrapper(
     return_types: &[ExternalSignatureType],
     numeric_profile: NumericProfile,
 ) -> Result<String, CompilerError> {
-    validate_supported_signature(
-        wrapper_name,
-        parameter_types,
-        return_types,
-        numeric_profile,
-    )?;
+    validate_supported_signature(wrapper_name, parameter_types, return_types, numeric_profile)?;
     let arguments = prepare_call_arguments(parameter_types, numeric_profile);
     let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
     let return_body = adapted_return_body(
@@ -138,12 +133,7 @@ pub(super) fn generate_fallible_wrapper(
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
 ) -> Result<String, CompilerError> {
-    validate_supported_signature(
-        wrapper_name,
-        parameter_types,
-        return_types,
-        numeric_profile,
-    )?;
+    validate_supported_signature(wrapper_name, parameter_types, return_types, numeric_profile)?;
     let arguments = prepare_call_arguments(parameter_types, numeric_profile);
     let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
     let zero_code = JsNumericCarrier::int_literal(0, numeric_profile)
@@ -178,11 +168,8 @@ pub(super) fn generate_fallible_wrapper(
     );
     let catch_error =
         internal_error_object_source("String(e.message || e)", &zero_code, release_build);
-    let returned_error = internal_error_object_source(
-        "errorMessage",
-        &returned_error_code,
-        release_build,
-    );
+    let returned_error =
+        internal_error_object_source("errorMessage", &returned_error_code, release_build);
     let invalid_wrapper_handling = if release_build {
         format!("        return {{ tag: \"err\", value: {invalid_error} }};")
     } else {
@@ -237,9 +224,9 @@ fn validate_supported_signature(
     }
 
     if return_types.len() > 1
-        && return_types
-            .iter()
-            .any(|value_type| return_adapter_for_type(value_type, numeric_profile) != ReturnAdapter::Identity)
+        && return_types.iter().any(|value_type| {
+            return_adapter_for_type(value_type, numeric_profile) != ReturnAdapter::Identity
+        })
     {
         return Err(CompilerError::compiler_error(format!(
             "HTML JS glue cannot adapt multiple numeric success slots for external function '{wrapper_name}'."
@@ -409,10 +396,7 @@ fn adapted_return_body(
     }
 }
 
-fn float_boundary_error_source(
-    numeric_profile: NumericProfile,
-    release_build: bool,
-) -> String {
+fn float_boundary_error_source(numeric_profile: NumericProfile, release_build: bool) -> String {
     let error = BuiltinErrorCode::FloatBoundaryNonFinite;
     let message = format!("{:?}", error.default_message());
     let code = JsNumericCarrier::int_literal(error.as_i32() as i64, numeric_profile)

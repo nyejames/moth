@@ -169,8 +169,18 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
             f16_scalar,
             runtime_cast_rejection,
         ),
-        (int32_float32, f32_scalar, f16_scalar, runtime_cast_rejection),
-        (int32_float32, f64_scalar, f16_scalar, runtime_cast_rejection),
+        (
+            int32_float32,
+            f32_scalar,
+            f16_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            f64_scalar,
+            f16_scalar,
+            runtime_cast_rejection,
+        ),
         (
             int32_float32,
             f16_scalar,

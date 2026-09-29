@@ -632,7 +632,6 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::StringFromFloat => {
             unreachable!("numeric/string formatters are dispatched to their focused emitters")
         }
-
     }
     function.instruction(&Instruction::End);
     Ok(function)
@@ -648,20 +647,16 @@ fn emit_string_from_u64(
         .get(&WasmRuntimeHelper::StringNewBuffer)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Wasm emission missing rt_string_new_buffer helper index",
-            )
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            CompilerError::compiler_error("Wasm emission missing rt_string_new_buffer helper index")
+                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
     let string_finish_index = plan
         .helper_indices
         .get(&WasmRuntimeHelper::StringFinish)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Wasm emission missing rt_string_finish helper index",
-            )
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            CompilerError::compiler_error("Wasm emission missing rt_string_finish helper index")
+                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
 
     const VALUE_I64: u32 = 0;

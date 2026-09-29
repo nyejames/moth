@@ -5,9 +5,9 @@
 //! type system because host boundaries are intentionally restricted.
 //! WHY: the frontend needs to know how to validate and lower arguments without embedding
 //! backend-specific knowledge into the AST.
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
 use super::ids::ExternalTypeId;

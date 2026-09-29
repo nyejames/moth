@@ -534,24 +534,18 @@ console.log(external_value);
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
     let mut build_result = build_result_with_index_html(&html);
-    let javascript_source_id = build_result
-        .project
-        .resource_inputs
-        .register_source(
-            javascript_source
-                .path()
-                .canonicalize()
-                .expect("the deferred JavaScript source should canonicalize"),
-        );
-    let image_source_id = build_result
-        .project
-        .resource_inputs
-        .register_source(
-            image_source
-                .path()
-                .canonicalize()
-                .expect("the deferred image source should canonicalize"),
-        );
+    let javascript_source_id = build_result.project.resource_inputs.register_source(
+        javascript_source
+            .path()
+            .canonicalize()
+            .expect("the deferred JavaScript source should canonicalize"),
+    );
+    let image_source_id = build_result.project.resource_inputs.register_source(
+        image_source
+            .path()
+            .canonicalize()
+            .expect("the deferred image source should canonicalize"),
+    );
     build_result.project.deferred_resources = vec![
         DeferredResourceOutput {
             relative_output_path: PathBuf::from("nested/providers/external_int.js"),
@@ -592,8 +586,11 @@ console.log(external_value);
 fn module_harness_reports_a_missing_deferred_javascript_source_as_a_harness_failure() {
     let javascript_source = tempfile::NamedTempFile::new()
         .expect("the deferred JavaScript source should have a real temporary file");
-    std::fs::write(javascript_source.path(), "export const external_value = 'unused';")
-        .expect("the deferred JavaScript source should be writable");
+    std::fs::write(
+        javascript_source.path(),
+        "export const external_value = 'unused';",
+    )
+    .expect("the deferred JavaScript source should be writable");
     let javascript_source_path = javascript_source
         .path()
         .canonicalize()
@@ -635,7 +632,10 @@ console.log(external_value);
 
     let result = validate_success_result(&case, build_result, &expectation);
 
-    assert!(!result.passed, "an unreadable resource must not pass rendering");
+    assert!(
+        !result.passed,
+        "an unreadable resource must not pass rendering"
+    );
     assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
     let reason = result
         .failure_reason
@@ -666,14 +666,15 @@ fn module_harness_reports_import_maps_as_harness_failures() {
         artifacts_must_not_exist: Vec::new(),
     };
     let case = success_test_case(BackendId::Html, expectation.clone());
-    let build_result = build_result_with_output_files(vec![(
-        PathBuf::from("index.html"),
-        FileKind::Html(html),
-    )]);
+    let build_result =
+        build_result_with_output_files(vec![(PathBuf::from("index.html"), FileKind::Html(html))]);
 
     let result = validate_success_result(&case, build_result, &expectation);
 
-    assert!(!result.passed, "an import map must not execute under native ESM");
+    assert!(
+        !result.passed,
+        "an import map must not execute under native ESM"
+    );
     assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
     let reason = result
         .failure_reason

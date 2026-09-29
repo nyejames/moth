@@ -955,10 +955,12 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
     assert_ne!(native_int_id, fixed_i32_id);
     assert_ne!(native_float_id, fixed_f64_id);
 
-    let native_returns =
-        external_success_returns(native_float, ExternalReturnAlias::Fresh);
+    let native_returns = external_success_returns(native_float, ExternalReturnAlias::Fresh);
     assert_eq!(native_returns.len(), 1);
-    assert_eq!(native_returns[0].value_type, ExternalSignatureType::NativeFloat);
+    assert_eq!(
+        native_returns[0].value_type,
+        ExternalSignatureType::NativeFloat
+    );
     assert!(
         external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh).is_empty(),
         "Void must continue to produce no success-return slot",
@@ -976,8 +978,14 @@ fn core_numeric_package_signatures_remain_native_language_types() {
     let (_, sin) = registry
         .resolve_package_function("@core/math", "sin")
         .expect("core math function should be registered");
-    assert_eq!(sin.parameters[0].language_type, ExternalSignatureType::NativeFloat);
-    assert_eq!(sin.returns[0].value_type, ExternalSignatureType::NativeFloat);
+    assert_eq!(
+        sin.parameters[0].language_type,
+        ExternalSignatureType::NativeFloat
+    );
+    assert_eq!(
+        sin.returns[0].value_type,
+        ExternalSignatureType::NativeFloat
+    );
     let (_, pi) = registry
         .resolve_package_constant("@core/math", "PI")
         .expect("core math constant should be registered");

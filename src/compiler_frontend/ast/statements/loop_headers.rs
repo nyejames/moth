@@ -25,12 +25,14 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidLoopHeaderReason, RangeOperandKind,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
-use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, binary_operation_domain};
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, binary_operation_domain,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
@@ -721,10 +723,7 @@ fn parse_range_loop_spec_cursor(
         if let Some(step_expression) = &step
             && is_zero_numeric_literal(step_expression)
         {
-            return loop_header_error(
-                InvalidLoopHeaderReason::ZeroRangeStep,
-                step_expression.span,
-            );
+            return loop_header_error(InvalidLoopHeaderReason::ZeroRangeStep, step_expression.span);
         }
 
         let start = if let Some(start) = start_expression {
@@ -767,27 +766,25 @@ fn range_numeric_domain(
 ) -> LoopHeaderResult<NumericScalar> {
     let end_domain = range_operand_domain(end, RangeOperandKind::End, type_environment)?;
     let start_domain = match start {
-        Some(expression) => range_operand_domain(
-            expression,
-            RangeOperandKind::Start,
-            type_environment,
-        )?,
+        Some(expression) => {
+            range_operand_domain(expression, RangeOperandKind::Start, type_environment)?
+        }
         None => end_domain,
     };
-    let Some(mut domain) =
-        binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
+    let Some(mut domain) = binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
     else {
-        return Err(
-            CompilerDiagnostic::invalid_range_operand(RangeOperandKind::End, end.type_id, end.span)
-                .into(),
-        );
+        return Err(CompilerDiagnostic::invalid_range_operand(
+            RangeOperandKind::End,
+            end.type_id,
+            end.span,
+        )
+        .into());
     };
 
     if let Some(step_expression) = step {
         let step_domain =
             range_operand_domain(step_expression, RangeOperandKind::Step, type_environment)?;
-        let Some(promoted) =
-            binary_operation_domain(NumericOperator::Add, domain, step_domain)
+        let Some(promoted) = binary_operation_domain(NumericOperator::Add, domain, step_domain)
         else {
             return Err(CompilerDiagnostic::invalid_range_operand(
                 RangeOperandKind::Step,
@@ -1247,9 +1244,7 @@ fn is_zero_numeric_literal(expression: &Expression) -> bool {
         ExpressionKind::Int(value) => value == 0,
         ExpressionKind::Float(value) => value == 0.0,
         ExpressionKind::FixedScalar(value) => {
-            value.as_i64() == Some(0)
-                || value.as_u64() == Some(0)
-                || value.as_f64() == Some(0.0)
+            value.as_i64() == Some(0) || value.as_u64() == Some(0) || value.as_f64() == Some(0.0)
         }
         _ => false,
     }

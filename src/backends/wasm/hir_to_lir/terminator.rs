@@ -159,7 +159,9 @@ fn lower_jump_argument_transfer(
     for (index, (source, _, abi)) in transfers.iter().enumerate() {
         if transfers[..index]
             .iter()
-            .any(|(prior_source, destination, _)| prior_source != destination && destination == source)
+            .any(|(prior_source, destination, _)| {
+                prior_source != destination && destination == source
+            })
             && !captured.iter().any(|(original, _)| original == source)
         {
             let snapshot = context.alloc_temp(*abi);

@@ -50,9 +50,7 @@ impl WasmScalarStorageKind {
     /// Wasm computation carrier for loads and stores of this physical kind.
     pub(crate) const fn carrier(self) -> WasmAbiType {
         match self {
-            Self::I8 | Self::U8 | Self::I16 | Self::U16 | Self::I32 | Self::U32 => {
-                WasmAbiType::I32
-            }
+            Self::I8 | Self::U8 | Self::I16 | Self::U16 | Self::I32 | Self::U32 => WasmAbiType::I32,
             Self::I64 | Self::U64 => WasmAbiType::I64,
             Self::F16 | Self::F32 => WasmAbiType::F32,
             Self::F64 => WasmAbiType::F64,

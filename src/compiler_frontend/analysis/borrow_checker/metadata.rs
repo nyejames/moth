@@ -1182,7 +1182,6 @@ fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
     }
 }
 
-
 fn reaches_function(
     start: FunctionId,
     current: FunctionId,

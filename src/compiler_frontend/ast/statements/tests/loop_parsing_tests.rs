@@ -226,9 +226,12 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
-    assert!(bindings.index.as_ref().is_some_and(|binding| {
-        matches!(&binding.value.diagnostic_type, DataType::Int)
-    }));
+    assert!(
+        bindings
+            .index
+            .as_ref()
+            .is_some_and(|binding| { matches!(&binding.value.diagnostic_type, DataType::Int) })
+    );
     assert!(matches!(
         &range.start.diagnostic_type,
         DataType::FixedScalar(FixedScalar::I8)
@@ -238,7 +241,10 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
         DataType::FixedScalar(FixedScalar::U16)
     ));
     assert!(range.step.as_ref().is_some_and(|step| {
-        matches!(&step.diagnostic_type, DataType::FixedScalar(FixedScalar::U16))
+        matches!(
+            &step.diagnostic_type,
+            DataType::FixedScalar(FixedScalar::U16)
+        )
     }));
 }
 
@@ -261,7 +267,6 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
         )
     }));
 }
-
 
 #[test]
 fn omitted_range_start_zero_uses_promoted_fixed_domain() {
@@ -289,9 +294,12 @@ fn omitted_range_start_zero_uses_promoted_fixed_domain() {
             DataType::FixedScalar(FixedScalar::U64)
         )
     }));
-    assert!(bindings.index.as_ref().is_some_and(|binding| {
-        matches!(&binding.value.diagnostic_type, DataType::Int)
-    }));
+    assert!(
+        bindings
+            .index
+            .as_ref()
+            .is_some_and(|binding| { matches!(&binding.value.diagnostic_type, DataType::Int) })
+    );
 }
 
 #[test]
@@ -342,11 +350,11 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
     }));
 }
 
-
 #[test]
 fn rejects_byte_range_operand() {
-    let payload =
-        parse_loop_fixture_diagnostic("end Byte = 1\nloop 0 to end |value|:\n    io.line([: [value]])\n;");
+    let payload = parse_loop_fixture_diagnostic(
+        "end Byte = 1\nloop 0 to end |value|:\n    io.line([: [value]])\n;",
+    );
 
     assert!(matches!(
         payload,

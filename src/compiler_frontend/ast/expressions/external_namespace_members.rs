@@ -238,26 +238,21 @@ pub(super) fn project_external_constant(
                 value_mode,
             )
         }
-        (
-            ExternalSignatureType::Abi(ExternalAbiType::F64),
-            ExternalConstantValue::Float(value),
-        ) => {
-            let value = FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
-                CompilerDiagnostic::compile_time_evaluation_error(
-                    CompileTimeEvaluationErrorReason::FloatOverflow,
-                    Some(constant_name),
-                    span,
-                )
-            })?;
+        (ExternalSignatureType::Abi(ExternalAbiType::F64), ExternalConstantValue::Float(value)) => {
+            let value =
+                FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
+                    CompilerDiagnostic::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::FloatOverflow,
+                        Some(constant_name),
+                        span,
+                    )
+                })?;
             Ok(Expression::fixed_scalar(value, span, value_mode))
         }
         (ExternalSignatureType::NativeInt, ExternalConstantValue::Int(value)) => {
             Ok(Expression::int(i64::from(value), span, value_mode))
         }
-        (
-            ExternalSignatureType::Abi(ExternalAbiType::I32),
-            ExternalConstantValue::Int(value),
-        ) => {
+        (ExternalSignatureType::Abi(ExternalAbiType::I32), ExternalConstantValue::Int(value)) => {
             let value = FixedScalarValue::signed(FixedScalar::I32, i64::from(value))
                 .expect("an I32 constant payload always fits the I32 scalar");
             Ok(Expression::fixed_scalar(value, span, value_mode))
@@ -269,12 +264,9 @@ pub(super) fn project_external_constant(
             let string_id = string_table.intern(value);
             Ok(Expression::string_slice(string_id, span, value_mode))
         }
-        (
-            ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            ExternalConstantValue::Bool(value),
-        ) => Ok(Expression::bool(value, span, value_mode)),
-        _ => unreachable!(
-            "registered external constant has mismatched signature and payload"
-        ),
+        (ExternalSignatureType::Abi(ExternalAbiType::Bool), ExternalConstantValue::Bool(value)) => {
+            Ok(Expression::bool(value, span, value_mode))
+        }
+        _ => unreachable!("registered external constant has mismatched signature and payload"),
     }
 }

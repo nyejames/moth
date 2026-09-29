@@ -254,7 +254,6 @@ fn generate_module_glue_asset_import_relative_to_glue_module() {
     );
 }
 
-
 #[test]
 fn fallible_wrapper_handles_invalid_shape_differently_for_debug_and_release() {
     let debug_source = generate_fallible_wrapper(
@@ -370,15 +369,9 @@ fn int64_fallible_wrapper_executes_with_bigint_error_code() {
         int_width: IntWidth::Bits64,
         ..NumericProfile::STANDARD
     };
-    let wrapper = generate_fallible_wrapper(
-        "wrapExternal",
-        "failExternal",
-        false,
-        profile,
-        &[],
-        &[],
-    )
-    .expect("fallible wrapper generation should succeed");
+    let wrapper =
+        generate_fallible_wrapper("wrapExternal", "failExternal", false, profile, &[], &[])
+            .expect("fallible wrapper generation should succeed");
     let code_field = crate::backends::js::builtin_error_code_js_field_name(false);
     let code_field = format!("{code_field:?}");
     let script = format!(
@@ -445,8 +438,7 @@ fn fallible_wrapper_reads_foreign_error_code_once_for_each_profile_and_build_mod
         )
         .expect("fallible wrapper generation should succeed");
         let code_field = crate::backends::js::builtin_error_code_js_field_name(release_build);
-        let message_field =
-            crate::backends::js::builtin_error_message_js_field_name(release_build);
+        let message_field = crate::backends::js::builtin_error_message_js_field_name(release_build);
         let (changing_code, invalid_initial_code, expected_code, zero_code) = match int_width {
             IntWidth::Bits32 => ("Infinity", "Infinity", "-17", "0"),
             IntWidth::Bits64 => ("1e20", "1e20", "-17n", "0n"),
@@ -696,12 +688,36 @@ fn fixed_i32_glue_checks_bounds_and_other_signatures_preserve_js_values() {
     .expect("mixed signature wrapper generation should succeed");
     let mut output_wrappers = String::new();
     for (wrapper_name, export_name, return_type) in [
-        ("wrapBool", "rawBool", ExternalSignatureType::Abi(ExternalAbiType::Bool)),
-        ("wrapString", "rawString", ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
-        ("wrapChar", "rawChar", ExternalSignatureType::Abi(ExternalAbiType::Char)),
-        ("wrapHandle", "rawHandle", ExternalSignatureType::Abi(ExternalAbiType::Handle)),
-        ("wrapNativeInt", "rawNativeInt", ExternalSignatureType::NativeInt),
-        ("wrapNativeFloat", "rawNativeFloat", ExternalSignatureType::NativeFloat),
+        (
+            "wrapBool",
+            "rawBool",
+            ExternalSignatureType::Abi(ExternalAbiType::Bool),
+        ),
+        (
+            "wrapString",
+            "rawString",
+            ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+        ),
+        (
+            "wrapChar",
+            "rawChar",
+            ExternalSignatureType::Abi(ExternalAbiType::Char),
+        ),
+        (
+            "wrapHandle",
+            "rawHandle",
+            ExternalSignatureType::Abi(ExternalAbiType::Handle),
+        ),
+        (
+            "wrapNativeInt",
+            "rawNativeInt",
+            ExternalSignatureType::NativeInt,
+        ),
+        (
+            "wrapNativeFloat",
+            "rawNativeFloat",
+            ExternalSignatureType::NativeFloat,
+        ),
     ] {
         let wrapper = generate_infallible_wrapper(
             wrapper_name,

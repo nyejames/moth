@@ -306,11 +306,8 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             }
         };
-        let (ascending_comparison, descending_comparison) = if inclusive {
-            ("<=", ">=")
-        } else {
-            ("<", ">")
-        };
+        let (ascending_comparison, descending_comparison) =
+            if inclusive { ("<=", ">=") } else { ("<", ">") };
         let bound_check = format!(
             "({direction_name} ? ({candidate_name} {ascending_comparison} {end_expr}) : ({candidate_name} {descending_comparison} {end_expr}))"
         );
@@ -318,9 +315,8 @@ impl<'hir> JsEmitter<'hir> {
         let in_range_local = self.local_name(in_range_result)?;
         let direction_assignment = format!("const {direction_name} = {ascending_expr};");
         let candidate_assignment = format!("const {candidate_name} = {candidate_expr};");
-        let in_range_assignment = format!(
-            "const {in_range_name} = Number.isFinite({candidate_name}) && {bound_check};"
-        );
+        let in_range_assignment =
+            format!("const {in_range_name} = Number.isFinite({candidate_name}) && {bound_check};");
         let in_range_result_assignment =
             format!("__moth_assign_value({in_range_local}, {in_range_name});");
         let candidate_result_assignment = format!(

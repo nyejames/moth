@@ -16,13 +16,13 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::datatypes::fixed_scalar::{
     FixedScalar, FixedScalarClass, FixedScalarValue,
 };
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -244,7 +244,6 @@ impl ConstRangeCursor {
                     float_precision,
                 })
             }
-
         }
     }
     fn new_fixed(
@@ -261,14 +260,15 @@ impl ConstRangeCursor {
     ) -> Result<Self, TemplateError> {
         let (start, end, step) = range_values;
         let end_kind = range.end_kind;
-        let step_span = range
-            .step
-            .as_ref()
-            .and_then(|expression| expression.span);
+        let step_span = range.step.as_ref().and_then(|expression| expression.span);
         let kind = match scalar.class() {
             FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
-                let current = start.to_fixed_integer().ok_or_else(|| invalid_range_bounds(span))?;
-                let end = end.to_fixed_integer().ok_or_else(|| invalid_range_bounds(span))?;
+                let current = start
+                    .to_fixed_integer()
+                    .ok_or_else(|| invalid_range_bounds(span))?;
+                let end = end
+                    .to_fixed_integer()
+                    .ok_or_else(|| invalid_range_bounds(span))?;
                 let maximum_step_magnitude = fixed_integer_max_magnitude(scalar)
                     .ok_or_else(|| invalid_range_bounds(span))?;
                 let step_magnitude = match step {
@@ -295,8 +295,8 @@ impl ConstRangeCursor {
                 }
             }
             FixedScalarClass::BinaryFloat => {
-                let (scalar, precision) = fixed_float_domain(scalar)
-                    .ok_or_else(|| invalid_range_bounds(span))?;
+                let (scalar, precision) =
+                    fixed_float_domain(scalar).ok_or_else(|| invalid_range_bounds(span))?;
                 let current = start
                     .to_fixed_float(precision)
                     .ok_or_else(|| invalid_range_bounds(span))?;
@@ -483,7 +483,6 @@ impl ConstRangeCursor {
                 Ok(Some(counter))
             }
 
-
             ConstRangeCursorKind::Float {
                 current,
                 end,
@@ -606,18 +605,12 @@ fn const_range_domain(
         end.numeric_scalar(),
     )?;
     if let Some(step) = step {
-        domain = binary_operation_domain(
-            NumericOperator::Add,
-            domain,
-            step.numeric_scalar(),
-        )?;
+        domain = binary_operation_domain(NumericOperator::Add, domain, step.numeric_scalar())?;
     }
     Some(domain)
 }
 
-fn fixed_float_domain(
-    scalar: FixedScalar,
-) -> Option<(FixedScalar, BinaryFloatPrecision)> {
+fn fixed_float_domain(scalar: FixedScalar) -> Option<(FixedScalar, BinaryFloatPrecision)> {
     match scalar {
         FixedScalar::F16 | FixedScalar::F32 => {
             Some((FixedScalar::F32, BinaryFloatPrecision::Binary32))
@@ -640,14 +633,13 @@ fn fixed_integer_scalar(scalar: FixedScalar, value: i128) -> Option<FixedScalarV
 }
 fn fixed_integer_max_magnitude(scalar: FixedScalar) -> Option<i128> {
     match scalar.class() {
-        FixedScalarClass::SignedInteger => {
-            scalar.signed_range().map(|(_, maximum)| i128::from(maximum))
-        }
+        FixedScalarClass::SignedInteger => scalar
+            .signed_range()
+            .map(|(_, maximum)| i128::from(maximum)),
         FixedScalarClass::UnsignedInteger => scalar.unsigned_max().map(i128::from),
         FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
     }
 }
-
 
 fn invalid_range_bounds(
     span: Option<crate::compiler_frontend::source::SourceSpan>,

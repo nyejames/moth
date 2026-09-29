@@ -35,7 +35,12 @@ pub(super) fn emit_validate_float(
         }
     };
     ensure_local_abi(source, abi_type, context, "Float validation source")?;
-    ensure_local_abi(destination, abi_type, context, "Float validation destination")?;
+    ensure_local_abi(
+        destination,
+        abi_type,
+        context,
+        "Float validation destination",
+    )?;
 
     function.instruction(&Instruction::LocalGet(local_index(source, context)?));
     emit_finite_float_check(function, destination, precision, context)

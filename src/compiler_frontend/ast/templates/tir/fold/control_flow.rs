@@ -63,10 +63,7 @@ fn resolve_range_constant_operands(
         .map(|step| resolve_range_constant_operand(step, fold_context))
         .transpose()?;
 
-    if start.is_none()
-        && end.is_none()
-        && !step.as_ref().is_some_and(|step| step.is_some())
-    {
+    if start.is_none() && end.is_none() && !step.as_ref().is_some_and(|step| step.is_some()) {
         return Ok(None);
     }
 
@@ -157,9 +154,9 @@ fn fold_source_constant_initializer(
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<Option<Expression>, TemplateError> {
     match &expression.kind {
-        ExpressionKind::Int(_)
-        | ExpressionKind::Float(_)
-        | ExpressionKind::FixedScalar(_) => Ok(Some(expression.clone())),
+        ExpressionKind::Int(_) | ExpressionKind::Float(_) | ExpressionKind::FixedScalar(_) => {
+            Ok(Some(expression.clone()))
+        }
         ExpressionKind::Reference(_) => {
             resolve_source_constant_references(expression, fold_context)
         }
