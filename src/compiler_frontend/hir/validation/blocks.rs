@@ -11,8 +11,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, negation_domain};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
@@ -344,6 +346,70 @@ impl<'a> HirValidator<'a> {
                             ));
                         }
                     }
+                }
+            }
+
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                domain,
+                candidate_result,
+                in_range_result,
+                ..
+            } => {
+                if !matches!(
+                    domain,
+                    NumericScalar::Float
+                        | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
+                ) {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate requires a profile Float, F32, or F64 domain",
+                        anchor,
+                    ));
+                }
+
+                self.validate_expression(current, anchor)?;
+                self.validate_expression(step, anchor)?;
+                self.validate_expression(end, anchor)?;
+                self.validate_expression(ascending, anchor)?;
+
+                let domain_type = domain.type_id(self.type_environment);
+                if current.ty != domain_type || step.ty != domain_type || end.ty != domain_type {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate operands must match its numeric domain",
+                        anchor,
+                    ));
+                }
+                if ascending.ty != self.type_environment.builtins().bool {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate direction operand must be Bool",
+                        anchor,
+                    ));
+                }
+
+                self.require_local_id(*candidate_result, anchor)?;
+                self.require_local_id(*in_range_result, anchor)?;
+                let Some(candidate_type) = self.local_types.get(candidate_result).copied() else {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate destination has no registered type",
+                        anchor,
+                    ));
+                };
+                let Some(in_range_type) = self.local_types.get(in_range_result).copied() else {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate Bool result has no registered type",
+                        anchor,
+                    ));
+                };
+                if candidate_type != domain_type
+                    || in_range_type != self.type_environment.builtins().bool
+                {
+                    return Err(self.error_with_hir(
+                        "FloatRangeCandidate result locals have the wrong types",
+                        anchor,
+                    ));
                 }
             }
 

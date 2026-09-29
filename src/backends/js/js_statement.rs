@@ -10,6 +10,7 @@ use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
@@ -95,6 +96,24 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_numeric_op_statement(*op, *failure_mode, operands, *result)?;
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                inclusive,
+                domain,
+                candidate_result,
+                in_range_result,
+            } => {
+                self.emit_float_range_candidate_statement(
+                    [current, step, end, ascending],
+                    *inclusive,
+                    *domain,
+                    *candidate_result,
+                    *in_range_result,
+                )?;
+            }
             HirStatementKind::FormatFloat {
                 source,
                 failure_mode,
@@ -247,6 +266,74 @@ impl<'hir> JsEmitter<'hir> {
 
         let helper_call = format!("{helper_name}({})", lowered_args.join(", "));
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
+    }
+
+    /// Emit the range candidate into JS-local scratch, then commit only a finite in-bound value.
+    fn emit_float_range_candidate_statement(
+        &mut self,
+        expressions: [&HirExpression; 4],
+        inclusive: bool,
+        domain: NumericScalar,
+        candidate_result: LocalId,
+        in_range_result: LocalId,
+    ) -> Result<(), CompilerError> {
+        let [current, step, end, ascending] = expressions;
+
+        let current_expr = self.lower_expr(current)?;
+        let step_expr = self.lower_expr(step)?;
+        let end_expr = self.lower_expr(end)?;
+        let ascending_expr = self.lower_expr(ascending)?;
+        let precision = domain
+            .binary_float_precision(self.config.numeric_profile)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend received a non-float range candidate domain {domain:?}"
+                ))
+            })?;
+
+        let direction_name = self.next_temp_identifier("__float_range_ascending");
+        let candidate_name = self.next_temp_identifier("__float_range_candidate");
+        let in_range_name = self.next_temp_identifier("__float_range_valid");
+        let unrounded_candidate = format!(
+            "({direction_name} ? ({current_expr} + {step_expr}) : ({current_expr} - {step_expr}))"
+        );
+        let candidate_expr = match precision {
+            BinaryFloatPrecision::Binary32 => format!("Math.fround({unrounded_candidate})"),
+            BinaryFloatPrecision::Binary64 => unrounded_candidate,
+            BinaryFloatPrecision::Binary16 => {
+                return Err(CompilerError::compiler_error(
+                    "JS backend does not support F16 range candidates",
+                ));
+            }
+        };
+        let (ascending_comparison, descending_comparison) = if inclusive {
+            ("<=", ">=")
+        } else {
+            ("<", ">")
+        };
+        let bound_check = format!(
+            "({direction_name} ? ({candidate_name} {ascending_comparison} {end_expr}) : ({candidate_name} {descending_comparison} {end_expr}))"
+        );
+        let candidate_local = self.local_name(candidate_result)?;
+        let in_range_local = self.local_name(in_range_result)?;
+        let direction_assignment = format!("const {direction_name} = {ascending_expr};");
+        let candidate_assignment = format!("const {candidate_name} = {candidate_expr};");
+        let in_range_assignment = format!(
+            "const {in_range_name} = Number.isFinite({candidate_name}) && {bound_check};"
+        );
+        let in_range_result_assignment =
+            format!("__moth_assign_value({in_range_local}, {in_range_name});");
+        let candidate_result_assignment = format!(
+            "if ({in_range_name}) __moth_assign_value({candidate_local}, {candidate_name});"
+        );
+
+        self.emit_line(&direction_assignment);
+        self.emit_line(&candidate_assignment);
+        self.emit_line(&in_range_assignment);
+        self.emit_line(&in_range_result_assignment);
+        self.emit_line(&candidate_result_assignment);
+
+        Ok(())
     }
 
     /// Lower a `HirStatementKind::FormatFloat` into the profile-precision binary-float formatter.

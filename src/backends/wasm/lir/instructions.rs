@@ -222,6 +222,18 @@ pub(crate) enum WasmLirStmt {
         precision: BinaryFloatPrecision,
         operands: WasmNumericOperationOperands,
     },
+    /// Compute a float range candidate in a backend-local scratch and commit only if accepted.
+    FloatRangeCandidate {
+        candidate_dst: WasmLirLocalId,
+        in_range_dst: WasmLirLocalId,
+        scratch: WasmLirLocalId,
+        current: WasmLirLocalId,
+        step: WasmLirLocalId,
+        end: WasmLirLocalId,
+        ascending: WasmLirLocalId,
+        precision: BinaryFloatPrecision,
+        inclusive: bool,
+    },
     /// Convert a signed or unsigned integer carrier directly to an F32/F64 computation carrier.
     IntegerToFloat {
         dst: WasmLirLocalId,

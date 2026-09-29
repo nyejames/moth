@@ -866,6 +866,18 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.collect_runtime_feature_uses_from_expression(current, span);
+                self.collect_runtime_feature_uses_from_expression(step, span);
+                self.collect_runtime_feature_uses_from_expression(end, span);
+                self.collect_runtime_feature_uses_from_expression(ascending, span);
+            }
             HirStatementKind::Drop(_) => {}
 
             HirStatementKind::NumericOp {

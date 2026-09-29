@@ -39,6 +39,24 @@ impl ScopeContext {
         })
     }
 
+    /// Return a visible, already-resolved module constant initializer by canonical path.
+    ///
+    /// WHAT: exposes only declarations confirmed in the scope's resolved-constant set and
+    ///       applies the same path visibility gate used by source reference lookup.
+    /// WHY: emission-time TIR folding precedes `ConstValueStore` construction, but its
+    ///      numeric range operands still need the existing Stage 3-resolved initializer.
+    pub(crate) fn resolved_module_constant_expression(
+        &self,
+        path: &PathId,
+    ) -> Option<&crate::compiler_frontend::ast::expressions::expression::Expression> {
+        let declaration = self
+            .shared
+            .top_level_declarations
+            .get_visible_resolved_by_path(path, self.visible_declaration_ids.as_deref())?;
+        self.is_explicit_compile_time_constant(declaration)
+            .then_some(&declaration.value)
+    }
+
     /// Build the narrow TIR fold state for the current AST scope.
     pub fn new_tir_fold_context<'b>(
         &'b self,
@@ -49,6 +67,7 @@ impl ScopeContext {
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
             numeric_profile: self.shared.numeric_profile,
             bindings: Vec::new(),
+            source_scope: Some(self),
         }
     }
 }

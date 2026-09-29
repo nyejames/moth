@@ -1,4 +1,5 @@
 UserId as Int
+TicketId as I64
 
 render || -> String:
     by_name ~{String = Int} = {"Priya" = 1}
@@ -6,8 +7,48 @@ render || -> String:
     by_flag ~{Bool = String} = {true = "yes"}
     by_letter ~{Char = String} = {'a' = "letter"}
     by_alias ~{UserId = String} = {42 = "answer"}
+    by_i8 {I8 = Int} = {127 = 11}
+    by_i16 {I16 = Int} = {32767 = 12}
+    by_i32 {I32 = Int} = {2147483647 = 13}
+    by_i64 {I64 = Int} = {9223372036854775807 = 14}
+    by_u8 {U8 = Int} = {255 = 15}
+    by_u16 {U16 = Int} = {65535 = 16}
+    by_u32 {U32 = Int} = {4294967295 = 17}
+    by_u64 {U64 = Int} = {18446744073709551615 = 18}
+    by_byte {Byte = Int} = {255 = 19}
+    by_ticket {TicketId = String} = {9223372036854775807 = "latest"}
+    i8_value = by_i8.get(127) catch:
+        then 0
+    ;
+    i16_value = by_i16.get(32767) catch:
+        then 0
+    ;
+    i32_value = by_i32.get(2147483647) catch:
+        then 0
+    ;
+    i64_value = by_i64.get(9223372036854775807) catch:
+        then 0
+    ;
+    u8_value = by_u8.get(255) catch:
+        then 0
+    ;
+    u16_value = by_u16.get(65535) catch:
+        then 0
+    ;
+    u32_value = by_u32.get(4294967295) catch:
+        then 0
+    ;
+    u64_value = by_u64.get(18446744073709551615) catch:
+        then 0
+    ;
+    byte_value = by_byte.get(255) catch:
+        then 0
+    ;
+    ticket_value = by_ticket.get(9223372036854775807) catch:
+        then "missing"
+    ;
 
-    return [:hashmap_scalar_key_types_success lengths=[by_name.length],[by_id.length],[by_flag.length],[by_letter.length],[by_alias.length]]
+    return [:hashmap_scalar_key_types_success legacy_lengths=[by_name.length],[by_id.length] fixed_keys=[i8_value],[i16_value],[i32_value],[i64_value],[u8_value],[u16_value],[u32_value],[u64_value],[byte_value] alias=[ticket_value]]
 ;
 
 [:[render()]]

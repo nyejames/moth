@@ -19,6 +19,7 @@ use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
@@ -133,6 +134,27 @@ pub enum HirStatementKind {
         result: LocalId,
     },
 
+    /// Compute the next candidate for a compiler-generated binary-float range loop.
+    ///
+    /// WHAT: performs exactly one profile-precision add/subtract into a backend-local scratch,
+    ///       then reports whether that finite candidate satisfies the authored range endpoint.
+    /// WHY: the rounded step-vs-distance precheck can reject an inclusive endpoint reached by
+    ///      rounding. The candidate destination is written only when the result is finite and in
+    ///      range; the Bool result is always written.
+    ///
+    /// `domain` is limited to profile `Float` and fixed `F32`/`F64` ranges. The expressions are
+    /// already converted to that domain by HIR lowering.
+    FloatRangeCandidate {
+        current: HirExpression,
+        step: HirExpression,
+        end: HirExpression,
+        ascending: HirExpression,
+        inclusive: bool,
+        domain: NumericScalar,
+        candidate_result: LocalId,
+        in_range_result: LocalId,
+    },
+
     // -------------------------
     //  Float Formatting & Validation
     // -------------------------
@@ -201,6 +223,18 @@ impl HirStatement {
             | HirStatementKind::FormatFloat { source: value, .. }
             | HirStatementKind::ValidateFloat { source: value, .. } => {
                 value.remap_string_ids(remap);
+            }
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                current.remap_string_ids(remap);
+                step.remap_string_ids(remap);
+                end.remap_string_ids(remap);
+                ascending.remap_string_ids(remap);
             }
             HirStatementKind::MapOp { receiver, args, .. } => {
                 receiver.remap_string_ids(remap);

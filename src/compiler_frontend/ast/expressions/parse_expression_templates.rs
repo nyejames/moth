@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
-    fold_prepared_template, prepare_tir_view,
+    fold_prepared_template, prepare_tir_view_with_source_scope,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -100,7 +100,11 @@ pub(super) fn parse_template_expression(
                 TemplateTirPhase::Composed,
                 reference.context,
             )?;
-            let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+            let preparation = prepare_tir_view_with_source_scope(
+                &view,
+                TemplatePreparationMode::Value,
+                &template_context,
+            )?;
             if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
                 return Ok(Some(Expression::template(template, value_mode.to_owned())));
             }

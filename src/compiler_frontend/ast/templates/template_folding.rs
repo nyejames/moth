@@ -22,6 +22,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView,
     prepare_tir_view,
 };
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -50,6 +51,11 @@ pub(crate) struct TirFoldContext<'a> {
     pub(crate) numeric_profile: NumericProfile,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
+    /// Optional source-scope lookup for already-resolved module constants.
+    ///
+    /// WHY: AST emission folds TIR before the finalized `ConstValueStore` exists, so
+    ///      range operands need a lazy path back to the active visibility-filtered scope.
+    pub(crate) source_scope: Option<&'a ScopeContext>,
 }
 
 /// Compile-time template folding must keep structural no-output distinct from output that happens

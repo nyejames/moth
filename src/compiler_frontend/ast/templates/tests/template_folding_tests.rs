@@ -107,6 +107,7 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 
@@ -129,6 +130,7 @@ fn string_slice_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 
@@ -173,6 +175,7 @@ fn bool_condition_binding_substitution_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings,
     };
 
@@ -227,6 +230,7 @@ fn option_present_capture_substitution_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings,
     };
 
@@ -309,6 +313,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
             value: option_value,
@@ -373,6 +378,7 @@ fn assert_store_backed_option_capture(
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
             value: option_value,
@@ -415,6 +421,7 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 
@@ -468,6 +475,7 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 
@@ -498,6 +506,7 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 
@@ -570,6 +579,7 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings,
     };
 

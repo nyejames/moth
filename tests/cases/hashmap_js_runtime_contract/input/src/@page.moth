@@ -51,7 +51,114 @@ render_hashmap_contract || -> String:
     ;
     template_key_length_after_remove = template_remove_map.length
 
-    return [:hashmap_runtime has_ada=[has_ada_before] has_linus=[has_linus_before] insert_len=[len_after_insert] replace_len=[len_after_replace] removed=[removed] remove_len=[len_after_remove] clear_len=[len_after_clear] missing=[missing] duplicate=[duplicate_value] duplicate_len=[duplicate_length] template_contains=[template_key_contains] template_before_set=[template_key_before_set] template_after_set=[template_key_after_set] template_removed=[template_key_removed] template_length=[template_key_length_after_remove]]
+    narrow ~{I8 = Int} = {-128 = 8, 127 = 127}
+    i8_initial_length = narrow.length
+    i8_min_value = narrow.get(-128) catch:
+        then 0
+    ;
+    assert(i8_min_value is 8)
+    i8_max_value = narrow.get(127) catch:
+        then 0
+    ;
+    assert(i8_max_value is 127)
+    i8_has_zero_before = narrow.contains(0)
+    ~narrow.set(0, 0) catch:
+    ;
+    i8_has_zero_after = narrow.contains(0)
+    i8_length_after_insert = narrow.length
+    ~narrow.set(127, 128) catch:
+    ;
+    i8_length_after_replace = narrow.length
+    i8_replaced_value = narrow.get(127) catch:
+        then 0
+    ;
+    assert(i8_replaced_value is 128)
+    i8_removed_value = ~narrow.remove(-128) catch:
+        then 0
+    ;
+    assert(i8_removed_value is 8)
+    i8_length_after_remove = narrow.length
+
+    high_i64 ~{I64 = Int} = {-9223372036854775808 = 64, 9223372036854775806 = 66, 9223372036854775807 = 67}
+    i64_initial_length = high_i64.length
+    i64_min_value = high_i64.get(-9223372036854775808) catch:
+        then 0
+    ;
+    assert(i64_min_value is 64)
+    i64_before_max_value = high_i64.get(9223372036854775806) catch:
+        then 0
+    ;
+    assert(i64_before_max_value is 66)
+    i64_max_value = high_i64.get(9223372036854775807) catch:
+        then 0
+    ;
+    assert(i64_max_value is 67)
+    i64_before_max_found = high_i64.contains(9223372036854775806)
+    ~high_i64.set(9223372036854775807, 68) catch:
+    ;
+    i64_length_after_replace = high_i64.length
+    i64_replaced_value = high_i64.get(9223372036854775807) catch:
+        then 0
+    ;
+    assert(i64_replaced_value is 68)
+    i64_removed_value = ~high_i64.remove(-9223372036854775808) catch:
+        then 0
+    ;
+    assert(i64_removed_value is 64)
+    i64_length_after_remove = high_i64.length
+    i64_min_after_remove = high_i64.contains(-9223372036854775808)
+
+    high_u64 ~{U64 = Int} = {18446744073709551614 = 14, 18446744073709551615 = 15}
+    u64_initial_length = high_u64.length
+    u64_neighbor_value = high_u64.get(18446744073709551614) catch:
+        then 0
+    ;
+    assert(u64_neighbor_value is 14)
+    u64_max_value = high_u64.get(18446744073709551615) catch:
+        then 0
+    ;
+    assert(u64_max_value is 15)
+    u64_neighbor_found = high_u64.contains(18446744073709551614)
+    ~high_u64.set(18446744073709551615, 16) catch:
+    ;
+    u64_length_after_replace = high_u64.length
+    u64_replaced_value = high_u64.get(18446744073709551615) catch:
+        then 0
+    ;
+    assert(u64_replaced_value is 16)
+    u64_removed_value = ~high_u64.remove(18446744073709551614) catch:
+        then 0
+    ;
+    assert(u64_removed_value is 14)
+    u64_length_after_remove = high_u64.length
+    u64_neighbor_after_remove = high_u64.contains(18446744073709551614)
+
+    octets ~{Byte = Int} = {0 = 100, 255 = 255}
+    byte_initial_length = octets.length
+    byte_zero_value = octets.get(0) catch:
+        then 0
+    ;
+    assert(byte_zero_value is 100)
+    byte_max_value = octets.get(255) catch:
+        then 0
+    ;
+    assert(byte_max_value is 255)
+    byte_max_found = octets.contains(255)
+    ~octets.set(255, 128) catch:
+    ;
+    byte_length_after_replace = octets.length
+    byte_replaced_value = octets.get(255) catch:
+        then 0
+    ;
+    assert(byte_replaced_value is 128)
+    byte_removed_value = ~octets.remove(0) catch:
+        then 0
+    ;
+    assert(byte_removed_value is 100)
+    byte_length_after_remove = octets.length
+    byte_zero_after_remove = octets.contains(0)
+
+    return [:hashmap_runtime has_ada=[has_ada_before] has_linus=[has_linus_before] insert_len=[len_after_insert] replace_len=[len_after_replace] removed=[removed] remove_len=[len_after_remove] clear_len=[len_after_clear] missing=[missing] duplicate=[duplicate_value] duplicate_len=[duplicate_length] template_contains=[template_key_contains] template_before_set=[template_key_before_set] template_after_set=[template_key_after_set] template_removed=[template_key_removed] template_length=[template_key_length_after_remove] fixed_i8_has_zero=[i8_has_zero_before],[i8_has_zero_after] fixed_i8_len=[i8_initial_length],[i8_length_after_insert],[i8_length_after_replace],[i8_length_after_remove] fixed_i64_has=[i64_before_max_found],[i64_min_after_remove] fixed_i64_len=[i64_initial_length],[i64_length_after_replace],[i64_length_after_remove] fixed_u64_has=[u64_neighbor_found],[u64_neighbor_after_remove] fixed_u64_len=[u64_initial_length],[u64_length_after_replace],[u64_length_after_remove] fixed_byte_has=[byte_max_found],[byte_zero_after_remove] fixed_byte_len=[byte_initial_length],[byte_length_after_replace],[byte_length_after_remove]]
 ;
 
 runtime_duplicate_key |key $String| -> String:

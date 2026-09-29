@@ -144,9 +144,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Control flow]
             [: Supported]
-            [: Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage.]
+            [: Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage; fixed integer and binary-float range tests cover promoted binding domains, checked unsigned descent, inclusive endpoints and Int indices, with HTML and instantiated-Wasm execution across four profiles, visible [$html:<code>#I64</code>], [$html:<code>#U8</code>] and [$html:<code>#U64</code>] constant folding, and source-order HTML coverage.]
             [: JS / HTML]
-            [: Branch-heavy CFG cases and loop exits remain important regression surfaces.]
+            [: Fixed integer and binary-float ranges promote the binding domain while indices remain Int; checked unsigned descent and inclusive endpoints terminate without an out-of-range sentinel, while [$html:<code>to</code>] remains exclusive. Visible [$html:<code>#I64</code>], [$html:<code>#U8</code>] and [$html:<code>#U64</code>] constants fold in ranges.]
         ]
 
         [data:
@@ -224,9 +224,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Hash maps]
             [: Partial]
-            [: Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage.]
+            [: Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage, including fixed-width integer/Byte key eligibility, exact typed lookup, duplicate-key rejection and unsupported float-key diagnostics on HTML-JS.]
             [: JS / HTML / backend validation for other targets]
-            [: V1 supports insertion-ordered scalar-keyed maps with [$html:<code>{K = V}</code>] types, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Non-JS map lowering remains the primary accepted target gap.]
+            [: V1 supports insertion-ordered maps with [$html:<code>{K = V}</code>] types and [$html:<code>I*/U*/Byte</code>] source keys, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS canonicalizes every String-like key to canonical content, including template-backed keys, and supports canonical same-typed lookup and duplicate rejection for these source keys. [$html:<code>F*/Float/Number</code>] source keys remain unsupported. Map runtime lowering is JavaScript-only; non-JS map lowering remains the primary target gap, with Wasm map lowering still target-rejected.]
         ]
 
         [data:

@@ -193,7 +193,7 @@ pub(crate) fn invalid_map_type_message(
         InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
             let type_name = diagnostic_type_name(key_type, context);
             format!(
-                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Bool, and Char. Use a package or user-defined map type for custom key behavior."
+                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
         InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {

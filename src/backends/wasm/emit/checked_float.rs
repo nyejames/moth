@@ -129,6 +129,20 @@ fn emit_finite_float_check(
     // Store the original scalar before using abs only for the finite comparison. In particular,
     // the destination retains the source sign bit when the validated value is negative zero.
     function.instruction(&Instruction::LocalTee(destination_index));
+    emit_finite_float_predicate(function, precision)?;
+    function.instruction(&Instruction::I32Eqz);
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::Unreachable);
+    function.instruction(&Instruction::End);
+
+    Ok(())
+}
+
+/// Replace a native F32/F64 value on the stack with whether it is finite; never traps.
+pub(super) fn emit_finite_float_predicate(
+    function: &mut Function,
+    precision: BinaryFloatPrecision,
+) -> Result<(), CompilerError> {
     match precision {
         BinaryFloatPrecision::Binary32 => {
             function.instruction(&Instruction::F32Abs);
@@ -146,10 +160,6 @@ fn emit_finite_float_check(
             ));
         }
     }
-    function.instruction(&Instruction::I32Eqz);
-    function.instruction(&Instruction::If(BlockType::Empty));
-    function.instruction(&Instruction::Unreachable);
-    function.instruction(&Instruction::End);
 
     Ok(())
 }

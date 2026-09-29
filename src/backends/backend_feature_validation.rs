@@ -1219,6 +1219,51 @@ where
 
             None
         }
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            candidate_result,
+            in_range_result,
+            ..
+        } => {
+            if let Some(occurrence) = first_unsupported_result_local_occurrence(
+                locals,
+                *candidate_result,
+                statement.span,
+                search,
+            )
+            .or_else(|| {
+                first_unsupported_result_local_occurrence(
+                    locals,
+                    *in_range_result,
+                    statement.span,
+                    search,
+                )
+            }) {
+                return Some(occurrence);
+            }
+
+            let unsupported_before = search.unsupported_count;
+            let occurrence = first_unsupported_expression_occurrence(current, search)
+                .or_else(|| first_unsupported_expression_occurrence(step, search))
+                .or_else(|| first_unsupported_expression_occurrence(end, search))
+                .or_else(|| first_unsupported_expression_occurrence(ascending, search));
+            if let Some(occurrence) = occurrence {
+                return Some(ReachableTypeOccurrence {
+                    span: statement.span.or(occurrence.span),
+                });
+            }
+
+            if search.unsupported_count > unsupported_before {
+                return statement
+                    .span
+                    .map(|span| ReachableTypeOccurrence { span: Some(span) });
+            }
+
+            None
+        }
         HirStatementKind::Drop(_) => None,
     }
 }

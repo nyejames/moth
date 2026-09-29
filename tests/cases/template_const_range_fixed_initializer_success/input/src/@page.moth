@@ -1,0 +1,4 @@
+fixed_i64_max #I64 = 9223372036854775807
+text #String = [loop fixed_i64_max to & fixed_i64_max |i|: max-[i]; ]
+
+[:[text]]

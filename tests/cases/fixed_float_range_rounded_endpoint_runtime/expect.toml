@@ -1,0 +1,21 @@
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "fixed_float_range_rounded_endpoint_runtime verified",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "fixed_float_range_rounded_endpoint_runtime verified",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true
+must_export = ["moth_start"]

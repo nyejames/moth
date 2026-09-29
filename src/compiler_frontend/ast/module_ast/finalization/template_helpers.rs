@@ -133,5 +133,6 @@ pub(super) fn make_fold_context<'a>(
         template_const_loop_iteration_limit,
         numeric_profile,
         bindings: Vec::new(),
+        source_scope: None,
     }
 }

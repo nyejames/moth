@@ -1,0 +1,7 @@
+runtime_value || -> I64:
+    return 1
+;
+
+#[loop runtime_value() to & runtime_value() |i|:
+    [i]
+]

@@ -273,6 +273,63 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            candidate_result,
+            in_range_result,
+            ..
+        } => {
+            let location = context.diagnostics.statement_error_span(statement);
+            {
+                let mut read_env = SharedReadEnv {
+                    context,
+                    layout,
+                    state,
+                    block_id,
+                    tracker: &mut tracker,
+                    location,
+                    current_order: statement_order,
+                    stats,
+                    value_fact_buffer,
+                };
+                for operand in [current, step, end, ascending] {
+                    record_shared_reads_in_expression(
+                        &mut read_env,
+                        operand,
+                        location,
+                        &mut RootSet::empty(layout.local_count()),
+                    )?;
+                }
+            }
+
+            let mut result_transfer = CallTransferContext {
+                context,
+                layout,
+                state,
+                block_id,
+                current_order: statement_order,
+                tracker: &mut tracker,
+                location,
+                stats,
+                value_fact_buffer,
+            };
+            transfer_call_result_alias(
+                &mut result_transfer,
+                Some(*candidate_result),
+                FunctionReturnAliasSummary::Fresh,
+                &[],
+            )?;
+            transfer_call_result_alias(
+                &mut result_transfer,
+                Some(*in_range_result),
+                FunctionReturnAliasSummary::Fresh,
+                &[],
+            )?;
+        }
+
         HirStatementKind::Expr(expression) => {
             let location = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {

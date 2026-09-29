@@ -1,0 +1,4 @@
+byte_map {Byte = Int} = {255 = 1}
+u8_key U8 = 255
+bad = byte_map.contains(u8_key)
+[:test]

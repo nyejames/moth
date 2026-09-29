@@ -1413,6 +1413,18 @@ fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValue
         },
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => collect_expression_values(&source, out),
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            ..
+        } => {
+            collect_expression_values(&current, out);
+            collect_expression_values(&step, out);
+            collect_expression_values(&end, out);
+            collect_expression_values(&ascending, out);
+        }
         HirStatementKind::Drop(_) => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_values(&value, out)

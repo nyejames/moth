@@ -84,6 +84,7 @@ fn build_test_fold_context_with_profile<'a>(
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile,
         bindings: vec![],
+        source_scope: None,
     }
 }
 
@@ -1154,6 +1155,9 @@ fn collect_float_counters(
             ConstRangeIterationValue::Float(value) => counters.push(value),
             ConstRangeIterationValue::Int(value) => {
                 panic!("expected a float counter, got int {value}")
+            }
+            ConstRangeIterationValue::Fixed(value) => {
+                panic!("expected a float counter, got fixed value {value}")
             }
         }
     }

@@ -125,6 +125,23 @@ pub(crate) fn lower_statement(
                 )
             }
         }
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            inclusive,
+            domain,
+            candidate_result,
+            in_range_result,
+        } => lower_float_range_candidate(
+            context,
+            [current, step, end, ascending],
+            *inclusive,
+            *domain,
+            [*candidate_result, *in_range_result],
+            statements,
+        ),
         HirStatementKind::FormatFloat {
             source,
             failure_mode,
@@ -525,6 +542,111 @@ fn lower_checked_float_operation(
         operands: lir_operands,
     });
 
+    Ok(())
+}
+
+fn lower_float_range_candidate(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    inputs: [&HirExpression; 4],
+    inclusive: bool,
+    domain: NumericScalar,
+    output_ids: [LocalId; 2],
+    statements: &mut Vec<WasmLirStmt>,
+) -> Result<(), CompilerError> {
+    let [current, step, end, ascending] = inputs;
+    let [candidate_result, in_range_result] = output_ids;
+    let profile = context.module_context.request.numeric_profile;
+    let precision = domain
+        .binary_float_precision(profile)
+        .filter(|precision| {
+            matches!(
+                precision,
+                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+            )
+        })
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm float range candidates do not support {} precision",
+                domain.name()
+            ))
+        })?;
+    let expected_type = domain.type_id(context.module_context.type_environment);
+    if current.ty != expected_type || step.ty != expected_type || end.ty != expected_type {
+        return Err(lir_transformation_error(format!(
+            "Wasm float range candidate operands do not match {}",
+            domain.name()
+        )));
+    }
+    if ascending.ty != context.module_context.type_environment.builtins().bool {
+        return Err(lir_transformation_error(
+            "Wasm float range candidate direction must be Bool",
+        ));
+    }
+
+    let expected_carrier = match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
+    };
+    let lowered_current = lower_expression(context, current, statements)?;
+    let lowered_step = lower_expression(context, step, statements)?;
+    let lowered_end = lower_expression(context, end, statements)?;
+    let lowered_ascending = lower_expression(context, ascending, statements)?;
+    for (operand, label) in [
+        (lowered_current.value, "current"),
+        (lowered_step.value, "step"),
+        (lowered_end.value, "end"),
+    ] {
+        if context.local_type_by_id.get(&operand).copied() != Some(expected_carrier) {
+            return Err(lir_transformation_error(format!(
+                "Wasm float range candidate {label} does not use carrier {expected_carrier:?}"
+            )));
+        }
+    }
+    if context
+        .local_type_by_id
+        .get(&lowered_ascending.value)
+        .copied()
+        != Some(WasmAbiType::I32)
+    {
+        return Err(lir_transformation_error(
+            "Wasm float range candidate direction does not use the I32 Bool carrier",
+        ));
+    }
+
+    let candidate_dst = context.local_map.get(&candidate_result).copied().ok_or_else(|| {
+        lir_transformation_error(format!(
+            "Wasm lowering could not resolve float range candidate local {candidate_result:?}"
+        ))
+    })?;
+    let in_range_dst = context.local_map.get(&in_range_result).copied().ok_or_else(|| {
+        lir_transformation_error(format!(
+            "Wasm lowering could not resolve float range Bool local {in_range_result:?}"
+        ))
+    })?;
+    if context.local_type_by_id.get(&candidate_dst).copied() != Some(expected_carrier) {
+        return Err(lir_transformation_error(format!(
+            "Wasm float range candidate destination does not use carrier {expected_carrier:?}"
+        )));
+    }
+    if context.local_type_by_id.get(&in_range_dst).copied() != Some(WasmAbiType::I32) {
+        return Err(lir_transformation_error(
+            "Wasm float range Bool result does not use the I32 carrier",
+        ));
+    }
+
+    let scratch = context.alloc_temp(expected_carrier);
+    statements.push(WasmLirStmt::FloatRangeCandidate {
+        candidate_dst,
+        in_range_dst,
+        scratch,
+        current: lowered_current.value,
+        step: lowered_step.value,
+        end: lowered_end.value,
+        ascending: lowered_ascending.value,
+        precision,
+        inclusive,
+    });
     Ok(())
 }
 

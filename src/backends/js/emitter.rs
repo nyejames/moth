@@ -320,6 +320,18 @@ impl<'hir> JsEmitter<'hir> {
                 self.numeric_operands_use_maps(operands)
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.expression_uses_maps(current)
+                    || self.expression_uses_maps(step)
+                    || self.expression_uses_maps(end)
+                    || self.expression_uses_maps(ascending)
+            }
             HirStatementKind::Drop(_) => false,
         }
     }
@@ -465,6 +477,18 @@ impl<'hir> JsEmitter<'hir> {
                 }
             },
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.record_expression_reactivity(current)?;
+                self.record_expression_reactivity(step)?;
+                self.record_expression_reactivity(end)?;
+                self.record_expression_reactivity(ascending)?;
+            }
             HirStatementKind::Drop(_) => {}
         }
 
@@ -804,6 +828,18 @@ fn collect_statement_cast_policies(
             }
         },
 
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            ..
+        } => {
+            collect_expression_cast_policies(current, policies);
+            collect_expression_cast_policies(step, policies);
+            collect_expression_cast_policies(end, policies);
+            collect_expression_cast_policies(ascending, policies);
+        }
         HirStatementKind::Drop(_) => {}
     }
 }

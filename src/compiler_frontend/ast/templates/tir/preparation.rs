@@ -2,7 +2,9 @@
 //! WHY: this is the sole final-value semantic owner; folding emits values and
 //!      handoff owns runtime materialization after consuming the prepared result.
 
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -110,13 +112,14 @@ pub(crate) fn refresh_kind_from_preparation(
 }
 
 /// Mutable state for the one exhaustive preparation traversal.
-struct PreparationWalk {
+struct PreparationWalk<'scope> {
     visiting_templates: HashSet<TirViewIdentity>,
     visiting_nodes: HashSet<PreparationNodeKey>,
     visiting_slot_plans: HashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
     const_diagnostic: Option<CompilerDiagnostic>,
+    source_scope: Option<&'scope ScopeContext>,
 }
 
 struct PreparationFacts {
@@ -187,8 +190,11 @@ impl PreparationFacts {
     }
 }
 
-impl PreparationWalk {
-    fn new(mode: TemplatePreparationMode) -> Self {
+impl<'scope> PreparationWalk<'scope> {
+    fn new(
+        mode: TemplatePreparationMode,
+        source_scope: Option<&'scope ScopeContext>,
+    ) -> Self {
         Self {
             visiting_templates: HashSet::new(),
             visiting_nodes: HashSet::new(),
@@ -196,6 +202,7 @@ impl PreparationWalk {
             runtime_reason: None,
             mode,
             const_diagnostic: None,
+            source_scope,
         }
     }
 
@@ -225,10 +232,26 @@ impl PreparationWalk {
     }
 }
 
-/// Prepares one exact view for folding or runtime handoff.
 pub(crate) fn prepare_tir_view(
     view: &TirView<'_>,
     mode: TemplatePreparationMode,
+) -> Result<TemplatePreparation, TemplateError> {
+    prepare_tir_view_in_scope(view, mode, None)
+}
+
+/// Prepares a parser-owned view with access to the scope's visible resolved constants.
+pub(crate) fn prepare_tir_view_with_source_scope(
+    view: &TirView<'_>,
+    mode: TemplatePreparationMode,
+    source_scope: &ScopeContext,
+) -> Result<TemplatePreparation, TemplateError> {
+    prepare_tir_view_in_scope(view, mode, Some(source_scope))
+}
+
+fn prepare_tir_view_in_scope(
+    view: &TirView<'_>,
+    mode: TemplatePreparationMode,
+    source_scope: Option<&ScopeContext>,
 ) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
@@ -240,7 +263,7 @@ pub(crate) fn prepare_tir_view(
     }
 
     increment_ast_counter(AstCounter::TirPreparationAttempts);
-    let mut walk = PreparationWalk::new(mode);
+    let mut walk = PreparationWalk::new(mode, source_scope);
     let facts = walk.walk_template(
         view.root_ref(),
         view,
@@ -320,7 +343,7 @@ pub(crate) fn prepare_tir_view(
     })
 }
 
-impl PreparationWalk {
+impl PreparationWalk<'_> {
     fn walk_template(
         &mut self,
         template_id: TemplateIrId,
@@ -949,14 +972,33 @@ impl PreparationWalk {
         loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
+        self.walk_expression_with_bindings(
+            view,
+            expression,
+            loop_binding_paths,
+            loop_binding_paths,
+            role,
+        )
+    }
+
+    /// Classifies with extra expression-local bindings without exposing those bindings to
+    /// nested templates re-entered by the same expression.
+    fn walk_expression_with_bindings(
+        &mut self,
+        view: &TirView<'_>,
+        expression: &Expression,
+        const_binding_paths: &[PathId],
+        nested_template_binding_paths: &[PathId],
+        role: &PreparationTraversalRole,
+    ) -> Result<PreparationFacts, TemplateError> {
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
-            |reference: TemplateTirReference, nested_binding_paths: &[PathId]| {
+            |reference: TemplateTirReference, _nested_binding_paths: &[PathId]| {
                 let nested_view = view.nested_template_value(reference)?;
                 let facts = self.walk_template(
                     reference.root,
                     &nested_view,
-                    nested_binding_paths,
+                    nested_template_binding_paths,
                     role.clone(),
                 )?;
                 let const_evaluable = facts.const_evaluable;
@@ -966,7 +1008,7 @@ impl PreparationWalk {
 
         let expression_const = classify_expression_const_evaluable_with_nested_template(
             expression,
-            loop_binding_paths,
+            const_binding_paths,
             &mut visit_nested_template,
         )?;
         nested_facts.const_evaluable &= expression_const;
@@ -1085,14 +1127,52 @@ impl PreparationWalk {
                 }
             }
             TemplateLoopHeader::Range { range, .. } => {
-                let start_facts = self.walk_expression(view, &range.start, &[], role)?;
-                let end_facts = self.walk_expression(view, &range.end, &[], role)?;
+                let mut source_constant_paths = Vec::new();
+                if let Some(source_scope) = self.source_scope {
+                    collect_source_constant_paths(
+                        &range.start,
+                        source_scope,
+                        &mut source_constant_paths,
+                    );
+                    collect_source_constant_paths(
+                        &range.end,
+                        source_scope,
+                        &mut source_constant_paths,
+                    );
+                    if let Some(step) = &range.step {
+                        collect_source_constant_paths(
+                            step,
+                            source_scope,
+                            &mut source_constant_paths,
+                        );
+                    }
+                }
+                let start_facts = self.walk_expression_with_bindings(
+                    view,
+                    &range.start,
+                    &source_constant_paths,
+                    &[],
+                    role,
+                )?;
+                let end_facts = self.walk_expression_with_bindings(
+                    view,
+                    &range.end,
+                    &source_constant_paths,
+                    &[],
+                    role,
+                )?;
                 let mut header_const = start_facts.const_evaluable;
                 header_const &= end_facts.const_evaluable;
                 facts.merge(start_facts);
                 facts.merge(end_facts);
                 if let Some(step) = &range.step {
-                    let step_facts = self.walk_expression(view, step, &[], role)?;
+                    let step_facts = self.walk_expression_with_bindings(
+                        view,
+                        step,
+                        &source_constant_paths,
+                        &[],
+                        role,
+                    )?;
                     header_const &= step_facts.const_evaluable;
                     facts.merge(step_facts);
                 }
@@ -1122,6 +1202,34 @@ impl PreparationWalk {
             self.record_const_diagnostic(diagnostic);
         }
         Ok(facts)
+    }
+}
+fn collect_source_constant_paths(
+    expression: &Expression,
+    source_scope: &ScopeContext,
+    paths: &mut Vec<PathId>,
+) {
+    match &expression.kind {
+        ExpressionKind::Reference(path) => {
+            if source_scope
+                .resolved_module_constant_expression(path)
+                .is_some()
+                && !paths.contains(path)
+            {
+                paths.push(*path);
+            }
+        }
+        ExpressionKind::Coerced { value, .. } => {
+            collect_source_constant_paths(value, source_scope, paths);
+        }
+        ExpressionKind::Runtime(rpn) => {
+            for item in &rpn.items {
+                if let ExpressionRpnItem::Operand(operand) = item {
+                    collect_source_constant_paths(operand, source_scope, paths);
+                }
+            }
+        }
+        _ => {}
     }
 }
 

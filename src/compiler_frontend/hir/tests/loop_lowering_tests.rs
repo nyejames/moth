@@ -63,7 +63,7 @@ use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
-fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, BlockId, BlockId) {
+fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId) {
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -79,14 +79,9 @@ fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, Bloc
         _ => panic!("expected zero-check branch"),
     };
 
-    let direction_check_block = match module.blocks[step_abs_check_block.0 as usize].terminator {
+    let header_selector_block = match module.blocks[step_abs_check_block.0 as usize].terminator {
         HirTerminator::If { else_block, .. } => else_block,
-        _ => panic!("expected abs-check branch"),
-    };
-
-    let header_selector_block = match module.blocks[direction_check_block.0 as usize].terminator {
-        HirTerminator::If { then_block, .. } => then_block,
-        _ => panic!("expected direction branch"),
+        _ => panic!("expected step magnitude branch"),
     };
 
     let header_ascending_block = match module.blocks[header_selector_block.0 as usize].terminator {
@@ -98,8 +93,6 @@ fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, Bloc
         step_zero_check_block,
         header_selector_block,
         header_ascending_block,
-        step_abs_check_block,
-        direction_check_block,
     )
 }
 
@@ -157,7 +150,7 @@ fn lowers_range_loop_with_new_syntax() {
     )
     .expect("range loop lowering should succeed");
 
-    let (_, header_selector_block, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
+    let (_, _, header_ascending_block) = range_loop_cfg_blocks(&module);
 
     let (body_block, exit_block) = match module.blocks[header_ascending_block.0 as usize].terminator
     {
@@ -176,7 +169,7 @@ fn lowers_range_loop_with_new_syntax() {
 
     assert!(matches!(
         module.blocks[step_block.0 as usize].terminator,
-        HirTerminator::Jump { target, .. } if target == header_selector_block
+        HirTerminator::If { .. }
     ));
     assert!(matches!(
         module.blocks[exit_block.0 as usize].terminator,
@@ -227,7 +220,7 @@ fn lowers_range_loop_without_user_bindings() {
     )
     .expect("range loop lowering without user bindings should succeed");
 
-    let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
+    let (_, _, header_ascending_block) = range_loop_cfg_blocks(&module);
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
         HirTerminator::If { then_block, .. } => then_block,
         _ => panic!("expected ascending header branch"),
@@ -284,7 +277,7 @@ fn lowers_range_loop_with_index_binding() {
     )
     .expect("range loop lowering with index should succeed");
 
-    let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
+    let (_, _, header_ascending_block) = range_loop_cfg_blocks(&module);
 
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
         HirTerminator::If { then_block, .. } => then_block,
@@ -301,27 +294,21 @@ fn lowers_range_loop_with_index_binding() {
         "expected value + index binding assignments"
     );
 
-    let step_block = match module.blocks[body_block.0 as usize].terminator {
-        HirTerminator::Jump { target, .. } => target,
-        _ => panic!("expected body jump to step block"),
-    };
 
-    let has_index_increment =
-        module.blocks[step_block.0 as usize]
-            .statements
-            .iter()
-            .any(|statement| match &statement.kind {
-                HirStatementKind::NumericOp {
-                    op:
-                        HirNumericOp {
-                            operator: NumericOperator::Add,
-                            domain: NumericScalar::Int,
-                        },
-                    operands: HirNumericOperands::Binary { right, .. },
-                    ..
-                } => matches!(right.kind, HirExpressionKind::Int(1)),
-                _ => false,
-            });
+    let has_index_increment = module.blocks.iter().any(|block| {
+        block.statements.iter().any(|statement| match &statement.kind {
+            HirStatementKind::NumericOp {
+                op:
+                    HirNumericOp {
+                        operator: NumericOperator::Add,
+                        domain: NumericScalar::Int,
+                    },
+                operands: HirNumericOperands::Binary { right, .. },
+                ..
+            } => matches!(right.kind, HirExpressionKind::Int(1)),
+            _ => false,
+        })
+    });
 
     assert!(
         has_index_increment,
@@ -387,7 +374,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     )
     .expect("dynamic-step range loop lowering should succeed");
 
-    let (step_zero_check_block, _, _, _, _) = range_loop_cfg_blocks(&module);
+    let (step_zero_check_block, _, _) = range_loop_cfg_blocks(&module);
 
     let panic_block = match module.blocks[step_zero_check_block.0 as usize].terminator {
         HirTerminator::If { then_block, .. } => then_block,
@@ -398,143 +385,6 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         module.blocks[panic_block.0 as usize].terminator,
         HirTerminator::RuntimeFailure { .. }
     ));
-}
-
-#[test]
-fn range_loop_nested_if_body_routes_tail_to_step_block() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
-    let location = None;
-
-    let branch_value = super::symbol("branch_value", &mut path_fork, &mut string_table);
-    let tail_value = super::symbol("tail_value", &mut path_fork, &mut string_table);
-    let range_loop = node(
-        NodeKind::RangeLoop {
-            bindings: LoopBindings {
-                item: None,
-                index: None,
-            },
-            range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(4, location, ValueMode::ImmutableOwned),
-                RangeEndKind::Exclusive,
-                None,
-            ),
-            body: vec![
-                node(
-                    NodeKind::If(
-                        runtime_expr(
-                            vec![runtime_operand_item(Expression::bool(
-                                true,
-                                location,
-                                ValueMode::ImmutableOwned,
-                            ))],
-                            builtin_type_ids::BOOL,
-                            location,
-                            ValueMode::ImmutableOwned,
-                        ),
-                        vec![node(
-                            NodeKind::VariableDeclaration(Declaration {
-                                id: branch_value,
-                                value: Expression::int(1, location, ValueMode::ImmutableOwned),
-                                binding_span: None,
-                                config_qualifier: None,
-                            }),
-                            location,
-                        )],
-                        None,
-                        test_if_branch_metadata(false),
-                    ),
-                    location,
-                ),
-                node(
-                    NodeKind::VariableDeclaration(Declaration {
-                        id: tail_value,
-                        value: Expression::int(2, location, ValueMode::ImmutableOwned),
-                        binding_span: None,
-                        config_qualifier: None,
-                    }),
-                    location,
-                ),
-            ],
-        },
-        location,
-    );
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![range_loop],
-        None,
-    );
-
-    let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("range loop lowering with nested body control-flow should succeed");
-
-    let (_, header_selector_block, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
-    let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
-        HirTerminator::If { then_block, .. } => then_block,
-        _ => panic!("expected ascending header branch"),
-    };
-    assert!(
-        matches!(
-            module.blocks[body_block.0 as usize].terminator,
-            HirTerminator::If { .. }
-        ),
-        "nested if should terminate the range-loop body entry block"
-    );
-
-    let step_block = module
-        .blocks
-        .iter()
-        .find_map(|block| match block.terminator {
-            HirTerminator::Jump { target, .. } if target == header_selector_block => {
-                let has_index_increment = block.statements.iter().any(|statement| match &statement
-                    .kind
-                {
-                    HirStatementKind::NumericOp {
-                        op:
-                            HirNumericOp {
-                                operator: NumericOperator::Add,
-                                domain: NumericScalar::Int,
-                            },
-                        operands: HirNumericOperands::Binary { right, .. },
-                        ..
-                    } => matches!(right.kind, HirExpressionKind::Int(1)),
-                    _ => false,
-                });
-                has_index_increment.then_some(block.id)
-            }
-            _ => None,
-        })
-        .expect("expected range-step block backedge to header selector");
-
-    let step_predecessor_ids = module
-        .blocks
-        .iter()
-        .filter_map(|block| match block.terminator {
-            HirTerminator::Jump { target, .. }
-                if target == step_block && block.id != body_block =>
-            {
-                Some(block.id)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        !step_predecessor_ids.is_empty(),
-        "expected lowered range-loop body tail to jump into the step block"
-    );
-    assert_no_placeholder_terminators(&module);
 }
 
 #[test]
@@ -864,7 +714,7 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     )
     .expect("range loop lowering should succeed");
 
-    let (_, _, header_ascending_block, _, _) = range_loop_cfg_blocks(&module);
+    let (_, _, header_ascending_block) = range_loop_cfg_blocks(&module);
     let body_block = match module.blocks[header_ascending_block.0 as usize].terminator {
         HirTerminator::If { then_block, .. } => then_block,
         _ => panic!("expected ascending header branch"),

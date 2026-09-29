@@ -1,0 +1,4 @@
+wide_map {U64 = Int} = {7 = 1}
+i64_key I64 = 7
+bad = wide_map.contains(i64_key)
+[:test]

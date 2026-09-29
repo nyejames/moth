@@ -1,0 +1,19 @@
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "fixed_numeric_range_source_order count=3/index=2/sum=0",
+]
+rendered_output_contains_exactly_once = [
+    "fixed-numeric-range source-start",
+    "fixed-numeric-range source-end",
+    "fixed-numeric-range source-step",
+]
+rendered_output_contains_in_order = [
+    "fixed-numeric-range source-start",
+    "fixed-numeric-range source-end",
+    "fixed-numeric-range source-step",
+    "fixed_numeric_range_source_order count=3/index=2/sum=0",
+]

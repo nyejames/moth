@@ -412,6 +412,28 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                inclusive,
+                domain,
+                candidate_result,
+                in_range_result,
+            } => {
+                format!(
+                    "({}, {}) = float_range_candidate_{}({}, {}, {}, {}, {})",
+                    self.local_label(*candidate_result),
+                    self.local_label(*in_range_result),
+                    domain.name(),
+                    self.render_expression(current),
+                    self.render_expression(step),
+                    self.render_expression(end),
+                    self.render_expression(ascending),
+                    if *inclusive { "inclusive" } else { "exclusive" }
+                )
+            }
             HirStatementKind::FormatFloat {
                 source,
                 failure_mode,

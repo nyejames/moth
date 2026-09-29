@@ -1,0 +1,6 @@
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = ["max-9223372036854775807;"]

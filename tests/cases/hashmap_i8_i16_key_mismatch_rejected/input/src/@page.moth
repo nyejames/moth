@@ -1,0 +1,4 @@
+narrow_map {I8 = Int} = {7 = 1}
+i16_key I16 = 7
+bad = narrow_map.contains(i16_key)
+[:test]

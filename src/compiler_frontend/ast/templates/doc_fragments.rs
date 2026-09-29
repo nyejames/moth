@@ -133,6 +133,7 @@ fn collect_doc_fragments(
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
             numeric_profile: context.numeric_profile,
             bindings: Vec::new(),
+            source_scope: None,
         };
         let reference = template.tir_reference;
         let store = context.template_ir_store.borrow();

@@ -594,7 +594,7 @@ physical planning and structured LIR.
 
 ### Phase 6: Existing-language and MON consumers
 
-- [ ] Extend range domains and map-key eligibility through their existing owners.
+- [x] Extend range domains and map-key eligibility through their existing owners.
   Cover unsigned descent without negation, inclusive endpoints and unchanged Int
   indices/capacities. Add no Number ranges or first-class range design.
 - [ ] Decouple foreign ABI widths from deliberate Core/Builder Int/Float language

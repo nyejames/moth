@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["hashmap_scalar_key_types_success lengths=1,1,1,1,1"]
+rendered_output_contains = ["hashmap_scalar_key_types_success legacy_lengths=1,1 fixed_keys=11,12,13,14,15,16,17,18,19 alias=latest"]

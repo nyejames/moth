@@ -94,6 +94,13 @@ Termination happens at the last valid endpoint. The loop never needs a counter
 value outside the selected domain, so an inclusive range ending at a type's
 maximum and a descending range reaching zero both complete normally.
 
+Floating-point ranges round each candidate to the selected binary precision before
+checking the endpoint. A non-finite or out-of-range candidate ends the loop
+without becoming the next value. If an in-range candidate rounds back to the
+current value before reaching the endpoint, the loop fails at runtime rather
+than repeating that value. An inclusive range exits after visiting its
+endpoint without computing another candidate.
+
 Const range loops diagnose statically known counter failures while folding.
 
 Fixed-width range domains are accepted end-state design; @../progress (Progress)

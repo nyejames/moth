@@ -13,7 +13,7 @@ use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
 use rustc_hash::FxHashMap;
-use wasm_encoder::{BlockType, Function, Instruction, MemArg};
+use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
 pub(crate) struct LirBodyEmitContext<'a> {
     pub function_id: WasmLirFunctionId,
@@ -255,6 +255,26 @@ pub(crate) fn emit_statement(
                 function, *dst, *operator, *precision, *operands, context, plan,
             )?;
         }
+        WasmLirStmt::FloatRangeCandidate {
+            candidate_dst,
+            in_range_dst,
+            scratch,
+            current,
+            step,
+            end,
+            ascending,
+            precision,
+            inclusive,
+        } => {
+            emit_float_range_candidate(
+                function,
+                [*current, *step, *end, *ascending],
+                [*candidate_dst, *in_range_dst, *scratch],
+                *precision,
+                *inclusive,
+                context,
+            )?;
+        }
         WasmLirStmt::IntegerToFloat {
             dst,
             source,
@@ -407,6 +427,104 @@ pub(crate) fn emit_statement(
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
     }
+
+    Ok(())
+}
+
+fn emit_float_range_candidate(
+    function: &mut Function,
+    inputs: [WasmLirLocalId; 4],
+    output_ids: [WasmLirLocalId; 3],
+    precision: BinaryFloatPrecision,
+    inclusive: bool,
+    context: &LirBodyEmitContext<'_>,
+) -> Result<(), CompilerError> {
+    let [current, step, end, ascending] = inputs;
+    let [candidate_dst, in_range_dst, scratch] = output_ids;
+    let carrier = match precision {
+        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
+        BinaryFloatPrecision::Binary16 => {
+            return Err(wasm_generation_error(
+                "Wasm float range candidates do not support F16".to_owned(),
+            ));
+        }
+    };
+    ensure_local_abi(current, carrier, context, "float range current")?;
+    ensure_local_abi(step, carrier, context, "float range step")?;
+    ensure_local_abi(end, carrier, context, "float range end")?;
+    ensure_local_abi(scratch, carrier, context, "float range candidate scratch")?;
+    ensure_local_abi(ascending, WasmAbiType::I32, context, "float range direction")?;
+    ensure_local_abi(in_range_dst, WasmAbiType::I32, context, "float range Bool result")?;
+    ensure_local_abi(candidate_dst, carrier, context, "float range candidate destination")?;
+
+    let (add_opcode, subtract_opcode, ascending_compare, descending_compare) = match precision {
+        BinaryFloatPrecision::Binary32 => (
+            &Instruction::F32Add,
+            &Instruction::F32Sub,
+            if inclusive {
+                &Instruction::F32Le
+            } else {
+                &Instruction::F32Lt
+            },
+            if inclusive {
+                &Instruction::F32Ge
+            } else {
+                &Instruction::F32Gt
+            },
+        ),
+        BinaryFloatPrecision::Binary64 => (
+            &Instruction::F64Add,
+            &Instruction::F64Sub,
+            if inclusive {
+                &Instruction::F64Le
+            } else {
+                &Instruction::F64Lt
+            },
+            if inclusive {
+                &Instruction::F64Ge
+            } else {
+                &Instruction::F64Gt
+            },
+        ),
+        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was rejected above"),
+    };
+
+    function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(local_index(current, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(step, context)?));
+    function.instruction(add_opcode);
+    function.instruction(&Instruction::LocalSet(local_index(scratch, context)?));
+    function.instruction(&Instruction::Else);
+    function.instruction(&Instruction::LocalGet(local_index(current, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(step, context)?));
+    function.instruction(subtract_opcode);
+    function.instruction(&Instruction::LocalSet(local_index(scratch, context)?));
+    function.instruction(&Instruction::End);
+
+    // Native F32/F64 operations already rounded into scratch. Keep the finite predicate separate
+    // from ordinary checked arithmetic so an out-of-range infinity exits without trapping.
+    function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
+    super::checked_float::emit_finite_float_predicate(function, precision)?;
+    function.instruction(&Instruction::LocalGet(local_index(ascending, context)?));
+    function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(end, context)?));
+    function.instruction(ascending_compare);
+    function.instruction(&Instruction::Else);
+    function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
+    function.instruction(&Instruction::LocalGet(local_index(end, context)?));
+    function.instruction(descending_compare);
+    function.instruction(&Instruction::End);
+    function.instruction(&Instruction::I32And);
+    function.instruction(&Instruction::LocalSet(local_index(in_range_dst, context)?));
+
+    function.instruction(&Instruction::LocalGet(local_index(in_range_dst, context)?));
+    function.instruction(&Instruction::If(BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(local_index(scratch, context)?));
+    function.instruction(&Instruction::LocalSet(local_index(candidate_dst, context)?));
+    function.instruction(&Instruction::End);
 
     Ok(())
 }

@@ -41,7 +41,7 @@ use crate::compiler_frontend::ast::templates::template_render_units::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateConstructionContext, TemplatePreparation, TemplateTirPhase, TemplateTirReference,
     TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
-    compose_tir_head_chain_from_root, prepare_tir_view,
+    compose_tir_head_chain_from_root, prepare_tir_view_with_source_scope,
 };
 
 use crate::builder_surface::SourceFileKind;
@@ -537,7 +537,7 @@ impl Template {
                 tir_reference.context,
             )
             .map_err(TemplateError::from)?;
-            prepare_tir_view(&view, preparation_mode)?
+            prepare_tir_view_with_source_scope(&view, preparation_mode, context)?
         };
 
         build_state.refresh_kind_from_preparation(&template_preparation.facts);

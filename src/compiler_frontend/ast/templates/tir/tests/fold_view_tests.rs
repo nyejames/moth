@@ -86,6 +86,7 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     }
 }
@@ -200,6 +201,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path,
             value: Expression::int(1, None, ValueMode::ImmutableOwned),
@@ -252,6 +254,7 @@ fn prepared_view_rejects_identity_mismatch() {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
     let error = fold_prepared_template(&preparation, alternate_view, &mut context)
@@ -1044,6 +1047,7 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     };
 

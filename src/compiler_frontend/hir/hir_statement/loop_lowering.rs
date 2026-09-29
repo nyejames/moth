@@ -15,9 +15,10 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_operators::{NumericOperator, binary_operation_domain};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -42,13 +43,25 @@ struct RangeLoopBlocks {
     step_zero_failure: BlockId,
     step_abs_check: BlockId,
     step_abs_negate: BlockId,
-    direction_check: BlockId,
-    descending_negate: BlockId,
     header_selector: BlockId,
     header_ascending: BlockId,
     header_descending: BlockId,
     body: BlockId,
     step: BlockId,
+    step_ascending_check: BlockId,
+    step_descending_check: BlockId,
+    step_ascending_distance: BlockId,
+    step_descending_distance: BlockId,
+    step_distance_check: BlockId,
+    step_candidate_direction: BlockId,
+    step_candidate_ascending: BlockId,
+    step_candidate_descending: BlockId,
+    step_candidate_check: BlockId,
+    step_candidate_ascending_check: BlockId,
+    step_candidate_descending_check: BlockId,
+    step_stall_check: BlockId,
+    step_stall_failure: BlockId,
+    step_commit: BlockId,
     exit: BlockId,
 }
 
@@ -59,21 +72,33 @@ struct RangeLoopLocals {
     step: LocalId,
     ascending: LocalId,
     iteration_index: LocalId,
+    distance: Option<LocalId>,
+    next_value: LocalId,
+    candidate_in_range: Option<LocalId>,
 }
 
 #[derive(Clone, Copy)]
 struct RangeLoopTypes {
     binding: TypeId,
+    domain: NumericScalar,
     bool_type: TypeId,
     int_type: TypeId,
-    float_type: TypeId,
 }
+
 
 #[derive(Clone, Copy)]
 struct RangeLoopRuntime {
     blocks: RangeLoopBlocks,
     locals: RangeLoopLocals,
     types: RangeLoopTypes,
+}
+
+fn uses_float_range_candidate(domain: NumericScalar) -> bool {
+    matches!(
+        domain,
+        NumericScalar::Float
+            | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
+    )
 }
 
 impl<'a> HirBuilder<'a> {
@@ -195,8 +220,8 @@ impl<'a> HirBuilder<'a> {
         span: Option<SourceSpan>,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
-        // Build an explicit CFG pipeline so runtime range semantics are deterministic:
-        // zero-step guard -> step normalization -> direction dispatch -> bounds checks.
+        // Build a CFG pipeline so each update is checked only if a next item remains:
+        // zero-step guard -> magnitude normalization -> bounds-safe candidate update.
         let parent_region = self.current_region_or_error(span_ref)?;
         let blocks = self.create_range_loop_blocks(parent_region, span_ref)?;
         let types = self.resolve_range_loop_types(bindings, range, span_ref)?;
@@ -214,12 +239,13 @@ impl<'a> HirBuilder<'a> {
 
         self.emit_range_loop_zero_step_guard(runtime, span_ref)?;
         self.emit_range_loop_step_magnitude_normalization(runtime, span_ref)?;
-        self.emit_range_loop_direction_dispatch(runtime, span_ref)?;
         self.emit_range_loop_header_checks(range, runtime, span_ref, span)?;
         let step_block_is_reachable =
             self.lower_range_loop_body_with_emitter(bindings, runtime, span_ref, &mut emit_body)?;
         if step_block_is_reachable {
-            self.emit_range_loop_step(runtime, span_ref)?;
+            self.emit_range_loop_step(runtime, range.end_kind, span_ref)?;
+        } else {
+            self.discard_unreachable_range_step_blocks(blocks, span_ref)?;
         }
 
         self.set_current_block(runtime.blocks.exit, span_ref)
@@ -235,8 +261,6 @@ impl<'a> HirBuilder<'a> {
             self.create_block(parent_region, span_ref, "for-step-zero-failure")?;
         let step_abs_check = self.create_block(parent_region, span_ref, "for-step-abs-check")?;
         let step_abs_negate = self.create_block(parent_region, span_ref, "for-step-abs-negate")?;
-        let direction_check = self.create_block(parent_region, span_ref, "for-direction-check")?;
-        let descending_negate = self.create_block(parent_region, span_ref, "for-desc-negate")?;
         let header_selector = self.create_block(parent_region, span_ref, "for-header-selector")?;
         let header_ascending =
             self.create_block(parent_region, span_ref, "for-header-ascending")?;
@@ -245,6 +269,33 @@ impl<'a> HirBuilder<'a> {
         let body_region = self.create_child_region(parent_region);
         let body = self.create_block(body_region, span_ref, "for-body")?;
         let step = self.create_block(parent_region, span_ref, "for-step")?;
+        let step_ascending_check =
+            self.create_block(parent_region, span_ref, "for-step-ascending-check")?;
+        let step_descending_check =
+            self.create_block(parent_region, span_ref, "for-step-descending-check")?;
+        let step_ascending_distance =
+            self.create_block(parent_region, span_ref, "for-step-ascending-distance")?;
+        let step_descending_distance =
+            self.create_block(parent_region, span_ref, "for-step-descending-distance")?;
+        let step_distance_check =
+            self.create_block(parent_region, span_ref, "for-step-distance-check")?;
+        let step_candidate_direction =
+            self.create_block(parent_region, span_ref, "for-step-candidate-direction")?;
+        let step_candidate_ascending =
+            self.create_block(parent_region, span_ref, "for-step-candidate-ascending")?;
+        let step_candidate_descending =
+            self.create_block(parent_region, span_ref, "for-step-candidate-descending")?;
+        let step_candidate_check =
+            self.create_block(parent_region, span_ref, "for-step-candidate-check")?;
+        let step_candidate_ascending_check =
+            self.create_block(parent_region, span_ref, "for-step-candidate-ascending-check")?;
+        let step_candidate_descending_check =
+            self.create_block(parent_region, span_ref, "for-step-candidate-descending-check")?;
+        let step_stall_check =
+            self.create_block(parent_region, span_ref, "for-step-stall-check")?;
+        let step_stall_failure =
+            self.create_block(parent_region, span_ref, "for-step-stall-failure")?;
+        let step_commit = self.create_block(parent_region, span_ref, "for-step-commit")?;
         let exit = self.create_block(parent_region, span_ref, "for-exit")?;
 
         Ok(RangeLoopBlocks {
@@ -252,15 +303,59 @@ impl<'a> HirBuilder<'a> {
             step_zero_failure,
             step_abs_check,
             step_abs_negate,
-            direction_check,
-            descending_negate,
             header_selector,
             header_ascending,
             header_descending,
             body,
             step,
+            step_ascending_check,
+            step_descending_check,
+            step_ascending_distance,
+            step_descending_distance,
+            step_distance_check,
+            step_candidate_direction,
+            step_candidate_ascending,
+            step_candidate_descending,
+            step_candidate_check,
+            step_candidate_ascending_check,
+            step_candidate_descending_check,
+            step_stall_check,
+            step_stall_failure,
+            step_commit,
             exit,
         })
+    }
+
+    fn discard_unreachable_range_step_blocks(
+        &mut self,
+        blocks: RangeLoopBlocks,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        for block in [
+            blocks.step_ascending_check,
+            blocks.step_descending_check,
+            blocks.step_ascending_distance,
+            blocks.step_descending_distance,
+            blocks.step_distance_check,
+            blocks.step_candidate_direction,
+            blocks.step_candidate_ascending,
+            blocks.step_candidate_descending,
+            blocks.step_candidate_check,
+            blocks.step_candidate_ascending_check,
+            blocks.step_candidate_descending_check,
+            blocks.step_stall_check,
+            blocks.step_stall_failure,
+            blocks.step_commit,
+        ] {
+            if !self.discard_unreachable_empty_block(block, span_ref)? {
+                return_hir_transformation_error!(
+                    "Unreachable range-loop step block was not empty and unowned",
+                    self.hir_error_location(span_ref)
+                );
+            }
+        }
+
+        Ok(())
     }
 
     fn resolve_range_loop_types(
@@ -270,33 +365,27 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<RangeLoopTypes, CompilerError> {
         let binding = self.range_iteration_type(bindings, range, span_ref)?;
-        let int_id = self.type_environment.builtins().int;
-        let float_id = self.type_environment.builtins().float;
+        let domain = NumericScalar::from_type_id(binding, &self.type_environment);
 
-        if binding != int_id && binding != float_id {
+        let Some(domain) = domain else {
             return_hir_transformation_error!(
-                "Range-loop item binding must be Int or Float",
+                "Range-loop item binding must use a numeric scalar type",
                 self.hir_error_location(span_ref)
             );
-        }
+        };
 
         Ok(RangeLoopTypes {
             binding,
+            domain,
             bool_type: builtin_type_ids::BOOL,
             int_type: builtin_type_ids::INT,
-            float_type: float_id,
         })
     }
 
-    /// Derives the checked numeric operation for a range-loop binding type.
-    ///
-    /// WHAT: maps the already-validated `Int`/`Float` binding to its canonical numeric domain.
-    /// WHY: loop lowering must not re-match builtins at each arithmetic site; the binding is
-    ///      validated as `Int` or `Float` by `resolve_range_loop_types`, so a missing domain
-    ///      here is a builder bug rather than a user diagnostic.
+
     fn numeric_op_for_binding(&self, binding: TypeId, operator: NumericOperator) -> HirNumericOp {
         let domain = NumericScalar::from_type_id(binding, &self.type_environment)
-            .expect("range-loop binding is validated as Int or Float before numeric lowering");
+            .expect("range-loop binding is validated as a numeric scalar before lowering");
 
         HirNumericOp { operator, domain }
     }
@@ -311,6 +400,17 @@ impl<'a> HirBuilder<'a> {
         let step = self.allocate_temp_local(types.binding, None)?;
         let ascending = self.allocate_temp_local(types.bool_type, None)?;
         let iteration_index = self.allocate_temp_local(types.int_type, None)?;
+        let distance = if uses_float_range_candidate(types.domain) {
+            None
+        } else {
+            Some(self.allocate_temp_local(types.binding, None)?)
+        };
+        let next_value = self.allocate_temp_local(types.binding, None)?;
+        let candidate_in_range = if uses_float_range_candidate(types.domain) {
+            Some(self.allocate_temp_local(types.bool_type, None)?)
+        } else {
+            None
+        };
 
         Ok(RangeLoopLocals {
             current,
@@ -318,6 +418,9 @@ impl<'a> HirBuilder<'a> {
             step,
             ascending,
             iteration_index,
+            distance,
+            next_value,
+            candidate_in_range,
         })
     }
 
@@ -356,6 +459,8 @@ impl<'a> HirBuilder<'a> {
 
         let lowered_start = self.lower_expression_value_to_current_block(&range.start)?;
         let lowered_start = self.snapshot_range_loop_operand(lowered_start);
+        let lowered_start =
+            self.convert_numeric_operand_to_domain(lowered_start, types.domain, span_ref)?;
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(locals.current),
@@ -366,6 +471,8 @@ impl<'a> HirBuilder<'a> {
 
         let lowered_end = self.lower_expression_value_to_current_block(&range.end)?;
         let lowered_end = self.snapshot_range_loop_operand(lowered_end);
+        let lowered_end =
+            self.convert_numeric_operand_to_domain(lowered_end, types.domain, span_ref)?;
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(locals.end),
@@ -374,6 +481,33 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
+
+        // `by` is optional for integer ranges; its unit default belongs to the selected domain.
+        if let Some(step_expression) = &range.step {
+            let lowered_step = self.lower_expression_value_to_current_block(step_expression)?;
+            let lowered_step = self.snapshot_range_loop_operand(lowered_step);
+            let lowered_step =
+                self.convert_numeric_operand_to_domain(lowered_step, types.domain, span_ref)?;
+
+            self.emit_statement_kind(
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(locals.step),
+                    value: lowered_step,
+                },
+                span_ref,
+            )?;
+        } else {
+            let step_region = self.current_region_or_error(span_ref)?;
+            let default_step = self.range_loop_unit_literal(types, span_ref, step_region);
+
+            self.emit_statement_kind(
+                HirStatementKind::Assign {
+                    target: HirPlace::Local(locals.step),
+                    value: default_step,
+                },
+                span_ref,
+            )?;
+        }
         let pre_header_region = self.current_region_or_error(span_ref)?;
         let zero_index = self.make_expression(
             span_ref,
@@ -390,45 +524,6 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        // `by` is optional for integer ranges; omitted steps default to +1 / +1.0.
-        if let Some(step_expression) = &range.step {
-            let lowered_step = self.lower_expression_value_to_current_block(step_expression)?;
-            let lowered_step = self.snapshot_range_loop_operand(lowered_step);
-
-            self.emit_statement_kind(
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(locals.step),
-                    value: lowered_step,
-                },
-                span_ref,
-            )?;
-        } else {
-            let default_step = if types.binding == types.float_type {
-                self.make_expression(
-                    span_ref,
-                    HirExpressionKind::Float(1.0),
-                    types.binding,
-                    ValueKind::Const,
-                    pre_header_region,
-                )
-            } else {
-                self.make_expression(
-                    span_ref,
-                    HirExpressionKind::Int(1),
-                    types.binding,
-                    ValueKind::Const,
-                    pre_header_region,
-                )
-            };
-
-            self.emit_statement_kind(
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(locals.step),
-                    value: default_step,
-                },
-                span_ref,
-            )?;
-        }
 
         let ascending_current = self.make_expression(
             span_ref,
@@ -561,25 +656,14 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             abs_check_region,
         );
-        self.emit_terminator(
-            blocks.step_abs_check,
-            HirTerminator::If {
-                condition: step_is_negative,
-                then_block: blocks.step_abs_negate,
-                else_block: blocks.direction_check,
-            },
-            span_ref,
-        )?;
-        self.log_control_flow_edge(
-            blocks.step_abs_check,
+        self.emit_range_loop_branch(
+            step_is_negative,
             blocks.step_abs_negate,
+            blocks.header_selector,
+            span_ref,
             "for.step.neg",
-        );
-        self.log_control_flow_edge(
-            blocks.step_abs_check,
-            blocks.direction_check,
             "for.step.pos",
-        );
+        )?;
 
         // Normalize explicit negative steps to magnitude first.
         self.set_current_block(blocks.step_abs_negate, span_ref)?;
@@ -600,70 +684,9 @@ impl<'a> HirBuilder<'a> {
             abs_step_current,
             span_ref,
         )?;
-        self.emit_jump_from_current_block(blocks.direction_check, span_ref, "for.step.abs.done")
+        self.emit_jump_from_current_block(blocks.header_selector, span_ref, "for.step.abs.done")
     }
 
-    fn emit_range_loop_direction_dispatch(
-        &mut self,
-        runtime: RangeLoopRuntime,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
-        let RangeLoopRuntime {
-            blocks,
-            locals,
-            types,
-        } = runtime;
-
-        self.set_current_block(blocks.direction_check, span_ref)?;
-        let direction_check_region = self.current_region_or_error(span_ref)?;
-        let ascending_for_direction = self.make_expression(
-            span_ref,
-            HirExpressionKind::Load(HirPlace::Local(locals.ascending)),
-            types.bool_type,
-            ValueKind::Place,
-            direction_check_region,
-        );
-        self.emit_terminator(
-            blocks.direction_check,
-            HirTerminator::If {
-                condition: ascending_for_direction,
-                then_block: blocks.header_selector,
-                else_block: blocks.descending_negate,
-            },
-            span_ref,
-        )?;
-        self.log_control_flow_edge(
-            blocks.direction_check,
-            blocks.header_selector,
-            "for.direction.asc",
-        );
-        self.log_control_flow_edge(
-            blocks.direction_check,
-            blocks.descending_negate,
-            "for.direction.desc",
-        );
-
-        // Apply direction after magnitude normalization so descending loops always decrement.
-        self.set_current_block(blocks.descending_negate, span_ref)?;
-        let desc_negate_region = self.current_region_or_error(span_ref)?;
-        let desc_step_current = self.make_expression(
-            span_ref,
-            HirExpressionKind::Load(HirPlace::Local(locals.step)),
-            types.binding,
-            ValueKind::Place,
-            desc_negate_region,
-        );
-        let desc_zero = self.range_loop_zero_literal(types, span_ref, desc_negate_region);
-        let desc_sub_op = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
-        self.emit_checked_numeric_assignment(
-            locals.step,
-            desc_sub_op,
-            desc_zero,
-            desc_step_current,
-            span_ref,
-        )?;
-        self.emit_jump_from_current_block(blocks.header_selector, span_ref, "for.direction.done")
-    }
 
     fn emit_range_loop_header_checks(
         &mut self,
@@ -824,9 +847,9 @@ impl<'a> HirBuilder<'a> {
         if let Some(item_binding) = &bindings.item {
             let body_current_value = self.make_expression(
                 span_ref,
-                HirExpressionKind::Load(HirPlace::Local(locals.current)),
+                HirExpressionKind::Copy(HirPlace::Local(locals.current)),
                 types.binding,
-                ValueKind::Place,
+                ValueKind::RValue,
                 body_region_id,
             );
             let binding = self.register_loop_binding_local(
@@ -842,9 +865,9 @@ impl<'a> HirBuilder<'a> {
         if let Some(index_binding) = &bindings.index {
             let index_value = self.make_expression(
                 span_ref,
-                HirExpressionKind::Load(HirPlace::Local(locals.iteration_index)),
+                HirExpressionKind::Copy(HirPlace::Local(locals.iteration_index)),
                 types.int_type,
-                ValueKind::Place,
+                ValueKind::RValue,
                 body_region_id,
             );
             let binding = self.register_loop_binding_local(
@@ -874,6 +897,7 @@ impl<'a> HirBuilder<'a> {
     fn emit_range_loop_step(
         &mut self,
         runtime: RangeLoopRuntime,
+        end_kind: RangeEndKind,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let RangeLoopRuntime {
@@ -882,44 +906,73 @@ impl<'a> HirBuilder<'a> {
             types,
         } = runtime;
 
-        self.set_current_block(blocks.step, span_ref)?;
-        let step_region = self.current_region_or_error(span_ref)?;
-        let step_current = self.make_expression(
+        if uses_float_range_candidate(types.domain) {
+            self.emit_float_range_candidate_update(runtime, end_kind, span_ref)?;
+            self.discard_float_range_precheck_blocks(blocks, end_kind, span_ref)?;
+        } else {
+            self.emit_range_loop_distance_candidate_precheck(runtime, end_kind, span_ref)?;
+        }
+        self.set_current_block(blocks.step_stall_check, span_ref)?;
+        let stall_region = self.current_region_or_error(span_ref)?;
+        let current =
+            self.range_loop_local(locals.current, types.binding, span_ref, stall_region);
+        let candidate =
+            self.range_loop_local(locals.next_value, types.binding, span_ref, stall_region);
+        let stalled = self.range_loop_comparison(
+            candidate,
+            HirBinOp::Eq,
+            current,
+            types,
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(locals.current)),
-            types.binding,
-            ValueKind::Place,
-            step_region,
+            stall_region,
         );
-        let step_delta = self.make_expression(
+        self.emit_range_loop_branch(
+            stalled,
+            blocks.step_stall_failure,
+            blocks.step_commit,
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(locals.step)),
-            types.binding,
-            ValueKind::Place,
-            step_region,
-        );
-        let current_add_op = self.numeric_op_for_binding(types.binding, NumericOperator::Add);
-        self.emit_checked_numeric_assignment(
-            locals.current,
-            current_add_op,
-            step_current,
-            step_delta,
+            "for.step.stalled",
+            "for.step.advances",
+        )?;
+
+        self.set_current_block(blocks.step_stall_failure, span_ref)?;
+        self.emit_terminator(
+            blocks.step_stall_failure,
+            HirTerminator::RuntimeFailure {
+                message: "Floating-point range step made no progress".to_owned(),
+            },
             span_ref,
         )?;
 
-        let index_current = self.make_expression(
+        self.set_current_block(blocks.step_commit, span_ref)?;
+        let commit_region = self.current_region_or_error(span_ref)?;
+        let candidate = self.make_expression(
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(locals.iteration_index)),
+            HirExpressionKind::Copy(HirPlace::Local(locals.next_value)),
+            types.binding,
+            ValueKind::RValue,
+            commit_region,
+        );
+        self.emit_statement_kind(
+            HirStatementKind::Assign {
+                target: HirPlace::Local(locals.current),
+                value: candidate,
+            },
+            span_ref,
+        )?;
+
+        let index_current = self.range_loop_local(
+            locals.iteration_index,
             types.int_type,
-            ValueKind::Place,
-            step_region,
+            span_ref,
+            commit_region,
         );
         let index_delta = self.make_expression(
             span_ref,
             HirExpressionKind::Int(1),
             types.int_type,
             ValueKind::Const,
-            step_region,
+            commit_region,
         );
         self.emit_checked_numeric_assignment(
             locals.iteration_index,
@@ -934,29 +987,563 @@ impl<'a> HirBuilder<'a> {
         self.emit_jump_from_current_block(blocks.header_selector, span_ref, "for.backedge")
     }
 
+    fn emit_range_loop_distance_candidate_precheck(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        end_kind: RangeEndKind,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+
+        let distance_local = locals.distance.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Range-loop distance lowering is missing its distance local",
+            )
+        })?;
+        self.set_current_block(blocks.step, span_ref)?;
+        let step_region = self.current_region_or_error(span_ref)?;
+        let ascending = self.range_loop_local(
+            locals.ascending,
+            types.bool_type,
+            span_ref,
+            step_region,
+        );
+        self.emit_range_loop_branch(
+            ascending,
+            blocks.step_ascending_check,
+            blocks.step_descending_check,
+            span_ref,
+            "for.step.asc",
+            "for.step.desc",
+        )?;
+
+        self.emit_range_loop_step_direction_check(runtime, true, span_ref)?;
+        self.emit_range_loop_step_direction_check(runtime, false, span_ref)?;
+        self.emit_range_loop_distance_update(runtime, true, span_ref)?;
+        self.emit_range_loop_distance_update(runtime, false, span_ref)?;
+
+        self.set_current_block(blocks.step_distance_check, span_ref)?;
+        let distance_region = self.current_region_or_error(span_ref)?;
+        let step_value =
+            self.range_loop_local(locals.step, types.binding, span_ref, distance_region);
+        let distance_value =
+            self.range_loop_local(distance_local, types.binding, span_ref, distance_region);
+        let within_distance_op = match end_kind {
+            RangeEndKind::Exclusive => HirBinOp::Lt,
+            RangeEndKind::Inclusive => HirBinOp::Le,
+        };
+        let within_distance = self.range_loop_comparison(
+            step_value,
+            within_distance_op,
+            distance_value,
+            types,
+            span_ref,
+            distance_region,
+        );
+        self.emit_range_loop_branch(
+            within_distance,
+            blocks.step_candidate_direction,
+            blocks.exit,
+            span_ref,
+            "for.step.has-next",
+            "for.step.done",
+        )?;
+
+        self.set_current_block(blocks.step_candidate_direction, span_ref)?;
+        let candidate_direction_region = self.current_region_or_error(span_ref)?;
+        let ascending = self.range_loop_local(
+            locals.ascending,
+            types.bool_type,
+            span_ref,
+            candidate_direction_region,
+        );
+        self.emit_range_loop_branch(
+            ascending,
+            blocks.step_candidate_ascending,
+            blocks.step_candidate_descending,
+            span_ref,
+            "for.step.candidate-asc",
+            "for.step.candidate-desc",
+        )?;
+
+        self.emit_range_loop_candidate_update(runtime, true, span_ref)?;
+        self.emit_range_loop_candidate_update(runtime, false, span_ref)?;
+
+        self.set_current_block(blocks.step_candidate_check, span_ref)?;
+        let candidate_check_region = self.current_region_or_error(span_ref)?;
+        let ascending = self.range_loop_local(
+            locals.ascending,
+            types.bool_type,
+            span_ref,
+            candidate_check_region,
+        );
+        self.emit_range_loop_branch(
+            ascending,
+            blocks.step_candidate_ascending_check,
+            blocks.step_candidate_descending_check,
+            span_ref,
+            "for.step.check-asc",
+            "for.step.check-desc",
+        )?;
+
+        self.emit_range_loop_candidate_bound_check(runtime, end_kind, true, span_ref)?;
+        self.emit_range_loop_candidate_bound_check(runtime, end_kind, false, span_ref)?;
+
+        Ok(())
+    }
+
+    fn emit_float_range_candidate_update(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        end_kind: RangeEndKind,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+        self.set_current_block(blocks.step, span_ref)?;
+        if matches!(end_kind, RangeEndKind::Inclusive) {
+            let step_region = self.current_region_or_error(span_ref)?;
+            let current =
+                self.range_loop_local(locals.current, types.binding, span_ref, step_region);
+            let end = self.range_loop_local(locals.end, types.binding, span_ref, step_region);
+            let at_endpoint = self.range_loop_comparison(
+                current,
+                HirBinOp::Eq,
+                end,
+                types,
+                span_ref,
+                step_region,
+            );
+            self.emit_range_loop_branch(
+                at_endpoint,
+                blocks.exit,
+                blocks.step_candidate_check,
+                span_ref,
+                "for.step.inclusive-end",
+                "for.step.before-inclusive-end",
+            )?;
+            self.set_current_block(blocks.step_candidate_check, span_ref)?;
+        }
+
+        let candidate_region = self.current_region_or_error(span_ref)?;
+        let current =
+            self.range_loop_local(locals.current, types.binding, span_ref, candidate_region);
+        let step = self.range_loop_local(locals.step, types.binding, span_ref, candidate_region);
+        let end = self.range_loop_local(locals.end, types.binding, span_ref, candidate_region);
+        let ascending =
+            self.range_loop_local(locals.ascending, types.bool_type, span_ref, candidate_region);
+        let in_range_result = locals.candidate_in_range.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Float range candidate lowering is missing its Bool result local",
+            )
+        })?;
+
+        self.emit_statement_kind(
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                inclusive: matches!(end_kind, RangeEndKind::Inclusive),
+                domain: types.domain,
+                candidate_result: locals.next_value,
+                in_range_result,
+            },
+            span_ref,
+        )?;
+
+        let in_range =
+            self.range_loop_local(in_range_result, types.bool_type, span_ref, candidate_region);
+        self.emit_range_loop_branch(
+            in_range,
+            blocks.step_stall_check,
+            blocks.exit,
+            span_ref,
+            "for.step.candidate-in-range",
+            "for.step.candidate-out",
+        )
+    }
+
+    fn discard_float_range_precheck_blocks(
+        &mut self,
+        blocks: RangeLoopBlocks,
+        end_kind: RangeEndKind,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        for block in [
+            blocks.step_ascending_check,
+            blocks.step_descending_check,
+            blocks.step_ascending_distance,
+            blocks.step_descending_distance,
+            blocks.step_distance_check,
+            blocks.step_candidate_direction,
+            blocks.step_candidate_ascending,
+            blocks.step_candidate_descending,
+            blocks.step_candidate_ascending_check,
+            blocks.step_candidate_descending_check,
+        ] {
+            if !self.discard_unreachable_empty_block(block, span_ref)? {
+                return_hir_transformation_error!(
+                    "Unused float range-loop distance block was not empty and unowned",
+                    self.hir_error_location(span_ref)
+                );
+            }
+        }
+
+        if matches!(end_kind, RangeEndKind::Exclusive)
+            && !self.discard_unreachable_empty_block(blocks.step_candidate_check, span_ref)?
+        {
+            return_hir_transformation_error!(
+                "Unused float range-loop distance block was not empty and unowned",
+                self.hir_error_location(span_ref)
+            );
+        }
+
+        Ok(())
+    }
+
+
+    fn emit_range_loop_step_direction_check(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        ascending: bool,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+        let (block, distance_block) = if ascending {
+            (blocks.step_ascending_check, blocks.step_ascending_distance)
+        } else {
+            (blocks.step_descending_check, blocks.step_descending_distance)
+        };
+
+        self.set_current_block(block, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let crosses_zero = if matches!(
+            types.domain,
+            NumericScalar::Fixed(scalar)
+                if scalar.class() == FixedScalarClass::UnsignedInteger
+        ) {
+            self.make_expression(
+                span_ref,
+                HirExpressionKind::Bool(false),
+                types.bool_type,
+                ValueKind::Const,
+                region,
+            )
+        } else {
+            let current =
+                self.range_loop_local(locals.current, types.binding, span_ref, region);
+            let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
+            let zero_for_current = self.range_loop_zero_literal(types, span_ref, region);
+            let current_sign = self.range_loop_comparison(
+                current,
+                if ascending { HirBinOp::Lt } else { HirBinOp::Ge },
+                zero_for_current,
+                types,
+                span_ref,
+                region,
+            );
+            let zero_for_end = self.range_loop_zero_literal(types, span_ref, region);
+            let end_sign = self.range_loop_comparison(
+                zero_for_end,
+                if ascending { HirBinOp::Le } else { HirBinOp::Ge },
+                end,
+                types,
+                span_ref,
+                region,
+            );
+            self.make_expression(
+                span_ref,
+                HirExpressionKind::BinOp {
+                    left: Box::new(current_sign),
+                    op: HirBinOp::And,
+                    right: Box::new(end_sign),
+                },
+                types.bool_type,
+                ValueKind::RValue,
+                region,
+            )
+        };
+        self.emit_range_loop_branch(
+            crosses_zero,
+            blocks.step_candidate_direction,
+            distance_block,
+            span_ref,
+            if ascending {
+                "for.step.asc.cross-zero"
+            } else {
+                "for.step.desc.cross-zero"
+            },
+            if ascending {
+                "for.step.asc.distance"
+            } else {
+                "for.step.desc.distance"
+            },
+        )
+    }
+
+    fn emit_range_loop_distance_update(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        ascending: bool,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+        let distance_local = locals.distance.ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Range-loop distance lowering is missing its distance local",
+            )
+        })?;
+        let block = if ascending {
+            blocks.step_ascending_distance
+        } else {
+            blocks.step_descending_distance
+        };
+        self.set_current_block(block, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let current =
+            self.range_loop_local(locals.current, types.binding, span_ref, region);
+        let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
+        let (left, right) = if ascending {
+            (end, current)
+        } else {
+            (current, end)
+        };
+        let subtract = self.numeric_op_for_binding(types.binding, NumericOperator::Subtract);
+        self.emit_checked_numeric_assignment(
+            distance_local,
+            subtract,
+            left,
+            right,
+            span_ref,
+        )?;
+        self.emit_jump_from_current_block(
+            blocks.step_distance_check,
+            span_ref,
+            "for.step.distance",
+        )
+    }
+
+    fn emit_range_loop_candidate_update(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        ascending: bool,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+        let block = if ascending {
+            blocks.step_candidate_ascending
+        } else {
+            blocks.step_candidate_descending
+        };
+        self.set_current_block(block, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let current =
+            self.range_loop_local(locals.current, types.binding, span_ref, region);
+        let step = self.range_loop_local(locals.step, types.binding, span_ref, region);
+        let operator = if ascending {
+            NumericOperator::Add
+        } else {
+            NumericOperator::Subtract
+        };
+        let operation = self.numeric_op_for_binding(types.binding, operator);
+        self.emit_checked_numeric_assignment(
+            locals.next_value,
+            operation,
+            current,
+            step,
+            span_ref,
+        )?;
+        self.emit_jump_from_current_block(
+            blocks.step_candidate_check,
+            span_ref,
+            "for.step.candidate",
+        )
+    }
+
+    fn emit_range_loop_candidate_bound_check(
+        &mut self,
+        runtime: RangeLoopRuntime,
+        end_kind: RangeEndKind,
+        ascending: bool,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let RangeLoopRuntime {
+            blocks,
+            locals,
+            types,
+        } = runtime;
+        let block = if ascending {
+            blocks.step_candidate_ascending_check
+        } else {
+            blocks.step_candidate_descending_check
+        };
+        self.set_current_block(block, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let candidate =
+            self.range_loop_local(locals.next_value, types.binding, span_ref, region);
+        let end = self.range_loop_local(locals.end, types.binding, span_ref, region);
+        let within_bound_op = match (ascending, end_kind) {
+            (true, RangeEndKind::Exclusive) => HirBinOp::Lt,
+            (true, RangeEndKind::Inclusive) => HirBinOp::Le,
+            (false, RangeEndKind::Exclusive) => HirBinOp::Gt,
+            (false, RangeEndKind::Inclusive) => HirBinOp::Ge,
+        };
+        let within_bound = self.range_loop_comparison(
+            candidate,
+            within_bound_op,
+            end,
+            types,
+            span_ref,
+            region,
+        );
+        self.emit_range_loop_branch(
+            within_bound,
+            blocks.step_stall_check,
+            blocks.exit,
+            span_ref,
+            "for.step.candidate-in-range",
+            "for.step.candidate-out",
+        )
+    }
+
+    fn range_loop_local(
+        &mut self,
+        local: LocalId,
+        ty: TypeId,
+        span_ref: &Option<SourceSpan>,
+        region: RegionId,
+    ) -> HirExpression {
+        self.make_expression(
+            span_ref,
+            HirExpressionKind::Load(HirPlace::Local(local)),
+            ty,
+            ValueKind::Place,
+            region,
+        )
+    }
+
+    fn range_loop_comparison(
+        &mut self,
+        left: HirExpression,
+        operator: HirBinOp,
+        right: HirExpression,
+        types: RangeLoopTypes,
+        span_ref: &Option<SourceSpan>,
+        region: RegionId,
+    ) -> HirExpression {
+        self.make_expression(
+            span_ref,
+            HirExpressionKind::BinOp {
+                left: Box::new(left),
+                op: operator,
+                right: Box::new(right),
+            },
+            types.bool_type,
+            ValueKind::RValue,
+            region,
+        )
+    }
+
+    fn emit_range_loop_branch(
+        &mut self,
+        condition: HirExpression,
+        then_block: BlockId,
+        else_block: BlockId,
+        span_ref: &Option<SourceSpan>,
+        then_label: &str,
+        else_label: &str,
+    ) -> Result<(), CompilerError> {
+        let source_block = self.current_block_id_or_error(span_ref)?;
+        self.emit_terminator(
+            source_block,
+            HirTerminator::If {
+                condition,
+                then_block,
+                else_block,
+            },
+            span_ref,
+        )?;
+        self.log_control_flow_edge(source_block, then_block, then_label);
+        self.log_control_flow_edge(source_block, else_block, else_label);
+        Ok(())
+    }
+
     fn range_loop_zero_literal(
         &mut self,
         types: RangeLoopTypes,
         span_ref: &Option<SourceSpan>,
         region: RegionId,
     ) -> HirExpression {
-        if types.binding == types.float_type {
-            self.make_expression(
-                span_ref,
-                HirExpressionKind::Float(0.0),
-                types.binding,
-                ValueKind::Const,
-                region,
-            )
-        } else {
-            self.make_expression(
-                span_ref,
-                HirExpressionKind::Int(0),
-                types.binding,
-                ValueKind::Const,
-                region,
-            )
-        }
+        let kind = match types.domain {
+            NumericScalar::Int => HirExpressionKind::Int(0),
+            NumericScalar::Float => HirExpressionKind::Float(0.0),
+            NumericScalar::Fixed(scalar) => {
+                let zero = match scalar.class() {
+                    FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 0),
+                    FixedScalarClass::UnsignedInteger => FixedScalarValue::unsigned(scalar, 0),
+                    FixedScalarClass::BinaryFloat => FixedScalarValue::binary_float(scalar, 0.0),
+                    FixedScalarClass::Octet => None,
+                }
+                .expect("range-loop numeric domain has a representable zero");
+                HirExpressionKind::FixedScalar(zero)
+            }
+        };
+        self.make_expression(
+            span_ref,
+            kind,
+            types.binding,
+            ValueKind::Const,
+            region,
+        )
+    }
+
+    fn range_loop_unit_literal(
+        &mut self,
+        types: RangeLoopTypes,
+        span_ref: &Option<SourceSpan>,
+        region: RegionId,
+    ) -> HirExpression {
+        let kind = match types.domain {
+            NumericScalar::Int => HirExpressionKind::Int(1),
+            NumericScalar::Float => HirExpressionKind::Float(1.0),
+            NumericScalar::Fixed(scalar) => {
+                let one = match scalar.class() {
+                    FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 1),
+                    FixedScalarClass::UnsignedInteger => FixedScalarValue::unsigned(scalar, 1),
+                    FixedScalarClass::BinaryFloat => FixedScalarValue::binary_float(scalar, 1.0),
+                    FixedScalarClass::Octet => None,
+                }
+                .expect("range-loop numeric domain has a representable unit step");
+                HirExpressionKind::FixedScalar(one)
+            }
+        };
+        self.make_expression(
+            span_ref,
+            kind,
+            types.binding,
+            ValueKind::Const,
+            region,
+        )
     }
 
     pub(super) fn lower_collection_loop_statement_impl(
@@ -1285,37 +1872,49 @@ impl<'a> HirBuilder<'a> {
             .map(|step| self.lower_type_id(step.type_id, span_ref))
             .transpose()?;
 
-        let is_numeric = |ty: TypeId, this: &Self| {
-            let int_id = this.type_environment.builtins().int;
-            let float_id = this.type_environment.builtins().float;
-            ty == int_id || ty == float_id
+        let Some(start_domain) = NumericScalar::from_type_id(start_ty, &self.type_environment)
+        else {
+            return_hir_transformation_error!(
+                "Range loop start did not lower to a numeric scalar type",
+                self.hir_error_location(span_ref)
+            );
+        };
+        let Some(end_domain) = NumericScalar::from_type_id(end_ty, &self.type_environment) else {
+            return_hir_transformation_error!(
+                "Range loop end did not lower to a numeric scalar type",
+                self.hir_error_location(span_ref)
+            );
+        };
+        let Some(mut domain) =
+            binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
+        else {
+            return_hir_transformation_error!(
+                "Range loop bounds have no common numeric promotion domain",
+                self.hir_error_location(span_ref)
+            );
         };
 
-        if !is_numeric(start_ty, self) || !is_numeric(end_ty, self) {
-            return_hir_transformation_error!(
-                "Range loop bounds must lower to numeric HIR types",
-                self.hir_error_location(span_ref)
-            );
+        if let Some(step_ty) = step_ty {
+            let Some(step_domain) =
+                NumericScalar::from_type_id(step_ty, &self.type_environment)
+            else {
+                return_hir_transformation_error!(
+                    "Range loop step did not lower to a numeric scalar type",
+                    self.hir_error_location(span_ref)
+                );
+            };
+            let Some(promoted) =
+                binary_operation_domain(NumericOperator::Add, domain, step_domain)
+            else {
+                return_hir_transformation_error!(
+                    "Range loop step has no common numeric promotion domain",
+                    self.hir_error_location(span_ref)
+                );
+            };
+            domain = promoted;
         }
 
-        if let Some(step_ty) = step_ty
-            && !is_numeric(step_ty, self)
-        {
-            return_hir_transformation_error!(
-                "Range loop step must lower to a numeric HIR type",
-                self.hir_error_location(span_ref)
-            );
-        }
-
-        let float_id = self.type_environment.builtins().float;
-        let uses_float =
-            start_ty == float_id || end_ty == float_id || step_ty.is_some_and(|ty| ty == float_id);
-
-        Ok(if uses_float {
-            float_id
-        } else {
-            self.type_environment.builtins().int
-        })
+        Ok(domain.type_id(&self.type_environment))
     }
 
     fn collection_iteration_types(

@@ -66,6 +66,7 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         numeric_profile: NumericProfile::STANDARD,
+        source_scope: None,
         bindings: vec![],
     }
 }

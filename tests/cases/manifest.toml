@@ -3800,11 +3800,81 @@ contract = "language.maps.duplicate_key_rejected"
 role = "primary"
 
 [[case]]
+id = "hashmap_duplicate_fixed_i8_rejected"
+path = "hashmap_duplicate_fixed_i8_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_i64_rejected"
+path = "hashmap_duplicate_fixed_i64_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_u64_rejected"
+path = "hashmap_duplicate_fixed_u64_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_byte_rejected"
+path = "hashmap_duplicate_fixed_byte_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
 id = "hashmap_unsupported_key_rejected"
 path = "hashmap_unsupported_key_rejected"
 tags = ["integration", "diagnostics", "hashmaps"]
 contract = "language.maps.unsupported_key_type_rejected"
 role = "primary"
+
+[[case]]
+id = "hashmap_unsupported_f16_key_rejected"
+path = "hashmap_unsupported_f16_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_unsupported_f32_key_rejected"
+path = "hashmap_unsupported_f32_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_unsupported_f64_key_rejected"
+path = "hashmap_unsupported_f64_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_i8_i16_key_mismatch_rejected"
+path = "hashmap_i8_i16_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_byte_u8_key_mismatch_rejected"
+path = "hashmap_byte_u8_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_u64_i64_key_mismatch_rejected"
+path = "hashmap_u64_i64_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
 
 [[case]]
 id = "hashmap_mixed_entries_rejected"
@@ -4316,6 +4386,55 @@ path = "loop_range_direction_and_step"
 tags = ["integration", "control-flow"]
 contract = "language.loops.range_direction_and_step_acceptance"
 role = "primary"
+
+[[case]]
+id = "fixed_numeric_range_runtime"
+path = "fixed_numeric_range_runtime"
+tags = ["integration", "control-flow", "numeric", "runtime", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "primary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int32_float32"
+path = "fixed_numeric_range_runtime_int32_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int64_float32"
+path = "fixed_numeric_range_runtime_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int64_float64"
+path = "fixed_numeric_range_runtime_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_float_range_rounded_endpoint_runtime"
+path = "fixed_float_range_rounded_endpoint_runtime"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_float_range_stall_runtime_trap"
+path = "fixed_float_range_stall_runtime_trap"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_source_order_html"
+path = "fixed_numeric_range_source_order_html"
+tags = ["integration", "control-flow", "numeric", "runtime", "html"]
+contract = "language.loops.fixed_numeric_range_source_order"
+role = "boundary"
 
 [[case]]
 id = "int_range_runtime_alias_updates"
@@ -5569,6 +5688,27 @@ id = "template_const_range_int64_endpoints"
 path = "template_const_range_int64_endpoints"
 tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
 contract = "language.templates.const_range_int64_endpoints"
+role = "boundary"
+
+[[case]]
+id = "template_const_range_fixed_initializer_success"
+path = "template_const_range_fixed_initializer_success"
+tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_fixed_initializer_success"
+role = "primary"
+
+[[case]]
+id = "template_const_range_runtime_reference_rejected"
+path = "template_const_range_runtime_reference_rejected"
+tags = ["integration", "templates", "diagnostics", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_runtime_reference_rejected"
+role = "primary"
+
+[[case]]
+id = "template_const_fixed_range_unrepresentable_step_rejected"
+path = "template_const_fixed_range_unrepresentable_step_rejected"
+tags = ["integration", "templates", "diagnostics", "numeric", "int64"]
+contract = "language.loops.fixed_range_unrepresentable_step_rejected"
 role = "boundary"
 
 [[case]]

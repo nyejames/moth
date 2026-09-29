@@ -1,3 +1,11 @@
+fixed_i64_max #I64 = 9223372036854775807
+fixed_i64_min #I64 = -9223372036854775808
+fixed_i64_near_max #I64 = 9223372036854775805
+fixed_i64_one #I64 = 1
+fixed_i64_zero #I64 = 0
+fixed_u64_max #U64 = 18446744073709551615
+fixed_u64_zero #U64 = 0
+
 #[loop 9223372036854775807 to & 9223372036854775807 |i|:
     int64-max-single-[i];
 ]
@@ -12,4 +20,24 @@
 
 #[loop -9223372036854775806 to & -9223372036854775808 |i|:
     int64-descending-near-min-[i];
+]
+
+#[loop fixed_i64_max to & fixed_i64_max |i|:
+    fixed-i64-max-single-[i];
+]
+
+#[loop fixed_i64_min to & fixed_i64_min |i|:
+    fixed-i64-min-single-[i];
+]
+
+#[loop fixed_i64_near_max to & fixed_i64_max by fixed_i64_one |i|:
+    fixed-i64-ascending-near-max-[i];
+]
+
+#[loop fixed_i64_max to & fixed_i64_zero by fixed_i64_max |i|:
+    fixed-i64-descending-to-zero-[i];
+]
+
+#[loop fixed_u64_max to & fixed_u64_zero by fixed_u64_max |i|:
+    fixed-u64-descending-to-zero-[i];
 ]

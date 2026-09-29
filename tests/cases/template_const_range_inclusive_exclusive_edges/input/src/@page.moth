@@ -1,3 +1,12 @@
+fixed_u8_start #U8 = 1
+fixed_u8_end #U16 = 3
+fixed_u8_step #U8 = 1
+fixed_u8_equal #U8 = 2
+fixed_f16_start #F16 = 0.5
+fixed_f16_end #F16 = 1.5
+fixed_f16_step #F16 = 0.5
+fixed_f16_equal #F16 = 1.0
+
 #[loop 1 to 3 |i|:
     excl-[i];
 ]
@@ -12,4 +21,28 @@
 
 #[loop 2.0 to & 2.0 by 0.0000000000000001 |i|:
     float-inclusive-equal-[i];
+]
+
+#[loop fixed_u8_start to & fixed_u8_end by fixed_u8_step |i|:
+    fixed-u8-u16-promoted-[i];
+]
+
+#[loop fixed_u8_equal to fixed_u8_equal by fixed_u8_step |i|:
+    fixed-u8-exclusive-equal-[i];
+]
+
+#[loop fixed_u8_equal to & fixed_u8_equal by fixed_u8_step |i|:
+    fixed-u8-inclusive-equal-[i];
+]
+
+#[loop fixed_f16_start to & fixed_f16_end by fixed_f16_step |i|:
+    fixed-f16-range-[i];
+]
+
+#[loop fixed_f16_equal to fixed_f16_equal by fixed_f16_step |i|:
+    fixed-f16-exclusive-equal-[i];
+]
+
+#[loop fixed_f16_equal to & fixed_f16_equal by fixed_f16_step |i|:
+    fixed-f16-inclusive-equal-[i];
 ]

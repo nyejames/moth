@@ -7,7 +7,32 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["excl-1;", "excl-2;", "incl-1;", "incl-2;", "incl-3;"]
-must_not_contain = ["excl-3;", "float-exclusive-equal-", "float-inclusive-equal-3;"]
+must_contain = [
+    "excl-1;",
+    "excl-2;",
+    "incl-1;",
+    "incl-2;",
+    "incl-3;",
+    "fixed-u8-u16-promoted-1;",
+    "fixed-u8-u16-promoted-2;",
+    "fixed-u8-u16-promoted-3;",
+    "fixed-u8-inclusive-equal-2;",
+    "fixed-f16-range-0.5;",
+    "fixed-f16-range-1;",
+    "fixed-f16-range-1.5;",
+    "fixed-f16-inclusive-equal-1;",
+]
+must_not_contain = [
+    "excl-3;",
+    "float-exclusive-equal-",
+    "float-inclusive-equal-3;",
+    "fixed-u8-exclusive-equal-",
+    "fixed-f16-exclusive-equal-",
+]
 
-must_contain_exactly_once = ["float-inclusive-equal-2;"]
+
+must_contain_exactly_once = [
+    "float-inclusive-equal-2;",
+    "fixed-u8-inclusive-equal-2;",
+    "fixed-f16-inclusive-equal-1;",
+]

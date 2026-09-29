@@ -414,6 +414,25 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let target = self.local_place(*result, &source)?;
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                candidate_result,
+                in_range_result,
+                ..
+            } => {
+                self.lower_expression(current, &source, event_ids)?;
+                self.lower_expression(step, &source, event_ids)?;
+                self.lower_expression(end, &source, event_ids)?;
+                self.lower_expression(ascending, &source, event_ids)?;
+
+                let candidate_target = self.local_place(*candidate_result, &source)?;
+                self.emit_fresh_write(candidate_target, &source, event_ids)?;
+                let in_range_target = self.local_place(*in_range_result, &source)?;
+                self.emit_fresh_write(in_range_target, &source, event_ids)?;
+            }
         }
         Ok(())
     }
