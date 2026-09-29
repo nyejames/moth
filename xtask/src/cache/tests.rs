@@ -36,7 +36,11 @@ fn pruning_preserves_recent_reports_and_all_build_artifacts() {
     for number in 0..14 {
         let path = timings.join(format!("cargo-timing-{number:02}.html"));
         fs::write(&path, b"report").expect("report fixture");
-        let modified = if number == 0 || number == 13 { now } else { old };
+        let modified = if number == 0 || number == 13 {
+            now
+        } else {
+            old
+        };
         File::options()
             .write(true)
             .open(path)
@@ -51,14 +55,23 @@ fn pruning_preserves_recent_reports_and_all_build_artifacts() {
     fs::create_dir_all(&artifacts).expect("artifact directory");
     fs::write(artifacts.join("keep.rlib"), b"compiled").expect("artifact fixture");
 
-    assert_eq!(prune_timing_reports(&timings, now).expect("prune reports"), 4);
+    assert_eq!(
+        prune_timing_reports(&timings, now).expect("prune reports"),
+        4
+    );
     assert!(timings.join("cargo-timing-00.html").is_file());
     assert!(timings.join("cargo-timing-13.html").is_file());
-    assert_eq!(fs::read(timings.join("cargo-timing.html")).unwrap(), b"latest");
+    assert_eq!(
+        fs::read(timings.join("cargo-timing.html")).unwrap(),
+        b"latest"
+    );
     assert_eq!(fs::read(timings.join("notes.txt")).unwrap(), b"notes");
     assert!(timings.join("cargo-timing-directory.html").is_dir());
     assert_eq!(fs::read(artifacts.join("keep.rlib")).unwrap(), b"compiled");
-    assert_eq!(prune_timing_reports(&timings, now).expect("repeat cleanup"), 0);
+    assert_eq!(
+        prune_timing_reports(&timings, now).expect("repeat cleanup"),
+        0
+    );
 }
 
 #[test]
@@ -66,7 +79,9 @@ fn recent_and_future_reports_are_not_removed() {
     let directory = tempdir().expect("fixture directory");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
     for number in 0..14 {
-        let path = directory.path().join(format!("cargo-timing-{number:02}.html"));
+        let path = directory
+            .path()
+            .join(format!("cargo-timing-{number:02}.html"));
         fs::write(&path, b"recent").expect("report fixture");
         File::options()
             .write(true)
