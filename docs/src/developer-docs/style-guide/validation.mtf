@@ -1,10 +1,9 @@
 ## Validation gates
 
-This document defines the technical gates a completed compiler or documentation
-slice must pass.
-
-The required final gate depends on whether the slice changes implementation or
-is strictly documentation-only.
+This document defines validation scope and cadence for compiler and documentation
+work. Choose checks by branch, checkpoint and changed behaviour. Feature-branch
+iteration uses targeted checks, important boundaries use routine validation and
+merge readiness uses the full gate.
 
 ### Task-reading guide
 
@@ -21,7 +20,7 @@ infrastructure or auditing the complete gate policy.
     ]
 
     [td:
-        [: Select the required final gate]
+        [: Select checks for a branch commit or merge checkpoint]
         [: `Choose the final gate by scope`]
     ]
 
@@ -160,36 +159,69 @@ A bare Cargo command does not claim that broader coverage.
 
 ### Choose the final gate by scope
 
+Use the smallest checks that cover the change at the current checkpoint.
+A commit or slice on a feature branch is not automatically a merge checkpoint.
+
 [table:
     [th:
-        [: **Slice**]
-        [: **Required final gate**]
+        [: **Checkpoint**]
+        [: **Required validation**]
     ]
 
     [td:
-        [: Ordinary code-bearing or mixed change]
-        [: `just validate`, plus affected feature lanes]
+        [: Feature-branch iteration or intermediate commit]
+        [: Targeted Cargo checks, filtered tests, selected integration cases or affected feature lanes]
     ]
 
     [td:
-        [: Performance-sensitive compiler work]
-        [: `just validate` and `just validate-perf`, plus affected feature lanes]
+        [: Important feature-branch boundary or broader integration checkpoint]
+        [: `just validate`, plus affected checks the routine gate does not cover]
     ]
 
     [td:
-        [: Validation infrastructure, Cargo/toolchain policy, timer erasure or release readiness]
-        [: `just validate-full`]
+        [: Completed plan or feature in final preparation for merge into main, or release readiness]
+        [: `just validate-full` on the final integrated tree]
     ]
 
     [td:
-        [: Strictly documentation-only change]
-        [: `moth build docs --release` or the equivalent Cargo invocation]
+        [: Every commit landing on main, including documentation-only commits]
+        [: Passing `just validate-full` evidence for the resulting tree]
+    ]
+
+    [td:
+        [: Documentation-only checkpoint on a feature branch]
+        [: The documentation gate below, without unrelated compiler suites]
     ]
 ]
 
-The `justfile` is the executable authority for these gates. `ship`, `release`
-and release CI use `validate-full`. A routine validation pass is not a claim
-that performance, feature-matrix or release-artifact checks ran.
+During branch work, use focused checks after each meaningful slice. Use
+`just validate` at important boundaries rather than after every small edit.
+Reserve `just validate-full` for final plan or feature merge preparation. Even
+changes to validation infrastructure, Cargo settings or timer erasure use their
+affected commands during intermediate work rather than repeatedly running every
+unrelated gate. An explicit user request for a wider run still takes precedence.
+
+Performance-sensitive changes need relevant non-recording evidence when assessing
+their effect. Select the affected benchmark or `just validate-perf` when its
+coverage is needed, not automatically for every branch commit. Full validation
+already includes the standard performance checks.
+
+The main-commit rule applies to the tree actually landing, including merge or
+rebase resolutions. After changes invalidate a passing full run, validate the
+final integrated tree again before merging. Record the tested revision and build
+configuration. The same passing run can serve branch closeout and main entry
+when that tree and configuration are unchanged. Intermediate commits kept only
+on the feature branch do not each need retrospective full runs.
+
+This cadence governs generic per-slice validation instructions in older plans
+and agent workflows. Preserve explicitly required behaviour tests, regression
+checks and evidence for the changed owner without expanding each into a full
+repository run. Report the selected commands and what they covered. A targeted
+or routine pass does not claim that unrun families passed.
+
+The `justfile` owns command contents. `ship`, `release` and release CI use
+`validate-full`. This policy changes when to run those commands, not their
+coverage or failure contracts.
 
 ### Code-bearing final gate
 
@@ -214,12 +246,16 @@ Run the probe directly to check the selected runtime before a full gate:
     node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 ]
 
-Before declaring a non-trivial code-bearing slice complete, run the gate
-selected by scope. The ordinary gate is:
+Use `Fast iteration commands` for small feature-branch slices. At an important
+branch boundary, the routine correctness gate is:
 
 [codeblock, $code("bash"):
     just validate
 ]
+
+Full-plan or feature merge preparation uses `just validate-full` under
+`Choose the final gate by scope`. Completing an intermediate slice does not
+require that full run.
 
 #### What just validate runs
 
@@ -514,11 +550,17 @@ default configuration.
 The report distinguishes standard and opt-in lane owners. Adding a Cargo feature means adding it
 to a standard or opt-in lane in the same change. The check fails otherwise.
 Run affected executing lanes for feature-gated work even when the routine gate passes.
+Use the relevant package, feature set and test filter during a branch slice.
+Run the complete standard matrix at full-validation checkpoints rather than
+for every intermediate feature-branch commit.
 
 ### CI gates
 
 `just validate` is the routine local gate and is deliberately fail-fast: the first failure stops
 the run. `just validate-full` provides all standard families as one fail-fast command.
+The per-main-commit requirement is independent of how frequently CI is triggered.
+A push containing several main commits does not establish full evidence for each
+one merely because CI tested its final revision.
 
 CI reports each validation family as its own job, so one failure never stops
 another from reporting:
@@ -637,8 +679,10 @@ A documentation-only slice must not change Rust, tests, libraries, build
 configuration, manifests, scripts, benchmark code or fixtures, compiler
 configuration or other executable project sources.
 
-For a strictly documentation-only slice, run one documentation release build
-using a current compiler.
+During documentation-only branch iteration, inspect the changed source, links
+and examples, using `moth check docs --terse` when checking Moth docs sources.
+At a documentation completion checkpoint on that branch, run one documentation
+release build using a current compiler.
 
 The direct release-binary form is:
 
@@ -657,15 +701,21 @@ Then:
 - confirm generated output came from source changes
 - confirm the changed-file list contains documentation only.
 
-Do not additionally run `just validate`, Clippy, unit tests, integration tests
-or benchmark checks for a documentation-only slice. A Cargo invocation of the
-compiler is an alternative way to run the same documentation gate, not an
-extra gate.
+This is sufficient for a documentation-only feature-branch checkpoint. Leave
+unrelated Clippy, unit, integration and benchmark suites for the appropriate
+wider checkpoint. A Cargo invocation of the compiler is an alternative way to
+run the same documentation gate, not an extra gate.
 
-If any non-documentation file changed, the documentation-only exception does
-not apply. Use the code-bearing gate selected by scope.
+Final merge preparation and every commit landing on main still require
+`just validate-full`, including documentation-only changes. The branch-only
+exception does not waive that requirement. If any non-documentation file
+changed, select code-bearing checks under `Choose the final gate by scope`.
 
 ### Fast iteration commands
+
+Prefer the narrowest useful command during feature-branch work. A compile check
+is useful early feedback but does not replace behaviour tests when behaviour
+changed. Package and test filters avoid rebuilding or running unrelated targets.
 
 [table:
     [th:
@@ -674,12 +724,37 @@ not apply. Use the code-bearing gate selected by scope.
     ]
 
     [td:
-        [: Unit-test iteration]
-        [: `cargo test --workspace --quiet -- --format terse`]
+        [: Compile-check one package]
+        [: `cargo check -p <package>`]
     ]
 
     [td:
-        [: Integration iteration]
+        [: Focused Rust test iteration]
+        [: `cargo test -p <package> <filter>`]
+    ]
+
+    [td:
+        [: Focused feature-gated tests]
+        [: `cargo test -p moth --features <features> <filter>`]
+    ]
+
+    [td:
+        [: Complete workspace tests when needed]
+        [: `just validate-unit-tests`]
+    ]
+
+    [td:
+        [: One integration case]
+        [: `cargo run --quiet -- tests --case <id> --terse`]
+    ]
+
+    [td:
+        [: An affected integration family]
+        [: `cargo run --quiet -- tests --tag <tag> --terse`]
+    ]
+
+    [td:
+        [: Complete integration suite when needed]
         [: `moth tests`]
     ]
 
@@ -764,18 +839,19 @@ not apply. Use the code-bearing gate selected by scope.
     ]
 
     [td:
-        [: Routine code-bearing gate]
+        [: Important feature-branch boundary]
         [: `just validate`]
     ]
 
     [td:
-        [: All standard validation families]
+        [: Final merge preparation or a main commit]
         [: `just validate-full`]
     ]
 ]
 
-Passing one targeted command does not imply a code-bearing slice passes its
-required gate.
+Replace placeholders with the affected package, test filter, feature set or
+canonical case metadata. Record the checks actually run. Passing targeted
+checks can close a branch slice without implying full merge readiness.
 
 ### Formatting
 
@@ -804,7 +880,8 @@ edits.
 
 When a code-bearing slice changes stage ownership, frontend boundaries, HIR,
 diagnostics, types or backend handoff, perform a manual architecture audit in
-addition to the automated gate.
+addition to the selected automated checks. This review does not itself require
+a full validation run for an intermediate feature-branch slice.
 
 Audit that:
 
@@ -831,6 +908,8 @@ pure refactor or prose-only correction.
 
 ### Benchmark safety
 
+- Run performance checks when the current change needs performance evidence,
+  not as a default step for every feature-branch commit or slice.
 - `just validate-perf` and `just validate-full` use non-recording `bench-ci` and scaling checks.
 - `bench-ci` preflights every standard case before measuring the quick subset.
 - `bench-validate` preflights all manifest cases and still builds a release compiler.
@@ -859,8 +938,9 @@ pure refactor or prose-only correction.
 
 ### Code-bearing completion checklist
 
-Before declaring a non-trivial code-bearing slice complete, check:
+Before closing a code-bearing slice or checkpoint, check:
 
+- The selected validation matches the branch, checkpoint and changed behaviour.
 - Rust source was formatted where applicable.
 - The changed code follows `style-guide.mtf`.
 - Test selection and assertions follow `testing.mtf`.
@@ -870,16 +950,18 @@ Before declaring a non-trivial code-bearing slice complete, check:
 - Documentation was rebuilt when required.
 - Generated output was not edited manually.
 - Benchmark history was not changed accidentally.
-- `just validate` and every additional gate required by scope pass.
+- The selected checks pass and their exact scope and results are reported.
+- Merge readiness and every main commit have full-gate evidence for the resulting tree.
 
 ### Documentation-only completion checklist
 
-Before declaring a documentation-only slice complete, check:
+Before declaring a documentation-only branch checkpoint complete, check:
 
 - The changed-file list contains documentation only.
-- The documentation release build succeeds.
+- The documentation release build succeeds at the completion checkpoint.
 - Changed routes, links, tables and examples were inspected.
 - Generated output was produced from source changes.
 - No generated HTML was edited manually.
 - No code, test, build, library, manifest, script, benchmark or configuration
   file changed.
+- Final merge preparation and main commits also satisfy the full-gate rule.

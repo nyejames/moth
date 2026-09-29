@@ -39,25 +39,34 @@ See the hosted docs site for the compiled versions of these mtf files.
 
 The complete testing policy is in [testing.mtf](docs/src/developer-docs/style-guide/testing.mtf).
 
-Run the integration suite during iteration with:
+Use focused tests while working on a feature branch, for example:
 
 ```sh
-cargo run --quiet -- tests
+cargo test -p xtask cache::tests
+cargo run --quiet -- tests --case <id>
 ```
+
+Intermediate branch commits use the smallest checks that cover their changes.
+Run `just validate` at important boundaries. Reserve `just validate-full` for
+final plan or feature merge preparation and release readiness. Every commit
+landing on `main`, including documentation-only commits, needs full validation
+of its resulting tree. The validation guide owns the exact evidence rules.
 
 ## Command guide
 
-- `cargo run --quiet -- build docs --release` - final gate for a strictly documentation-only change
-- `cargo run --quiet -- tests` - fast integration-suite iteration
+- `cargo check -p <package>` - quick compile check during branch work
+- `cargo test -p <package> <filter>` - focused Rust tests for a slice
+- `cargo run --quiet -- build docs --release` - documentation-only branch checkpoint
+- `cargo run --quiet -- tests` - complete integration suite
 - `cargo run --quiet -- tests --case <id> [--backend <id>]` - exact focused integration run
 - `cargo run --quiet -- tests --tag <tag> [--tag <tag>]` - logical AND tag selection
 - `cargo run --quiet -- tests --list [filters]` - list selected suite metadata without compiling
 - `cargo run --quiet -- tests --audit` - validate and write the complete suite inventory
 - `cargo clippy` or `just clippy` - ordinary linting with the same toolchain, scope and warning policy
 - `cargo fmt` or `just fmt` - ordinary formatting with the same formatter and scope
-- `just validate` - routine correctness, plus affected feature lanes when required
-- `just validate-perf` - non-recording benchmark and scaling checks for performance-sensitive work
-- `just validate-full` - all standard gates, required for validation infrastructure and release readiness
+- `just validate` - routine correctness at important feature-branch boundaries
+- `just validate-perf` - non-recording benchmark and scaling evidence when the change needs it
+- `just validate-full` - final merge preparation, every main commit and release readiness
 - `just cache-maintain` - conservative timing-report retention and a soft target size warning
 - `just cache-evict-preview` - preview explicit workspace dev/test eviction before `just cache-evict`
 - `just bench-check` - non-recording performance evidence
