@@ -531,9 +531,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Control flow</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage; fixed integer and binary-float range tests cover promoted binding domains, checked unsigned descent, inclusive endpoints and Int indices, with HTML and instantiated-Wasm execution across four profiles, visible <code>#I64</code>, <code>#U8</code> and <code>#U64</code> constant folding, and source-order HTML coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Branch-heavy CFG cases and loop exits remain important regression surfaces.</td>
+ <td style="padding: 0.1em 0.5em; "> Fixed integer and binary-float ranges promote the binding domain while indices remain Int; checked unsigned descent and inclusive endpoints terminate without an out-of-range sentinel, while <code>to</code> remains exclusive. Visible <code>#I64</code>, <code>#U8</code> and <code>#U64</code> constants fold in ranges.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -611,9 +611,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Hash maps</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage, including fixed-width integer/Byte key eligibility, exact typed lookup, duplicate-key rejection and unsupported float-key diagnostics on HTML-JS.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML / backend validation for other targets</td>
- <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered scalar-keyed maps with <code>{K = V}</code> types, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Non-JS map lowering remains the primary accepted target gap.</td>
+ <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered maps with <code>{K = V}</code> types and <code>I*/U*/Byte</code> source keys, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS canonicalizes every String-like key to canonical content, including template-backed keys, and supports canonical same-typed lookup and duplicate rejection for these source keys. <code>F*/Float/Number</code> source keys remain unsupported. Map runtime lowering is JavaScript-only; non-JS map lowering remains the primary target gap, with Wasm map lowering still target-rejected.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1102,7 +1102,7 @@ td {
              <td style="padding: 0.1em 0.5em; "> MON Rust codec</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad public API, focused codec and bounded hardening coverage</td>
- <td style="padding: 0.1em 0.5em; "> The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.</td>
+ <td style="padding: 0.1em 0.5em; "> The Rust-only <code>moth::mon</code> codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. It covers fixed-width numerics, <code>Byte</code>, profile-selected <code>Int</code>/<code>Float</code> via <code>Schema::with_profile</code> (defaulting to <code>Int32</code>/<code>Float64</code>), fixed-integer/<code>Byte</code> map keys and decimal scales through <code>256</code>. The external Rust consumer covers save conversion, profiled round trips, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native <code>$mon</code>, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
