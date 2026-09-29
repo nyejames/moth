@@ -1084,6 +1084,10 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
 
 #[test]
 fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
+    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
+    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
+    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
     let child = root.join("child");

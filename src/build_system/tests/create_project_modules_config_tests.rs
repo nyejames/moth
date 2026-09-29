@@ -151,6 +151,10 @@ fn persists_direct_project_config_resolution_records_in_live_config() {
 
 #[test]
 fn loads_canonical_config_file_from_project_root() {
+    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
+    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
+    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
