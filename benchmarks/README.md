@@ -349,7 +349,9 @@ the schema version so this reset cannot be hidden as a speed movement.
 ### Frontend parallelism matrix
 
 For frontend scheduling and parallelism work, run the focused frontend suite with the default
-thread count and the fixed Rayon thread counts used by the roadmap plan:
+thread count and the fixed Rayon thread counts used by the roadmap plan. Repository Cargo
+configuration leaves `RAYON_NUM_THREADS` unset, so ordinary benchmark commands use Rayon's
+host-selected default. Set the variable only for an intentional fixed-thread experiment:
 
 ```bash
 just bench-frontend-check
