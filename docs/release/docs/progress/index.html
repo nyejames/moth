@@ -531,16 +531,16 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Control flow</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad parser, HIR, integration, dispatcher, branch, loop, break, continue and match lowering coverage; fixed integer and binary-float range tests cover promoted binding domains, checked unsigned descent, inclusive endpoints and Int indices, with HTML and instantiated-Wasm execution across four profiles, visible <code>#I64</code>, <code>#U8</code> and <code>#U64</code> constant folding, and source-order HTML coverage.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Branch-heavy CFG cases and loop exits remain important regression surfaces.</td>
+ <td style="padding: 0.1em 0.5em; "> Fixed integer and binary-float ranges promote the binding domain while indices remain Int; checked unsigned descent and inclusive endpoints terminate without an out-of-range sentinel, while <code>to</code> remains exclusive. Visible <code>#I64</code>, <code>#U8</code> and <code>#U64</code> constants fold in ranges.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Assertions</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage.</td>
- <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage. Dynamic default-message failures execute on HTML and instantiated HTML-Wasm with distinct Error and trap observations.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML / HTML-Wasm</td>
  <td style="padding: 0.1em 0.5em; "> <code>assert</code> is a statement-only language intrinsic. It is always checked, unrecoverable and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default, fully folded and unreachable literal-true runtime messages but rejects reachable runtime construction. Literal-true messages are fully type/generic/evidence checked and normalized, then replaced with typed <code>none</code> before HIR, so no TIR, runtime handoff, reactive metadata, generated request or executable fact is published. Message construction cannot escape its evaluation through <code>!</code>, <code>?</code>, return, break or continue. Authored propagation locations remain distinct from ordinary call mapping. <code>assert(false)</code> is statically terminal.</td>
         </tr>
 
@@ -595,9 +595,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Pattern matching</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics and single-predicate value-if coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards and <code>else =&gt;</code> arms are supported. General bare-name capture has been removed from full-match positions, and <code>String</code> relational subjects are rejected. Option <code>|name|</code> and declared choice payload captures remain valid. Inline and block option-present and choice-predicate single-predicate value matches are supported at closed receivers, with focused coverage. Full relational overlap analysis and nested choice payload patterns remain deferred. Relational subjects are limited to <code>Int</code>, <code>Float</code> and <code>Char</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad literal, choice-match, payload-capture, relational pattern, guard, exhaustiveness, warning, diagnostics and single-predicate value-if coverage. Targeted fixed-width/Byte destination, range, category and HIR coverage for literal-pattern typing; four-profile negative Float decimal/exponent, relational and optional present-value runtime branches.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Literal patterns, choice variants, payload extraction, relational patterns, guards and <code>else =&gt;</code> arms are supported. General bare-name capture has been removed from full-match positions, and <code>String</code> relational subjects are rejected. Option <code>|name|</code> and declared choice payload captures remain valid. Inline and block option-present and choice-predicate single-predicate value matches are supported at closed receivers, with focused coverage. Full relational overlap analysis and nested choice payload patterns remain deferred. Frontend literal and relational patterns also support fixed-width numeric types and Byte; HTML-JS executes their runtime values, while HTML-Wasm rejects them until its lowering lands.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -611,15 +611,15 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Hash maps</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage, including fixed-width integer/Byte key eligibility, exact typed lookup, duplicate-key rejection and unsupported float-key diagnostics on HTML-JS.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML / backend validation for other targets</td>
- <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered scalar-keyed maps with <code>{K = V}</code> types, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS normalizes every String-like key to canonical content, including template-backed keys. Non-JS map lowering remains the primary accepted target gap.</td>
+ <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered maps with <code>{K = V}</code> types and <code>I*/U*/Byte</code> source keys, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS canonicalizes every String-like key to canonical content, including template-backed keys, and supports canonical same-typed lookup and duplicate rejection for these source keys. <code>F*/Float/Dec</code> source keys remain unsupported. Map runtime lowering is JavaScript-only; non-JS map lowering remains the primary target gap, with Wasm map lowering still target-rejected.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Results, options, multiple returns and multi-bind</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind and diagnostic coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad option, fallible return, postfix propagation, catch, value-producing block, multi-return, multi-bind and diagnostic coverage; external-JS generated wrapper getter snapshots across both Int widths and debug/release builds.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
  <td style="padding: 0.1em 0.5em; "> <code>Error!</code>, postfix <code>!</code>, <code>catch</code>, value-producing blocks, options, multiple returns and multi-bind are supported. Value-producing <code>if</code> and match work at declaration, assignment, return and multi-bind receivers. Nested <code>then</code> receivers remain deferred.</td>
         </tr>
@@ -627,9 +627,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Constants and compile-time folding</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, anonymous const-record, external constant, config and diagnostics coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad top-level constant, dependency sorting, template folding, numeric folding, const-record, anonymous const-record, external constant, config and diagnostics coverage. Focused Int32/Int64 consumption tests cover copied constants, imported nominal and anonymous const-record leaves and configuration-origin diagnostics.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend</td>
- <td style="padding: 0.1em 0.5em; "> Top-level compile-time constants such as <code>name #= value</code> must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values. Parenthesised anonymous const records use named-only <code>(name = value)</code> entries: the empty record is permitted, every field needs an explicit value, fields declare no constructable type and inline nested anonymous, bound or explicitly constructed nominal children fold without declaring nested types. Whole records remain runtime-ineligible. Exported and imported folded records are supported.</td>
+ <td style="padding: 0.1em 0.5em; "> Top-level compile-time constants such as <code>name #= value</code> must fully fold. Same-file constant evaluation follows source order unless dependency sorting can order top-level declarations. Const records are compile-time field-access-only values. Parenthesised anonymous const records use named-only <code>(name = value)</code> entries: the empty record is permitted, every field needs an explicit value, fields declare no constructable type and inline nested anonymous, bound or explicitly constructed nominal children fold without declaring nested types. Whole records remain runtime-ineligible. Exported and imported folded records are supported. Numeric operations on explicit constant values diagnose known failures at the authored operator, including inside builtin <code>Error!</code> functions, and retain the selected numeric profile and configuration origin.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -643,17 +643,17 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Arithmetic, explicit casts and copy</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad arithmetic, precedence, checked numeric, cast parser/AST/HIR/JS, const-folding, explicit copy and diagnostics coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Runtime numeric operations lower through checked HIR operations. Explicit <code>cast</code> uses compiler-owned builtin cast policies and evidence. Scalar constructor-style conversions are removed. Const <code>Error</code> materialization, branching const catch handlers and Wasm cast lowering remain deferred.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad arithmetic, precedence, checked numeric, cast parser/AST/HIR/JS, const-folding, explicit copy and diagnostics coverage. Fixed-width promotion/compatibility and numeric constant folding are covered.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HIR / JS / HTML / HTML-Wasm</td>
+ <td style="padding: 0.1em 0.5em; "> Runtime Int/Float numeric operations lower through checked HIR operations. Fixed-width and Byte cast policies, fixed-width operator typing and numeric constant folding are implemented in the frontend/HIR. HTML-JS executes fixed-width numeric and Byte runtime values. HTML-Wasm executes direct fixed integers, Byte, F16, F32/F64 and profile-selected Int/Float values and comparisons, checked integer and Float/F32/F64 trap-mode arithmetic; F16 scalar values use a finite F32 computation carrier and compact two-byte storage, with portable conversion/rounding and F16 + F16 arithmetic producing F32. Supported infallible numeric expression casts include the existing casts not involving F16, integer -> F16 and widening F16 -> F32/F64, plus Byte -> U8 and U8 -> Byte. HTML-Wasm also executes NumericToString expression casts for profile Int and fixed signed/unsigned integers; the one-profile paired and generated-Wasm helper coverage appears in the Wasm payload/runtime parity row. F32/F64 -> F16 narrowing and numeric-to-numeric casts from F16 other than widening to F32/F64 remain target-gated. HTML-Wasm validates finite Float values after carrier conversion in trap mode and formats runtime Float templates and Float/F16/F32/F64-to-String expression casts at their own precision; non-finite values trap only in trap mode. Reachable ReturnError FormatFloat and ValidateFloat remain target-rejected. Recoverable numeric Error! paths, other fallible casts, other defined builtin runtime conversions involving Bool, Char, Error or String (including Char -> Int and String-to-numeric parsing), statement-form casts, source-level external Float imports and their finite-boundary validation, and fixed-scalar aggregates remain target-gated. Dec arithmetic, exact negation and cast policies are implemented in the frontend; HTML-JS executes arithmetic and exact negation, with exact mixed operations and comparisons against profile Int and all eight fixed integer types, rounded half-even per operation. Integer-to-Dec and scale widening are infallible; scale narrowing and Dec-to-integer conversions are exact and fallible. HTML-JS String-to-Dec conversion is fallible and parses the whole existing numeric grammar exactly; HTML-JS formats Dec canonically. HTML-Wasm rejects reachable Dec values and signatures, including nested types and generated-function uses; unreachable private helpers do not gate the target. Explicit <code>cast</code> uses compiler-owned builtin cast policies and evidence. Const <code>Error</code> materialisation and branching const catch handlers remain deferred. Conservative integer proofs elide only proven JS integer-operation/narrowing predicates and Wasm trap-mode integer-operation predicates (<code>ProvenSafe</code>). Evaluation order and required carriers remain unchanged; JS canonicalises exact-integer Number zero and keeps BigInt exact. Missing or profile-mismatched facts retain checks. Power, Byte, float and Dec checks remain; Wasm casts and Error-mode arithmetic remain target-gated, with no Wasm narrowing support.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Float formatting and boundary validation</td>
- <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Targeted stable formatting, finite-source, external-boundary, HIR statement, JS helper and validator coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Moth-owned Float formatting is used for AST folding, runtime template interpolation and casts. External Float success returns are validated before ordinary Moth code observes them.</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend folding and external-boundary tests, paired HTML/HTML-Wasm source fixtures at default and Int32/Float32 profiles (both 2/2), generated-Wasm formatter checks for all finite F16 encodings and selected F32/F64 boundary and random bits, plus non-finite traps.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML / HTML-Wasm</td>
+ <td style="padding: 0.1em 0.5em; "> The frontend folds Float text. HTML-JS uses Moth-owned Float formatting for runtime template interpolation and casts, and validates external Float success returns. HTML-Wasm validates finite Float values in trap mode after carrier conversion, preserving signed zero until formatting. HTML-Wasm formats runtime Float templates and Float/F16/F32/F64-to-String expression casts at their own precision; non-finite formatting and validation trap only in trap mode. Reachable ReturnError FormatFloat and ValidateFloat, source-level external Float imports and String-to-numeric parsing remain target-rejected.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -874,10 +874,10 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Named arguments and call-site mutability</td>
- <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad function-call, constructor-call, duplicate, unknown, missing, ordering and tilde diagnostics coverage.</td>
- <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
- <td style="padding: 0.1em 0.5em; "> Fresh rvalues can satisfy mutable parameters without <code>~</code>. Existing places still require explicit <code>~</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML-JS / HTML-Wasm</td>
+ <td style="padding: 0.1em 0.5em; "> Fresh rvalues can satisfy mutable parameters without <code>~</code>. Existing places still require explicit <code>~</code>. HTML-JS preserves normal write-through; HTML-Wasm rejects reachable mutable function parameters because its call-argument ABI has no writable argument slot.</td>
         </tr>
             
 
@@ -1005,9 +1005,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Builtin Error type</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Constructor, default-field, named-argument, public field and backend-generated Error coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> U32 default, constructor order and cross-module public fields; source/Core/backend/foreign recovery through U32::MAX in Int32 and Int64 profiles; explicit Int conversion, negative/oversized rejection and structured Wasm rejection. Runtime and diagnostic cases: <code>tests/cases/error_code_u32_*</code>. Public U32-schema round trips: <code>tests/mon_public_api.rs</code>.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
- <td style="padding: 0.1em 0.5em; "> Public fields are <code>message</code> and <code>code</code>. Hidden location/trace metadata remains backend-internal.</td>
+ <td style="padding: 0.1em 0.5em; "> Public fields are <code>message String</code> and <code>code U32 = 0</code>. HTML-JS preserves unsigned codes through construction, propagation, recovery and foreign projection in every numeric profile. HTML-Wasm rejects reachable Error values until aggregate/runtime support exists. Hidden location/trace metadata remains backend-internal.</td>
         </tr>
             
 
@@ -1081,7 +1081,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Wasm payload/runtime parity</td>
  <td style="padding: 0.1em 0.5em; "> Experimental</td>
- <td style="padding: 0.1em 0.5em; "> Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive and external-call cases.</td>
+ <td style="padding: 0.1em 0.5em; "> Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive and external-call cases. The four-profile paired HTML-JS/HTML-Wasm <code>wasm_scalar_profile_comparison_runtime</code> corpus executes emitted Wasm for scalar calls, exact fixed comparisons, unsigned Byte ordering and direct Int64-to-Float32 rounding. Paired `wasm_scalar_compound_parity` cases execute local compound I32/U64 operations, dynamic I8/U16 widening and U64 above signed max (2/2 HTML/instantiated-Wasm outcomes). Reachable mutable function parameters are target-rejected with structured `unsupported_backend_feature.mutable_function_parameters` diagnostics (paired `mutable_parameter_wasm_rejected` 2/2); immutable parameters and mutable locals remain supported. A separate paired JS/instantiated-Wasm NumericToString expression-cast fixture covers profile Int and fixed signed/unsigned integer formatting in the Int32/Float32 profile only; generated-Wasm UTF-8 helper tests cover signed and unsigned output. Paired source fixtures `float_format_contract` (default) and `float_format_profile_float32` (Int32/Float32) each pass 2/2 HTML/HTML-Wasm outcomes, providing two-profile source evidence, not four-profile text coverage. Paired integer cases execute promoted arithmetic, signed and unsigned 32/64-bit boundaries, full-width power, truncating division, dividend-sign remainder and infallible integer widening. Paired float cases execute Float/F32/F64 arithmetic, infallible numeric expression casts that do not involve F16 (including direct U64-to-F32 rounding) and Byte/U8 conversion. The four-profile paired corpus also exercises direct F16 scalar values and comparisons, frontend-materialised F16 literals at the midpoint and just above it and at the minimum subnormal, parameter/local/result paths including local rebinding and return, runtime I16-to-F16 conversion with ties to even, and F16 + F16 arithmetic yielding F32. Portable Wasm helpers implement binary16 conversion, power and dividend-sign float remainder without host math imports. Dynamic range cases preserve source bounds and step values through checked in-place counter updates. Separate terminal cases observe numeric overflow, zero-divisor, exponent, non-finite-result and negation traps. Emitter tests cover machine-boundary overflow and preserved power operands, plus compact scalar loads/stores with raw bytes and strides; the emitter-only compact-storage proof inspects 152 raw bytes, not source aggregate layout. F16 emitter cases exercise compact two-byte raw-bit storage, signed zero and invalid-storage traps. This does not claim source aggregate support. The shared runtime harness distinguishes explicit Wasm traps from Moth Error outcomes. Float template formatting and Float/F16/F32/F64-to-String expression casts work in trap mode; non-finite formatting and validation trap only in trap mode. Recoverable numeric Error! paths, other fallible casts, F32/F64 -> F16 narrowing and numeric-to-numeric casts from F16 other than widening to F32/F64, other defined builtin runtime casts involving Bool, Char, Error or String (including Char -> Int and String-to-numeric parsing), statement-form casts, reachable ReturnError FormatFloat and ValidateFloat, source-level external Float imports and their finite-boundary validation, fixed-scalar aggregates and Dec remain target-gated. Reachable builtin <code>Error</code> values and fallible control flow also remain target-gated; HTML-Wasm reports structured, source-located diagnostics before backend lowering. Two paired HTML-JS/HTML-Wasm cases check JS recovery and source-mapped target rejection for builtin and custom errors on Wasm.</td>
  <td style="padding: 0.1em 0.5em; "> Backend parity progress belongs here, not repeated in every feature row.</td>
         </tr>
             
@@ -1101,8 +1101,8 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> MON Rust codec</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad public API, focused codec and bounded hardening coverage</td>
- <td style="padding: 0.1em 0.5em; "> The Rust-only `moth::mon` codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. The external Rust consumer covers save conversion, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native `$mon`, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.</td>
+ <td style="padding: 0.1em 0.5em; "> Public Int/Float round trips cover all four numeric profiles with integer range checks, binary rounding and profile-independent I64/F64 values. Broad public API, focused codec and bounded hardening coverage includes bit-exact F16 subnormal/normal edges, both zero signs, signed-zero default expansion, exact scale 0/1/256 ingress and defaults, and large Integer/Decimal public round trips. Error-shaped U32 schemas cover default zero, 2147483648 and 4294967295 under both Int widths, with field-located negative/oversized rejection in <code>tests/mon_public_api.rs</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> The Rust-only <code>moth::mon</code> codec is implemented and publicly re-exported with owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling. It covers fixed-width numerics, <code>Byte</code>, profile-selected <code>Int</code>/<code>Float</code> via <code>Schema::with_profile</code> (defaulting to <code>Int32</code>/<code>Float64</code>), fixed-integer/<code>Byte</code> map keys and decimal scales through <code>256</code>. The external Rust consumer covers save conversion, profiled round trips, schema reuse, lifetime independence and limits; local throughput notes are smoke observations, not release benchmarks; allocations and peak memory have not been measured. Moth-native <code>$mon</code>, automatic schema extraction, source-parity changes, runtime operations and the static builder remain deferred.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1206,7 +1206,7 @@ td {
              <td style="padding: 0.1em 0.5em; "> Trait bounds on generics</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad declaration-site bound, visible evidence, module public-surface privacy, receiver-call, nominal generic instance and negative diagnostic coverage.</td>
- <td style="padding: 0.1em 0.5em; "> Bounds use <code>is</code>. Concrete generic calls and nominal generic instances require visible reusable evidence.</td>
+ <td style="padding: 0.1em 0.5em; "> Bounds use <code>is</code>. Concrete generic calls and nominal generic instances require visible reusable evidence. Core cast bounds derive pair-scoped evidence on demand with exact fallibility. Retained requests freeze canonical identities without mutating the frozen requester.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1225,9 +1225,9 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Rich numeric redesign</td>
- <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> Current numeric coverage is tracked in the core arithmetic and Float rows.</td>
- <td style="padding: 0.1em 0.5em; "> The accepted Number and fixed-scale NumberN family, Byte scaffold and conservative numeric check elision remain deferred. Byte runtime support and lossy Float/Number helpers remain later accepted work.</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted fixed-width operator-matrix, unsigned-negation, exact-comparison, immediate-peer, match-pattern and operator/cast constant-fold coverage, plus Dec identity, exact materialisation and transport, mixed integer arithmetic/comparisons, signed half-even rounding, full-width exponent fast paths, exact casts and parsing failures, atomic compound writeback, imported generic cast proofs and common formatting coverage. Conservative integer proofs cover invalidation, retained failures, exact zero and side-effect order in <code>src/compiler_frontend/analysis/numeric_proofs/tests/</code> and backend tests, with paired source cases in <code>tests/cases/numeric_bounded_proofs_*</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> Canonical fixed-width numeric and Byte identities, contextual literals, promotion, checked operations and casts are implemented in the frontend and HTML-JS. Dec and Dec0 share scale-zero identity; Dec1 through Dec256 retain exact coefficients and scales through receiving literals, folded/public/HIR values and immutable HTML-JS transport, including copies, collections, options and generics. HTML-JS executes exact mixed integer operations, per-operation half-even rounding, exact scale conversions and canonical text. Conservative integer proofs elide only proven predicates without changing source acceptance, required carriers, side effects or failure order. Experimental Wasm scalar coverage and its remaining gates belong in the Wasm payload/runtime parity row above. Reachable Dec and Error values, recoverable numeric failures and fixed-scalar aggregates remain target-gated on Wasm. General aggregate layout remains deferred.</td>
         </tr>
             
 

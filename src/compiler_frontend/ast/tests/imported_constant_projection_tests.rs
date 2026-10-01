@@ -17,11 +17,12 @@ use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRootTable,
 };
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
+    CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -144,26 +145,13 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
     ) -> Result<TypeId, CompilerError> {
         match identity {
             CanonicalTypeIdentity::Builtin(builtin) => {
-                let type_id = match builtin {
-                    CanonicalBuiltinType::Bool => builtin_type_ids::BOOL,
-                    CanonicalBuiltinType::Int => builtin_type_ids::INT,
-                    CanonicalBuiltinType::Float => builtin_type_ids::FLOAT,
-                    CanonicalBuiltinType::Decimal => builtin_type_ids::DECIMAL,
-                    CanonicalBuiltinType::String => builtin_type_ids::STRING,
-                    CanonicalBuiltinType::Char => builtin_type_ids::CHAR,
-                    CanonicalBuiltinType::Range => builtin_type_ids::RANGE,
-                    CanonicalBuiltinType::None => builtin_type_ids::NONE,
-
-                    // The Error builtin is seeded by real module compilation, which this fixture
-                    // never runs, so there is no consumer-local handle to return.
-                    CanonicalBuiltinType::Error => {
-                        return Err(CompilerError::compiler_error(
-                            "record projection test materialiser has no consumer-local Error builtin",
-                        ));
-                    }
-                };
-
-                Ok(type_id)
+                // The `Error` builtin is seeded by real module compilation, which this fixture
+                // never runs, so there is no consumer-local handle to return.
+                intern_canonical_builtin(*builtin, &mut self.type_environment).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "record projection test materialiser has no consumer-local Error builtin",
+                    )
+                })
             }
 
             // The marker interns to this fixture environment's one compile-time-only TypeId.
@@ -551,6 +539,78 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         imported_nested_fields[0].value.kind,
         ExpressionKind::Int(7)
     ));
+}
+
+#[test]
+fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
+    let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
+    let mut consumer_string_table = StringTable::new();
+
+    // U64::MAX cannot pass through `Int`: the import path must carry the exact bits.
+    let u64_max =
+        FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
+    let u64_type = builtin_type_ids::fixed_scalar(FixedScalar::U64);
+    let materialised = materialize_public_folded_value(
+        &mut consumer_materialiser,
+        &PublicFoldedValue::FixedScalar(u64_max),
+        u64_type,
+        &mut consumer_string_table,
+        None,
+    )
+    .expect("a fixed-scalar folded value should import");
+    assert_eq!(materialised.type_id, u64_type);
+    assert!(matches!(
+        materialised.kind,
+        ExpressionKind::FixedScalar(value) if value == u64_max
+    ));
+
+    // -0.0 stays negative through the import path: `==` would hide a sign flip.
+    let neg_zero_f16 =
+        FixedScalarValue::binary_float(FixedScalar::F16, -0.0).expect("-0.0 is a finite F16 value");
+    let f16_type = builtin_type_ids::fixed_scalar(FixedScalar::F16);
+    let materialised = materialize_public_folded_value(
+        &mut consumer_materialiser,
+        &PublicFoldedValue::FixedScalar(neg_zero_f16),
+        f16_type,
+        &mut consumer_string_table,
+        None,
+    )
+    .expect("a signed-zero folded value should import");
+    assert_eq!(materialised.type_id, f16_type);
+    let ExpressionKind::FixedScalar(imported) = materialised.kind else {
+        panic!("expected the import to rebuild a fixed-scalar expression");
+    };
+    assert_eq!(
+        f64::to_bits(imported.as_f64().expect("F16 reads as f64")),
+        0x8000_0000_0000_0000
+    );
+
+    // Equal numeric payloads with distinct scalars keep distinct identities.
+    let u8_five = FixedScalarValue::unsigned(FixedScalar::U8, 5).expect("5 fits U8");
+    let u16_five = FixedScalarValue::unsigned(FixedScalar::U16, 5).expect("5 fits U16");
+    let byte_five = FixedScalarValue::unsigned(FixedScalar::Byte, 5).expect("5 fits Byte");
+    for (scalar, value) in [
+        (FixedScalar::U8, u8_five),
+        (FixedScalar::U16, u16_five),
+        (FixedScalar::Byte, byte_five),
+    ] {
+        let expected = builtin_type_ids::fixed_scalar(scalar);
+        let materialised = materialize_public_folded_value(
+            &mut consumer_materialiser,
+            &PublicFoldedValue::FixedScalar(value),
+            expected,
+            &mut consumer_string_table,
+            None,
+        )
+        .expect("each scalar identity should import");
+        assert_eq!(materialised.type_id, expected);
+        assert!(matches!(
+            materialised.kind,
+            ExpressionKind::FixedScalar(round_tripped) if round_tripped == value
+        ));
+    }
+    assert_ne!(u8_five, u16_five);
+    assert_ne!(u8_five, byte_five);
 }
 
 #[test]

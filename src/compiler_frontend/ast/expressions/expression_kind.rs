@@ -24,7 +24,10 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -79,9 +82,23 @@ pub enum ExpressionKind {
     /// WHY: operands are `Expression` values, not general `AstNode` fragments, so runtime
     ///      RPN cannot smuggle statement bodies into value contexts.
     Runtime(ExpressionRpn),
-
-    Int(i32),
+    Int(i64),
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value.
+    ///
+    /// WHAT: carries the scalar identity plus the exact-bit payload from
+    ///       `FixedScalarValue`, so `U64` values above `i64::MAX` and signed zero
+    ///       survive without an `Int`/`Float` intermediate.
+    /// WHY: literal materialisation owns destination-aware rounding and range checks;
+    ///      later stages consume the already-materialised value through this one variant.
+    FixedScalar(FixedScalarValue),
+    /// One exact decimal `Dec` value at its receiving scale.
+    ///
+    /// WHAT: retains the arbitrary-precision coefficient and canonical scale as one immutable
+    ///       value instead of routing it through `Int` or `Float`.
+    /// WHY: exact decimal literals stay lossless from AST materialisation through constant
+    ///      folding and HIR lowering.
+    Number(NumberValue),
     StringSlice(StringId),
     Bool(bool),
     Char(char),
@@ -316,6 +333,8 @@ impl ExpressionKind {
             self,
             ExpressionKind::Int(_)
                 | ExpressionKind::Float(_)
+                | ExpressionKind::FixedScalar(_)
+                | ExpressionKind::Number(_)
                 | ExpressionKind::Bool(_)
                 | ExpressionKind::StringSlice(_)
                 | ExpressionKind::Char(_)
@@ -416,6 +435,35 @@ impl Operator {
             | Operator::NotEqual => 2,
 
             Operator::Not | Operator::Negate => 1,
+        }
+    }
+
+    /// The numeric operator this source operator applies, or `None` for logical, comparison and
+    /// range operators.
+    ///
+    /// WHY: AST typing, constant folding and HIR lowering all select the operation domain through
+    ///      `numeric_operators`, so the source-to-numeric mapping lives in one place.
+    pub(crate) fn numeric_operator(&self) -> Option<NumericOperator> {
+        match self {
+            Operator::Add => Some(NumericOperator::Add),
+            Operator::Subtract => Some(NumericOperator::Subtract),
+            Operator::Multiply => Some(NumericOperator::Multiply),
+            Operator::Divide => Some(NumericOperator::Divide),
+            Operator::IntDivide => Some(NumericOperator::IntegerDivide),
+            Operator::Modulus => Some(NumericOperator::Remainder),
+            Operator::Exponent => Some(NumericOperator::Power),
+            Operator::Negate => Some(NumericOperator::Negate),
+
+            Operator::And
+            | Operator::Or
+            | Operator::GreaterThan
+            | Operator::GreaterThanOrEqual
+            | Operator::LessThan
+            | Operator::LessThanOrEqual
+            | Operator::Equality
+            | Operator::NotEqual
+            | Operator::Not
+            | Operator::Range => None,
         }
     }
 

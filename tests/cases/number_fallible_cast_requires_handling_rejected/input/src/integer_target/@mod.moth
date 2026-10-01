@@ -1,0 +1,3 @@
+number_to_integer |value Dec2| -> Int:
+    return cast value
+;

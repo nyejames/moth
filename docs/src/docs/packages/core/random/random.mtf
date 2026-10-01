@@ -49,7 +49,7 @@ All parameters use shared access. No function requires mutable access. Both func
 
 ### Backend behaviour
 
-HTML-JS lowers `random_float` to `Math.random()`. `random_int` lowers to a JavaScript runtime helper that handles the inclusive range and bound swapping.
+HTML-JS demand-emits a runtime helper for each referenced function. `random_float` returns `Math.random()` under Float64 and caps the host sample at the greatest Float32 below `1.0` under Float32 before profile rounding, preserving the exclusive upper bound. `random_int` uses a JavaScript runtime helper for the inclusive range and bound swapping.
 
 HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
 

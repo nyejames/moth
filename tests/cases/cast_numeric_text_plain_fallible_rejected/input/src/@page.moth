@@ -1,0 +1,3 @@
+narrow |text String| -> U8:
+    return cast text
+;

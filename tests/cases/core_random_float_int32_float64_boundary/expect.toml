@@ -1,0 +1,8 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+math_random_samples = [0.0, 0.5, 0.9999999999999999]
+rendered_output_exact = "core_random_float zero=true interior=true near_one=true below_one=true"

@@ -42,7 +42,7 @@ User-authored topology that is invalid or cannot be proven legal produces a stru
 
 **Physical strategy selection**
 
-After shared topology and backend-neutral memory requirements are complete, target assignment and target-contract validation establish the physical variant. The compiler-owned memory planner then selects target/profile-specific strategies for that variant, one per allocation family:
+After shared topology and backend-neutral memory requirements are complete, target assignment and target-contract validation establish the physical variant. The compiler-owned memory planner then selects target/build-profile-specific strategies for that variant, one per allocation family:
 
 - stack or inline placement
 - static affine cleanup at a proven final use
@@ -113,11 +113,11 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 **4. Last-use analysis is central.** There is no explicit move syntax. Alias activity is path-sensitive and non-lexical for shared aliases and observed exclusive aliases; whether an issued but never-used exclusive capability may be elided remains an explicit experiment until canonical semantics adopt it. Branches are analysed independently and loops use fixed-point future-use reasoning. The compiler may transfer affine cleanup responsibility only where every relevant path proves no later source use. When transfer is not proven, the operation remains a borrow and the program stays valid.
 
-**5. Borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend and every profile, including GC-native backends.
+**5. Borrow validation is mandatory.** Shared and exclusive conflicts are checked under every backend and every build profile, including GC-native backends.
 
 **6. One lifetime owner and retained-edge legality.** Every allocation family has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object (`R_value >= R_container`).
 
-**7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality.
+**7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality. Numeric width and precision come from the compiler-owned `NumericProfile`, which is a separate boundary-wide semantic input rather than a build profile or backend choice (`docs/compiler-design-overview.md` > `Numeric model and profile`).
 
 **8. Inferred regions are non-lexical.** Inferred regions are compiler-generated CFG intervals, not merely lexical scopes. The compiler starts from the narrowest valid candidate owner and may widen only along the nearest existing ancestor on one ordered lifetime chain. It must not promote laterally across independently ending siblings, and it must not invent a page, application or process owner to avoid a diagnostic.
 
@@ -199,9 +199,9 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
 
 ## Goals and tradeoffs
 
-- Unconditional memory safety under all backends and profiles.
+- Unconditional memory safety under all backends and build profiles.
 - A predictable source model without reference types, lifetime syntax or move keywords.
-- Identical source legality on every backend and profile.
+- Identical access and lifetime source legality on every backend and build profile.
 - Stronger static proof improves memory quality without changing language semantics.
 - Conservative topology analysis may reject unproven structures.
 - Conservative retention is the acceptable failure mode for imprecise planning; rejecting legal source is not.
@@ -223,7 +223,7 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
         -> target-contract validation
         -> per-physical-variant family/layout refinement
         -> revalidate affected refined family-edge facts
-        -> target/profile-aware compiler-owned memory planning
+        -> target/build-profile-aware compiler-owned memory planning
         -> ValidatedMemoryPlan
         -> backend lowering
         -> collector-free artefact verification where required
@@ -237,7 +237,7 @@ Local module compilation produces local lifetime constraints and exported summar
 - Lifetime-topology validation enforces one owner, retained-edge legality, escapes, frontiers and cycles.
 - Backend-neutral memory requirements are the last target-independent handoff. They carry family identity, owners, intervals, frontiers, retention facts, REC candidacy and declared-region membership, but never a selected physical strategy.
 - Target partition and target-contract validation are build-owned and run before physical memory planning.
-- The compiler-owned memory planner selects the physical representation for each validated allocation family, once per target/profile physical variant, and produces one `ValidatedMemoryPlan` per variant.
+- The compiler-owned memory planner selects the physical representation for each validated allocation family, once per target/build-profile physical variant, and produces one `ValidatedMemoryPlan` per variant.
 - The planner turns each semantic commit into one normalised per-family obligation transition and owns root-to-edge and edge-to-root reclassification.
 - Backend lowering realises that plan without changing semantics or selecting strategy. It encodes the planned transitions and never derives them.
 
@@ -343,9 +343,10 @@ Local module compilation produces local lifetime constraints and exported summar
 
 ## Hard invariants
 
-- Every backend and profile accepts and rejects exactly the same source.
+- Every backend and build profile accepts and rejects exactly the same source with respect to access and lifetime topology.
+- Numeric width and precision are not a memory-model choice: the compiler-owned `NumericProfile` is one fixed compilation-boundary input, not a per-backend or per-build-profile decision. Different numeric profiles may change `Int` overflow limits, `Float` rounding and folded results without changing any access or lifetime guarantee on this page.
 - Borrow validation reads HIR and writes side tables. It does not rewrite HIR or perform backend lowering.
-- Lifetime-topology validation is mandatory, backend-independent and profile-independent.
+- Lifetime-topology validation is mandatory, backend-independent and build-profile-independent.
 - Every allocation family has exactly one semantic lifetime owner.
 - GC cannot bypass topology validation or legalise invalid retained edges.
 - A capable full-control release backend must not fall back to a tracing or reachability collector.

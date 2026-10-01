@@ -132,14 +132,20 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             id: ExternalFunctionId::IoInputPointerX,
             path: "pointer_x",
             parameters: input_handle_param(),
-            returns: external_success_returns(ExternalAbiType::F64, ExternalReturnAlias::Fresh),
+            returns: external_success_returns(
+                ExternalSignatureType::NativeFloat,
+                ExternalReturnAlias::Fresh,
+            ),
             error_return_type: None,
         },
         IoInputFunctionSpec {
             id: ExternalFunctionId::IoInputPointerY,
             path: "pointer_y",
             parameters: input_handle_param(),
-            returns: external_success_returns(ExternalAbiType::F64, ExternalReturnAlias::Fresh),
+            returns: external_success_returns(
+                ExternalSignatureType::NativeFloat,
+                ExternalReturnAlias::Fresh,
+            ),
             error_return_type: None,
         },
         IoInputFunctionSpec {

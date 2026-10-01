@@ -119,6 +119,8 @@ pub(crate) fn test_module() -> Module {
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs:
+                crate::compiler_frontend::analysis::numeric_proofs::NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {

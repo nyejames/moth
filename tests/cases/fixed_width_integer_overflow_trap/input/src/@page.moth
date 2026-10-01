@@ -1,0 +1,5 @@
+overflow_u64 |value U64|:
+    ignored = value + 1
+;
+
+overflow_u64(18446744073709551615)

@@ -99,6 +99,7 @@ fn emits_structured_if_without_dispatcher() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -204,6 +205,7 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -310,6 +312,7 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -441,6 +444,7 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -547,6 +551,7 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -704,6 +709,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -872,6 +878,7 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -995,6 +1002,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1087,6 +1095,7 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1181,6 +1190,7 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1262,6 +1272,7 @@ fn lowers_break_and_continue_terminators_with_dispatcher() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1328,6 +1339,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1446,6 +1458,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1560,6 +1573,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1654,6 +1668,7 @@ fn jump_args_write_through_alias_only_target_local() {
     let output = lower_hir_to_js(
         &module,
         &report,
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -1775,6 +1790,7 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -2045,6 +2061,7 @@ fn multiple_acyclic_if_blocks_stay_structured() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

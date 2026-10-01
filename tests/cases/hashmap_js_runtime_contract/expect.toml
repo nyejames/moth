@@ -1,27 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "hashmap_runtime has_ada=true has_linus=false insert_len=3 replace_len=3 removed=12 remove_len=2 clear_len=0 missing=99 duplicate=2 duplicate_len=1 template_contains=true template_before_set=2 template_after_set=3 template_removed=3 template_length=0"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_map_new(",
-    "function __moth_map_get(",
-    "function __moth_map_contains(",
-    "function __moth_map_set(",
-    "function __moth_map_remove(",
-    "function __moth_map_clear(",
-    "function __moth_map_length(",
-    "function __moth_map_key(",
-    "__moth_string_value(value)",
-]
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "Map key not found",
-    "Map operation expects an ordered map",
-]
+rendered_output_exact = "hashmap_runtime has_ada=true has_linus=false insert_len=3 replace_len=3 removed=12 remove_len=2 clear_len=0 missing=99 duplicate=2 duplicate_len=1 template_contains=true template_before_set=2 template_after_set=3 template_removed=3 template_length=0 fixed_i8_has_zero=false,true fixed_i8_len=2,3,3,2 fixed_i64_has=true,false fixed_i64_len=3,3,2 fixed_u64_has=true,false fixed_u64_len=2,2,1 fixed_byte_has=true,false fixed_byte_len=2,2,1"

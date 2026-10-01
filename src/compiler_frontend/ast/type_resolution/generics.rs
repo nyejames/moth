@@ -153,6 +153,7 @@ fn validate_nominal_bound_evidence_for_instantiation(
 ) -> TypeResolutionResult<()> {
     let evidence_context = GenericBoundEvidenceContext {
         type_environment: context.type_environment,
+        numeric_profile: context.numeric_profile,
         trait_environment: context.trait_environment,
         trait_evidence_environment: context.trait_evidence_environment,
         generated_evidence_pairs: None,

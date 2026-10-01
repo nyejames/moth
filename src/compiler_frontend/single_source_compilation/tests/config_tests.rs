@@ -12,7 +12,11 @@ use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_sourc
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, TypeAnnotationContext,
+    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, NumberLiteralErrorReason,
+    TypeAnnotationContext,
+};
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
@@ -29,12 +33,24 @@ fn compile_project_source(
     inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
     globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
 ) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
+    compile_project_source_with_profile(source_code, inputs, globals, NumericProfile::STANDARD)
+}
+
+/// Compile one authored config source under a caller-selected boundary profile, so a test can
+/// prove that `Int`/`Float` config values fold at the widths the build selected.
+fn compile_project_source_with_profile(
+    source_code: &str,
+    inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
+    globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
+    numeric_profile: NumericProfile,
+) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let outcome = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
@@ -61,6 +77,7 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code:
@@ -111,6 +128,7 @@ fn projects_authored_anonymous_const_records() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= (\n    first = \"a\",\n)\n",
@@ -144,6 +162,46 @@ fn projects_authored_anonymous_const_records() {
         fields[0].value,
         PublicFoldedValue::String(OwnedFoldedString::Text("a".to_owned()))
     );
+}
+
+#[test]
+fn boundary_int_config_constant_folds_at_the_boundary_int_width() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    // One past the `Int32` maximum: the same authored constant either folds or diagnoses
+    // depending only on the boundary `Int` width this service was handed.
+    let source = "limit #= 3_000_000_000\n";
+
+    let messages = compile_project_source(source, &inputs, &globals)
+        .err()
+        .expect("a config constant above the standard Int width must not fold");
+    assert!(
+        messages.diagnostics().any(|diagnostic| matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidNumberLiteral {
+                reason: NumberLiteralErrorReason::OutsideIntRange,
+                ..
+            }
+        )),
+        "the Int32 boundary must report the out-of-range config literal",
+    );
+
+    let (compiled, string_table) = compile_project_source_with_profile(
+        source,
+        &inputs,
+        &globals,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    )
+    .expect("an Int64 boundary must fold the same config constant");
+    let limit = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "limit")
+        .expect("the authored constant should reach the folded declarations");
+    assert_eq!(limit.value, PublicFoldedValue::Int(3_000_000_000));
 }
 
 #[test]
@@ -216,6 +274,7 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
 
     let outcome = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path,
             file_id,
             source_code,
@@ -264,6 +323,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "Inner = |\n    x Int,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
@@ -305,6 +365,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
@@ -348,6 +409,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    alias = name,\n)\n",
@@ -389,6 +451,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "origin #Config of String = \"/docs\"\nhtml #= (\n    origin = origin,\n)\n",
@@ -1419,6 +1482,7 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
         let file_id = sources.get_by_canonical_path(canonical_path).unwrap().id;
         let outcome = compile_config_source(
             ConfigCompilationRequest {
+                numeric_profile: NumericProfile::STANDARD,
                 authored_path,
                 file_id,
                 source_code: &source,

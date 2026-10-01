@@ -1,7 +1,7 @@
 -- Loop CFG lowering inside builtin `Error!` functions. No loop body below contains an authored
 -- fallible operation, so the compiler-generated iteration-index and range-value updates are the
--- only recoverable arithmetic. Those updates end the block they start in and continue in a fresh
--- success block, so every loop edge has to leave the block lowering actually finished in.
+-- only recoverable arithmetic. Their success paths must continue from the live block emitted by
+-- checked lowering, while the final endpoint update is skipped when no next iteration exists.
 
 LoopFault = |
     reason String,
@@ -33,8 +33,8 @@ sum_descending || -> Int, Error!:
     return total
 ;
 
--- The generated range increment overflows once past the final iteration, so the loop's own
--- arithmetic is what takes the recoverable error edge out of the function.
+-- The inclusive maximum endpoint is visited, then the loop exits without an overflowing
+-- increment past Int::MAX.
 walk_to_int_max || -> Int, Error!:
     visited ~= 0
     loop 2147483645 to & 2147483647 |i|:
@@ -58,8 +58,6 @@ ascending_count = count_ascending(4) catch then -1
 descending_total = sum_descending() catch then -1
 custom_error_count = count_with_custom_error({5, 6, 7}) catch then -1
 
-overflow_code = walk_to_int_max() catch |err|:
-    then err.code
-;
+endpoint_count = walk_to_int_max() catch then -1
 
-[:loop_generated_arithmetic_in_fallible_function collection=[collection_total] ascending=[ascending_count] descending=[descending_total] custom=[custom_error_count] overflow=[overflow_code]]
+[:loop_generated_arithmetic_in_fallible_function collection=[collection_total] ascending=[ascending_count] descending=[descending_total] custom=[custom_error_count] endpoint_count=[endpoint_count]]

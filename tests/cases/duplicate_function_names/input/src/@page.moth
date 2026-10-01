@@ -1,7 +1,7 @@
 -- Test duplicate function names should be detected
 
-simple_function |number Int| -> Int:
-    return number + 1
+simple_function |numeric_value Int| -> Int:
+    return numeric_value + 1
 ;
 
 simple_function |value Int| -> Int:

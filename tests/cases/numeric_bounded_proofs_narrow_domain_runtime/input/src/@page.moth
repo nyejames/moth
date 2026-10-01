@@ -1,0 +1,121 @@
+-- Bounded-integer proof coverage for the paired backends. Every operation
+-- below is provably safe from its operand types, a narrow promotion domain, a
+-- literal divisor interval excluding zero, or an infallible cast whose single
+-- cached local feeds the proven operation that follows it immediately, so both
+-- backends may elide the checks while still computing and rendering the same
+-- exact values. Operands arrive through parameters so no operation folds, and
+-- the final retained-but-valid controls keep their checks.
+
+u8_sum |left U8, right U8| -> U32:
+    return left + right
+;
+
+i16_pair_sum |left I16, right I16| -> I32:
+    return left + right
+;
+
+i8_difference |left I8, right I8| -> I32:
+    return left - right
+;
+
+i16_unsigned_difference |left I16, right U16| -> I32:
+    return left - right
+;
+
+wide_minus_zero |value U32| -> I64:
+    wide I64 = cast value
+    return wide - 0
+;
+
+zero_minus_wide |value U32| -> I64:
+    wide I64 = cast value
+    return 0 - wide
+;
+
+i8_product |left I8, right I8| -> I32:
+    return left * right
+;
+
+u16_product |left U16, right U16| -> U32:
+    return left * right
+;
+
+i16_unsigned_product |left I16, right U16| -> I32:
+    return left * right
+;
+
+negate_i8 |value I8| -> I32:
+    return -value
+;
+
+i16_halve |value I16| -> I32:
+    return value // 2
+;
+
+u16_last_bit |value U16| -> U32:
+    return value % 2
+;
+
+i64_halve |value I64| -> I64:
+    return value // 2
+;
+
+i64_parity |value I64| -> I64:
+    return value % 2
+;
+
+i64_identity |value I64| -> I64:
+    return value + 0
+;
+
+u64_identity |value U64| -> U64:
+    return value + 0
+;
+
+u64_third |value U64| -> U64:
+    return value // 3
+;
+
+u64_parity |value U64| -> U64:
+    return value % 2
+;
+
+u32_wide_product |value U32| -> U64:
+    wide U64 = cast value
+    return wide * wide
+;
+
+power_u8 |base U8, exponent U8| -> U32:
+    return base ^ exponent
+;
+
+i32_pair_add |left I32, right I32| -> I32:
+    return left + right
+;
+
+u8_add = u8_sum(200, 100)
+i16_add = i16_pair_sum(-30000, 20000)
+i8_sub = i8_difference(-128, 127)
+i16u16_sub = i16_unsigned_difference(-32768, 65535)
+wide_sub_high = wide_minus_zero(4294967295)
+wide_sub_low = zero_minus_wide(4294967295)
+i8_mul = i8_product(-128, -128)
+u16_mul = u16_product(65535, 65535)
+i16u16_mul = i16_unsigned_product(-32768, 65535)
+neg_min_i8 = negate_i8(-128)
+neg_zero_i8 = negate_i8(0)
+halve_i16 = i16_halve(-7)
+odd_bit_u16 = u16_last_bit(65535)
+even_bit_u16 = u16_last_bit(65534)
+halve_i64 = i64_halve(-9223372036854775808)
+parity_i64 = i64_parity(-9223372036854775807)
+identity_i64_min = i64_identity(-9223372036854775808)
+identity_i64_max = i64_identity(9223372036854775807)
+identity_u64_max = u64_identity(18446744073709551615)
+third_u64 = u64_third(18446744073709551615)
+parity_u64 = u64_parity(18446744073709551615)
+wide_mul = u32_wide_product(4294967295)
+power_boundary = power_u8(2, 31)
+retained_add = i32_pair_add(2147483646, 1)
+
+[:bounded proofs u8=[u8_add] i16=[i16_add] i8sub=[i8_sub] i16u16sub=[i16u16_sub] wide-high=[wide_sub_high] wide-low=[wide_sub_low] i8mul=[i8_mul] u16mul=[u16_mul] i16u16mul=[i16u16_mul] neg-min=[neg_min_i8] neg-zero=[neg_zero_i8] halve=[halve_i16] lastbit=[odd_bit_u16]/[even_bit_u16] halve64=[halve_i64] parity64=[parity_i64] i64min=[identity_i64_min] i64max=[identity_i64_max] u64max=[identity_u64_max] u64third=[third_u64] u64parity=[parity_u64] widemul=[wide_mul] power=[power_boundary] retained=[retained_add]]

@@ -14,6 +14,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
@@ -158,6 +159,58 @@ impl<'a> HirBuilder<'a> {
 
         Ok(success_payload)
     }
+    /// Returns a fallible carrier's success payload using numeric trap or Error! failure policy.
+    ///
+    /// WHAT: branches on the carrier, emitting a runtime failure terminator for trap mode or
+    ///       delegating to ordinary fallible propagation for builtin `Error!`.
+    /// WHY: implicit compound-store conversions use the same enclosing-function policy as checked
+    ///      arithmetic while remaining distinct from a user-authored `cast!` expression.
+    pub(crate) fn lower_fallible_carrier_to_success_value_with_runtime_failure(
+        &mut self,
+        result_carrier: EmittedFallibleCarrier,
+        failure_mode: NumericFailureMode,
+        failure_message: &str,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirExpression, CompilerError> {
+        if failure_mode == NumericFailureMode::ReturnError {
+            return self.lower_fallible_carrier_to_success_value(result_carrier, span);
+        }
+
+        let branch = self.emit_result_carrier_branch(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            span,
+            *span,
+            "store-conversion-ok",
+            "store-conversion-err",
+        )?;
+        self.emit_terminator_with_span(
+            branch.error_block,
+            HirTerminator::RuntimeFailure {
+                message: failure_message.to_owned(),
+            },
+            span,
+            *span,
+        )?;
+
+        self.set_current_block(branch.success_block, span)?;
+        let success_region = self.current_region_or_error(span)?;
+        let success_result = self.make_local_load_expression(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            &None,
+            success_region,
+        );
+        Ok(self.make_expression(
+            &None,
+            HirExpressionKind::FallibleUnwrapSuccess {
+                result: Box::new(success_result),
+            },
+            result_carrier.ok_type,
+            ValueKind::RValue,
+            success_region,
+        ))
+    }
 
     pub(super) fn emit_result_carrier_branch(
         &mut self,
@@ -191,6 +244,7 @@ impl<'a> HirBuilder<'a> {
             error_block,
         })
     }
+
     pub(super) fn emit_result_carrier_error_return(
         &mut self,
         error_block: BlockId,

@@ -8,9 +8,11 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, InvalidTypeAnnotationReason};
+use crate::compiler_frontend::datatypes::number::NumberScale;
+use crate::compiler_frontend::datatypes::numeric_profile::IntWidth;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::numeric_text::parse::materialize_i32;
+use crate::compiler_frontend::numeric_text::parse::materialize_int;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -190,6 +192,13 @@ fn parse_type_atom(
 ) -> TypeParseResult<ParsedTypeRef> {
     let span = current_source_span(token_stream);
 
+    // Explicit-width builtin scalars and `Byte` are keyword spellings with one token tag each,
+    // so they reuse the builtin-scalar branch instead of growing one parser arm per type.
+    if let Some(scalar) = fixed_scalar_for_builtin_type_tag(token_stream.current_tag()) {
+        token_stream.advance();
+        return Ok(ParsedTypeRef::BuiltinFixedScalar { scalar, span });
+    }
+
     match token_stream.current_tag() {
         TokenTag::DATATYPE_INT => {
             token_stream.advance();
@@ -287,6 +296,13 @@ fn parse_type_atom(
                     ))
                 })?;
             token_stream.advance();
+
+            // Bare `Dec`/`Dec0`..`Dec256` spellings are builtin scaled-integer types,
+            // not named types. Invalid numeric suffixes (`Dec01`, `Dec257`, `DecX`)
+            // stay named so type resolution reports the familiar unknown-type diagnostic.
+            if let Some(scale) = NumberScale::from_name(string_table.resolve(type_name)) {
+                return Ok(ParsedTypeRef::BuiltinNumber { scale, span });
+            }
 
             // Check for namespace-qualified type syntax: `Namespace.Type` or
             // `Namespace.Child.Type`. Collect all `Symbol . Symbol` segments into a
@@ -594,6 +610,9 @@ fn collect_collection_inner_range(
 ///       syntax site rather than a generic parse failure.
 /// WHY: the language only allows literal-or-bare-const capacity in type position;
 ///      named constants can still hold arithmetic before they are used in type annotations.
+///      Header parsing has no profile, so literals materialise at `Bits64` only as the
+///      widest lossless carrier; capacity folding owns the final boundary-`IntWidth`
+///      range check. Capacity must be a positive `Int` literal of the boundary width.
 fn parsed_capacity(
     tokens: TypeTokenWindow<'_>,
     string_table: &mut StringTable,
@@ -637,13 +656,14 @@ fn parsed_capacity(
                     ));
                 }
 
-                let value = materialize_i32(&numeric, string_table).map_err(|reason| {
-                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
-                        numeric.source_text,
-                        reason,
-                        token_span,
-                    ))
-                })?;
+                let value = materialize_int(&numeric, numeric.sign, IntWidth::Bits64, string_table)
+                    .map_err(|reason| {
+                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                            numeric.source_text,
+                            reason,
+                            token_span,
+                        ))
+                    })?;
 
                 if numeric.sign == NumericLiteralSign::Negative {
                     return Err(HeaderParseFailure::Diagnostic(
@@ -935,12 +955,8 @@ fn collection_type_slice_can_start_type(
     };
 
     let can_start = match first_tag {
-        TokenTag::DATATYPE_INT
-        | TokenTag::DATATYPE_FLOAT
-        | TokenTag::DATATYPE_BOOL
-        | TokenTag::DATATYPE_STRING
-        | TokenTag::DATATYPE_CHAR
-        | TokenTag::OPEN_CURLY => true,
+        tag if tag.is_builtin_scalar_type_name() => true,
+        TokenTag::OPEN_CURLY => true,
 
         TokenTag::TRAIT_THIS => matches!(context, TypeAnnotationContext::TraitRequirement),
 

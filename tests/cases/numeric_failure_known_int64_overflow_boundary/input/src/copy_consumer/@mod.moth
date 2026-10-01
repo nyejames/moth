@@ -1,0 +1,5 @@
+max_value #Int = 9223372036854775807
+
+overflow || -> Int:
+    return copy max_value + 1
+;

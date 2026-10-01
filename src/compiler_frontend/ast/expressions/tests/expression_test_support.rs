@@ -178,7 +178,6 @@ fn test_builtin_type_id_for_data_type(data_type: &DataType) -> TypeId {
         DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
         DataType::Int => builtin_type_ids::INT,
         DataType::Float => builtin_type_ids::FLOAT,
-        DataType::Decimal => builtin_type_ids::DECIMAL,
         DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
         DataType::Range => builtin_type_ids::RANGE,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRuntimeTemplateHandoff {
@@ -71,6 +72,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -156,6 +158,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -321,6 +324,7 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -454,6 +458,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         &template_ir_store.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        NumericProfile::STANDARD,
         None,
     )
     .expect("selected exact TIR fold should project module constants");
@@ -466,6 +471,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -511,6 +517,7 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -607,6 +614,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -684,6 +692,7 @@ fn nested_runtime_template_normalizes_through_final_view() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -812,6 +821,7 @@ fn nested_const_template_folds_through_final_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -888,6 +898,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -1093,6 +1104,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         &ConstValueStore::default(),
         Rc::clone(&template_ir_store),
         &mut string_table,
+        NumericProfile::STANDARD,
     )
     .expect("static candidate specialization should succeed");
     assert!(candidate.has_selections());
@@ -1105,6 +1117,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
 
     let mut normalization_context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store,
         module_resources: None,
@@ -1187,6 +1200,7 @@ fn helper_artifact_rejected_after_final_view_traversal() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -1245,6 +1259,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
     normalize_retained_signature_defaults(
         &mut signature,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        NumericProfile::STANDARD,
         &template_ir_store,
         &mut string_table,
     )
@@ -1296,6 +1311,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
     };
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store,
         module_resources: None,

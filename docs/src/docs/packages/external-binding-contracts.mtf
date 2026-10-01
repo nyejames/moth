@@ -1,4 +1,4 @@
-External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder supports two binding profiles: annotated project-local JavaScript files and future value-only WIT component imports.
+External binding packages expose typed functions, constants and opaque types implemented outside Moth. The HTML builder currently supports annotated project-local JavaScript files; WIT component imports are deferred.
 
 ### Annotated JavaScript dependencies
 
@@ -82,21 +82,34 @@ Existing Core, Builder and JavaScript-backed bindings follow a restricted host-b
 
 Observable external resources require explicit close or teardown. Host finalisation timing does not define language behaviour.
 
-### WIT value-only component profile
+### Numeric signature types
+
+External numeric signatures distinguish fixed foreign ABI scalars from language-semantic `Int` and `Float`. `I32` is signed 32-bit and `F64` is binary64 regardless of the active numeric profile. Core and Builder signatures, and `@moth.sig` annotations using `Int` or `Float`, retain profile-selected native types; they do not silently become `I32` or `F64`. Annotated JavaScript signatures spell `Int` and `Float`; fixed `I32` and `F64` slots arise only from compiler-registered foreign bindings, and the HTML-JS rules below apply to those bindings.
+
+At the HTML-JS boundary:
+
+- A native `Int` in a 64-bit Int profile crosses annotated JavaScript as a `Number` only within the safe-integer range, from -9,007,199,254,740,991 through 9,007,199,254,740,991 inclusive. Values outside that range fail rather than silently losing precision.
+- A native `Float` result in a Float32 profile is rounded with `Math.fround` and rejected if the rounded value is non-finite. Native `Float` results in a Float64 profile are also checked for finiteness. Fixed `F64` results retain binary64 width and are checked for finiteness; a non-finite result from a fallible external function becomes built-in `Error` code `304`.
+- Native `Int` results in a 32-bit Int profile and fixed `I32` values must be JavaScript Numbers, integral and within -2,147,483,648 through 2,147,483,647. Invalid successful payloads fail at the wrapper boundary in both infallible and fallible calls. Integer ingress converts `-0` to `0`, while binary-float ingress preserves signed zero.
+- Opaque external types retain their package-specific identities and representations; numeric carrier adaptation does not reinterpret them.
+
+Fallible JavaScript bindings project `error.code` onto Moth's `U32` field,
+independently of the `Int` profile. The wrapper reads the foreign code once and
+accepts JavaScript Number integers from `0` through `4294967295`. It normalises
+integer `-0` to `0` and uses code `0` for missing or invalid codes.
+Exceptions thrown by the export become builtin `Error` values with code `0`.
+Their message uses a truthy `message` property or stringifies the thrown value,
+including `null` and `undefined`. Invalid-wrapper handling remains build-mode-specific.
+
+### Deferred WIT component support
 
 WIT is the standard foreign Wasm/component boundary. It does not encode Moth module or package semantic interfaces. `MothSource` packages keep their Moth interfaces even when their physical output is Wasm.
 
-Component discovery validates the supported WIT profile and projects it into ordinary binding-backed package metadata before normal Moth semantic compilation.
-
-WIT component imports are accepted but deferred. Future general Wasm library imports use a value-only WIT component profile:
-
-- supported arguments lower from shared reads into independent component values
-- results lift into independent Moth result graphs
-- no Moth alias, lifetime owner, ownership state or destruction responsibility crosses the component boundary
+The HTML builder does not currently load WIT component imports. Component discovery and projection into binding-backed package metadata are deferred; no WIT component loader contract is delivered here.
 
 ### Deferred WIT surfaces
 
-The V1 value-only profile defers WIT resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases and retained Moth references.
+No WIT component contract is delivered for resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases or retained Moth references.
 
 ### Related concepts
 

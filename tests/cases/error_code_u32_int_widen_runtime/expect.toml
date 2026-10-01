@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "int widen runtime code=41/0 negative-code=0/242 positive-bound=true negative-is-cast-failure=true"

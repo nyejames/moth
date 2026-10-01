@@ -8,6 +8,13 @@ default-run = "moth"
 members = [".", "xtask"]
 resolver = "2"
 
+# Direct Cargo and just use the same warning policy, without recipe-only -D flags.
+[workspace.lints.rust]
+warnings = "deny"
+
+[lints]
+workspace = true
+
 [features]
 # Timer and developer-instrumentation features. `timers` enables the
 # current-schema command/build/dev timing collector, final aggregate benchmark
@@ -57,6 +64,11 @@ notify = "8.2.0"
 ryu = "1.0.23"
 unicode-width = "0.2"
 
+# Exact Number coefficients and single-pass quotient/remainder arithmetic.
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+
 # For future release builds:
 # oxc_minifier = "0.115.0"
 
@@ -70,9 +82,12 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
+# Test inherits this profile. Preserve assertions and overflow checks while avoiding
+# duplicate debug-info configurations between ordinary commands and validation.
 [profile.dev]
 opt-level = 0
-debug = true
+debug = 0
+incremental = true
 
 [profile.release]
 opt-level = 3

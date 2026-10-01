@@ -601,6 +601,7 @@ impl<'hir> JsEmitter<'hir> {
         emitted_blocks: &mut HashSet<BlockId>,
     ) -> Result<(), CompilerError> {
         let merge_target = self.resolve_match_merge_target(arms)?;
+        let scrutinee_type = scrutinee.ty;
         let scrutinee = self.lower_expr(scrutinee)?;
         let scrutinee_temp = self.next_temp_identifier("__match_value");
         let synthetic_merge_wildcard = merge_target.and_then(|target| {
@@ -619,7 +620,7 @@ impl<'hir> JsEmitter<'hir> {
                 continue;
             }
 
-            let condition = self.lower_match_arm_condition(&scrutinee_temp, arm)?;
+            let condition = self.lower_match_arm_condition(&scrutinee_temp, scrutinee_type, arm)?;
 
             if emitted_arm_count == 0 {
                 self.emit_line(&format!("if ({condition}) {{"));

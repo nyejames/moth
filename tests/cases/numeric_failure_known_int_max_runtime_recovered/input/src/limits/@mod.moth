@@ -1,0 +1,3 @@
+export:
+    max_value #Int = 2147483647
+;

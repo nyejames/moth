@@ -459,6 +459,53 @@ fn accepts_success_fixture_with_artifact_assertion() {
 }
 
 #[test]
+fn math_random_samples_require_a_rendered_output_assertion() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let case_root = root.join("case");
+    let input_root = case_root.join(INPUT_DIR_NAME);
+    fs::create_dir_all(&input_root).expect("should create input directory");
+    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+
+    let expectation_path = case_root.join(EXPECT_FILE_NAME);
+    let artifact_assertion = "\
+        \n[[backends.html.artifact_assertions]]\n\
+        path = \"index.html\"\n\
+        kind = \"html\"\n\
+        must_contain = [\"ok\"]\n";
+    let expectation_prefix = "\
+        [backends.html]\n\
+        mode = \"success\"\n\
+        warnings = \"forbid\"\n\
+        math_random_samples = [0.0]\n";
+    fs::write(
+        &expectation_path,
+        format!("{expectation_prefix}{artifact_assertion}"),
+    )
+    .expect("should write samples-only expectation");
+
+    let Err(error) = load_canonical_case_specs(&case_root, None) else {
+        panic!(
+            "host samples and an artifact assertion must not replace rendered-output assertions"
+        );
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+
+    fs::write(
+        &expectation_path,
+        format!("{expectation_prefix}rendered_output_contains = [\"ok\"]{artifact_assertion}"),
+    )
+    .expect("should write expectation with rendered-output assertion");
+    load_canonical_case_specs(&case_root, None)
+        .expect("host samples paired with a rendered-output assertion should be accepted");
+}
+
+#[test]
 fn accepts_success_fixture_with_rendered_output_assertion() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

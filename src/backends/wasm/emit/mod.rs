@@ -1,9 +1,18 @@
 //! LIR -> Wasm emission subsystem.
 //!
 //! This layer owns binary encoding only. It does not reinterpret frontend semantics.
+//! `instructions` dispatches LIR statements; `checked_integer` and `checked_float` enforce the
+//! resolved numeric domains. `binary16` handles compact representation boundaries, while power
+//! and remainder helpers implement portable numerical operations with core Wasm instructions.
 
+mod binary16;
+mod checked_float;
+mod checked_integer;
 pub(crate) mod data;
 pub(crate) mod exports;
+mod float_format;
+mod float_power;
+mod float_remainder;
 pub(crate) mod functions;
 pub(crate) mod helpers;
 pub(crate) mod imports;

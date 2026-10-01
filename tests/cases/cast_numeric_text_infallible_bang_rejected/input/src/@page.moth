@@ -1,0 +1,3 @@
+text |count U8| -> String, Error!:
+    return cast! count
+;

@@ -2,9 +2,8 @@
 //!
 //! WHAT: folds fully compile-time expression fragments during AST construction.
 //! WHY: AST owns semantic compile-time folding so that HIR lowering only sees runtime
-//! expressions or already-materialized constant values. Folding is runtime-parity only:
-//! this module does not implement arbitrary precision, rational, Decimal, or BigInt const
-//! folding.
+//! expressions or already-materialized constant values. Folding is runtime-parity only and
+//! performs exact Dec arithmetic through the shared NumberValue owner.
 //!
 //! ## Algorithm
 //!
@@ -15,16 +14,18 @@
 //!
 //! ## Supported Operations
 //!
-//! - **Arithmetic**: Addition, subtraction, multiplication, division for integers and floats
+//! - **Arithmetic**: Checked Int, Float and fixed-width numeric arithmetic, plus exact Dec
+//!   arithmetic, with domain-specific rounding
 //! - **Boolean**: Logical AND, OR, NOT operations
-//! - **Comparison**: Equality, inequality, relational comparisons
-//! - **Type Coercion**: Automatic promotion between compatible numeric types
+//! - **Comparison**: Exact integer and Dec ordering, numeric float comparisons, and equality
+//! - **Promotion**: Shared operator-domain rules keep compile-time results aligned with typed
+//!   operations
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::compiler_frontend::source::SourceSpan;
-
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
@@ -44,12 +45,27 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidCastReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::fixed_scalar::{
+    FixedScalar, FixedScalarClass, FixedScalarValue,
+};
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::number::{
+    NumberArithmeticError, NumberScale, NumberValue,
+};
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, binary_operation_domain, comparison_supported, negation_domain,
+};
+use crate::compiler_frontend::datatypes::numeric_power;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[derive(Debug)]
@@ -128,6 +144,7 @@ pub(crate) fn require_concrete_text(
                             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                             Some(operation),
                             value.span,
+                            None,
                         ));
                     }
                 }
@@ -180,9 +197,13 @@ impl From<TemplateError> for ConstantFoldError {
 /// [`CompilerDiagnostic`] values while malformed internal RPN state remains an
 /// infrastructure [`CompilerError`]. A text-unavailable outcome is not an error for speculative
 /// callers because runtime lowering resolves the structural pieces later.
+/// `scope_context`, when available, resolves retained source-`#Config` provenance for numeric
+/// failure labels; speculative callers without that owner pass `None`.
 pub fn constant_fold(
     output_stack: Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
+    numeric_profile: NumericProfile,
+    scope_context: Option<&ScopeContext>,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
@@ -226,7 +247,25 @@ pub fn constant_fold(
                 .pop()
                 .expect("unary operator should have one operand after the stack-length guard");
 
-            if let Some(folded) = fold_unary_operator(operator, &operand, string_table, *span)? {
+            let folded =
+                match fold_unary_operator(operator, &operand, string_table, *span, numeric_profile)
+                {
+                    Ok(folded) => folded,
+                    Err(ConstantFoldError::Diagnostic(mut diagnostic)) => {
+                        if let ExpressionRpnItem::Operand(expression) = &operand {
+                            attach_source_config_origin_labels(
+                                &mut diagnostic,
+                                &[&expression.synthetic_interface_provenance],
+                                string_table,
+                                scope_context,
+                            )?;
+                        }
+                        return Err(ConstantFoldError::Diagnostic(diagnostic));
+                    }
+                    Err(error) => return Err(error),
+                };
+
+            if let Some(folded) = folded {
                 stack.push(folded);
             } else {
                 // Keep unary operators as runtime RPN when the operand cannot fold.
@@ -259,7 +298,30 @@ pub fn constant_fold(
             }
         };
 
-        match lhs_expr.evaluate_operator(rhs_expr, operator, string_table)? {
+        let outcome = match lhs_expr.evaluate_operator(
+            rhs_expr,
+            operator,
+            string_table,
+            numeric_profile,
+            *span,
+        ) {
+            Ok(outcome) => outcome,
+            Err(ConstantFoldError::Diagnostic(mut diagnostic)) => {
+                attach_source_config_origin_labels(
+                    &mut diagnostic,
+                    &[
+                        &lhs_expr.synthetic_interface_provenance,
+                        &rhs_expr.synthetic_interface_provenance,
+                    ],
+                    string_table,
+                    scope_context,
+                )?;
+                return Err(ConstantFoldError::Diagnostic(diagnostic));
+            }
+            Err(error) => return Err(error),
+        };
+
+        match outcome {
             OperatorFoldOutcome::Folded(result) => {
                 stack.push(ExpressionRpnItem::Operand(result));
             }
@@ -296,38 +358,143 @@ pub fn constant_fold(
     }
 }
 
+fn attach_source_config_origin_labels(
+    diagnostic: &mut CompilerDiagnostic,
+    provenances: &[&SyntheticInterfaceProvenance],
+    string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
+) -> Result<(), ConstantFoldError> {
+    if !matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::CompileTimeEvaluationError {
+            numeric_profile: Some(_),
+            ..
+        }
+    ) {
+        return Ok(());
+    }
+
+    let mut input_names = provenances
+        .iter()
+        .flat_map(|provenance| provenance.source_config_member_names())
+        .collect::<Vec<_>>();
+    input_names.sort_unstable();
+    input_names.dedup();
+    if input_names.is_empty() {
+        return Ok(());
+    }
+
+    let Some(scope_context) = scope_context else {
+        return Err(CompilerError::compiler_error(
+            "A numeric compile-time diagnostic retained source #Config provenance without its owning scope resolver.",
+        )
+        .into());
+    };
+
+    for input_name in input_names {
+        let Some((origin, Some(label_span))) =
+            scope_context.source_config_diagnostic_origin(input_name)
+        else {
+            return Err(CompilerError::compiler_error(format!(
+                "A numeric compile-time diagnostic retained source #Config input '{input_name}' without a matching resolver origin and source anchor."
+            ))
+            .into());
+        };
+        diagnostic.labels.push(DiagnosticLabel::secondary(
+            Some(label_span),
+            Some(DiagnosticLabelMessage::ConfigInputOrigin {
+                input_name: string_table.intern(input_name),
+                origin,
+            }),
+        ));
+    }
+
+    Ok(())
+}
+
 fn fold_unary_operator(
     op: &Operator,
     operand: &ExpressionRpnItem,
     string_table: &mut StringTable,
     operator_span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
 ) -> Result<Option<ExpressionRpnItem>, ConstantFoldError> {
     let ExpressionRpnItem::Operand(expression) = operand else {
         return Ok(None);
     };
 
-    let folded_expression = match (op, &expression.kind) {
-        (Operator::Not, ExpressionKind::Bool(value)) => {
+    let mut failure_context = NumericFoldFailure {
+        operator: op,
+        span: operator_span,
+        numeric_profile,
+        string_table,
+    };
+
+    let folded_expression = match (&expression.kind, op) {
+        (ExpressionKind::Bool(value), Operator::Not) => {
             Expression::bool(!value, expression.span, expression.value_mode.to_owned())
         }
-
-        (Operator::Negate, ExpressionKind::Int(value)) => {
-            let Some(negated) = value.checked_neg() else {
-                integer_overflow_error(op, string_table, operator_span)?;
+        (_, Operator::Negate) => {
+            let Some(operand_domain) = numeric_scalar_for_expression(expression) else {
                 return Ok(None);
             };
-            Expression::int(negated, expression.span, expression.value_mode.to_owned())
+            let Some(result_domain) = negation_domain(operand_domain) else {
+                return Ok(None);
+            };
+
+            if let NumericScalar::Number(_) = result_domain {
+                let ExpressionKind::Number(value) = &expression.kind else {
+                    return Err(CompilerError::compiler_error(
+                        "Dec negation received a non-Dec operand.",
+                    )
+                    .into());
+                };
+
+                Expression::number(
+                    value.negated(),
+                    expression.type_id,
+                    expression.span,
+                    expression.value_mode.to_owned(),
+                )
+            } else if result_domain.is_integer() {
+                let value = integer_value_from_expression(expression)
+                    .expect("integer negation domain only accepts integer-valued expressions");
+                let Some(value) = value.checked_neg() else {
+                    return integer_overflow_error(&mut failure_context);
+                };
+                let Some((minimum, maximum)) = result_domain.integer_range(numeric_profile) else {
+                    return Err(CompilerError::compiler_error(
+                        "Integer negation received a non-integer result domain.",
+                    )
+                    .into());
+                };
+                if !(minimum..=maximum).contains(&value) {
+                    return integer_overflow_error(&mut failure_context);
+                }
+
+                integer_result_expression(
+                    result_domain,
+                    value,
+                    expression.span,
+                    expression.value_mode.to_owned(),
+                )
+            } else if let Some(precision) = result_domain.binary_float_precision(numeric_profile) {
+                let value = float_value_from_expression(expression)
+                    .expect("float negation domain only accepts binary-float expressions");
+                let value = checked_float_result(-value, precision, &mut failure_context)?;
+                float_result_expression(
+                    result_domain,
+                    value,
+                    expression.span,
+                    expression.value_mode.to_owned(),
+                )
+            } else {
+                return Err(CompilerError::compiler_error(
+                    "Numeric negation received a result domain without scalar arithmetic.",
+                )
+                .into());
+            }
         }
-
-        (Operator::Negate, ExpressionKind::Float(value)) => Expression::float(
-            match checked_float_result(-value, op, string_table, operator_span)? {
-                ExpressionKind::Float(value) => value,
-                _ => return Ok(None),
-            },
-            expression.span,
-            expression.value_mode.to_owned(),
-        ),
-
         _ => return Ok(None),
     };
 
@@ -347,6 +514,7 @@ pub fn fold_compile_time_expression(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
+    numeric_profile: NumericProfile,
 ) -> Result<Expression, ConstantFoldError> {
     match &expression.kind {
         ExpressionKind::Cast(cast) => {
@@ -355,6 +523,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
             )?;
             fold_resolved_cast(
                 expression,
@@ -363,6 +532,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
                 None,
             )
         }
@@ -374,6 +544,7 @@ pub fn fold_compile_time_expression(
                 template_ir_store,
                 string_table,
                 constant_context,
+                numeric_profile,
             )?;
 
             match &folded_value.kind {
@@ -417,6 +588,7 @@ pub fn fold_compile_time_expression(
                     template_ir_store,
                     string_table,
                     constant_context,
+                    numeric_profile,
                 )?;
 
                 fold_resolved_cast(
@@ -426,6 +598,7 @@ pub fn fold_compile_time_expression(
                     template_ir_store,
                     string_table,
                     constant_context,
+                    numeric_profile,
                     Some(body),
                 )
             }
@@ -438,8 +611,7 @@ pub fn fold_compile_time_expression(
     }
 }
 
-/// Folds a resolved explicit `ExpressionKind::Cast` when its source has folded to
-/// a supported builtin literal.
+/// Folds a resolved cast expression when its source has folded to a supported builtin literal.
 ///
 /// WHAT: builtin evidence is evaluated here; user-defined or generic-bound
 ///      evidence is rejected in const-required contexts because the compiler
@@ -447,6 +619,10 @@ pub fn fold_compile_time_expression(
 ///      compile time.
 /// WHY: keeping this logic in the AST const-eval owner means HIR lowering only sees
 ///      runtime casts that could not be folded away.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "cast folding keeps the original and folded expressions, the resolved cast, the TIR store, mutable string state, const context, boundary numeric profile and recovery body as separate inputs"
+)]
 fn fold_resolved_cast(
     original_expression: &Expression,
     cast: &ResolvedCastExpression,
@@ -454,6 +630,7 @@ fn fold_resolved_cast(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
+    numeric_profile: NumericProfile,
     recovery_handler_body: Option<&[AstNode]>,
 ) -> Result<Expression, ConstantFoldError> {
     match &cast.evidence {
@@ -484,10 +661,11 @@ fn fold_resolved_cast(
                     Err(diagnostic) => return Err(ConstantFoldError::Diagnostic(diagnostic)),
                 };
 
-            match apply_builtin_cast_policy(*policy, &source_literal) {
+            match apply_builtin_cast_policy(*policy, &source_literal, numeric_profile) {
                 Ok(folded_literal) => {
                     let Some(mut folded_expression) = builtin_cast_expression_from_literal(
                         &folded_literal,
+                        cast.target_type_id,
                         original_expression.span,
                         string_table,
                     ) else {
@@ -521,6 +699,7 @@ fn fold_resolved_cast(
                             original_expression.span,
                             template_ir_store,
                             string_table,
+                            numeric_profile,
                         )?
                     {
                         let recovery_provenance = folded_source
@@ -581,6 +760,10 @@ fn fold_resolved_cast(
 ///      cast.
 /// WHY: keeping this small and local to the AST const-eval owner means HIR lowering does not need to
 ///      interpret general catch handler bodies at compile time.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "recovery folding keeps the handler body, target/result types, wrap flag, span, TIR store, mutable string state and boundary numeric profile as separate inputs"
+)]
 fn fold_cast_recovery_handler(
     handler_body: &[AstNode],
     target_type_id: TypeId,
@@ -589,6 +772,7 @@ fn fold_cast_recovery_handler(
     diagnostic_span: Option<SourceSpan>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
+    numeric_profile: NumericProfile,
 ) -> Result<Option<Expression>, ConstantFoldError> {
     let Some(handler_expression) = extract_single_produced_value(handler_body) else {
         return Err(CompilerDiagnostic::invalid_cast(
@@ -600,8 +784,13 @@ fn fold_cast_recovery_handler(
         .into());
     };
 
-    let folded_handler =
-        fold_compile_time_expression(handler_expression, template_ir_store, string_table, true)?;
+    let folded_handler = fold_compile_time_expression(
+        handler_expression,
+        template_ir_store,
+        string_table,
+        true,
+        numeric_profile,
+    )?;
 
     let handler_is_compile_time_constant = folded_handler
         .const_value_kind_with_template_classifier(&mut |template| {
@@ -670,6 +859,8 @@ fn builtin_cast_literal_from_expression(
         ExpressionKind::Bool(value) => Ok(Some(BuiltinCastLiteral::Bool(*value))),
         ExpressionKind::Int(int) => Ok(Some(BuiltinCastLiteral::Int(*int))),
         ExpressionKind::Float(float) => Ok(Some(BuiltinCastLiteral::Float(*float))),
+        ExpressionKind::FixedScalar(fixed) => Ok(Some(BuiltinCastLiteral::Fixed(*fixed))),
+        ExpressionKind::Number(value) => Ok(Some(BuiltinCastLiteral::Number(value.clone()))),
         ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
             let Some(string) =
                 require_concrete_text(value, ConstStringRequirement::CastOrParse, string_table)?
@@ -688,6 +879,7 @@ fn builtin_cast_literal_from_expression(
 /// Builds an `Expression` literal from a `BuiltinCastLiteral`.
 fn builtin_cast_expression_from_literal(
     literal: &BuiltinCastLiteral,
+    type_id: TypeId,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Option<Expression> {
@@ -709,6 +901,17 @@ fn builtin_cast_expression_from_literal(
         BuiltinCastLiteral::Char(value) => {
             Some(Expression::char(*value, span, ValueMode::ImmutableOwned))
         }
+        BuiltinCastLiteral::Fixed(value) => Some(Expression::fixed_scalar(
+            *value,
+            span,
+            ValueMode::ImmutableOwned,
+        )),
+        BuiltinCastLiteral::Number(value) => Some(Expression::number(
+            value.clone(),
+            type_id,
+            span,
+            ValueMode::ImmutableOwned,
+        )),
         BuiltinCastLiteral::Error { .. } => None,
     }
 }
@@ -718,371 +921,695 @@ fn compile_time_evaluation_diagnostic(
     operation: Option<String>,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
+    numeric_profile: Option<NumericProfile>,
 ) -> ConstantFoldError {
     let operation = operation.map(|operation| string_table.get_or_intern(operation));
 
-    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span).into()
+    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span, numeric_profile)
+        .into()
 }
 
-fn integer_overflow_error(
-    op: &Operator,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
+fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::IntegerOverflow,
-        Some(op.to_str().to_string()),
-        string_table,
-        span,
+        Some(ctx.operator.to_str().to_string()),
+        ctx.string_table,
+        ctx.span,
+        Some(ctx.numeric_profile),
     ))
 }
 
-fn float_non_finite_error(
-    op: &Operator,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
+fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::FloatOverflow,
-        Some(op.to_str().to_string()),
-        string_table,
-        span,
+        Some(ctx.operator.to_str().to_string()),
+        ctx.string_table,
+        ctx.span,
+        Some(ctx.numeric_profile),
     ))
+}
+
+/// Shared failure context for one numeric fold attempt.
+///
+/// WHAT: carries the authored operator, its span, the selected numeric profile and the shared
+///       string table so both helpers funnel typed numeric diagnostics through one value.
+/// WHY: keeps the fold-function argument lists short while failures retain the same span,
+///       profile and operation identity that the standalone parameters provided.
+struct NumericFoldFailure<'table, 'operator> {
+    operator: &'operator Operator,
+    span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
+    string_table: &'table mut StringTable,
 }
 
 fn checked_float_result(
     value: f64,
-    op: &Operator,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
-    if value.is_finite() {
-        Ok(ExpressionKind::Float(value))
+    precision: BinaryFloatPrecision,
+    ctx: &mut NumericFoldFailure<'_, '_>,
+) -> Result<f64, ConstantFoldError> {
+    // Every numeric float domain rounds its semantic result once before the finite-value check.
+    let rounded = precision.round(value);
+    if rounded.is_finite() {
+        Ok(rounded)
     } else {
-        float_non_finite_error(op, string_table, span)
+        float_non_finite_error(ctx)
     }
 }
 
+/// Folds one integer operation exactly in `i128` and checks the result against the operation
+/// domain's inclusive `range`, so `Int` and every fixed integer share one set of rules.
 fn checked_int_binary_result(
-    lhs: i32,
-    rhs: i32,
-    op: &Operator,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
-    let checked = match op {
-        Operator::Add => lhs.checked_add(rhs),
-        Operator::Subtract => lhs.checked_sub(rhs),
-        Operator::Multiply => lhs.checked_mul(rhs),
-        Operator::IntDivide => lhs.checked_div(rhs),
-        Operator::Modulus => lhs.checked_rem(rhs),
-        // Non-negative exponents are guaranteed by the caller; `rhs` is already validated as i32.
-        Operator::Exponent => lhs.checked_pow(rhs as u32),
-        _ => {
+    lhs: i128,
+    rhs: i128,
+    (minimum, maximum): (i128, i128),
+    numeric_operator: NumericOperator,
+    ctx: &mut NumericFoldFailure<'_, '_>,
+) -> Result<i128, ConstantFoldError> {
+    let checked = match numeric_operator {
+        NumericOperator::Add => lhs.checked_add(rhs),
+        NumericOperator::Subtract => lhs.checked_sub(rhs),
+        NumericOperator::Multiply => lhs.checked_mul(rhs),
+        NumericOperator::IntegerDivide => {
+            if rhs == 0 {
+                return divide_by_zero_error(ctx);
+            }
+
+            lhs.checked_div(rhs)
+        }
+        NumericOperator::Remainder => {
+            if rhs == 0 {
+                return divide_by_zero_error(ctx);
+            }
+
+            // Remainder by -1 is zero even where the paired quotient overflows.
+            if rhs == -1 {
+                Some(0)
+            } else {
+                lhs.checked_rem(rhs)
+            }
+        }
+        NumericOperator::Power => {
+            if rhs < 0 {
+                return exponent_operand_context_error(ctx);
+            }
+
+            // Trivial bases have exact answers even when the exponent cannot fit u32. Other
+            // powers use checked exponentiation, whose work grows logarithmically with exponent.
+            if lhs == 0 {
+                Some(if rhs == 0 { 1 } else { 0 })
+            } else if lhs == 1 {
+                Some(1)
+            } else if lhs == -1 {
+                Some(if rhs % 2 == 0 { 1 } else { -1 })
+            } else {
+                let Ok(exponent) = u32::try_from(rhs) else {
+                    return integer_overflow_error(ctx);
+                };
+                lhs.checked_pow(exponent)
+            }
+        }
+        NumericOperator::Divide | NumericOperator::Negate => {
             return Err(CompilerError::compiler_error(format!(
-                "Checked integer folding does not support '{}'",
-                op.to_str()
+                "Integer folding received unsupported numeric operator '{}'",
+                ctx.operator.to_str()
             ))
             .into());
         }
     };
 
-    match checked {
-        Some(value) => Ok(ExpressionKind::Int(value)),
-        None => integer_overflow_error(op, string_table, span),
+    let Some(value) = checked else {
+        return integer_overflow_error(ctx);
+    };
+    if !(minimum..=maximum).contains(&value) {
+        return integer_overflow_error(ctx);
     }
+
+    Ok(value)
 }
 
-fn divide_by_zero_error(
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
+fn divide_by_zero_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::DivideByZero,
         None,
-        string_table,
-        span,
+        ctx.string_table,
+        ctx.span,
+        Some(ctx.numeric_profile),
     ))
 }
 
-fn integer_division_operand_error(
+fn exponent_operand_context_error<T>(
+    ctx: &mut NumericFoldFailure<'_, '_>,
+) -> Result<T, ConstantFoldError> {
+    Err(compile_time_evaluation_diagnostic(
+        CompileTimeEvaluationErrorReason::InvalidExponent,
+        Some(ctx.operator.to_str().to_string()),
+        ctx.string_table,
+        ctx.span,
+        Some(ctx.numeric_profile),
+    ))
+}
+
+fn integer_division_operand_error<T>(
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
+    numeric_profile: NumericProfile,
+) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt,
         None,
         string_table,
         span,
+        Some(numeric_profile),
     ))
 }
 
-fn invalid_operator_for_compile_time_type(
+fn invalid_operator_for_compile_time_type<T>(
     op: &Operator,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<ExpressionKind, ConstantFoldError> {
+    numeric_profile: Option<NumericProfile>,
+) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::InvalidOperatorForType,
         Some(op.to_str().to_string()),
         string_table,
         span,
+        numeric_profile,
     ))
 }
+
+fn numeric_scalar_for_expression(expression: &Expression) -> Option<NumericScalar> {
+    match &expression.kind {
+        ExpressionKind::Int(_) => Some(NumericScalar::Int),
+        ExpressionKind::Float(_) => Some(NumericScalar::Float),
+        ExpressionKind::FixedScalar(value) if value.scalar() != FixedScalar::Byte => {
+            Some(NumericScalar::Fixed(value.scalar()))
+        }
+        ExpressionKind::Number(value) => Some(NumericScalar::Number(value.scale())),
+        _ => None,
+    }
+}
+
+fn integer_value_from_expression(expression: &Expression) -> Option<i128> {
+    match &expression.kind {
+        ExpressionKind::Int(value) => Some(i128::from(*value)),
+        ExpressionKind::FixedScalar(value) => match value.scalar().class() {
+            FixedScalarClass::SignedInteger => value.as_i64().map(i128::from),
+            FixedScalarClass::UnsignedInteger => value.as_u64().map(i128::from),
+            FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
+        },
+        _ => None,
+    }
+}
+
+fn float_value_from_expression(expression: &Expression) -> Option<f64> {
+    match &expression.kind {
+        ExpressionKind::Float(value) => Some(*value),
+        ExpressionKind::FixedScalar(value) => value.as_f64(),
+        _ => None,
+    }
+}
+
+fn float_operand_in_domain(
+    expression: &Expression,
+    precision: BinaryFloatPrecision,
+) -> Option<f64> {
+    if let Some(integer) = integer_value_from_expression(expression) {
+        return Some(precision.round_integer(integer));
+    }
+
+    float_value_from_expression(expression)
+}
+
+fn integer_result_expression(
+    domain: NumericScalar,
+    value: i128,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    match domain {
+        NumericScalar::Int => {
+            // The profile-specific domain range check immediately precedes construction.
+            let value = i64::try_from(value).expect("Int result fits its i64 expression carrier");
+            Expression::int(value, span, value_mode)
+        }
+        NumericScalar::Fixed(scalar) => match scalar.class() {
+            FixedScalarClass::SignedInteger => {
+                // The fixed-domain range check immediately precedes construction.
+                let value = i64::try_from(value).expect("signed fixed result fits its i64 carrier");
+                let value = FixedScalarValue::signed(scalar, value)
+                    .expect("checked result fits the signed fixed domain");
+                Expression::fixed_scalar(value, span, value_mode)
+            }
+            FixedScalarClass::UnsignedInteger => {
+                // The fixed-domain range check immediately precedes construction.
+                let value =
+                    u64::try_from(value).expect("unsigned fixed result fits its u64 carrier");
+                let value = FixedScalarValue::unsigned(scalar, value)
+                    .expect("checked result fits the unsigned fixed domain");
+                Expression::fixed_scalar(value, span, value_mode)
+            }
+            FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => {
+                unreachable!("integer result domain must be an integer scalar")
+            }
+        },
+        NumericScalar::Float => unreachable!("integer result domain cannot be Float"),
+        NumericScalar::Number(_) => unreachable!("Number results use the exact Number constructor"),
+    }
+}
+
+fn float_result_expression(
+    domain: NumericScalar,
+    value: f64,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    match domain {
+        NumericScalar::Float => Expression::float(value, span, value_mode),
+        NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::BinaryFloat => {
+            let value = FixedScalarValue::binary_float(scalar, value)
+                .expect("rounded finite result fits the fixed float domain");
+            Expression::fixed_scalar(value, span, value_mode)
+        }
+        NumericScalar::Int | NumericScalar::Fixed(_) | NumericScalar::Number(_) => {
+            unreachable!("float result domain must be a binary float scalar")
+        }
+    }
+}
+
+fn number_operand_in_domain(
+    expression: &Expression,
+    scale: NumberScale,
+) -> Option<Cow<'_, NumberValue>> {
+    match &expression.kind {
+        ExpressionKind::Number(value) if value.scale() == scale => Some(Cow::Borrowed(value)),
+        ExpressionKind::Int(_) | ExpressionKind::FixedScalar(_) => {
+            integer_value_from_expression(expression)
+                .map(|integer| Cow::Owned(NumberValue::from_integer(integer, scale)))
+        }
+        _ => None,
+    }
+}
+
+fn fold_number_binary(
+    lhs: &Expression,
+    rhs: &Expression,
+    numeric_operator: NumericOperator,
+    scale: NumberScale,
+    value_mode: ValueMode,
+    ctx: &mut NumericFoldFailure<'_, '_>,
+) -> Result<Expression, ConstantFoldError> {
+    let result_type_id = match numeric_scalar_for_expression(lhs) {
+        Some(NumericScalar::Number(left_scale)) if left_scale == scale => lhs.type_id,
+        _ => match numeric_scalar_for_expression(rhs) {
+            Some(NumericScalar::Number(right_scale)) if right_scale == scale => rhs.type_id,
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "Dec folding could not retain a Dec operand's canonical TypeId.",
+                )
+                .into());
+            }
+        },
+    };
+
+    let result = if numeric_operator == NumericOperator::Power {
+        let ExpressionKind::Number(base) = &lhs.kind else {
+            return Err(CompilerError::compiler_error(
+                "Dec power folding received a non-Dec base.",
+            )
+            .into());
+        };
+        let ExpressionKind::Int(exponent) = &rhs.kind else {
+            return Err(CompilerError::compiler_error(
+                "Dec power folding received a non-Int exponent.",
+            )
+            .into());
+        };
+        base.checked_power(*exponent)
+    } else {
+        let Some(left_value) = number_operand_in_domain(lhs, scale) else {
+            return Err(CompilerError::compiler_error(
+                "Dec folding could not materialize the left operand in the result scale.",
+            )
+            .into());
+        };
+        let Some(right_value) = number_operand_in_domain(rhs, scale) else {
+            return Err(CompilerError::compiler_error(
+                "Dec folding could not materialize the right operand in the result scale.",
+            )
+            .into());
+        };
+
+        left_value
+            .as_ref()
+            .checked_binary(numeric_operator, right_value.as_ref())
+    };
+
+    let value = match result {
+        Ok(value) => value,
+        Err(NumberArithmeticError::DivideByZero) => {
+            return divide_by_zero_error(ctx);
+        }
+        Err(NumberArithmeticError::InvalidExponent) => {
+            return exponent_operand_context_error(ctx);
+        }
+        Err(NumberArithmeticError::InvalidOperation) => {
+            return Err(CompilerError::compiler_error(format!(
+                "Dec folding received unsupported numeric operator '{}'",
+                ctx.operator.to_str()
+            ))
+            .into());
+        }
+    };
+
+    Ok(Expression::number(
+        value,
+        result_type_id,
+        lhs.span,
+        value_mode,
+    ))
+}
+
+fn fold_numeric_binary(
+    lhs: &Expression,
+    rhs: &Expression,
+    numeric_operator: NumericOperator,
+    domain: NumericScalar,
+    ctx: &mut NumericFoldFailure<'_, '_>,
+) -> Result<Expression, ConstantFoldError> {
+    let value_mode = numeric_value_mode(lhs, rhs);
+    if let NumericScalar::Number(scale) = domain {
+        return fold_number_binary(lhs, rhs, numeric_operator, scale, value_mode, ctx);
+    }
+
+    if domain.is_integer() {
+        let left_value = integer_value_from_expression(lhs)
+            .expect("integer operation domains only accept integer-valued expressions");
+        let right_value = integer_value_from_expression(rhs)
+            .expect("integer operation domains only accept integer-valued expressions");
+        let Some(range) = domain.integer_range(ctx.numeric_profile) else {
+            return Err(CompilerError::compiler_error(
+                "Integer folding received a non-integer result domain.",
+            )
+            .into());
+        };
+        let value =
+            checked_int_binary_result(left_value, right_value, range, numeric_operator, ctx)?;
+        return Ok(integer_result_expression(
+            domain, value, lhs.span, value_mode,
+        ));
+    }
+
+    let Some(precision) = domain.binary_float_precision(ctx.numeric_profile) else {
+        return Err(CompilerError::compiler_error(
+            "Numeric folding received a domain without integer or binary-float arithmetic.",
+        )
+        .into());
+    };
+    let left_value = float_operand_in_domain(lhs, precision)
+        .expect("binary-float operation domains only accept numeric expressions");
+    let right_value = float_operand_in_domain(rhs, precision)
+        .expect("binary-float operation domains only accept numeric expressions");
+
+    let value = match numeric_operator {
+        NumericOperator::Add => left_value + right_value,
+        NumericOperator::Subtract => left_value - right_value,
+        NumericOperator::Multiply => left_value * right_value,
+        NumericOperator::Divide => {
+            if right_value == 0.0 {
+                return divide_by_zero_error(ctx);
+            }
+            left_value / right_value
+        }
+        NumericOperator::Remainder => {
+            if right_value == 0.0 {
+                return divide_by_zero_error(ctx);
+            }
+            left_value % right_value
+        }
+        NumericOperator::Power => numeric_power::pow(left_value, right_value),
+        NumericOperator::IntegerDivide | NumericOperator::Negate => {
+            return Err(CompilerError::compiler_error(format!(
+                "Binary-float folding received unsupported numeric operator '{}'",
+                ctx.operator.to_str()
+            ))
+            .into());
+        }
+    };
+    let value = checked_float_result(value, precision, ctx)?;
+    Ok(float_result_expression(domain, value, lhs.span, value_mode))
+}
+
+fn comparison_result(op: &Operator, ordering: std::cmp::Ordering) -> Option<bool> {
+    match op {
+        Operator::Equality => Some(ordering.is_eq()),
+        Operator::NotEqual => Some(!ordering.is_eq()),
+        Operator::GreaterThan => Some(ordering.is_gt()),
+        Operator::GreaterThanOrEqual => Some(!ordering.is_lt()),
+        Operator::LessThan => Some(ordering.is_lt()),
+        Operator::LessThanOrEqual => Some(!ordering.is_gt()),
+        _ => None,
+    }
+}
+
+fn fold_numeric_comparison(
+    lhs: &Expression,
+    rhs: &Expression,
+    op: &Operator,
+    numeric_profile: NumericProfile,
+) -> Option<bool> {
+    if let (ExpressionKind::FixedScalar(left), ExpressionKind::FixedScalar(right)) =
+        (&lhs.kind, &rhs.kind)
+        && left.scalar() == FixedScalar::Byte
+        && right.scalar() == FixedScalar::Byte
+    {
+        let left = left.as_u64()?;
+        let right = right.as_u64()?;
+        return comparison_result(op, left.cmp(&right));
+    }
+
+    let left_domain = numeric_scalar_for_expression(lhs)?;
+    let right_domain = numeric_scalar_for_expression(rhs)?;
+    if !comparison_supported(left_domain, right_domain) {
+        return None;
+    }
+
+    let ordering = match (left_domain, right_domain) {
+        (NumericScalar::Int, NumericScalar::Int) => {
+            integer_value_from_expression(lhs)?.cmp(&integer_value_from_expression(rhs)?)
+        }
+        (NumericScalar::Fixed(left), NumericScalar::Fixed(right))
+            if matches!(
+                left.class(),
+                FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger
+            ) && matches!(
+                right.class(),
+                FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger
+            ) =>
+        {
+            integer_value_from_expression(lhs)?.cmp(&integer_value_from_expression(rhs)?)
+        }
+        (NumericScalar::Float, NumericScalar::Float)
+        | (NumericScalar::Fixed(_), NumericScalar::Fixed(_)) => {
+            float_value_from_expression(lhs)?.partial_cmp(&float_value_from_expression(rhs)?)?
+        }
+        (NumericScalar::Int, NumericScalar::Float) => {
+            let integer = integer_value_from_expression(lhs)?;
+            let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
+            precision
+                .round_integer(integer)
+                .partial_cmp(&float_value_from_expression(rhs)?)?
+        }
+        (NumericScalar::Float, NumericScalar::Int) => {
+            let integer = integer_value_from_expression(rhs)?;
+            let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
+            float_value_from_expression(lhs)?.partial_cmp(&precision.round_integer(integer))?
+        }
+        (NumericScalar::Number(_), NumericScalar::Number(_)) => {
+            let ExpressionKind::Number(left) = &lhs.kind else {
+                return None;
+            };
+            let ExpressionKind::Number(right) = &rhs.kind else {
+                return None;
+            };
+            left.coefficient().cmp(right.coefficient())
+        }
+        (NumericScalar::Number(scale), integer_domain) if integer_domain.is_integer() => {
+            let ExpressionKind::Number(left) = &lhs.kind else {
+                return None;
+            };
+            let integer = integer_value_from_expression(rhs)?;
+            let right = NumberValue::from_integer(integer, scale);
+            left.coefficient().cmp(right.coefficient())
+        }
+        (integer_domain, NumericScalar::Number(scale)) if integer_domain.is_integer() => {
+            let ExpressionKind::Number(right) = &rhs.kind else {
+                return None;
+            };
+            let integer = integer_value_from_expression(lhs)?;
+            let left = NumberValue::from_integer(integer, scale);
+            left.coefficient().cmp(right.coefficient())
+        }
+        _ => return None,
+    };
+
+    comparison_result(op, ordering)
+}
+
+fn numeric_value_mode(lhs: &Expression, rhs: &Expression) -> ValueMode {
+    if lhs.value_mode.is_mutable() || rhs.value_mode.is_mutable() {
+        ValueMode::MutableOwned
+    } else {
+        ValueMode::ImmutableOwned
+    }
+}
+
+fn folded_operator_expression(
+    mut expression: Expression,
+    lhs: &Expression,
+    rhs: &Expression,
+    op: &Operator,
+) -> Expression {
+    expression.contains_regular_division = lhs.contains_regular_division
+        || rhs.contains_regular_division
+        || matches!(op, Operator::Divide);
+    expression.synthetic_interface_provenance = lhs
+        .synthetic_interface_provenance
+        .union(&rhs.synthetic_interface_provenance);
+    expression
+}
+
 impl Expression {
-    // Evaluates a binary operation between two expressions based on the operator
-    // This helps with constant folding by handling type-specific operations
+    /// Fold an already-typed binary operation in its shared numeric result domain.
+    ///
+    /// WHAT: numeric arithmetic uses the same promotion table as AST operator typing. Comparisons
+    ///       keep their exact integer or numeric-value rules, while non-numeric constant operators
+    ///       retain their existing AST-local policies.
+    /// WHY: compile-time evaluation must produce the same domain and failure boundary as runtime
+    ///      lowering, without reducing fixed scalars through the Int/Float carrier variants.
     pub(crate) fn evaluate_operator(
         &self,
         rhs: &Expression,
         op: &Operator,
         string_table: &mut StringTable,
+        numeric_profile: NumericProfile,
+        operator_span: Option<SourceSpan>,
     ) -> Result<OperatorFoldOutcome, ConstantFoldError> {
-        let kind: ExpressionKind = match (&self.kind, &rhs.kind) {
-            // Float operations: Moth `Float` is finite f64. Require finite results and
-            // report divide/modulo-by-zero explicitly instead of relying on NaN/Inf classification.
-            (ExpressionKind::Float(lhs_val), ExpressionKind::Float(rhs_val)) => match op {
-                Operator::Add => {
-                    checked_float_result(lhs_val + rhs_val, op, string_table, self.span)?
-                }
-                Operator::Subtract => {
-                    checked_float_result(lhs_val - rhs_val, op, string_table, self.span)?
-                }
-                Operator::Multiply => {
-                    checked_float_result(lhs_val * rhs_val, op, string_table, self.span)?
-                }
-                Operator::Divide => {
-                    if *rhs_val == 0.0 {
-                        divide_by_zero_error(string_table, self.span)?
-                    } else {
-                        checked_float_result(lhs_val / rhs_val, op, string_table, self.span)?
-                    }
-                }
-                Operator::Modulus => {
-                    if *rhs_val == 0.0 {
-                        divide_by_zero_error(string_table, self.span)?
-                    } else {
-                        checked_float_result(lhs_val % rhs_val, op, string_table, self.span)?
-                    }
-                }
-                Operator::Exponent => {
-                    checked_float_result(lhs_val.powf(*rhs_val), op, string_table, self.span)?
-                }
+        if let (Some(numeric_operator), Some(left_domain), Some(right_domain)) = (
+            op.numeric_operator(),
+            numeric_scalar_for_expression(self),
+            numeric_scalar_for_expression(rhs),
+        ) && !numeric_operator.is_unary()
+            && let Some(domain) =
+                binary_operation_domain(numeric_operator, left_domain, right_domain)
+        {
+            let mut failure_context = NumericFoldFailure {
+                operator: op,
+                span: operator_span,
+                numeric_profile,
+                string_table,
+            };
+            let expression =
+                fold_numeric_binary(self, rhs, numeric_operator, domain, &mut failure_context)?;
+            return Ok(OperatorFoldOutcome::Folded(folded_operator_expression(
+                expression, self, rhs, op,
+            )));
+        }
 
-                // Logical operations with float operands
-                Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
-                Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
-                Operator::GreaterThan => ExpressionKind::Bool(lhs_val > rhs_val),
-                Operator::GreaterThanOrEqual => ExpressionKind::Bool(lhs_val >= rhs_val),
-                Operator::LessThan => ExpressionKind::Bool(lhs_val < rhs_val),
-                Operator::LessThanOrEqual => ExpressionKind::Bool(lhs_val <= rhs_val),
-
-                // Other operations are not applicable to floats.
-                _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
-            },
-
-            // Integer operations use checked i32 arithmetic so compile-time folding stays
-            // equivalent to the Alpha runtime `Int` contract.
-            (ExpressionKind::Int(lhs_val), ExpressionKind::Int(rhs_val)) => match op {
-                Operator::Add | Operator::Subtract | Operator::Multiply => {
-                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
+        let kind = if let Some(value) = fold_numeric_comparison(self, rhs, op, numeric_profile) {
+            ExpressionKind::Bool(value)
+        } else {
+            match (&self.kind, &rhs.kind) {
+                (ExpressionKind::Int(left), ExpressionKind::Int(right))
+                    if matches!(op, Operator::Range) =>
+                {
+                    ExpressionKind::Range(
+                        Box::new(Expression::int(*left, self.span, ValueMode::ImmutableOwned)),
+                        Box::new(Expression::int(*right, rhs.span, ValueMode::ImmutableOwned)),
+                    )
                 }
-                Operator::Divide => {
-                    if *rhs_val == 0 {
-                        divide_by_zero_error(string_table, self.span)?
-                    } else {
-                        checked_float_result(
-                            f64::from(*lhs_val) / f64::from(*rhs_val),
+                (ExpressionKind::Int(_), ExpressionKind::Float(_))
+                | (ExpressionKind::Float(_), ExpressionKind::Int(_))
+                    if matches!(op, Operator::IntDivide) =>
+                {
+                    integer_division_operand_error(string_table, operator_span, numeric_profile)?
+                }
+                (ExpressionKind::Float(_), ExpressionKind::Float(_))
+                    if matches!(op, Operator::IntDivide) =>
+                {
+                    invalid_operator_for_compile_time_type(
+                        op,
+                        string_table,
+                        operator_span,
+                        Some(numeric_profile),
+                    )?
+                }
+                (ExpressionKind::Int(_), ExpressionKind::Int(_))
+                | (ExpressionKind::Int(_), ExpressionKind::Float(_))
+                | (ExpressionKind::Float(_), ExpressionKind::Int(_))
+                | (ExpressionKind::Float(_), ExpressionKind::Float(_)) => {
+                    invalid_operator_for_compile_time_type(
+                        op,
+                        string_table,
+                        operator_span,
+                        Some(numeric_profile),
+                    )?
+                }
+                (ExpressionKind::Bool(left), ExpressionKind::Bool(right)) => match op {
+                    Operator::And => ExpressionKind::Bool(*left && *right),
+                    Operator::Or => ExpressionKind::Bool(*left || *right),
+                    Operator::Equality => ExpressionKind::Bool(left == right),
+                    Operator::NotEqual => ExpressionKind::Bool(left != right),
+                    _ => invalid_operator_for_compile_time_type(
+                        op,
+                        string_table,
+                        operator_span,
+                        None,
+                    )?,
+                },
+                (
+                    ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
+                    ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
+                ) => {
+                    if !matches!(op, Operator::Equality | Operator::NotEqual) {
+                        invalid_operator_for_compile_time_type(
                             op,
                             string_table,
-                            self.span,
-                        )?
+                            operator_span,
+                            None,
+                        )?;
                     }
-                }
-                Operator::IntDivide => {
-                    if *rhs_val == 0 {
-                        divide_by_zero_error(string_table, self.span)?
-                    } else {
-                        checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
-                    }
-                }
-                Operator::Modulus => {
-                    if *rhs_val == 0 {
-                        divide_by_zero_error(string_table, self.span)?
-                    } else {
-                        checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
-                    }
-                }
-                Operator::Exponent => {
-                    if *rhs_val < 0 {
-                        return Err(compile_time_evaluation_diagnostic(
-                            CompileTimeEvaluationErrorReason::InvalidExponent,
-                            Some(op.to_str().to_string()),
-                            string_table,
-                            self.span,
-                        ));
-                    }
-                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, self.span)?
-                }
-                Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
-                Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
-                Operator::GreaterThan => ExpressionKind::Bool(lhs_val > rhs_val),
-                Operator::GreaterThanOrEqual => ExpressionKind::Bool(lhs_val >= rhs_val),
-                Operator::LessThan => ExpressionKind::Bool(lhs_val < rhs_val),
-                Operator::LessThanOrEqual => ExpressionKind::Bool(lhs_val <= rhs_val),
-                Operator::Range => ExpressionKind::Range(
-                    Box::new(Expression::int(
-                        *lhs_val,
-                        self.span,
-                        ValueMode::ImmutableOwned,
-                    )),
-                    Box::new(Expression::int(
-                        *rhs_val,
-                        rhs.span,
-                        ValueMode::ImmutableOwned,
-                    )),
-                ),
 
-                _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
-            },
+                    let requirement = ConstStringRequirement::EqualityComparison;
+                    let lhs_text = match require_concrete_text(self, requirement, string_table) {
+                        Ok(Some(text)) => text,
+                        Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
+                        Err(diagnostic) => {
+                            return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
+                        }
+                    };
+                    let rhs_text = match require_concrete_text(rhs, requirement, string_table) {
+                        Ok(Some(text)) => text,
+                        Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
+                        Err(diagnostic) => {
+                            return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
+                        }
+                    };
 
-            // Mixed Int/Float operations promote the i32 operand to Float, then require a finite
-            // f64 result.
-            (ExpressionKind::Int(lhs_val), ExpressionKind::Float(rhs_val)) => {
-                let lhs = f64::from(*lhs_val);
-                match op {
-                    Operator::Add => {
-                        checked_float_result(lhs + rhs_val, op, string_table, self.span)?
+                    match op {
+                        Operator::Equality => ExpressionKind::Bool(lhs_text == rhs_text),
+                        Operator::NotEqual => ExpressionKind::Bool(lhs_text != rhs_text),
+                        _ => unreachable!("string operator was checked above"),
                     }
-                    Operator::Subtract => {
-                        checked_float_result(lhs - rhs_val, op, string_table, self.span)?
-                    }
-                    Operator::Multiply => {
-                        checked_float_result(lhs * rhs_val, op, string_table, self.span)?
-                    }
-                    Operator::Divide => {
-                        if *rhs_val == 0.0 {
-                            divide_by_zero_error(string_table, self.span)?
-                        } else {
-                            checked_float_result(lhs / rhs_val, op, string_table, self.span)?
-                        }
-                    }
-                    Operator::Modulus => {
-                        if *rhs_val == 0.0 {
-                            divide_by_zero_error(string_table, self.span)?
-                        } else {
-                            checked_float_result(lhs % rhs_val, op, string_table, self.span)?
-                        }
-                    }
-                    Operator::Exponent => {
-                        checked_float_result(lhs.powf(*rhs_val), op, string_table, self.span)?
-                    }
-                    Operator::Equality => ExpressionKind::Bool(lhs == *rhs_val),
-                    Operator::NotEqual => ExpressionKind::Bool(lhs != *rhs_val),
-                    Operator::GreaterThan => ExpressionKind::Bool(lhs > *rhs_val),
-                    Operator::GreaterThanOrEqual => ExpressionKind::Bool(lhs >= *rhs_val),
-                    Operator::LessThan => ExpressionKind::Bool(lhs < *rhs_val),
-                    Operator::LessThanOrEqual => ExpressionKind::Bool(lhs <= *rhs_val),
-                    Operator::IntDivide => integer_division_operand_error(string_table, self.span)?,
-                    _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
                 }
+                _ => return Ok(OperatorFoldOutcome::NotConstant),
             }
-
-            (ExpressionKind::Float(lhs_val), ExpressionKind::Int(rhs_val)) => {
-                let rhs = f64::from(*rhs_val);
-                match op {
-                    Operator::Add => {
-                        checked_float_result(lhs_val + rhs, op, string_table, self.span)?
-                    }
-                    Operator::Subtract => {
-                        checked_float_result(lhs_val - rhs, op, string_table, self.span)?
-                    }
-                    Operator::Multiply => {
-                        checked_float_result(lhs_val * rhs, op, string_table, self.span)?
-                    }
-                    Operator::Divide => {
-                        if *rhs_val == 0 {
-                            divide_by_zero_error(string_table, self.span)?
-                        } else {
-                            checked_float_result(lhs_val / rhs, op, string_table, self.span)?
-                        }
-                    }
-                    Operator::Modulus => {
-                        if *rhs_val == 0 {
-                            divide_by_zero_error(string_table, self.span)?
-                        } else {
-                            checked_float_result(lhs_val % rhs, op, string_table, self.span)?
-                        }
-                    }
-                    Operator::Exponent => {
-                        checked_float_result(lhs_val.powf(rhs), op, string_table, self.span)?
-                    }
-                    Operator::Equality => ExpressionKind::Bool(*lhs_val == rhs),
-                    Operator::NotEqual => ExpressionKind::Bool(*lhs_val != rhs),
-                    Operator::GreaterThan => ExpressionKind::Bool(*lhs_val > rhs),
-                    Operator::GreaterThanOrEqual => ExpressionKind::Bool(*lhs_val >= rhs),
-                    Operator::LessThan => ExpressionKind::Bool(*lhs_val < rhs),
-                    Operator::LessThanOrEqual => ExpressionKind::Bool(*lhs_val <= rhs),
-                    Operator::IntDivide => integer_division_operand_error(string_table, self.span)?,
-                    _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
-                }
-            }
-
-            // Boolean operations
-            (ExpressionKind::Bool(lhs_val), ExpressionKind::Bool(rhs_val)) => match op {
-                Operator::And => ExpressionKind::Bool(*lhs_val && *rhs_val),
-                Operator::Or => ExpressionKind::Bool(*lhs_val || *rhs_val),
-                Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
-                Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
-
-                _ => invalid_operator_for_compile_time_type(op, string_table, self.span)?,
-            },
-
-            // String equality requires concrete characters; all other string operators retain
-            // their existing compile-time operator diagnostics.
-            (
-                ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
-                ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
-            ) => {
-                if !matches!(op, Operator::Equality | Operator::NotEqual) {
-                    invalid_operator_for_compile_time_type(op, string_table, self.span)?;
-                }
-
-                let requirement = ConstStringRequirement::EqualityComparison;
-                let lhs_text = match require_concrete_text(self, requirement, string_table) {
-                    Ok(Some(text)) => text,
-                    Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
-                    Err(diagnostic) => {
-                        return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
-                    }
-                };
-                let rhs_text = match require_concrete_text(rhs, requirement, string_table) {
-                    Ok(Some(text)) => text,
-                    Ok(None) => return Ok(OperatorFoldOutcome::NotConstant),
-                    Err(diagnostic) => {
-                        return Ok(OperatorFoldOutcome::TextUnavailable { diagnostic });
-                    }
-                };
-
-                match op {
-                    Operator::Equality => ExpressionKind::Bool(lhs_text == rhs_text),
-                    Operator::NotEqual => ExpressionKind::Bool(lhs_text != rhs_text),
-                    _ => unreachable!("string operator was checked above"),
-                }
-            }
-            // Any other combination of types
-            _ => return Ok(OperatorFoldOutcome::NotConstant),
         };
 
-        let value_mode = if self.value_mode.is_mutable() || rhs.value_mode.is_mutable() {
-            ValueMode::MutableOwned
-        } else {
-            ValueMode::ImmutableOwned
-        };
+        let value_mode = numeric_value_mode(self, rhs);
         let contains_regular_division = self.contains_regular_division
             || rhs.contains_regular_division
             || matches!(op, Operator::Divide);
-
         let result_type = match &kind {
             ExpressionKind::Int(_) => DataType::Int,
             ExpressionKind::Float(_) => DataType::Float,
@@ -1096,7 +1623,6 @@ impl Expression {
         let folded_provenance = self
             .synthetic_interface_provenance
             .union(&rhs.synthetic_interface_provenance);
-
         let mut result_expression = Expression::new(
             kind,
             self.span,

@@ -8,6 +8,7 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry,
+    ExternalSignatureType,
 };
 use std::collections::HashSet;
 
@@ -17,6 +18,8 @@ pub(super) struct ReferencedExport {
     pub(super) package_id: ExternalPackageId,
     pub(super) export_name: String,
     pub(super) raw_import_name: String,
+    pub(super) parameter_types: Vec<ExternalSignatureType>,
+    pub(super) return_types: Vec<ExternalSignatureType>,
     pub(super) is_fallible: bool,
 }
 
@@ -51,6 +54,16 @@ pub(super) fn collect_referenced_exports(
             package_id,
             export_name: export_name.clone(),
             raw_import_name: raw_export_import_name(*function_id),
+            parameter_types: function_def
+                .parameters
+                .iter()
+                .map(|parameter| parameter.language_type.clone())
+                .collect(),
+            return_types: function_def
+                .returns
+                .iter()
+                .map(|slot| slot.value_type.clone())
+                .collect(),
             is_fallible: function_def.is_fallible(),
         });
     }

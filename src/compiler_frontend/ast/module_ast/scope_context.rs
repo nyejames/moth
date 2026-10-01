@@ -51,6 +51,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
@@ -399,6 +400,11 @@ pub struct ScopeShared {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// The compilation boundary's `Int` width and `Float` precision for this scope chain.
+    ///
+    /// WHY: literal materialisation, constant folding, casts and template folding read the scope
+    ///      context, so the boundary profile travels on it rather than being re-derived per site.
+    pub(crate) numeric_profile: NumericProfile,
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
@@ -443,6 +449,9 @@ pub struct ScopeContext {
     // Core scope identity.
     pub kind: ContextKind,
     pub scope: PathId,
+
+    /// Preserves an enclosing match arm's line boundary in child expression contexts.
+    pub(crate) match_arm_boundary: bool,
 
     // Immutable shared services are cheap to clone into child scopes.
     pub(crate) shared: Rc<ScopeShared>,
@@ -511,6 +520,7 @@ impl Clone for ScopeContext {
         Self {
             kind: self.kind.clone(),
             scope: self.scope,
+            match_arm_boundary: self.match_arm_boundary,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),
@@ -677,6 +687,10 @@ impl ScopeContext {
     /// The TIR store is a required input, not a scratch default: every production
     /// context must share the one module-level store allocated by
     /// `AstPhaseContext::from_build_context`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "root construction keeps kind, scope, declarations, external registry, expected results, frame capacity, the shared TIR store and the required boundary numeric profile as separate inputs"
+    )]
     pub(crate) fn new(
         kind: ContextKind,
         scope: PathId,
@@ -685,6 +699,7 @@ impl ScopeContext {
         expected_result_type_ids: Vec<TypeId>,
         scope_frame_capacity: usize,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
+        numeric_profile: NumericProfile,
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
@@ -696,6 +711,10 @@ impl ScopeContext {
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
             build_profile: FrontendBuildProfile::Dev,
+            // No silent width default: every production context receives the boundary
+            // profile from its `AstPhaseContext` module view, so a non-STANDARD boundary
+            // cannot silently re-fold as STANDARD.
+            numeric_profile,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,
@@ -728,6 +747,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind,
+            match_arm_boundary: false,
             scope,
             shared,
             arena,
@@ -782,9 +802,11 @@ impl ScopeContext {
         } else {
             self.expected_result_type_ids.clone()
         };
+        let match_arm_boundary = self.match_arm_boundary || matches!(&kind, ContextKind::MatchArm);
 
         ScopeContext {
             kind,
+            match_arm_boundary,
             scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -832,6 +854,7 @@ impl ScopeContext {
             .expect("path table exhausted while creating child function scope");
         let mut new_context = ScopeContext {
             kind: ContextKind::Function,
+            match_arm_boundary: false,
             scope: function_scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -867,6 +890,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind: ContextKind::Expression,
+            match_arm_boundary: self.match_arm_boundary,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -907,6 +931,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind: template_kind,
+            match_arm_boundary: self.match_arm_boundary,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -944,6 +969,7 @@ impl ScopeContext {
 
         ScopeContext {
             kind: ContextKind::Constant,
+            match_arm_boundary: parent.match_arm_boundary,
             scope,
             shared: Rc::clone(&parent.shared),
             arena: Rc::clone(&parent.arena),

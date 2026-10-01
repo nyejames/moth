@@ -1,0 +1,9 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "external_native_int positive=9007199254740991 negative=-9007199254740991 large=5000000000",
+]

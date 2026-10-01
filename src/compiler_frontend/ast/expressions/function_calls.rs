@@ -35,6 +35,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
 };
@@ -163,6 +164,7 @@ pub(crate) fn parse_function_call_expression(
         string_table,
         type_interner,
         path_fork,
+        context.numeric_profile.float_precision,
     )?;
 
     let call = HandledFallibleCall {
@@ -243,6 +245,10 @@ fn finish_function_call_expression(
     .into())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "argument resolution keeps callee identity, arguments, parameters, span, mutable string/type state, path fork and boundary Float precision as separate borrows"
+)]
 fn resolve_user_function_call_arguments(
     function_name: &PathId,
     raw_args: &[CallArgument],
@@ -251,6 +257,7 @@ fn resolve_user_function_call_arguments(
     string_table: &mut StringTable,
     type_interner: &mut AstTypeInterner<'_>,
     path_fork: &PathInternerFork,
+    float_precision: FloatPrecision,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     let callee_name = path_fork
         .component(*function_name)
@@ -269,6 +276,7 @@ fn resolve_user_function_call_arguments(
             type_environment: type_check_context.type_environment,
             path_fork,
             compatibility_cache: type_check_context.compatibility_cache,
+            float_precision,
         },
     )
     .map_err(ExpressionParseError::from)
@@ -375,6 +383,7 @@ fn parse_external_function_call_parts(
             type_environment: type_check_context.type_environment,
             path_fork,
             compatibility_cache: type_check_context.compatibility_cache,
+            float_precision: context.numeric_profile.float_precision,
         },
     )
     .map_err(ExpressionParseError::from)?;
@@ -562,6 +571,8 @@ fn validate_external_signature_type_is_registered(
 ) -> Result<(), ExpressionParseError> {
     match signature_type {
         ExternalSignatureType::Abi(_)
+        | ExternalSignatureType::NativeInt
+        | ExternalSignatureType::NativeFloat
         | ExternalSignatureType::BuiltinError
         | ExternalSignatureType::StringContent => Ok(()),
         ExternalSignatureType::External(type_id) => {

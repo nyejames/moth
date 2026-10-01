@@ -12,6 +12,7 @@ mod parse_chain;
 mod receiver_access;
 mod receiver_calls;
 
+pub(crate) use field_member::project_explicit_const_record_field;
 pub use parse_chain::parse_field_access;
 pub(crate) use parse_chain::{
     parse_field_access_expression_with_receiver_access, parse_postfix_chain_expression,

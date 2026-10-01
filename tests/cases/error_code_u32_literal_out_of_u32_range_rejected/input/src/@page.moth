@@ -1,0 +1,1 @@
+rejected = Error(code = 4294967296, message = "too wide code range")

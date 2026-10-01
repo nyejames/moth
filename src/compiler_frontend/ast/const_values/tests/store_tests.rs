@@ -19,6 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -487,6 +489,127 @@ fn duplicate_record_field_name_is_a_construction_error() {
         error.msg.contains("duplicate field names"),
         "unexpected error: {}",
         error.msg
+    );
+}
+
+// ------------------------------------
+//  Fixed-scalar round trip
+// ------------------------------------
+
+fn fixed_scalar_declaration(
+    path: &str,
+    value: FixedScalarValue,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> Declaration {
+    Declaration {
+        id: path_fork
+            .try_intern_portable_path(path, string_table)
+            .expect("test path fits"),
+        value: Expression::fixed_scalar(value, None, ValueMode::ImmutableOwned),
+        binding_span: None,
+        config_qualifier: None,
+    }
+}
+
+fn visit_fixed_scalar_value(
+    store: &ConstValueStore,
+    id: ConstValueId,
+) -> Result<FixedScalarValue, CompilerError> {
+    let mut visited = None;
+    store.fold_value(id, &mut |_, visit| {
+        match visit {
+            ConstValueVisit::FixedScalar(value) => visited = Some(value),
+            // A fixed-scalar row must never visit as any other value shape.
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "a fixed-scalar row visited as a non-fixed-scalar value",
+                ));
+            }
+        }
+        Ok(())
+    })?;
+    visited.ok_or_else(|| {
+        CompilerError::compiler_error("a fixed-scalar row visited without a scalar value")
+    })
+}
+
+#[test]
+fn fixed_scalar_values_round_trip_with_exact_bits_and_type() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let type_environment = TypeEnvironment::default();
+
+    let u64_max =
+        FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
+    let i64_min = FixedScalarValue::signed(FixedScalar::I64, i64::MIN).expect("I64::MIN fits I64");
+    let neg_zero_f16 =
+        FixedScalarValue::binary_float(FixedScalar::F16, -0.0).expect("-0.0 is a finite F16 value");
+    // The smallest positive F16 subnormal is exactly 2^-24, which is also exactly
+    // representable in f64, so it passes the constructor's exactness gate.
+    let subnormal_f16 = FixedScalarValue::binary_float(FixedScalar::F16, 2f64.powi(-24))
+        .expect("the F16 subnormal floor is exactly representable");
+
+    for (path, value) in [
+        ("u64_max", u64_max),
+        ("i64_min", i64_min),
+        ("neg_zero", neg_zero_f16),
+        ("subnormal", subnormal_f16),
+    ] {
+        let store = ConstValueStore::from_test_declarations(
+            vec![fixed_scalar_declaration(
+                path,
+                value,
+                &mut path_fork,
+                &mut string_table,
+            )],
+            &type_environment,
+        )
+        .expect("a fixed-scalar constant is representable in the store");
+        let id = store
+            .value_for_path(
+                &path_fork
+                    .try_intern_portable_path(path, &mut string_table)
+                    .expect("test path fits"),
+            )
+            .expect("the defining path indexes the store");
+
+        let ConstValuePayload::FixedScalar(stored) =
+            store.payload(id).expect("scalar row has a payload")
+        else {
+            panic!("payload must keep the exact {path} bits");
+        };
+        assert_eq!(*stored, value, "payload must keep the exact {path} bits");
+        // U64::MAX does not fit i64: matching the payload as `Int` would already fail, but
+        // assert the accessor view too so an Int/Float intermediate cannot hide here.
+        assert_eq!(
+            store.metadata(id).expect("row has metadata").type_id,
+            builtin_type_ids::fixed_scalar(value.scalar())
+        );
+        assert_eq!(
+            visit_fixed_scalar_value(&store, id).expect("scalar visits as fixed scalar"),
+            value,
+            "visitor must keep the exact {path} bits",
+        );
+        // Signed zero and subnormals only survive when equality is exact-bit.
+        assert!(
+            visit_fixed_scalar_value(&store, id)
+                .expect("scalar visits as fixed scalar")
+                .as_f64()
+                .is_none_or(
+                    |bits| f64::to_bits(bits) == f64::to_bits(value.as_f64().unwrap_or(bits))
+                ),
+            "float payload must keep exact bits for {path}",
+        );
+    }
+
+    // -0.0 and +0.0 are distinct fixed-scalar values even though `==` says otherwise.
+    let pos_zero_f16 =
+        FixedScalarValue::binary_float(FixedScalar::F16, 0.0).expect("+0.0 is a finite F16 value");
+    assert_ne!(neg_zero_f16, pos_zero_f16);
+    assert_eq!(
+        f64::to_bits(neg_zero_f16.as_f64().expect("F16 reads as f64")),
+        0x8000_0000_0000_0000
     );
 }
 

@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFieldAccessReason, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
 use crate::compiler_frontend::source::SourceSpan;
@@ -201,7 +202,17 @@ fn parses_builtin_error_with_default_code_field() {
             .map(|id| string_table.resolve(id)),
         Some("code")
     );
-    assert!(matches!(fields[1].value.kind, ExpressionKind::Int(0)));
+    // Consumer-visible canonical contract: the omitted `code` materialises as a
+    // genuine `U32` zero fixed-scalar value, never as an `Int` fallback.
+    assert_eq!(
+        fields[1].value.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    let ExpressionKind::FixedScalar(default_code) = &fields[1].value.kind else {
+        panic!("expected Error.code default to lower as a fixed-scalar literal");
+    };
+    assert_eq!(default_code.scalar(), FixedScalar::U32);
+    assert_eq!(default_code.as_u64(), Some(0));
 }
 
 #[test]

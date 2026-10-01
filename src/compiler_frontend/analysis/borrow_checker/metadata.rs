@@ -1116,7 +1116,7 @@ fn record_statement_liveness(
     local_index_by_id: &FxHashMap<LocalId, usize>,
     liveness: &mut BlockLiveness,
 ) {
-    let defined_local = statement_defined_local(statement);
+    let defined_locals = statement_defined_locals(statement);
 
     collect_statement_loaded_locals(statement, &mut |local_id| {
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
@@ -1127,7 +1127,7 @@ fn record_statement_liveness(
     // A write through a projection updates part of the base and leaves the rest observable, so the
     // base counts as a read and never kills.
     collect_statement_written_locals(statement, &mut |local_id| {
-        if Some(local_id) == defined_local {
+        if defined_locals.contains(&Some(local_id)) {
             return;
         }
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
@@ -1135,22 +1135,22 @@ fn record_statement_liveness(
         }
     });
 
-    if let Some(local_id) = defined_local
-        && let Some(index) = local_index_by_id.get(&local_id).copied()
-    {
-        liveness.record_definition(index);
+    for local_id in defined_locals.into_iter().flatten() {
+        if let Some(index) = local_index_by_id.get(&local_id).copied() {
+            liveness.record_definition(index);
+        }
     }
 }
 
-// WHAT: reports the local this statement redefines outright, if any.
-// WHY: only a whole-local write ends the previous value's life. Field and index writes reach the
-//      same root through `collect_statement_written_locals` but leave the surrounding value intact.
-fn statement_defined_local(statement: &HirStatement) -> Option<LocalId> {
+// WHAT: reports every local this statement redefines outright.
+// WHY: only whole-local writes end the previous value's life; projected writes leave the
+//      surrounding value observable.
+fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
     match &statement.kind {
         HirStatementKind::Assign {
             target: HirPlace::Local(local),
             ..
-        } => Some(*local),
+        } => [Some(*local), None],
         HirStatementKind::Call {
             result: Some(local),
             ..
@@ -1162,10 +1162,15 @@ fn statement_defined_local(statement: &HirStatement) -> Option<LocalId> {
         | HirStatementKind::CastOp {
             result: Some(local),
             ..
-        } => Some(*local),
+        } => [Some(*local), None],
         HirStatementKind::NumericOp { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
-        | HirStatementKind::ValidateFloat { result, .. } => Some(*result),
+        | HirStatementKind::ValidateFloat { result, .. } => [Some(*result), None],
+        HirStatementKind::FloatRangeCandidate {
+            candidate_result,
+            in_range_result,
+            ..
+        } => [Some(*candidate_result), Some(*in_range_result)],
 
         HirStatementKind::Assign { .. }
         | HirStatementKind::Call { result: None, .. }
@@ -1173,7 +1178,7 @@ fn statement_defined_local(statement: &HirStatement) -> Option<LocalId> {
         | HirStatementKind::CastOp { result: None, .. }
         | HirStatementKind::Expr(_)
         | HirStatementKind::Drop(_)
-        | HirStatementKind::PushRuntimeFragment { .. } => None,
+        | HirStatementKind::PushRuntimeFragment { .. } => [None, None],
     }
 }
 
@@ -1235,6 +1240,18 @@ fn collect_statement_loaded_locals(statement: &HirStatement, visitor: &mut impl 
                 collect_expression_loaded_locals(right, visitor);
             }
         },
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            ..
+        } => {
+            collect_expression_loaded_locals(current, visitor);
+            collect_expression_loaded_locals(step, visitor);
+            collect_expression_loaded_locals(end, visitor);
+            collect_expression_loaded_locals(ascending, visitor);
+        }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
             collect_expression_loaded_locals(source, visitor);
@@ -1266,6 +1283,14 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             ..
         } => visitor(*local),
         HirStatementKind::NumericOp { result, .. } => visitor(*result),
+        HirStatementKind::FloatRangeCandidate {
+            candidate_result,
+            in_range_result,
+            ..
+        } => {
+            visitor(*candidate_result);
+            visitor(*in_range_result);
+        }
         HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => visitor(*result),
         HirStatementKind::Call { result: None, .. }
@@ -1388,8 +1413,10 @@ fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut im
         | HirExpressionKind::Cast { source: result, .. } => {
             collect_expression_loaded_locals(result, visitor);
         }
-        HirExpressionKind::Int(_)
+        HirExpressionKind::Number(_)
+        | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

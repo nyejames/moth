@@ -9,6 +9,7 @@ use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
@@ -116,6 +117,7 @@ pub(crate) fn compile_html_module_wasm(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let js_lowering_config = JsLoweringConfig::html_wasm_companion(
         input.build_profile.is_release(),
+        input.numeric_profile,
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
     )
@@ -123,6 +125,7 @@ pub(crate) fn compile_html_module_wasm(
     let js_module = lower_hir_to_js(
         input.hir_module,
         input.borrow_analysis,
+        input.numeric_proofs,
         string_table,
         js_lowering_config,
         input.type_environment,
@@ -136,8 +139,13 @@ pub(crate) fn compile_html_module_wasm(
         structural_url_renderer,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let mut build_plan = build_html_wasm_plan(input.hir_module, input.reachability, slot_ids)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let mut build_plan = build_html_wasm_plan(
+        input.hir_module,
+        input.reachability,
+        slot_ids,
+        input.numeric_profile,
+    )
+    .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     build_plan.wasm_request.external_package_registry =
         Arc::clone(&input.external_package_registry);
     build_plan.wasm_request.structural_string_urls = Some(structural_string_urls);
@@ -150,6 +158,7 @@ pub(crate) fn compile_html_module_wasm(
         lower_hir_to_wasm_module(
             input.hir_module,
             input.borrow_analysis.borrow_facts(),
+            input.numeric_proofs,
             &build_plan.wasm_request,
             string_table,
             input.type_environment,
@@ -219,9 +228,10 @@ pub(crate) fn build_html_wasm_plan(
     hir_module: &HirModule,
     reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
     js_entry_slot_ids: Vec<String>,
+    numeric_profile: NumericProfile,
 ) -> Result<HtmlWasmBuildPlan, CompilerError> {
     let export_plan = build_html_wasm_export_plan(hir_module)?;
-    let wasm_request = build_wasm_backend_request(&export_plan, reachability);
+    let wasm_request = build_wasm_backend_request(&export_plan, reachability, numeric_profile);
     // WHY: entry start() is exported as "moth_start"; JS evaluates it directly and consumes the
     //      returned fragment Vec handle. No JS-side wrapper installation is part of the contract.
     let js_start_invocation = String::from("instance.exports.moth_start()");

@@ -1,0 +1,108 @@
+f64_asc_start F64 = 1.5e308
+f64_asc_end F64 = 1.6e308
+f64_asc_step F64 = 1e307
+f64_asc_count ~= 0
+f64_asc_last ~F64 = 0.0
+loop f64_asc_start to & f64_asc_end by f64_asc_step |value|:
+    f64_asc_count = f64_asc_count + 1
+    f64_asc_last = value
+;
+
+f64_desc_start F64 = 1.6e308
+f64_desc_end F64 = 1.5e308
+f64_desc_step F64 = 1e307
+f64_desc_count ~= 0
+f64_desc_last ~F64 = 0.0
+loop f64_desc_start to & f64_desc_end by f64_desc_step |value|:
+    f64_desc_count = f64_desc_count + 1
+    f64_desc_last = value
+;
+
+f32_asc_start F32 = 1.5e38
+f32_asc_end F32 = 1.52e38
+f32_asc_step F32 = 2e36
+f32_asc_count ~= 0
+f32_asc_last ~F32 = 0.0
+loop f32_asc_start to & f32_asc_end by f32_asc_step |value|:
+    f32_asc_count = f32_asc_count + 1
+    f32_asc_last = value
+;
+
+f32_desc_start F32 = 1.52e38
+f32_desc_end F32 = 1.5e38
+f32_desc_step F32 = 2e36
+f32_desc_count ~= 0
+f32_desc_last ~F32 = 0.0
+loop f32_desc_start to & f32_desc_end by f32_desc_step |value|:
+    f32_desc_count = f32_desc_count + 1
+    f32_desc_last = value
+;
+
+f64_equal_start F64 = 2.0
+f64_equal_end F64 = 2.0
+f64_equal_step F64 = 1e-16
+f64_equal_count ~= 0
+f64_equal_last ~F64 = 0.0
+loop f64_equal_start to & f64_equal_end by f64_equal_step |value|:
+    f64_equal_count = f64_equal_count + 1
+    f64_equal_last = value
+;
+
+f32_equal_start F32 = 16777216.0
+f32_equal_end F32 = 16777216.0
+f32_equal_step F32 = 1.0
+f32_equal_count ~= 0
+f32_equal_last ~F32 = 0.0
+loop f32_equal_start to & f32_equal_end by f32_equal_step |value|:
+    f32_equal_count = f32_equal_count + 1
+    f32_equal_last = value
+;
+
+float_equal_start Float = 2.0
+float_equal_end Float = 2.0
+float_equal_step Float = 1e-16
+float_equal_count ~= 0
+float_equal_last ~Float = 0.0
+loop float_equal_start to & float_equal_end by float_equal_step |value|:
+    float_equal_count = float_equal_count + 1
+    float_equal_last = value
+;
+
+f32_exclusive_asc_start F32 = 0.0
+f32_exclusive_asc_end F32 = 1.0
+f32_exclusive_asc_step F32 = 0.5
+f32_exclusive_asc_count ~= 0
+f32_exclusive_asc_last ~F32 = 0.0
+f32_exclusive_asc_expected_last F32 = 0.5
+loop f32_exclusive_asc_start to f32_exclusive_asc_end by f32_exclusive_asc_step |value|:
+    f32_exclusive_asc_count = f32_exclusive_asc_count + 1
+    f32_exclusive_asc_last = value
+;
+
+f64_nonfinite_start F64 = 1.0e308
+f64_nonfinite_end F64 = 1.1e308
+f64_nonfinite_step F64 = 1.0e308
+f64_nonfinite_count ~= 0
+loop f64_nonfinite_start to & f64_nonfinite_end by f64_nonfinite_step |value|:
+    f64_nonfinite_count = f64_nonfinite_count + 1
+;
+
+assert(f64_asc_count is 2)
+assert(f64_asc_last is f64_asc_end)
+assert(f64_desc_count is 2)
+assert(f64_desc_last is f64_desc_end)
+assert(f32_asc_count is 2)
+assert(f32_asc_last is f32_asc_end)
+assert(f32_desc_count is 2)
+assert(f32_desc_last is f32_desc_end)
+assert(f64_nonfinite_count is 1)
+assert(f64_equal_count is 1)
+assert(f64_equal_last is f64_equal_end)
+assert(f32_equal_count is 1)
+assert(f32_equal_last is f32_equal_end)
+assert(float_equal_count is 1)
+assert(float_equal_last is float_equal_end)
+assert(f32_exclusive_asc_count is 2)
+assert(f32_exclusive_asc_last is f32_exclusive_asc_expected_last)
+
+[:fixed_float_range_rounded_endpoint_runtime verified]

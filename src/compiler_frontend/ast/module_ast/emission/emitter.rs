@@ -297,6 +297,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             Vec::<TypeId>::new(),
             input.scope_frame_capacity,
             self.context.template_ir_store.clone(),
+            self.context.numeric_profile,
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
@@ -321,6 +322,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_declaring_file_id(input.declaring_file_id);
         if let Some(services) = &self.context.file_value_resolution {
             context = context.with_file_value_resolution(Rc::clone(services));
+        }
+        // Body expression evaluation reports source-`#Config` provenance for numeric failures,
+        // so the resolved map and the bootstrap services travel with the scope the same way
+        // they travel with constant-header scopes. Only the two provenance owners are attached;
+        // contract names stay a constant-header concern and cost nothing here.
+        if !self.context.build_config_values.is_empty() {
+            context = context
+                .with_source_build_config_values(Arc::clone(&self.context.build_config_values));
+        }
+        if let Some(services) = &self.context.config_resolution {
+            context = context.with_config_resolution(Rc::clone(services));
         }
         context
     }

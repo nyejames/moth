@@ -1,0 +1,200 @@
+start_i8 I8 = -1
+end_u16 U16 = 1
+step_u16 U16 = 1
+i8u16_sum ~I32 = 0
+i8u16_count ~= 0
+i8u16_last_index ~= 0
+loop start_i8 to & end_u16 by step_u16 |value, index|:
+    i8u16_sum = i8u16_sum + value
+    i8u16_count = i8u16_count + 1
+    i8u16_last_index = index
+;
+
+start_i32 I32 = 2147483646
+end_u32 U32 = 2147483648
+step_u32 U32 = 1
+mixed_sum ~I64 = 0
+mixed_count ~= 0
+mixed_last_index ~= 0
+loop start_i32 to & end_u32 by step_u32 |value, index|:
+    mixed_sum = mixed_sum + value
+    mixed_count = mixed_count + 1
+    mixed_last_index = index
+;
+
+above_i64 U64 = 9223372036854775808
+near_max_u64 U64 = 18446744073709551614
+max_u64 U64 = 18446744073709551615
+u64_one U64 = 1
+high_u64_count ~= 0
+saw_u64_above_i64 ~= false
+saw_u64_max ~= false
+high_u64_last_index ~= 0
+loop above_i64 to & above_i64 by u64_one |value, index|:
+    high_u64_count = high_u64_count + 1
+    high_u64_last_index = index
+    if value is above_i64:
+        saw_u64_above_i64 = true
+    ;
+;
+loop near_max_u64 to & max_u64 by u64_one |value, index|:
+    high_u64_count = high_u64_count + 1
+    high_u64_last_index = index
+    if value is max_u64:
+        saw_u64_max = true
+    ;
+;
+
+desc_start_u64 U64 = 2
+desc_end_u64 U64 = 0
+desc_u64_count ~= 0
+desc_u64_last ~U64 = 9
+desc_u64_last_index ~= 0
+loop desc_start_u64 to & desc_end_u64 by u64_one |value, index|:
+    desc_u64_count = desc_u64_count + 1
+    desc_u64_last = value
+    desc_u64_last_index = index
+;
+
+signed_min I64 = -9223372036854775808
+signed_max I64 = 9223372036854775807
+cross_step I64 = 9223372036854775807
+cross_count ~= 0
+cross_last ~I64 = 0
+loop signed_min to & signed_max by cross_step |value|:
+    cross_count = cross_count + 1
+    cross_last = value
+;
+
+max_near I64 = 9223372036854775806
+i64_one I64 = 1
+min_endpoint_count ~= 0
+max_endpoint_count ~= 0
+max_endpoint_last ~I64 = 0
+loop signed_min to & signed_min by i64_one |value|:
+    min_endpoint_count = min_endpoint_count + 1
+;
+loop max_near to & signed_max by i64_one |value|:
+    max_endpoint_count = max_endpoint_count + 1
+    max_endpoint_last = value
+;
+
+half_start F16 = 0.5
+float_end F32 = 1.5
+half_step F16 = 0.5
+float_total ~F32 = 0.0
+float_count ~= 0
+loop half_start to & float_end by half_step |value|:
+    float_total = float_total + value
+    float_count = float_count + 1
+;
+float_expected F32 = 3.0
+float_total_matches = float_total is float_expected
+
+desc_start_i32 I32 = 3
+desc_end_i32 I32 = -1
+desc_step_i32 I32 = 2
+desc_sum ~I32 = 0
+loop desc_start_i32 to & desc_end_i32 by desc_step_i32 |value|:
+    desc_sum = desc_sum + value
+;
+
+equal_empty_count ~= 0
+equal_inclusive_count ~= 0
+loop 2 to 2 |value|:
+    equal_empty_count = equal_empty_count + 1
+;
+loop 2 to & 2 |value|:
+    equal_inclusive_count = equal_inclusive_count + 1
+;
+
+nested_if_sum ~Int = 0
+nested_if_count ~= 0
+loop 0 to 10 |value|:
+    if value is 1:
+        if value is 1:
+            continue
+        ;
+    ;
+    if value is 5:
+        if value is 5:
+            break
+        ;
+    ;
+    nested_if_sum = nested_if_sum + value
+    nested_if_count = nested_if_count + 1
+;
+f64_asc_start F64 = 0.5
+f64_asc_end F64 = 1.5
+f64_asc_step F64 = 0.5
+f64_asc_sum ~F64 = 0.0
+f64_asc_count ~= 0
+loop f64_asc_start to & f64_asc_end by f64_asc_step |value|:
+    f64_asc_sum = f64_asc_sum + value
+    f64_asc_count = f64_asc_count + 1
+;
+
+f64_desc_start F64 = 1.5
+f64_desc_end F64 = 0.5
+f64_desc_step F64 = 0.5
+f64_desc_sum ~F64 = 0.0
+f64_desc_count ~= 0
+loop f64_desc_start to & f64_desc_end by f64_desc_step |value|:
+    f64_desc_sum = f64_desc_sum + value
+    f64_desc_count = f64_desc_count + 1
+;
+
+u8_max_start U8 = 254
+u8_max_end U8 = 255
+u8_max_step U8 = 1
+u8_max_count ~= 0
+u8_max_last ~U32 = 0
+loop u8_max_start to & u8_max_end by u8_max_step |value|:
+    u8_max_count = u8_max_count + 1
+    u8_max_last = value
+;
+
+u8_zero_start U8 = 1
+u8_zero_end U8 = 0
+u8_zero_step U8 = 1
+u8_zero_count ~= 0
+u8_zero_last ~U32 = 9
+loop u8_zero_start to & u8_zero_end by u8_zero_step |value|:
+    u8_zero_count = u8_zero_count + 1
+    u8_zero_last = value
+;
+
+assert(i8u16_sum is 0)
+assert(i8u16_count is 3)
+assert(i8u16_last_index is 2)
+assert(mixed_sum is 6442450941)
+assert(mixed_count is 3)
+assert(mixed_last_index is 2)
+assert(high_u64_count is 3)
+assert(saw_u64_above_i64)
+assert(saw_u64_max is true)
+assert(high_u64_last_index is 1)
+assert(desc_u64_count is 3)
+assert(desc_u64_last is 0)
+assert(desc_u64_last_index is 2)
+assert(cross_count is 3)
+assert(cross_last is 9223372036854775806)
+assert(min_endpoint_count is 1)
+assert(max_endpoint_count is 2)
+assert(max_endpoint_last is 9223372036854775807)
+assert(float_count is 3)
+assert(float_total_matches is true)
+assert(desc_sum is 3)
+assert(equal_empty_count is 0)
+assert(equal_inclusive_count is 1)
+assert(nested_if_count is 4)
+assert(nested_if_sum is 9)
+assert(f64_asc_count is 3)
+assert(f64_asc_sum is 3.0)
+assert(f64_desc_count is 3)
+assert(f64_desc_sum is 3.0)
+assert(u8_max_count is 2)
+assert(u8_max_last is 255)
+assert(u8_zero_count is 2)
+assert(u8_zero_last is 0)
+[:fixed_numeric_range_runtime verified]

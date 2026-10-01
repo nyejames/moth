@@ -30,6 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, SourceId, SourceSpan, SpanCapacityError, SpanCapacityReason,
 };
@@ -1844,11 +1845,16 @@ impl CompilerDiagnostic {
         reason: crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason,
         operation: Option<StringId>,
         span: Option<SourceSpan>,
+        numeric_profile: Option<NumericProfile>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError),
             span,
-            DiagnosticPayload::CompileTimeEvaluationError { reason, operation },
+            DiagnosticPayload::CompileTimeEvaluationError {
+                reason,
+                operation,
+                numeric_profile,
+            },
         )
     }
 

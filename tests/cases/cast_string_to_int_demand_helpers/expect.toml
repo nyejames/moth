@@ -20,7 +20,7 @@ path = "index.html"
 kind = "html"
 must_contain = [
     "function __moth_cast_int(",
-    "function __moth_cast_int_in_range(",
+    "function __moth_cast_integer_in_range(",
 ]
 
 [[backends.html.artifact_assertions]]

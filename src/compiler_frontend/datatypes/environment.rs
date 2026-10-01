@@ -9,7 +9,9 @@
 //! - Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! - Type compatibility POLICY does NOT belong here (see `type_coercion`).
 
-use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalTypeIdentity, builtin_key_for_canonical_builtin,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::instrumentation::{
@@ -29,6 +31,7 @@ use super::definitions::{
     FieldDefinition, FunctionParameterDefinition, FunctionTypeDefinition,
     GenericInstanceDefinition, GenericParameterDefinition, StructTypeDefinition, TypeDefinition,
 };
+use super::fixed_scalar::FixedScalar;
 use super::generic_bindings::{BindingConflict, GenericTypeBindings};
 use super::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
@@ -37,8 +40,9 @@ use super::generic_parameters::TypeParameterId;
 use super::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, ConstructedTypeKey, FunctionTypeKey,
     GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
-    TypeId,
+    TypeId, builtin_type_ids,
 };
+use super::number::NumberScale;
 use super::queries::TypeKind;
 use super::{BuiltinScalarReceiver, ReceiverKey};
 
@@ -61,14 +65,14 @@ pub(crate) struct MapShape {
 }
 
 /// Compact handles for all builtin types seeded in a fresh `TypeEnvironment`.
+///
+/// `Dec` types have no seeded handle: their scale identities intern lazily through
+/// `TypeEnvironment::intern_number`.
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinTypes {
     pub bool: TypeId,
     pub int: TypeId,
     pub float: TypeId,
-    // Decimal is intentionally inactive in the Alpha surface. The handle is kept
-    // only to preserve the stable builtin TypeId layout seeded by TypeEnvironment::new.
-    pub decimal: TypeId,
     pub string: TypeId,
     pub char: TypeId,
     pub range: TypeId,
@@ -287,7 +291,6 @@ impl TypeEnvironment {
                 bool: TypeId(0),
                 int: TypeId(0),
                 float: TypeId(0),
-                decimal: TypeId(0),
                 string: TypeId(0),
                 char: TypeId(0),
                 range: TypeId(0),
@@ -300,23 +303,32 @@ impl TypeEnvironment {
         };
 
         // Seed builtins. The order here is arbitrary but deterministic.
-        let bool_id = env.insert_builtin(BuiltinTypeKey::Bool);
-        let int_id = env.insert_builtin(BuiltinTypeKey::Int);
-        let float_id = env.insert_builtin(BuiltinTypeKey::Float);
-        // Decimal is intentionally inactive in the Alpha surface. It is seeded only
-        // to keep the stable builtin TypeId layout; no parser or operator path may
-        // produce a live Decimal type.
-        let decimal_id = env.insert_builtin(BuiltinTypeKey::Decimal);
-        let string_id = env.insert_builtin(BuiltinTypeKey::String);
-        let char_id = env.insert_builtin(BuiltinTypeKey::Char);
-        let range_id = env.insert_builtin(BuiltinTypeKey::Range);
-        let none_id = env.insert_builtin(BuiltinTypeKey::None);
+        let bool_id = env.intern_builtin_key(BuiltinTypeKey::Bool);
+        let int_id = env.intern_builtin_key(BuiltinTypeKey::Int);
+        let float_id = env.intern_builtin_key(BuiltinTypeKey::Float);
+        let string_id = env.intern_builtin_key(BuiltinTypeKey::String);
+        let char_id = env.intern_builtin_key(BuiltinTypeKey::Char);
+        let range_id = env.intern_builtin_key(BuiltinTypeKey::Range);
+        let none_id = env.intern_builtin_key(BuiltinTypeKey::None);
+
+        // Explicit-width scalars are profile-independent identities, so they are seeded once
+        // with the other builtins. Seeding happens after `None` to keep the builtin `TypeId`
+        // layout stable; `builtin_type_ids::fixed_scalar` mirrors this sequence and the
+        // invariant check below fails loudly if the two ever drift apart. `Dec` scales are
+        // deliberately absent: they intern lazily through `intern_number` with no seeded ids.
+        for scalar in FixedScalar::ALL {
+            let fixed_scalar_id = env.intern_builtin_key(BuiltinTypeKey::FixedScalar(scalar));
+            debug_assert_eq!(
+                fixed_scalar_id,
+                builtin_type_ids::fixed_scalar(scalar),
+                "fixed scalar seeding order must match builtin_type_ids::fixed_scalar"
+            );
+        }
 
         env.builtins = BuiltinTypes {
             bool: bool_id,
             int: int_id,
             float: float_id,
-            decimal: decimal_id,
             string: string_id,
             char: char_id,
             range: range_id,
@@ -1031,6 +1043,56 @@ impl TypeEnvironment {
         id
     }
 
+    /// Interns a keyed builtin type, reusing its existing `TypeId` when present.
+    ///
+    /// WHAT: seeded and lazily resolved builtins reuse one local handle per key.
+    /// WHY: canonical imports and Dec scale resolution must share seeding's type identity.
+    pub(crate) fn intern_builtin_key(&mut self, key: BuiltinTypeKey) -> TypeId {
+        if let Some(existing) = self.builtin_type_id_for_key(key) {
+            return existing;
+        }
+
+        let id = self.insert_definition(TypeDefinition::Builtin(BuiltinTypeDefinition { key }));
+        self.builtin_ids.insert(key, id);
+        id
+    }
+
+    /// Interns one canonical `Dec` scale identity.
+    ///
+    /// WHAT: returns the consumer-local `TypeId` for the scale, reusing an already interned
+    ///       scale and interning on first use otherwise.
+    /// WHY: `Dec`'s 257 scale identities must not be seeded, so every consumer (source
+    ///      resolution, import projection, generated materialisation) lazily interns through
+    ///      this single entry point and repeated uses of one scale share one `TypeId`.
+    pub fn intern_number(&mut self, scale: NumberScale) -> TypeId {
+        self.intern_builtin_key(BuiltinTypeKey::Number(scale))
+    }
+
+    /// Returns the canonical scale when the type is exactly one `Dec` identity.
+    ///
+    /// WHAT: direct scale lookup over the environment-owned builtin definition, with the
+    ///       inherited fork prefix covered through the builtin key map.
+    /// WHY: arithmetic, literal and backend consumers classify Dec identities by scale
+    ///      without going back through diagnostic spellings.
+    pub fn number_scale(&self, id: TypeId) -> Option<NumberScale> {
+        match self.get(id) {
+            Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
+                BuiltinTypeKey::Number(scale) => Some(scale),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Looks up the `TypeId` of a keyed builtin, including the inherited fork prefix.
+    fn builtin_type_id_for_key(&self, key: BuiltinTypeKey) -> Option<TypeId> {
+        self.builtin_ids.get(&key).copied().or_else(|| {
+            self.base
+                .as_ref()
+                .and_then(|base| base.builtin_type_id_for_key(key))
+        })
+    }
+
     // --------------------------------------------------------
     //  Nominal Registration
     // --------------------------------------------------------
@@ -1270,11 +1332,23 @@ impl TypeEnvironment {
         &self,
         identity: &CanonicalTypeIdentity,
     ) -> Option<TypeId> {
-        self.canonical_type_ids.get(identity).copied().or_else(|| {
-            self.base
-                .as_ref()
-                .and_then(|base| base.type_id_for_canonical_identity(identity))
-        })
+        self.canonical_type_ids
+            .get(identity)
+            .copied()
+            .or_else(|| {
+                self.base
+                    .as_ref()
+                    .and_then(|base| base.type_id_for_canonical_identity(identity))
+            })
+            .or_else(|| {
+                // Keyed builtins resolve through the builtin id map, including a Dec
+                // scale already interned by this environment or its inherited fork prefix.
+                let CanonicalTypeIdentity::Builtin(builtin) = identity else {
+                    return None;
+                };
+                let key = builtin_key_for_canonical_builtin(*builtin)?;
+                self.builtin_type_id_for_key(key)
+            })
     }
 
     pub(crate) fn canonical_identity_for_type_id(
@@ -1457,6 +1531,20 @@ impl TypeEnvironment {
         }
     }
 
+    /// Returns the fixed scalar when the type is exactly one, without unwrapping options.
+    ///
+    /// WHAT: direct scalar identity for operator, pattern and validation classification.
+    /// WHY: optional scalars must never be classified as plain numeric operands.
+    pub(crate) fn fixed_scalar(&self, id: TypeId) -> Option<FixedScalar> {
+        match self.get(id) {
+            Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
+                BuiltinTypeKey::FixedScalar(scalar) => Some(scalar),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Interns a tuple type with the given field types.
     ///
     /// WHAT: creates a canonical `TypeId` for a tuple/multi-return type.
@@ -1496,6 +1584,16 @@ impl TypeEnvironment {
         id: TypeId,
         visited_choices: &mut FxHashSet<TypeId>,
     ) -> bool {
+        // WHAT: option equality delegates to the exact inner type.
+        // WHY: optional Byte and other fixed scalars share their direct equality contract.
+        if let Some(inner) = self.option_inner_type(id) {
+            return self.supports_runtime_equality_with_visited(inner, visited_choices);
+        }
+
+        if self.fixed_scalar(id).is_some() {
+            return true;
+        }
+
         match self.get(id) {
             Some(TypeDefinition::Builtin(builtin)) => matches!(
                 builtin.key,
@@ -1503,6 +1601,7 @@ impl TypeEnvironment {
                     | BuiltinTypeKey::Int
                     | BuiltinTypeKey::Float
                     | BuiltinTypeKey::Char
+                    | BuiltinTypeKey::Number(_)
                     | BuiltinTypeKey::String
             ),
 
@@ -1515,13 +1614,8 @@ impl TypeEnvironment {
             | Some(TypeDefinition::External(..))
             | Some(TypeDefinition::GenericParameter(..))
             | Some(TypeDefinition::AnonymousConstRecordMarker)
-            | None => false,
-
-            Some(TypeDefinition::Constructed(..)) => {
-                self.option_inner_type(id).is_some_and(|inner| {
-                    self.supports_runtime_equality_with_visited(inner, visited_choices)
-                })
-            }
+            | None
+            | Some(TypeDefinition::Constructed(..)) => false,
         }
     }
 
@@ -1732,7 +1826,10 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Char => {
                     Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char))
                 }
-                BuiltinTypeKey::Decimal | BuiltinTypeKey::Range | BuiltinTypeKey::None => None,
+                BuiltinTypeKey::Number(_)
+                | BuiltinTypeKey::Range
+                | BuiltinTypeKey::FixedScalar(_)
+                | BuiltinTypeKey::None => None,
             },
 
             TypeDefinition::Struct(definition) => Some(ReceiverKey::Struct(definition.path)),
@@ -1776,9 +1873,6 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Float => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Float))
                 }
-                BuiltinTypeKey::Decimal => {
-                    Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Decimal))
-                }
                 BuiltinTypeKey::String => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::String))
                 }
@@ -1786,6 +1880,12 @@ impl TypeEnvironment {
                 BuiltinTypeKey::Range => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Range))
                 }
+                BuiltinTypeKey::FixedScalar(scalar) => Some(TypeIdentityKey::Builtin(
+                    BridgeBuiltinTypeKey::FixedScalar(scalar),
+                )),
+                BuiltinTypeKey::Number(scale) => Some(TypeIdentityKey::Builtin(
+                    BridgeBuiltinTypeKey::Number(scale),
+                )),
                 BuiltinTypeKey::None => None,
             },
             TypeDefinition::Struct(def) => Some(TypeIdentityKey::Nominal(def.path)),
@@ -2021,12 +2121,6 @@ impl TypeEnvironment {
     fn insert_definition(&mut self, definition: TypeDefinition) -> TypeId {
         let id = TypeId(self.type_count() as u32);
         self.types.push(definition);
-        id
-    }
-
-    fn insert_builtin(&mut self, key: BuiltinTypeKey) -> TypeId {
-        let id = self.insert_definition(TypeDefinition::Builtin(BuiltinTypeDefinition { key }));
-        self.builtin_ids.insert(key, id);
         id
     }
 

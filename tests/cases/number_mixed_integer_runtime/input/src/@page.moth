@@ -1,0 +1,117 @@
+mix_int |number_value Dec2, integer Int| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+compare_number1_int |number_value Dec1, integer Int| -> String:
+    number_less = number_value < integer
+    integer_greater = integer > number_value
+    return [:[number_less]/[integer_greater]]
+;
+
+mix_i8 |number_value Dec2, integer I8| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_i16 |number_value Dec2, integer I16| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_i32 |number_value Dec2, integer I32| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_i64 |number_value Dec2, integer I64| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_u8 |number_value Dec2, integer U8| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_u16 |number_value Dec2, integer U16| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_u32 |number_value Dec2, integer U32| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+mix_u64 |number_value Dec0, integer U64| -> String:
+    number_first = number_value + integer
+    integer_first = integer + number_value
+    number_equal = number_value is integer
+    integer_equal = integer is number_value
+    return [:[number_first]/[integer_first]/[number_equal]/[integer_equal]]
+;
+sub_mixed |number_value Dec2, integer Int| -> String:
+    number_minus = number_value - integer
+    integer_minus = integer - number_value
+    return [:[number_minus]/[integer_minus]]
+;
+divide_mixed |number_value Dec1, integer Int| -> String:
+    number_divided = number_value / integer
+    integer_divided = integer / number_value
+    return [:[number_divided]/[integer_divided]]
+;
+remainder_mixed |number_value Dec2, integer Int| -> String:
+    number_remainder = number_value % integer
+    integer_remainder = integer % number_value
+    return [:[number_remainder]/[integer_remainder]]
+;
+mix_i64_extreme |number_value Dec0, value I64| -> String:
+    number_first = number_value + value
+    value_first = value + number_value
+    return [:[number_first]/[value_first]]
+;
+compare_number0_i64 |number_value Dec0, value I64| -> String:
+    number_less = number_value < value
+    value_greater = value > number_value
+    return [:[number_less]/[value_greater]]
+;
+add_float |value Float, increment Float| -> Float:
+    return value + increment
+;
+
+int_case = mix_int(42.00, 42)
+scale_mixed_comparison = compare_number1_int(1.0, 2)
+
+i8_case = mix_i8(42.00, 42)
+i16_case = mix_i16(42.00, 42)
+i32_case = mix_i32(42.00, 42)
+i64_case = mix_i64(42.00, 42)
+u8_case = mix_u8(42.00, 42)
+u16_case = mix_u16(42.00, 42)
+u32_case = mix_u32(42.00, 42)
+u64_case = mix_u64(18446744073709551615, 18446744073709551615)
+float_profile = add_float(16777216.0, 1.0)
+sub_mixed_case = sub_mixed(10.25, 3)
+divide_mixed_case = divide_mixed(1.2, 5)
+remainder_mixed_case = remainder_mixed(-5.25, 2)
+i64_exact_case = mix_i64_extreme(-9223372036854775808, 9223372036854775807)
+i64_order_case = compare_number0_i64(9223372036854775806, 9223372036854775807)
+
+[:mixed Dec integers Int=[int_case] I8=[i8_case] I16=[i16_case] I32=[i32_case] I64=[i64_case] U8=[u8_case] U16=[u16_case] U32=[u32_case] U64max=[u64_case] scale-mixed-less=[scale_mixed_comparison] float32=[float_profile] sub-mixed=[sub_mixed_case] div-mixed=[divide_mixed_case] rem-mixed=[remainder_mixed_case] i64-exact=[i64_exact_case] i64-order=[i64_order_case]]

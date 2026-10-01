@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["external_native_float32 overflow-code=304"]

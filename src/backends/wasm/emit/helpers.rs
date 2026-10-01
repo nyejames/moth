@@ -10,6 +10,24 @@ pub(crate) fn emit_helper_function(
     helper: WasmRuntimeHelper,
     plan: &WasmEmitPlan,
 ) -> Result<Function, CompilerError> {
+    // Pure numeric helpers have no dependency on linear memory or the allocator.
+    match helper {
+        WasmRuntimeHelper::FloatPower => return Ok(super::float_power::emit_float_power()),
+        WasmRuntimeHelper::FloatRemainder => {
+            return Ok(super::float_remainder::emit_float_remainder());
+        }
+        WasmRuntimeHelper::F32ToF16Bits => {
+            return Ok(super::binary16::emit_f32_to_f16_bits());
+        }
+        WasmRuntimeHelper::F16BitsToF32 => {
+            return Ok(super::binary16::emit_f16_bits_to_f32());
+        }
+        WasmRuntimeHelper::FloatToDecimal => {
+            return super::float_format::emit_float_to_decimal(plan);
+        }
+        _ => {}
+    }
+
     // WHAT: helpers share one bump-allocation/global model.
     // WHY: correctness-first runtime scaffolding until richer ownership/runtime logic lands.
     let heap_top_global = plan.heap_top_global_index.ok_or_else(|| {
@@ -27,6 +45,9 @@ pub(crate) fn emit_helper_function(
             CompilerError::compiler_error("Wasm emission missing rt_alloc helper index")
                 .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
+    if helper == WasmRuntimeHelper::StringFromFloat {
+        return super::float_format::emit_string_from_float(plan, alloc_index);
+    }
 
     // Vec-handle helpers have their own focused emitter.
     if matches!(
@@ -43,8 +64,8 @@ pub(crate) fn emit_helper_function(
     // Named constants below document the local index layout per helper.
     let mut function = match helper {
         WasmRuntimeHelper::Alloc => {
-            // param 0: size  |  local 1: old_top (scratch)
-            Function::new(vec![(1, ValType::I32)])
+            // param 0: size | locals 1..4: old_top, new_top, needed_pages, current_pages
+            Function::new(vec![(4, ValType::I32)])
         }
         WasmRuntimeHelper::StringNewBuffer => {
             // no params  |  local 0: buffer_handle (scratch)
@@ -70,8 +91,14 @@ pub(crate) fn emit_helper_function(
             Function::new(vec![(6, ValType::I32)])
         }
         WasmRuntimeHelper::StringFromI64 => {
-            // param 0: value_i64 | local 1: buffer_handle
-            Function::new(vec![(1, ValType::I32)])
+            // param 0: value_i64 | locals 1..5: buffer_handle, region, cursor, digit_count, negative
+            // local 6: unsigned magnitude
+            Function::new(vec![(5, ValType::I32), (1, ValType::I64)])
+        }
+        WasmRuntimeHelper::StringFromU64 => {
+            // param 0: value_u64 | locals 1..4: buffer_handle, region, cursor, digit_count
+            // local 5: unsigned magnitude
+            Function::new(vec![(4, ValType::I32), (1, ValType::I64)])
         }
         WasmRuntimeHelper::StringPtr
         | WasmRuntimeHelper::StringLen
@@ -83,19 +110,70 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
         }
+        WasmRuntimeHelper::FloatPower
+        | WasmRuntimeHelper::FloatRemainder
+        | WasmRuntimeHelper::F32ToF16Bits
+        | WasmRuntimeHelper::F16BitsToF32
+        | WasmRuntimeHelper::FloatToDecimal
+        | WasmRuntimeHelper::StringFromFloat => {
+            unreachable!("numeric/string formatters are dispatched to their focused emitters")
+        }
     };
 
     match helper {
         WasmRuntimeHelper::Alloc => {
-            // WHAT: return current heap_top and then advance by requested size.
-            // WHY: simple monotonic bump allocator for runtime objects.
+            // WHAT: return the current heap address and advance the bump pointer.
+            // WHY: runtime objects may exceed the initial memory, so grow before publishing an
+            //      allocation that would otherwise make its first memory access trap.
             const SIZE: u32 = 0;
             const OLD_TOP: u32 = 1;
+            const NEW_TOP: u32 = 2;
+            const NEEDED_PAGES: u32 = 3;
+            const CURRENT_PAGES: u32 = 4;
 
             function.instruction(&Instruction::GlobalGet(heap_top_global));
             function.instruction(&Instruction::LocalTee(OLD_TOP));
             function.instruction(&Instruction::LocalGet(SIZE));
             function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalTee(NEW_TOP));
+
+            // Reject address-space wraparound instead of returning a pointer below heap_top.
+            function.instruction(&Instruction::LocalGet(OLD_TOP));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::Unreachable);
+            function.instruction(&Instruction::End);
+
+            // needed_pages = ceil(new_top / 65536), without overflowing the rounding addition.
+            function.instruction(&Instruction::LocalGet(NEW_TOP));
+            function.instruction(&Instruction::I32Const(16));
+            function.instruction(&Instruction::I32ShrU);
+            function.instruction(&Instruction::LocalGet(NEW_TOP));
+            function.instruction(&Instruction::I32Const(0xffff));
+            function.instruction(&Instruction::I32And);
+            function.instruction(&Instruction::I32Eqz);
+            function.instruction(&Instruction::I32Eqz);
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalSet(NEEDED_PAGES));
+
+            function.instruction(&Instruction::MemorySize(0));
+            function.instruction(&Instruction::LocalSet(CURRENT_PAGES));
+            function.instruction(&Instruction::LocalGet(NEEDED_PAGES));
+            function.instruction(&Instruction::LocalGet(CURRENT_PAGES));
+            function.instruction(&Instruction::I32GtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::LocalGet(NEEDED_PAGES));
+            function.instruction(&Instruction::LocalGet(CURRENT_PAGES));
+            function.instruction(&Instruction::I32Sub);
+            function.instruction(&Instruction::MemoryGrow(0));
+            function.instruction(&Instruction::I32Const(-1));
+            function.instruction(&Instruction::I32Eq);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::Unreachable);
+            function.instruction(&Instruction::End);
+            function.instruction(&Instruction::End);
+
+            function.instruction(&Instruction::LocalGet(NEW_TOP));
             function.instruction(&Instruction::GlobalSet(heap_top_global));
             function.instruction(&Instruction::LocalGet(OLD_TOP));
             function.instruction(&Instruction::Return);
@@ -411,10 +489,9 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::Return);
         }
         WasmRuntimeHelper::StringFromI64 => {
-            // WHAT: materialize a string handle from an i64 interpolation chunk.
-            // WHY: frontend template coercion currently models numeric->string as `"" + value`.
-            // A dedicated helper keeps lowering deterministic while scalar formatting support is
-            // incrementally implemented.
+            // WHAT: format a signed i64 as its canonical base-10 UTF-8 bytes.
+            // WHY: numeric text conversion must preserve the full signed range, including
+            //      i64::MIN, which has no positive signed i64 magnitude.
             let string_new_buffer_index = plan
                 .helper_indices
                 .get(&WasmRuntimeHelper::StringNewBuffer)
@@ -438,17 +515,103 @@ pub(crate) fn emit_helper_function(
 
             const VALUE_I64: u32 = 0;
             const BUFFER_HANDLE: u32 = 1;
+            const REGION: u32 = 2;
+            const CURSOR: u32 = 3;
+            const DIGIT_COUNT: u32 = 4;
+            const NEGATIVE: u32 = 5;
+            const MAGNITUDE: u32 = 6;
 
-            // Keep the input value consumed so helper semantics remain explicit.
-            function.instruction(&Instruction::LocalGet(VALUE_I64));
-            function.instruction(&Instruction::Drop);
-
-            // Temporary phase behavior: emit an empty finalized string handle.
+            // Buffer helpers own the header/finalized string layout; allocate 20 bytes for the
+            // longest signed i64 representation (minus sign plus 19 digits).
             function.instruction(&Instruction::Call(string_new_buffer_index));
             function.instruction(&Instruction::LocalSet(BUFFER_HANDLE));
+            function.instruction(&Instruction::I32Const(20));
+            function.instruction(&Instruction::Call(alloc_index));
+            function.instruction(&Instruction::LocalSet(REGION));
+            function.instruction(&Instruction::LocalGet(REGION));
+            function.instruction(&Instruction::I32Const(19));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalSet(CURSOR));
+
+            function.instruction(&Instruction::LocalGet(VALUE_I64));
+            function.instruction(&Instruction::I64Const(0));
+            function.instruction(&Instruction::I64LtS);
+            function.instruction(&Instruction::LocalSet(NEGATIVE));
+
+            // Select |value| using wrapping subtraction. For i64::MIN, this leaves the magnitude
+            // as the unsigned bit pattern 0x8000... which the unsigned division below handles.
+            function.instruction(&Instruction::I64Const(0));
+            function.instruction(&Instruction::LocalGet(VALUE_I64));
+            function.instruction(&Instruction::I64Sub);
+            function.instruction(&Instruction::LocalGet(VALUE_I64));
+            function.instruction(&Instruction::LocalGet(NEGATIVE));
+            function.instruction(&Instruction::Select);
+            function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+            function.instruction(&Instruction::I32Const(0));
+            function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+            function.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::LocalGet(CURSOR));
+            function.instruction(&Instruction::LocalGet(MAGNITUDE));
+            function.instruction(&Instruction::I64Const(10));
+            function.instruction(&Instruction::I64RemU);
+            function.instruction(&Instruction::I32WrapI64);
+            function.instruction(&Instruction::I32Const(48));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::I32Store8(byte_memarg(0)));
+
+            function.instruction(&Instruction::LocalGet(CURSOR));
+            function.instruction(&Instruction::I32Const(1));
+            function.instruction(&Instruction::I32Sub);
+            function.instruction(&Instruction::LocalSet(CURSOR));
+            function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+            function.instruction(&Instruction::I32Const(1));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+            function.instruction(&Instruction::LocalGet(MAGNITUDE));
+            function.instruction(&Instruction::I64Const(10));
+            function.instruction(&Instruction::I64DivU);
+            function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+            // The do-while loop emits one digit for zero as well as for nonzero values.
+            function.instruction(&Instruction::LocalGet(MAGNITUDE));
+            function.instruction(&Instruction::I64Const(0));
+            function.instruction(&Instruction::I64Ne);
+            function.instruction(&Instruction::BrIf(0));
+            function.instruction(&Instruction::End);
+
+            function.instruction(&Instruction::LocalGet(NEGATIVE));
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            function.instruction(&Instruction::LocalGet(CURSOR));
+            function.instruction(&Instruction::I32Const(45));
+            function.instruction(&Instruction::I32Store8(byte_memarg(0)));
+            function.instruction(&Instruction::End);
+
+            // Store the suffix actually written; capacity is its usable byte length.
+            function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+            function.instruction(&Instruction::LocalGet(CURSOR));
+            function.instruction(&Instruction::I32Const(1));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalGet(NEGATIVE));
+            function.instruction(&Instruction::I32Sub);
+            function.instruction(&Instruction::I32Store(memarg(0)));
+            function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+            function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+            function.instruction(&Instruction::LocalGet(NEGATIVE));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::I32Store(memarg(4)));
+            function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+            function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+            function.instruction(&Instruction::LocalGet(NEGATIVE));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::I32Store(memarg(8)));
+
             function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
             function.instruction(&Instruction::Call(string_finish_index));
             function.instruction(&Instruction::Return);
+        }
+        WasmRuntimeHelper::StringFromU64 => {
+            emit_string_from_u64(&mut function, plan, alloc_index)?;
         }
         WasmRuntimeHelper::Release | WasmRuntimeHelper::DropIfOwned => {
             // WHAT: release/drop helpers are conservative no-ops for both string and vec handles.
@@ -461,10 +624,110 @@ pub(crate) fn emit_helper_function(
         | WasmRuntimeHelper::VecGet => {
             unreachable!("vec helpers are dispatched early to vec_helpers::emit_vec_helper")
         }
+        WasmRuntimeHelper::FloatPower
+        | WasmRuntimeHelper::FloatRemainder
+        | WasmRuntimeHelper::F32ToF16Bits
+        | WasmRuntimeHelper::F16BitsToF32
+        | WasmRuntimeHelper::FloatToDecimal
+        | WasmRuntimeHelper::StringFromFloat => {
+            unreachable!("numeric/string formatters are dispatched to their focused emitters")
+        }
     }
-
     function.instruction(&Instruction::End);
     Ok(function)
+}
+
+fn emit_string_from_u64(
+    function: &mut Function,
+    plan: &WasmEmitPlan,
+    alloc_index: u32,
+) -> Result<(), CompilerError> {
+    let string_new_buffer_index = plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::StringNewBuffer)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error("Wasm emission missing rt_string_new_buffer helper index")
+                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        })?;
+    let string_finish_index = plan
+        .helper_indices
+        .get(&WasmRuntimeHelper::StringFinish)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error("Wasm emission missing rt_string_finish helper index")
+                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        })?;
+
+    const VALUE_I64: u32 = 0;
+    const BUFFER_HANDLE: u32 = 1;
+    const REGION: u32 = 2;
+    const CURSOR: u32 = 3;
+    const DIGIT_COUNT: u32 = 4;
+    const MAGNITUDE: u32 = 5;
+
+    // U64 needs at most 20 decimal digits; the existing string runtime owns the returned handle.
+    function.instruction(&Instruction::Call(string_new_buffer_index));
+    function.instruction(&Instruction::LocalSet(BUFFER_HANDLE));
+    function.instruction(&Instruction::I32Const(20));
+    function.instruction(&Instruction::Call(alloc_index));
+    function.instruction(&Instruction::LocalSet(REGION));
+    function.instruction(&Instruction::LocalGet(REGION));
+    function.instruction(&Instruction::I32Const(19));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::LocalSet(CURSOR));
+    function.instruction(&Instruction::LocalGet(VALUE_I64));
+    function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+    function.instruction(&Instruction::I32Const(0));
+    function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+    function.instruction(&Instruction::Loop(wasm_encoder::BlockType::Empty));
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(10));
+    function.instruction(&Instruction::I64RemU);
+    function.instruction(&Instruction::I32WrapI64);
+    function.instruction(&Instruction::I32Const(48));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::I32Store8(byte_memarg(0)));
+
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Sub);
+    function.instruction(&Instruction::LocalSet(CURSOR));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::LocalSet(DIGIT_COUNT));
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(10));
+    function.instruction(&Instruction::I64DivU);
+    function.instruction(&Instruction::LocalSet(MAGNITUDE));
+
+    // The do-while loop emits one digit for zero as well as for nonzero values.
+    function.instruction(&Instruction::LocalGet(MAGNITUDE));
+    function.instruction(&Instruction::I64Const(0));
+    function.instruction(&Instruction::I64Ne);
+    function.instruction(&Instruction::BrIf(0));
+    function.instruction(&Instruction::End);
+
+    // Publish only the suffix written; StringFinish materializes the usual {ptr, len} handle.
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(CURSOR));
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::I32Add);
+    function.instruction(&Instruction::I32Store(memarg(0)));
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Store(memarg(4)));
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::LocalGet(DIGIT_COUNT));
+    function.instruction(&Instruction::I32Store(memarg(8)));
+
+    function.instruction(&Instruction::LocalGet(BUFFER_HANDLE));
+    function.instruction(&Instruction::Call(string_finish_index));
+    function.instruction(&Instruction::Return);
+    Ok(())
 }
 
 fn memarg(offset: u64) -> MemArg {

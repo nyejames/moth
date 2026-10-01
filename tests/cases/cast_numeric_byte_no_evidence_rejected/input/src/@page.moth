@@ -1,0 +1,3 @@
+hidden |raw Byte|:
+    wide U16 = cast raw
+;

@@ -58,6 +58,7 @@ fn local_slot_assignment_emits_assign_value() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -111,6 +112,7 @@ fn function_parameters_emit_param_binding() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -190,6 +192,7 @@ fn borrow_assignment_emits_assign_borrow() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -283,6 +286,7 @@ fn alias_local_read_emits_bs_read() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -355,6 +359,7 @@ fn alias_only_local_assignment_emits_write() {
     let output = lower_hir_to_js(
         &module,
         &report,
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -442,6 +447,7 @@ fn field_place_emits_bs_field() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -504,6 +510,7 @@ fn index_place_emits_bs_index() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -589,6 +596,7 @@ fn computed_place_read_composes_with_bs_read() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

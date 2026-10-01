@@ -1,0 +1,1 @@
+rejected = Error(code = -1, message = "negative code")

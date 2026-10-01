@@ -7,11 +7,11 @@ inner |name String| -> String, Int, Error!:
 ;
 
 outer |name String| -> String, Int, Error!:
-    value, number = inner(name) catch |err|:
+    value, numeric_value = inner(name) catch |err|:
         return! err
     ;
 
-    return value, number
+    return value, numeric_value
 ;
 
 ok_name, ok_number = outer("Ana") catch:

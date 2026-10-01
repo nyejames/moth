@@ -23,11 +23,13 @@ impl ScopeContext {
     /// WHAT: adopts an empty `TemplateIrStore` as the fresh module store so the
     ///       context satisfies the required-store constructor invariant of
     ///       `ScopeContext::new` without borrowing a production module store.
-    /// WHY: `ScopeContext::new` requires the shared module TIR store; tests that exercise non-template scope
-    ///      behaviour need an isolated store without assembling one inline at
-    ///      every call site. Tests that must share a specific store should build
-    ///      that store explicitly and pass it to `ScopeContext::new`, or swap it
-    ///      in with `with_template_ir_store`.
+    /// WHY: `ScopeContext::new` requires the shared module TIR store and an explicit
+    ///      boundary numeric profile; tests that exercise non-template scope
+    ///      behaviour need an isolated store and the STANDARD default without assembling
+    ///      either inline at every call site. Profile-sensitive tests override the
+    ///      profile afterwards with `with_numeric_profile`, and tests that must share a
+    ///      specific store should build that store explicitly and pass it to
+    ///      `ScopeContext::new`, or swap it in with `with_template_ir_store`.
     pub(crate) fn new_for_tests(
         kind: ContextKind,
         scope: PathId,
@@ -45,6 +47,7 @@ impl ScopeContext {
             expected_result_type_ids,
             scope_frame_capacity,
             template_ir_store,
+            NumericProfile::STANDARD,
         )
     }
 }
@@ -274,6 +277,13 @@ impl ScopeContext {
     }
     pub fn with_template_const_loop_iteration_limit(mut self, limit: usize) -> ScopeContext {
         Rc::make_mut(&mut self.shared).template_const_loop_iteration_limit = limit;
+        self
+    }
+
+    /// Set the compilation boundary's numeric widths for child scopes.
+    #[cfg(test)]
+    pub(crate) fn with_numeric_profile(mut self, profile: NumericProfile) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).numeric_profile = profile;
         self
     }
 

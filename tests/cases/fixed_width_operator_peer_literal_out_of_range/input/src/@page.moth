@@ -1,0 +1,6 @@
+hidden ||:
+    x U8 = 1
+    value = x + 300
+;
+
+[:unreachable]

@@ -32,7 +32,7 @@ A simple recovery may stay on one logical line.
 
 [codeblock, $code("moth"):
     value = parse_number(text) catch then 0
-    other = parse_number(text) catch |err| then err.code
+    label = load_label(text) catch |err| then err.message
 ]
 
 Inline catch:

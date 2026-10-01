@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandli
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -52,9 +53,15 @@ impl<'a> ConstFactCollector<'a> {
         string_table: &'a mut StringTable,
         const_values: &'a ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
+        numeric_profile: NumericProfile,
     ) -> Self {
         Self {
-            resolver: ConstValueResolver::new(string_table, const_values, template_ir_store),
+            resolver: ConstValueResolver::new(
+                string_table,
+                const_values,
+                template_ir_store,
+                numeric_profile,
+            ),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),
         }
@@ -480,6 +487,8 @@ impl<'a> ConstFactCollector<'a> {
                             self.walk_expression_for_body_local(expression, env)?;
                         }
                         ExpressionRpnItem::Operator { .. } => {}
+                        // Resolution removes pending literals before this stage.
+                        ExpressionRpnItem::PendingNumericLiteral { .. } => {}
                     }
                 }
             }
@@ -596,6 +605,8 @@ impl<'a> ConstFactCollector<'a> {
             | ExpressionKind::OptionNone
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
+            | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)

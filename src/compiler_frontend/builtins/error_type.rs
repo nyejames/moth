@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, type_id_hint_for_diagnostic_type,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
@@ -79,7 +80,7 @@ pub(crate) fn register_builtin_error_types(
 
     let error_fields = vec![
         required_field(message_path, DataType::StringSlice, None),
-        defaulted_int_field(code_path, 0, None),
+        defaulted_u32_field(code_path, 0, None),
     ];
 
     let declarations = vec![type_declaration(
@@ -170,10 +171,18 @@ fn required_field(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> 
     }
 }
 
-fn defaulted_int_field(id: PathId, value: i32, span: Option<SourceSpan>) -> Declaration {
+/// The canonical `Error.code` fixed-scalar identity; every code is an unsigned
+/// 32-bit value, so the default literal materialises through the existing
+/// fixed-scalar AST expression APIs rather than routed through `Int`.
+fn defaulted_u32_field(id: PathId, value: u32, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
-        value: Expression::int(value, span, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::unsigned(FixedScalar::U32, u64::from(value))
+                .expect("the builtin Error.code default must fit the U32 fixed-scalar domain"),
+            span,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     }

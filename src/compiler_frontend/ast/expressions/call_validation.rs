@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::external_packages::{
@@ -161,6 +162,8 @@ pub(crate) struct CallArgumentResolutionContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) compatibility_cache: &'a mut TypeCompatibilityCache,
     pub(crate) path_fork: &'a PathInternerFork,
+    /// Boundary precision for contextual `Int -> Float` argument coercion.
+    pub(crate) float_precision: FloatPrecision,
 }
 
 struct CallArgumentPolicyContext<'a> {
@@ -168,6 +171,7 @@ struct CallArgumentPolicyContext<'a> {
     type_environment: &'a TypeEnvironment,
     type_validation: CallTypeValidation<'a>,
     path_fork: &'a PathInternerFork,
+    float_precision: FloatPrecision,
 }
 
 /// Builds one expectation per user-defined parameter declaration.
@@ -287,6 +291,7 @@ pub(crate) fn resolve_call_arguments(
             type_environment: context.type_environment,
             type_validation: CallTypeValidation::Validate(context.compatibility_cache),
             path_fork: context.path_fork,
+            float_precision: context.float_precision,
         },
     )
 }
@@ -300,6 +305,10 @@ pub(crate) fn resolve_call_arguments(
 /// WHY: the parser owns named/positional routing; this owner consumes those retained slots for
 /// arity, defaults and mutable-access rules while allowing generic-aware validation to supply
 /// its own type evidence.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shape validation keeps diagnostics, arguments, expectations, span, mutable string state, type environment, path fork and boundary Float precision as separate borrows"
+)]
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
@@ -308,6 +317,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
+    float_precision: FloatPrecision,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
@@ -319,6 +329,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
             type_environment,
             type_validation: CallTypeValidation::Skip,
             path_fork,
+            float_precision,
         },
     )
 }
@@ -335,6 +346,7 @@ fn resolve_call_arguments_with_type_policy(
         type_environment,
         mut type_validation,
         path_fork,
+        float_precision,
     } = context;
 
     // Validation flow order is intentionally fixed:
@@ -458,6 +470,7 @@ fn resolve_call_arguments_with_type_policy(
             normalized_argument.value,
             expected_type_id,
             type_environment,
+            float_precision,
         );
 
         ordered.push(normalized_argument);

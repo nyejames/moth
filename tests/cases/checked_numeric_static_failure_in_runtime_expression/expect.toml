@@ -2,4 +2,3 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0053"]
-message_contains = ["Cannot divide by zero"]

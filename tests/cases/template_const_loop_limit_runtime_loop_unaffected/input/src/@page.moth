@@ -4,8 +4,8 @@ last_number || -> Int:
 
 [:
     runtime loop unaffected before
-    [loop 1 to & last_number() |number|:
-        runtime-[number];
+    [loop 1 to & last_number() |numeric_value|:
+        runtime-[numeric_value];
     ]
     runtime loop unaffected after
 ]

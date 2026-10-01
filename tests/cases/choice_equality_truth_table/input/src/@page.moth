@@ -15,7 +15,7 @@ Outer ::
     First,
     Second,
     Word | text String |,
-    Count | number Int |,
+    Count | numeric_value Int |,
     Wrapped | inner Inner |,
 ;
 

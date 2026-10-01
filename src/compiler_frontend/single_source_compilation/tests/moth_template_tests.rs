@@ -9,6 +9,7 @@
 //!       request, no builder and no filesystem.
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -47,6 +48,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
 
     let folded = compile_moth_template_source(
         MothTemplateCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             source_path: Path::new("/templates/intro.mtf"),
             source_code: Some(String::from("# Intro")),
             style_directives: &style_directives,
@@ -102,6 +104,7 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
 
     let messages = match compile_moth_template_source(
         MothTemplateCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             source_path,
             source_code: Some(source_code.to_owned()),
             style_directives: &style_directives,
@@ -124,6 +127,47 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
         source_database.retained_text(source_id),
         Some(source_code),
         "diagnosed preparation must retain the exact authored snapshot",
+    );
+}
+
+#[test]
+fn float_interpolation_renders_at_the_boundary_float_precision() {
+    // The sum is inexact at both precisions, so the interpolated text is decided by the boundary
+    // `Float` precision this service was handed rather than by the literal digits.
+    let source_code = "[:[0.1 + 0.2]]";
+    let style_directives = StyleDirectiveRegistry::built_ins();
+
+    let render = |numeric_profile: NumericProfile| {
+        let folded = compile_moth_template_source(
+            MothTemplateCompilationRequest {
+                numeric_profile,
+                source_path: Path::new("/templates/float.mtf"),
+                source_code: Some(source_code.to_owned()),
+                style_directives: &style_directives,
+                file_value_resolution: None,
+            },
+            &mut StringTable::new(),
+        )
+        .expect("a Float interpolation should fold under every boundary precision");
+        folded
+            .content
+            .into_text()
+            .expect("a single Float interpolation should fold to owned text")
+    };
+
+    let narrow = render(NumericProfile {
+        float_precision: FloatPrecision::Bits32,
+        ..NumericProfile::STANDARD
+    });
+    let standard = render(NumericProfile::STANDARD);
+
+    assert_eq!(
+        narrow, "0.3",
+        "a Float32 boundary must render the shortest f32 text of the sum",
+    );
+    assert_eq!(
+        standard, "0.30000000000000004",
+        "a Float64 boundary must render the exact f64 sum",
     );
 }
 
@@ -236,6 +280,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         source_database,
     } = compile_moth_template_source(
         MothTemplateCompilationRequest {
+            numeric_profile: NumericProfile::STANDARD,
             source_path: template_path,
             source_code: None,
             style_directives: &style_directives,

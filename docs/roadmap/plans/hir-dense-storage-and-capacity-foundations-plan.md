@@ -67,7 +67,7 @@ Re-read the current owners at activation rather than treating paths or Rust shap
 
 ### Numeric checkpoint input
 
-The activation tree already carries fixed I*/U*/F* types, Byte, Number scales,
+The activation tree already carries fixed I*/U*/F* types, Byte, Dec scales,
 profile-selected Int/Float and U32 Error.code. Preserve their canonical type
 identity, constant payloads, numeric domain/operator/failure metadata and explicit
 conversion boundaries. Update store-aware visitors and ID-keyed numeric side
@@ -77,7 +77,7 @@ interpretation of canonical numeric types.
 
 Source semantic width, physical scalar layout and Wasm carrier are distinct.
 Compacting a HIR record does not narrow its literal value or choose a new numeric
-profile. Preserve U64 extremes, F16/F32 precision, signed zero and exact Number
+profile. Preserve U64 extremes, F16/F32 precision, signed zero and exact Dec
 coefficients/scales. Arbitrary-precision value payload storage follows its value
 owner rather than being mistaken for a recursive child-expression graph.
 
@@ -379,7 +379,7 @@ Every implementation phase ends with the mandatory gate. A phase is a coherent c
 * [ ] Activate from current `main` after unified numeric semantics and before Wiring V1 begins. Keep the package programme's parallel work separate.
 * [ ] Record the active revision, worktree state, validation baseline and non-recording benchmark baseline.
 * [ ] Inventory every durable HIR owner of expressions and recursive places, including expressions, statements, terminators, patterns, remapping, validation, display, rewrites, generated functions, borrow/Boracle consumers and both backends.
-* [ ] Include delivered numeric/Byte/Number constant payloads, conversion/failure statements, range proofs and U32 Error.code in the producer/consumer inventory.
+* [ ] Include delivered numeric/Byte/Dec constant payloads, conversion/failure statements, range proofs and U32 Error.code in the producer/consumer inventory.
 * [ ] Search for every `HirExpression`, `Box<HirExpression>`, `Vec<HirExpression>` and recursive `HirPlace` storage site. Classify temporary lowering locals separately from durable IR ownership.
 * [ ] Reconfirm how generated-function publication and current ID remapping affect the structural freeze point.
 * [ ] Freeze the exact store and typed-range map against the active tree. Preserve the decisions above while allowing names and the number of side stores to simplify.
@@ -436,7 +436,7 @@ Mandatory closeout: capacity/retained-memory audit, focused HIR tests, full vali
 * [ ] Update the native-result-slot/Core const-eval plan so its HIR call/result examples and Phase 2 migration assume `HirValueId`/range storage. Preserve its approved result semantics unchanged.
 * [ ] Replace the roadmap's old profiling-only HIR-compaction note with the delivered architecture status while keeping whole-AST and broader borrow-fact compaction profiling-gated.
 * [ ] Update benchmark evidence, progress documentation and implementation navigation where the delivered representation changes them.
-* [ ] Run the existing numeric parity corpus across all profiles, including large fixed integers, F16/F32 rounding, Byte, Number scale boundaries and U32 error codes. Keep Number's Wasm target restriction intact.
+* [ ] Run the existing numeric parity corpus across all profiles, including large fixed integers, F16/F32 rounding, Byte, Dec scale boundaries and U32 error codes. Keep Dec's Wasm target restriction intact.
 * [ ] Run final correctness, architecture and style reviews.
 * [ ] Remove this ordinary implementation plan and its roadmap entry in the completion commit after durable rationale has moved into canonical documentation.
 
@@ -475,7 +475,7 @@ The plan is complete only when all of these are true:
 * Incorrect capacity guesses cannot change compiler semantics.
 * HIR validation, borrow checking, Boracle and current backends consume the new representation directly.
 * Existing source semantics, evaluation order, diagnostics and emitted behaviour are preserved.
-* Fixed/profile-selected numerics, Byte, Number and U32 Error.code retain their type identity, payload and failure/rounding boundaries through the representation change.
+* Fixed/profile-selected numerics, Byte, Dec and U32 Error.code retain their type identity, payload and failure/rounding boundaries through the representation change.
 * No repeatable accepted compile-time regression remains.
 * AST representation is unchanged except for mechanical HIR-lowering API adaptation.
 * The general dense-IR rule exists once in canonical compiler architecture documentation and repeated generic explanations have been compressed where safe.

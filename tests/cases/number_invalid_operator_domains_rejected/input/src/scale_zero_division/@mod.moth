@@ -1,0 +1,3 @@
+bad_scale_zero_division |left Dec0, right Dec0| -> Dec0:
+    return left / right
+;

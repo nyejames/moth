@@ -9,6 +9,7 @@ use crate::backends::wasm::request::{
 };
 use crate::backends::wasm::result::WasmLirBackendResult;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType,
 };
@@ -22,6 +23,7 @@ use std::collections::HashSet;
 pub(crate) fn lower_hir_to_wasm_lir(
     hir_module: &HirModule,
     borrow_facts: &BorrowFacts,
+    numeric_proofs: &NumericProofs,
     request: &WasmBackendRequest,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
@@ -37,6 +39,7 @@ pub(crate) fn lower_hir_to_wasm_lir(
     let lir_module = lower_hir_module_to_lir(
         hir_module,
         borrow_facts,
+        numeric_proofs,
         request,
         string_table,
         path_table,
@@ -55,6 +58,7 @@ pub(crate) fn lower_hir_to_wasm_lir(
 pub(crate) fn lower_hir_to_wasm_module(
     hir_module: &HirModule,
     borrow_facts: &BorrowFacts,
+    numeric_proofs: &NumericProofs,
     request: &WasmBackendRequest,
     string_table: &StringTable,
     type_environment: &TypeEnvironment,
@@ -65,6 +69,7 @@ pub(crate) fn lower_hir_to_wasm_module(
     let mut result = lower_hir_to_wasm_lir(
         hir_module,
         borrow_facts,
+        numeric_proofs,
         request,
         string_table,
         type_environment,
@@ -103,6 +108,7 @@ fn validate_request(
 ) -> Result<(), CompilerError> {
     // WHAT: reject request/contract issues before any lowering or emission work.
     // WHY: this guarantees deterministic diagnostics and prevents partial outputs.
+
     let mut seen = HashSet::new();
     let mut export_name_set = HashSet::new();
 

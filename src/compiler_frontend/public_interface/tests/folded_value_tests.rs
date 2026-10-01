@@ -34,7 +34,9 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FiniteFloat, OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
@@ -167,6 +169,96 @@ fn constant_record_owns_scalar_int_folded_value() {
         panic!("expected constant semantics");
     };
     assert_eq!(semantics.folded_value, PublicFoldedValue::Int(42));
+}
+
+#[test]
+fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let env = TypeEnvironment::new();
+
+    let u64_max =
+        FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
+    let neg_zero_f16 =
+        FixedScalarValue::binary_float(FixedScalar::F16, -0.0).expect("-0.0 is a finite F16 value");
+    let u8_five = FixedScalarValue::unsigned(FixedScalar::U8, 5).expect("5 fits U8");
+    let u16_five = FixedScalarValue::unsigned(FixedScalar::U16, 5).expect("5 fits U16");
+    let byte_five = FixedScalarValue::unsigned(FixedScalar::Byte, 5).expect("5 fits Byte");
+
+    let declarations = [
+        ("big", u64_max),
+        ("neg_zero", neg_zero_f16),
+        ("u8_five", u8_five),
+        ("u16_five", u16_five),
+        ("byte_five", byte_five),
+    ];
+    let module_constants = declarations
+        .iter()
+        .map(|(name, value)| Declaration {
+            id: path_fork
+                .try_intern_portable_path(name, &mut string_table)
+                .expect("test path fits"),
+            value: Expression::fixed_scalar(*value, None, ValueMode::ImmutableOwned),
+            binding_span: None,
+            config_qualifier: None,
+        })
+        .collect::<Vec<_>>();
+    let roots = declarations
+        .iter()
+        .map(|(name, value)| {
+            constant_root(
+                name,
+                builtin_type_ids::fixed_scalar(value.scalar()),
+                &mut string_table,
+                &mut path_fork,
+            )
+        })
+        .collect::<Vec<_>>();
+    let bindings = declarations
+        .iter()
+        .map(|(name, _)| constant_binding(name))
+        .collect::<Vec<_>>();
+
+    let records = build_constant_records(
+        roots,
+        bindings,
+        &module_constants,
+        &FxHashMap::default(),
+        &env,
+        &string_table,
+        &path_fork,
+    )
+    .expect("join succeeds for fixed-scalar constants");
+
+    assert_eq!(records.len(), declarations.len());
+    for ((name, expected), record) in declarations.iter().zip(records.iter()) {
+        let PublicDeclarationSemantics::Constant(semantics) = &record.semantics else {
+            panic!("expected constant semantics for {name}");
+        };
+        assert_eq!(
+            semantics.folded_value,
+            PublicFoldedValue::FixedScalar(*expected),
+            "projection must keep the exact {name} bits with scalar identity",
+        );
+    }
+
+    // Equal numeric payloads with distinct scalars stay distinct through projection.
+    assert_ne!(
+        PublicFoldedValue::FixedScalar(u8_five),
+        PublicFoldedValue::FixedScalar(u16_five)
+    );
+    assert_ne!(
+        PublicFoldedValue::FixedScalar(u8_five),
+        PublicFoldedValue::FixedScalar(byte_five)
+    );
+    // Signed zero is distinct from positive zero at the exact-bit level.
+    assert_ne!(
+        PublicFoldedValue::FixedScalar(neg_zero_f16),
+        PublicFoldedValue::FixedScalar(
+            FixedScalarValue::binary_float(FixedScalar::F16, 0.0)
+                .expect("+0.0 is a finite F16 value")
+        )
+    );
 }
 
 #[test]

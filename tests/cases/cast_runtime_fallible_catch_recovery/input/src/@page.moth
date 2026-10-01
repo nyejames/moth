@@ -1,54 +1,52 @@
-Holder = |
-    code ~Int,
-|
-
 try_float |text String| -> Float, Error!:
     return cast! text
 ;
 
-code_for_float |text String, holder ~Holder|:
+code_for_float |text String| -> U32:
+    code ~U32 = 0
     ignored Float = cast text catch |err|:
-        holder.code = err.code
+        code = err.code
         then 0.0
     ;
+    return code
 ;
 
-code_for_float_int |value Float| -> Int:
-    result Int = cast value catch |err|:
-        then err.code
+capture_float_int_code |value Float| -> U32:
+    code ~U32 = 0
+    ignored Int = cast value catch |err|:
+        code = err.code
+        then 0
     ;
-    return result
+    return code
 ;
 
-code_for_char |text String, holder ~Holder|:
+code_for_char |text String| -> U32:
+    code ~U32 = 0
     ignored Char = cast text catch |err|:
-        holder.code = err.code
+        code = err.code
         then ' '
     ;
+    return code
 ;
 
-code_for_int_char |value Int, holder ~Holder|:
+code_for_int_char |value Int| -> U32:
+    code ~U32 = 0
     ignored Char = cast value catch |err|:
-        holder.code = err.code
+        code = err.code
         then ' '
     ;
+    return code
 ;
 
-float_holder ~Holder = Holder(code = 0)
-code_for_float("not a number", ~float_holder)
-bad_float_fmt = float_holder.code
+bad_float_fmt = code_for_float("not a number")
 
 big Float = try_float("1e100") catch |err|:
     then 0.0
 ;
-oor_float = code_for_float_int(big)
+oor_float = capture_float_int_code(big)
 
-char_holder ~Holder = Holder(code = 0)
-code_for_char("ab", ~char_holder)
-bad_char = char_holder.code
+bad_char = code_for_char("ab")
 
-cp_holder ~Holder = Holder(code = 0)
-code_for_int_char(1114112, ~cp_holder)
-bad_cp = cp_holder.code
+bad_cp = code_for_int_char(1114112)
 
 [: runtime catch codes: [bad_float_fmt]|[oor_float]|[bad_char]|[bad_cp]]

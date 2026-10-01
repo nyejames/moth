@@ -59,6 +59,17 @@ pub(in crate::compiler_frontend::ast) struct AstFinalizer<'context, 'services> {
         &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
+/// When AST finalization builds the declaring-module generic materialisation context.
+///
+/// WHAT: modules always retain the context, while a generated sidecar retains it only as the
+///       requester of the nested generic requests its own body deferred.
+/// WHY: the context copies module-wide lookup state. Building it for every generated sidecar
+///      made generic instantiation quadratic in module size, although only nested requests read it.
+pub(in crate::compiler_frontend::ast) enum MaterialisationContextRetention {
+    Always,
+    ForDeferredRequests,
+}
+
 impl<'context, 'services> AstFinalizer<'context, 'services> {
     /// Creates a new finalizer with the given phase context, resolved environment, and path table.
     pub(in crate::compiler_frontend::ast) fn new(
@@ -87,6 +98,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         mut self,
         mut emitted: AstEmission,
         top_level_const_fragments: &[TopLevelConstFragment],
+        materialisation_retention: MaterialisationContextRetention,
         string_table: &mut StringTable,
     ) -> Result<AstBuildResult, CompilerMessages> {
         // ----------------------------
@@ -96,6 +108,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut emitted.ast,
             string_table,
             self.context.template_const_loop_iteration_limit,
+            self.context.numeric_profile,
             Rc::clone(&self.context.template_ir_store),
         )
         .map_err(TemplateNormalizationError::from)
@@ -196,6 +209,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
+            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -278,6 +292,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
+            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -327,6 +342,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             string_table,
             &const_values,
             Rc::clone(&self.context.template_ir_store),
+            self.context.numeric_profile,
         )
         .collect(&const_values, &emitted.ast, start_function_path.as_ref())
         .map_err(|error| {
@@ -395,50 +411,62 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
 
-        let materialisation_context = ModuleMaterialisationPreparationBuilder::from_environment(
-            ModuleMaterialisationEnvironmentInput {
-                lookups: &owned_lookups,
-                const_values: &const_values,
-                type_environment: &type_environment,
-                public_trait_roots: &resolved_public_trait_roots,
-                default_const_templates_by_path: projected_const_templates.by_path,
-                entry_dir: self.context.entry_dir,
-                module_origin: self
-                    .context
-                    .file_value_resolution
-                    .as_ref()
-                    .and_then(|services| services.module_origin.clone()),
-                stage0_resolution_facts: self
-                    .context
-                    .file_value_resolution
-                    .as_ref()
-                    .and_then(|services| services.stage0_resolution_facts.clone()),
-                frozen_identity_handle: self
-                    .context
-                    .file_value_resolution
-                    .as_ref()
-                    .map(|services| services.frozen_identity_handle.clone())
-                    .unwrap_or_else(FrozenIdentityHandle::new),
-                module_resources: self
-                    .context
-                    .file_value_resolution
-                    .as_ref()
-                    .map(|services| Rc::clone(&services.module_resources)),
-                string_table,
-                template_const_loop_iteration_limit: self
-                    .context
-                    .template_const_loop_iteration_limit,
-                capacity_estimate: self.context.capacity_estimate,
-            },
-        )
-        .map_err(|error| {
-            CompilerMessages::from_error_with_warnings(
-                error,
-                emitted.warnings.clone(),
-                string_table,
+        let retain_materialisation_context = match materialisation_retention {
+            MaterialisationContextRetention::Always => true,
+            MaterialisationContextRetention::ForDeferredRequests => {
+                !emitted.deferred_generic_requests.is_empty()
+            }
+        };
+        let materialisation_context = if retain_materialisation_context {
+            let context = ModuleMaterialisationPreparationBuilder::from_environment(
+                ModuleMaterialisationEnvironmentInput {
+                    lookups: &owned_lookups,
+                    const_values: &const_values,
+                    type_environment: &type_environment,
+                    public_trait_roots: &resolved_public_trait_roots,
+                    default_const_templates_by_path: projected_const_templates.by_path,
+                    entry_dir: self.context.entry_dir,
+                    module_origin: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .and_then(|services| services.module_origin.clone()),
+                    stage0_resolution_facts: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .and_then(|services| services.stage0_resolution_facts.clone()),
+                    frozen_identity_handle: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .map(|services| services.frozen_identity_handle.clone())
+                        .unwrap_or_else(FrozenIdentityHandle::new),
+                    module_resources: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .map(|services| Rc::clone(&services.module_resources)),
+                    string_table,
+                    numeric_profile: self.context.numeric_profile,
+                    template_const_loop_iteration_limit: self
+                        .context
+                        .template_const_loop_iteration_limit,
+                    capacity_estimate: self.context.capacity_estimate,
+                },
             )
-            .with_type_context_for_all_diagnostics(type_environment.clone())
-        })?;
+            .map_err(|error| {
+                CompilerMessages::from_error_with_warnings(
+                    error,
+                    emitted.warnings.clone(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(type_environment.clone())
+            })?;
+            Some(context)
+        } else {
+            None
+        };
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
             trait_roots: resolved_public_trait_roots,

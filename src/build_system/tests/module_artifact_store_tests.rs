@@ -9,6 +9,7 @@ use crate::build_system::create_project_modules::compiled_boundary::CompiledGrap
 use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -57,6 +58,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
                 resource_table: ModuleResourceTable::new(),
                 type_environment: TypeEnvironment::new(),
                 borrow_analysis: BorrowCheckReport::default(),
+                numeric_proofs: NumericProofs::default(),
                 path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
             },
             link_facts: ModuleLinkFacts {

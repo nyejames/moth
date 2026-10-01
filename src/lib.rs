@@ -46,6 +46,8 @@ mod compiler_tests {
     pub(crate) mod integration_test_runner; // For running all integration tests and report back the results
 
     #[cfg(test)]
+    mod config_input_origin_tests;
+    #[cfg(test)]
     pub mod test_diagnostics;
     #[cfg(test)]
     pub mod test_fs;
@@ -62,7 +64,10 @@ pub mod first_party_js;
 /// This is the sole public MON root. It accepts caller-owned UTF-8 MON text and
 /// returns owned data values; it never compiles a module, evaluates a Moth
 /// program, reads a file, discovers a project, or writes a build output.
-/// `compiler_frontend` stays crate-private and no MON path exposes its internals.
+/// The reader, writer and prepared-schema owners stay crate-private; the only
+/// compiler-owned facts the boundary publishes are the numeric profile
+/// selection (`NumericProfile`, `IntWidth`, `FloatPrecision`) consumed by
+/// `Schema::with_profile`.
 ///
 /// The accepted operations share one prepared schema:
 ///
@@ -78,12 +83,32 @@ pub mod first_party_js;
 /// - `decode_document_bytes` behaves like `decode_document` for raw
 ///   bytes and reports invalid UTF-8 through `MonErrorCode::InvalidUtf8`
 ///   with a byte span.
-///
+/// - `Schema::with_profile` selects the numeric profile a schema prepares
+///   under; schemas prepared without it use `NumericProfile::STANDARD`
+///   (`Int32`/`Float64`). Fixed widths and `Byte` are profile-independent.
+/// - `SchemaType::Integer` preserves arbitrary-precision whole-number data.
+///   `SchemaType::Decimal` carries an exact scale in `0..=256` and requires
+///   exact representability at that scale. A scale-two target accepts `1.2`
+///   and rejects `1.239`. `Integer` and `Decimal` remain MON data families.
+/// - Integer schemas and `Byte` require whole-number spelling. Decimal or
+///   exponent forms such as `3.0` and `1e3` never decode as them, even when
+///   mathematically integral. Binary floats accept whole and decimal forms,
+///   round to nearest with ties to even at their own precision and reject
+///   non-finite results. Encoding round-trips supported typed values,
+///   including `F16`/`F32` bits and signed zero.
+/// - Map keys follow one declared schema type: `String`, `Bool`, `Char`,
+///   `Int`, any fixed-width integer or `Byte`. Float and exact-decimal keys
+///   are rejected. Duplicate decoded keys and duplicate field/variant names
+///   fail rather than keeping a first or last value.
+///     
 /// Encoding a `Value::String` always encodes string data. It never guesses
 /// that the text resembles MON and should be inserted raw or decoded. Decoded
-/// values outlive and release the input text without a caller-retained backing
-/// buffer; the public boundary has no borrowed document view and publishes no
-/// partial result on failure.
+/// values outlive and release the input text without a caller-retained backing buffer;
+/// the public boundary has no borrowed document view and publishes no partial result on failure.
+///
+/// Moth-native integration stays out of this boundary: automatic schemas
+/// derived from Moth types, the `$mon` directive, source or runtime codec
+/// operations and a static MON builder are separate deferred work.
 ///
 /// ```
 /// use moth::mon::{
@@ -138,6 +163,9 @@ pub mod first_party_js;
 /// assert!(failure.span.is_some());
 /// ```
 pub mod mon {
+    pub use crate::compiler_frontend::datatypes::numeric_profile::{
+        FloatPrecision, IntWidth, NumericProfile,
+    };
     pub use crate::compiler_frontend::mon::{
         Field, Limits, MonError, MonErrorCode, PathSegment, PreparedSchema, Schema, SchemaType,
         Span, Value, Variant, decode_document, decode_document_bytes, encode_document,

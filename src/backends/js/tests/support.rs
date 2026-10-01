@@ -12,6 +12,7 @@ pub(super) use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 pub(super) use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, BorrowStateSnapshot, LocalBorrowSnapshot, LocalMode,
 };
+pub(super) use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::definitions::ChoiceTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -19,6 +20,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor,
 };
+pub(super) use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
@@ -275,8 +277,9 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -332,8 +335,9 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -342,7 +346,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
 }
 
 pub(super) fn default_config() -> JsLoweringConfig {
-    JsLoweringConfig::direct_js(false)
+    JsLoweringConfig::direct_js(false, NumericProfile::STANDARD)
 }
 
 /// Builds and lowers a minimal module that performs one runtime cast expression.
@@ -402,8 +406,9 @@ fn lower_minimal_module_with_cast(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -418,7 +423,9 @@ fn lower_minimal_module_with_cast(
 pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::StringToInt,
+        BuiltinCastPolicyId::StringToNumeric(
+            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+        ),
         |types, region| string_expression(1, "0", types.string, region),
         |types| types.int,
     )
@@ -431,21 +438,11 @@ pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> 
 pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::IntToFloat,
+        BuiltinCastPolicyId::NumericConversion {
+            source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+            target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+        },
         |types, region| int_expression(1, 0, types.int, region),
-        |types| types.float,
-    )
-}
-
-/// Builds and lowers a minimal module that performs a `String -> Float` cast at runtime.
-///
-/// WHY: runtime-helper tests need a module that emits only the float parser and
-/// its shared normalizer, without also making the integer parser reachable.
-pub(super) fn lower_minimal_module_with_string_float_cast(function_name: &str) -> String {
-    lower_minimal_module_with_cast(
-        function_name,
-        BuiltinCastPolicyId::StringToFloat,
-        |types, region| string_expression(1, "0.5", types.string, region),
         |types| types.float,
     )
 }
@@ -457,7 +454,9 @@ pub(super) fn lower_minimal_module_with_string_float_cast(function_name: &str) -
 pub(super) fn lower_minimal_module_with_float_string_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::FloatToString,
+        BuiltinCastPolicyId::NumericToString(
+            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+        ),
         |types, region| float_expression(1, 1.5, types.float, region),
         |types| types.string,
     )
@@ -514,8 +513,9 @@ pub(super) fn lower_minimal_module_with_io_call(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -599,8 +599,9 @@ pub(super) fn lower_minimal_module_with_io_input_call(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )

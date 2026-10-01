@@ -9,6 +9,9 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -33,6 +36,7 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
 
     let cases = load_canonical_case_specs(&case_root, None)
         .expect("explicit acceptance-only fixture should be accepted");
+    assert_eq!(cases[0].numeric_profile, NumericProfile::STANDARD);
     let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
         panic!("case should have a success expectation");
     };
@@ -40,6 +44,59 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
         expectation.success_contract,
         Some(SuccessContract::AcceptanceOnly)
     );
+}
+
+#[test]
+fn numeric_profile_key_parses_exact_spelling_and_rejects_unknown_values() {
+    let (_root, case_root) = write_fixture(
+        "numeric_profile",
+        "numeric_profile = \"Int64/Float32\"\n\
+         [backends.html]\n\
+         mode = \"success\"\n\
+         warnings = \"forbid\"\n\
+         rendered_output_contains = [\"ok\"]\n",
+    );
+
+    let cases = load_canonical_case_specs(&case_root, None)
+        .expect("Int64/Float32 numeric profile spelling should be accepted");
+    assert_eq!(
+        cases[0].numeric_profile,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        }
+    );
+
+    fs::write(
+        case_root.join(EXPECT_FILE_NAME),
+        "numeric_profile = \"Int32/float64\"\n\
+         [backends.html]\n\
+         mode = \"success\"\n\
+         warnings = \"forbid\"\n\
+         rendered_output_contains = [\"ok\"]\n",
+    )
+    .expect("should replace the expectation file");
+
+    let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
+        panic!("unknown numeric profile spelling should be rejected");
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        "unexpected kind: {:?} ({error})",
+        error.kind
+    );
+    for spelling in [
+        "Int32/Float32",
+        "Int32/Float64",
+        "Int64/Float32",
+        "Int64/Float64",
+    ] {
+        assert!(
+            error.message.contains(spelling),
+            "accepted spelling {spelling:?} missing from error: {error}"
+        );
+    }
 }
 
 #[test]
@@ -996,6 +1053,134 @@ fn parses_and_retains_all_rendered_output_assertion_forms() {
         expectation.rendered_output.contains_exactly_once,
         vec!["once".to_owned()]
     );
+}
+
+#[test]
+fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
+    for backend in ["html", "html_wasm"] {
+        let (_root, case_root) = write_fixture(
+            &format!("runtime_error_contains_{backend}"),
+            &format!(
+                concat!(
+                    "[backends.{}]\n",
+                    "mode = \"success\"\n",
+                    "warnings = \"forbid\"\n",
+                    "rendered_output_exact = \"before overflow\"\n",
+                    "runtime_error_contains = [\"Int operation\", \"overflowed\"]\n"
+                ),
+                backend
+            ),
+        );
+
+        let cases = load_canonical_case_specs(&case_root, None)
+            .expect("runtime_error_contains should be a success contract");
+        let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
+            panic!("case should have a success expectation");
+        };
+        assert_eq!(
+            expectation.rendered_output.exact.as_deref(),
+            Some("before overflow")
+        );
+        assert_eq!(
+            expectation.rendered_output.runtime_error_contains,
+            vec!["Int operation", "overflowed"]
+        );
+        assert!(expectation.rendered_output.is_present());
+    }
+}
+
+#[test]
+fn runtime_trap_contains_rejects_wrong_backend_mode_and_fragments() {
+    for (name, expectation_text, expected_message) in [
+        (
+            "html_backend",
+            "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = [\"unreachable\"]\n",
+            "only supported for the 'html_wasm' backend",
+        ),
+        (
+            "failure_mode",
+            "[backends.html_wasm]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nruntime_trap_contains = [\"unreachable\"]\n",
+            "runtime_trap_contains",
+        ),
+        (
+            "empty_list",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = []\n",
+            "requires 'runtime_trap_contains' to contain at least one entry",
+        ),
+        (
+            "empty_fragment",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_trap_contains = [\"\"]\n",
+            "empty 'runtime_trap_contains'",
+        ),
+        (
+            "combined_with_runtime_error",
+            "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_error_contains = [\"assertion failed\"]\nruntime_trap_contains = [\"unreachable\"]\n",
+            "must not combine 'runtime_trap_contains' with 'runtime_error_contains'",
+        ),
+    ] {
+        let (_root, case_root) =
+            write_fixture(&format!("runtime_trap_contains_{name}"), expectation_text);
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("invalid runtime_trap_contains contract '{name}' should be rejected");
+        };
+
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract
+        );
+        assert!(
+            error.message.contains(expected_message),
+            "unexpected error for '{name}': {error}"
+        );
+    }
+}
+
+#[test]
+fn runtime_error_contains_rejects_failure_mode_and_lists_rendered_fields() {
+    let (_root, case_root) = write_fixture(
+        "runtime_error_contains_failure_mode",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"ignore\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nruntime_error_contains = [\"overflow\"]\n",
+    );
+
+    let Err(error) = load_canonical_case_specs(&case_root, None) else {
+        panic!("runtime_error_contains in failure mode should be rejected");
+    };
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract
+    );
+    assert!(
+        error.message.contains("runtime_error_contains")
+            && error.message.contains("rendered_output_contains"),
+        "failure-mode error should list the rendered-output fields: {error}"
+    );
+}
+
+#[test]
+fn runtime_error_contains_rejects_empty_lists_and_entries() {
+    for (name, value, expected_message) in [
+        ("empty_list", "[]", "at least one entry"),
+        ("empty_entry", "[\"\"]", "empty 'runtime_error_contains'"),
+    ] {
+        let (_root, case_root) = write_fixture(
+            &format!("runtime_error_contains_{name}"),
+            &format!(
+                "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nruntime_error_contains = {value}\n"
+            ),
+        );
+
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("runtime_error_contains = {value} should be rejected");
+        };
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationContract
+        );
+        assert!(
+            error.message.contains(expected_message),
+            "unexpected error for runtime_error_contains = {value}: {error}"
+        );
+    }
 }
 
 #[test]

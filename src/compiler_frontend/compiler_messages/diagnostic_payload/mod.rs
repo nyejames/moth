@@ -10,6 +10,7 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 mod reason_keys;
 mod remap;
 mod types;

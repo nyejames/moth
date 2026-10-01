@@ -19,12 +19,14 @@ use crate::build_system::create_project_modules::project_module_graph::ProjectMo
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -225,6 +227,7 @@ fn synthetic_module(
             type_environment:
                 crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
@@ -402,6 +405,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         project,
         source_packages,
         resource_inputs,
+        NumericProfile::STANDARD,
     ) {
         Ok(_) => {
             panic!("project facade assembly should reject ProjectContext declaration provenance")
@@ -531,6 +535,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => panic!("source-package facade should reject ProjectContext helper provenance"),
@@ -605,6 +610,7 @@ fn source_package_facade_rejects_project_context_public_declaration() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => {
@@ -689,6 +695,7 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         project_boundary,
         source_packages,
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     )
     .expect("synthetic entry boundaries should assemble");
     let entry = compilation
@@ -811,6 +818,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => panic!("project facade should reject ProjectContext helper provenance"),
@@ -911,6 +919,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     )
     .expect("synthetic package boundary should assemble");
     let paths = compilation
@@ -1041,6 +1050,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        NumericProfile::STANDARD,
     )
     .expect("synthetic nominal package should assemble");
     let paths = compilation

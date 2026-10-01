@@ -4,6 +4,7 @@
 //! WHY: diagnostics need enough structure for terminal rendering, dev-server rendering, and future
 //! tooling without carrying final prose in compiler stages.
 
+use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -12,8 +13,8 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 pub struct DiagnosticLabel {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) frozen_identity_handle: Option<FrozenIdentityHandle>,
-    pub style: DiagnosticLabelStyle,
-    pub message: Option<DiagnosticLabelMessage>,
+    pub(crate) style: DiagnosticLabelStyle,
+    pub(crate) message: Option<DiagnosticLabelMessage>,
 }
 
 impl DiagnosticLabel {
@@ -64,15 +65,17 @@ pub enum DiagnosticLabelStyle {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DiagnosticLabelMessage {
+pub(crate) enum DiagnosticLabelMessage {
     PreviousDeclaration,
     ConflictingAccess,
-    ExpectedTypeDeclaredHere,
     ValueMovedHere,
+    /// Identifies the retained resolver for a source `#Config` input used by a failed operation.
+    ConfigInputOrigin {
+        input_name: StringId,
+        origin: BuildConfigValueOrigin,
+    },
     /// Render-ready label text for diagnostics that need local phrasing.
     RenderedText(StringId),
-    /// Marks the call site that triggered a generic function concrete instance emission.
-    GenericInstantiationCallSite,
     /// Marks the generic function body location where the concrete instantiation failed.
     GenericInstantiationBodySite,
     /// Marks the generic declaration that produced the instantiated body.
@@ -90,7 +93,11 @@ pub enum DiagnosticLabelMessage {
 impl DiagnosticLabelMessage {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         match self {
-            DiagnosticLabelMessage::RenderedText(message) => {
+            DiagnosticLabelMessage::RenderedText(message)
+            | DiagnosticLabelMessage::ConfigInputOrigin {
+                input_name: message,
+                ..
+            } => {
                 *message = remap.get(*message);
             }
             DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
@@ -100,9 +107,7 @@ impl DiagnosticLabelMessage {
             }
             DiagnosticLabelMessage::PreviousDeclaration
             | DiagnosticLabelMessage::ConflictingAccess
-            | DiagnosticLabelMessage::ExpectedTypeDeclaredHere
             | DiagnosticLabelMessage::ValueMovedHere
-            | DiagnosticLabelMessage::GenericInstantiationCallSite
             | DiagnosticLabelMessage::GenericInstantiationBodySite
             | DiagnosticLabelMessage::GenericInstantiationDeclarationSite
             | DiagnosticLabelMessage::GenericInferencePreviousEvidence

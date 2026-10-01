@@ -1,0 +1,9 @@
+hidden_collection |raw {U8}| -> {U8}:
+    return raw
+;
+
+hidden_octet |flag Byte| -> {Byte}:
+    return {flag}
+;
+
+[:html wasm skips unreachable fixed width values]

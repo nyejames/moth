@@ -1,0 +1,11 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["assertion failed"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_trap_contains = ["unreachable"]

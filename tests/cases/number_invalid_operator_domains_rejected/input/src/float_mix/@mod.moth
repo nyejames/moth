@@ -1,0 +1,3 @@
+bad_float_mix |left Dec2, right Float| -> Dec2:
+    return left + right
+;

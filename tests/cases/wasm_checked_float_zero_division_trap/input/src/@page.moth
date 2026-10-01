@@ -1,0 +1,5 @@
+divide_float |numerator F64, denominator F64| -> F64:
+    return numerator / denominator
+;
+
+result = divide_float(1.0, 0.0)

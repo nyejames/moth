@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[test]
 fn source_package_config_inputs_are_isolated_from_project_inputs() {
@@ -50,6 +51,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -653,6 +655,7 @@ html #= ()\n",
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -861,6 +864,7 @@ export:
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1559,6 +1563,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,

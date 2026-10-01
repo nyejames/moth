@@ -72,6 +72,10 @@ Current open questions include:
 - @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), whose
   agreed future source-block spelling is `$checked:` but whose proof-tier
   semantics, placement and soundness evidence remain open
+- `Dec` and `DecN` range domains
+- lossy `Float`/`Dec` conversion helpers and explicit rounded `Dec` scale changes
+- source-level bitwise integer operations
+- speculative `Byte` buffer and text-encoding APIs
 
 The `$checked:` spelling and compiler-owned direction do not make research
 obligations, deterministic limits or normal safety laws implemented or fully

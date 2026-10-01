@@ -1,0 +1,14 @@
+-- Reachable wide Error values keep the structured error_values rejection on
+-- HTML-Wasm: a four-billion code changes nothing about the target gate, so
+-- this surface stays unreachable there while HTML recovers the wide code.
+authored_failure |fail Bool| -> String, Error!:
+    if fail:
+        return! Error("authored maximum failure", 4294967295)
+    ;
+    return "success"
+;
+
+message = authored_failure(true) catch |err|:
+    then [:recovered=[err.message] code=[err.code]]
+;
+[:[message]]

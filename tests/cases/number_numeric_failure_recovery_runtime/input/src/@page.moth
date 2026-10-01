@@ -1,0 +1,19 @@
+divide_numbers |left Dec1, right Dec1| -> Dec1, Error!:
+    return left / right
+;
+power_number |base Dec1, exponent Int| -> Dec1, Error!:
+    return base ^ exponent
+;
+
+zero_division_code ~U32 = 0
+zero_division = divide_numbers(4.0, 0.0) catch |division_error|:
+    zero_division_code = division_error.code
+    then 0.0
+;
+negative_power_code ~U32 = 0
+negative_power = power_number(2.0, -1) catch |power_error|:
+    negative_power_code = power_error.code
+    then 0.0
+;
+
+[:number errors zero-divisor=[zero_division_code] negative-exponent=[negative_power_code]]

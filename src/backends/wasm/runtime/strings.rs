@@ -1,4 +1,4 @@
-//! Runtime string helper identifiers.
+//! Runtime helper identifiers shared by the Wasm emitter and runtime.
 //!
 //! Buffer layout (12 bytes, allocated by `StringNewBuffer`):
 //!   offset 0: content_ptr  (i32): pointer to accumulated byte region
@@ -27,7 +27,22 @@ pub(crate) enum WasmRuntimeHelper {
     StringLen,
     /// Compare two finalized string handles by their UTF-8 byte contents.
     StringEqual,
-    /// Convert i64 scalar values into finalized string handles for template interpolation.
+    /// Convert one finite F32 value to its rounded binary16 bit pattern.
+    F32ToF16Bits,
+    /// Convert a finite binary16 bit pattern to its exact F32 carrier.
+    F16BitsToF32,
+    /// Compute binary64 exponentiation using the portable fdlibm algorithm.
+    FloatPower,
+    /// Compute exact binary64 remainder using significand shift/subtract.
+    FloatRemainder,
+    /// Convert one finite Float/F16/F32/F64 value to a finalized decimal string handle.
+    StringFromFloat,
+    /// Compute the Ryu shortest decimal pair for a finite positive binary float.
+    FloatToDecimal,
+
+    /// Convert an unsigned i64 bit pattern into a finalized decimal string handle.
+    StringFromU64,
+    /// Convert signed i64 scalar values into finalized string handles.
     StringFromI64,
     /// Allocate an empty Vec-handle header for `Vec<String>` runtime fragments.
     VecNew,

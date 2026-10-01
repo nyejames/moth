@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " folded: 300 72 3.5 -3 -1 true 0.75 128 true"

@@ -1,0 +1,22 @@
+export:
+    -- Typed U32 surface for Error.code identity: the value helpers take a
+    -- U32 code and return a U32, the predicate helpers take a U32 code and
+    -- return Bool, and echo_code reads the public Error.code field, so the
+    -- public cross-module interface carries the U32 type identity, not a
+    -- numeric spelling.
+    echo_code |error Error| -> U32:
+        return error.code
+    ;
+
+    record_low_code |code U32| -> U32:
+        return code + 1
+    ;
+
+    code_is_i32_boundary |code U32| -> Bool:
+        return code is 2147483648
+    ;
+
+    code_is_u32_max |code U32| -> Bool:
+        return code is 4294967295
+    ;
+;

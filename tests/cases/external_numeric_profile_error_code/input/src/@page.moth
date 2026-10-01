@@ -1,0 +1,7 @@
+@external_failure.js fail_external
+
+value = fail_external() catch |err|:
+    io.line([: external error code=[err.code] matches Int literal=[err.code is 500]])
+    then "caught"
+;
+

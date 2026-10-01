@@ -1,0 +1,5 @@
+project #= (
+    name = "numeric_range_proof_runtime_narrowing_rejected",
+    entry_root = "src",
+)
+html #= ()

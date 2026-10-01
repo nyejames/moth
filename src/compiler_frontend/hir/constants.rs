@@ -4,7 +4,9 @@
 //! WHY: constants are backend/tooling metadata, not ordinary runtime statements.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::ids::HirConstId;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
@@ -20,9 +22,14 @@ pub enum HirConstValue {
     /// current validation matches them with `_`. Tests and future backends may
     /// read these values.
     #[allow(dead_code)]
-    Int(i32),
+    Int(i64),
     #[allow(dead_code)]
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    #[allow(dead_code)]
+    FixedScalar(FixedScalarValue),
+    /// One exact arbitrary-precision decimal coefficient and its canonical scale.
+    Number(NumberValue),
     #[allow(dead_code)]
     Bool(bool),
     #[allow(dead_code)]
@@ -96,6 +103,8 @@ impl HirConstValue {
             Self::OptionSome(inner) => inner.remap_string_ids(remap),
             Self::Int(_)
             | Self::Float(_)
+            | Self::FixedScalar(_)
+            | Self::Number(_)
             | Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)

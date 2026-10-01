@@ -1,0 +1,256 @@
+identity_int |value Int| -> Int:
+    return value
+;
+
+identity_float |value Float| -> Float:
+    return value
+;
+
+identity_i8 |value I8| -> I8:
+    return value
+;
+
+identity_u16 |value U16| -> U16:
+    return value
+;
+
+identity_i64 |value I64| -> I64:
+    return value
+;
+
+identity_u64 |value U64| -> U64:
+    return value
+;
+
+identity_u32 |value U32| -> U32:
+    return value
+;
+
+identity_f32 |value F32| -> F32:
+    return value
+;
+
+identity_f64 |value F64| -> F64:
+    return value
+;
+
+identity_f16 |value F16| -> F16:
+    return value
+;
+
+equal_f16 |left F16, right F16| -> Bool:
+    return left is right
+;
+
+less_f16 |left F16, right F16| -> Bool:
+    return left < right
+;
+
+rebind_f16 |value F16, replacement F16| -> F16:
+    rebound ~F16 = copy value
+    if rebound is value:
+        rebound = replacement
+    else
+        rebound = value
+    ;
+    return rebound
+;
+
+f16_from_i16 |value I16| -> F16:
+    converted F16 = cast value
+    return converted
+;
+
+add_f16 |left F16, right F16| -> F32:
+    return left + right
+;
+
+identity_byte |value Byte| -> Byte:
+    return value
+;
+
+less_i64_u64 |signed I64, unsigned U64| -> Bool:
+    return signed < unsigned
+;
+
+greater_u64_i64 |unsigned U64, signed I64| -> Bool:
+    return unsigned > signed
+;
+
+equal_i64_u64 |signed I64, unsigned U64| -> Bool:
+    return signed is unsigned
+;
+
+equal_u64_i64 |unsigned U64, signed I64| -> Bool:
+    return unsigned is signed
+;
+
+profile_integer_equals_float |integer Int, real Float| -> Bool:
+    return integer is real
+;
+
+less_i8 |left I8, right I8| -> Bool:
+    return left < right
+;
+
+greater_u16 |left U16, right U16| -> Bool:
+    return left > right
+;
+
+greater_u32 |left U32, right U32| -> Bool:
+    return left > right
+;
+
+greater_f32_f64 |single F32, double F64| -> Bool:
+    return single > double
+;
+
+less_f64_f32 |double F64, single F32| -> Bool:
+    return double < single
+;
+
+equal_f32_f64 |single F32, double F64| -> Bool:
+    return single is double
+;
+
+less_byte |left Byte, right Byte| -> Bool:
+    return left < right
+;
+
+equal_byte |left Byte, right Byte| -> Bool:
+    return left is right
+;
+
+profile_float_add |left Float, right Float| -> Float:
+    return left + right
+;
+
+profile_float_subtract |left Float, right Float| -> Float:
+    return left - right
+;
+
+profile_float_multiply |left Float, right Float| -> Float:
+    return left * right
+;
+
+profile_float_divide |left Float, right Float| -> Float:
+    return left / right
+;
+
+profile_float_remainder |left Float, right Float| -> Float:
+    return left % right
+;
+
+profile_float_power |base Float, exponent Float| -> Float:
+    return base ^ exponent
+;
+
+profile_float_negate |value Float| -> Float:
+    return -value
+;
+
+profile_int_to_float |value Int| -> Float:
+    converted Float = cast value
+    return converted
+;
+
+profile_int_divide |numerator Int, denominator Int| -> Float:
+    return numerator / denominator
+;
+
+fixed_u64_u32_divide |numerator U64, denominator U32| -> F64:
+    return numerator / denominator
+;
+
+fixed_i64_above_int32 = identity_i64(2147483648)
+fixed_i64_equal = if fixed_i64_above_int32 is identity_i64(2147483648) then [:fixed-i64-exact] else [:failed-fixed-i64-exact]
+fixed_i64_order = if fixed_i64_above_int32 > identity_i64(2147483647) then [:fixed-i64-above-int32] else [:failed-fixed-i64-above-int32]
+
+profile_int_value = identity_int(2147483648)
+profile_comparison = profile_integer_equals_float(identity_int(16777217), identity_float(16777216.0))
+profile_comparison_marker = if profile_comparison then [:profile-comparison-true] else [:profile-comparison-false]
+
+signed_negative = identity_i64(-1)
+signed_zero = identity_i64(0)
+unsigned_zero = identity_u64(0)
+unsigned_high = identity_u64(9223372036854775808)
+unsigned_max = identity_u64(18446744073709551615)
+i64_u64_negative_zero = if less_i64_u64(signed_negative, unsigned_zero) then [:i64-negative-before-u64-zero] else [:failed-i64-negative-before-u64-zero]
+u64_i64_zero_negative = if greater_u64_i64(unsigned_zero, signed_negative) then [:u64-zero-after-i64-negative] else [:failed-u64-zero-after-i64-negative]
+i64_u64_zero_equal = if equal_i64_u64(signed_zero, unsigned_zero) then [:i64-zero-equals-u64-zero] else [:failed-i64-zero-equals-u64-zero]
+u64_i64_zero_equal = if equal_u64_i64(unsigned_zero, signed_zero) then [:u64-zero-equals-i64-zero] else [:failed-u64-zero-equals-i64-zero]
+i64_u64_zero_not_less = if less_i64_u64(signed_zero, unsigned_zero) is false then [:i64-zero-not-less-than-u64-zero] else [:failed-i64-zero-not-less-than-u64-zero]
+u64_i64_zero_not_greater = if greater_u64_i64(unsigned_zero, signed_zero) is false then [:u64-zero-not-greater-than-i64-zero] else [:failed-u64-zero-not-greater-than-i64-zero]
+i64_u64_negative_not_equal_max = if equal_i64_u64(signed_negative, unsigned_max) is false then [:i64-negative-not-equal-u64-max] else [:failed-i64-negative-not-equal-u64-max]
+u64_i64_max_not_equal_negative = if equal_u64_i64(unsigned_max, signed_negative) is false then [:u64-max-not-equal-i64-negative] else [:failed-u64-max-not-equal-i64-negative]
+i64_u64_negative_high = if less_i64_u64(signed_negative, unsigned_high) then [:i64-negative-before-u64-high] else [:failed-i64-negative-before-u64-high]
+u64_i64_high_negative = if greater_u64_i64(unsigned_high, signed_negative) then [:u64-high-after-i64-negative] else [:failed-u64-high-after-i64-negative]
+i64_u64_zero_high = if less_i64_u64(signed_zero, unsigned_high) then [:i64-zero-before-u64-high] else [:failed-i64-zero-before-u64-high]
+u64_i64_high_zero = if greater_u64_i64(unsigned_high, signed_zero) then [:u64-high-after-i64-zero] else [:failed-u64-high-after-i64-zero]
+
+signed_narrow = identity_i8(-128)
+signed_narrow_high = identity_i8(127)
+signed_narrow_order = if less_i8(signed_narrow, signed_narrow_high) then [:i8-min-before-max] else [:failed-i8-min-before-max]
+signed_narrow_reverse = if less_i8(signed_narrow_high, signed_narrow) is false then [:i8-max-not-before-min] else [:failed-i8-max-not-before-min]
+unsigned_narrow = identity_u16(65535)
+unsigned_narrow_low = identity_u16(1)
+unsigned_narrow_order = if greater_u16(unsigned_narrow, unsigned_narrow_low) then [:u16-max-greater-than-one] else [:failed-u16-max-greater-than-one]
+unsigned_narrow_reverse = if greater_u16(unsigned_narrow_low, unsigned_narrow) is false then [:u16-one-not-greater-than-max] else [:failed-u16-one-not-greater-than-max]
+u32_high = identity_u32(2147483648)
+u32_low = identity_u32(2147483647)
+u32_high_order = if greater_u32(u32_high, u32_low) then [:u32-high-over-low] else [:failed-u32-high-over-low]
+u32_low_reverse = if greater_u32(u32_low, u32_high) is false then [:u32-low-not-over-high] else [:failed-u32-low-not-over-high]
+
+single_value = identity_f32(0.1)
+double_value = identity_f64(0.1)
+mixed_f32_greater = if greater_f32_f64(single_value, double_value) then [:f32-over-f64] else [:failed-f32-over-f64]
+mixed_f64_less = if less_f64_f32(double_value, single_value) then [:f64-under-f32] else [:failed-f64-under-f32]
+mixed_float_not_equal = if equal_f32_f64(single_value, double_value) is false then [:f32-not-equal-f64] else [:failed-f32-not-equal-f64]
+
+byte_low = identity_byte(128)
+byte_high = identity_byte(255)
+byte_same = identity_byte(255)
+byte_ordered = if less_byte(byte_low, byte_high) then [:byte-low-before-high] else [:failed-byte-low-before-high]
+byte_reverse = if less_byte(byte_high, byte_low) is false then [:byte-high-not-before-low] else [:failed-byte-high-not-before-low]
+byte_equal = if equal_byte(byte_high, byte_same) then [:byte-high-equals-copy] else [:failed-byte-high-equals-copy]
+byte_not_equal = if equal_byte(byte_low, byte_high) is false then [:byte-low-not-equal-high] else [:failed-byte-low-not-equal-high]
+
+assert(profile_float_add(0.1, 0.2) is not 0.3)
+assert(profile_float_subtract(6.5, 1.25) is 5.25)
+assert(profile_float_multiply(1.5, 2.0) is 3.0)
+assert(profile_float_divide(7.5, 2.5) is 3.0)
+assert(profile_float_remainder(-5.5, 2.0) is -1.5)
+assert(profile_float_remainder(5.5, -2.0) is 1.5)
+assert(profile_float_power(16.0, 0.5) is 4.0)
+assert(profile_float_power(2.0, -2.0) is 0.25)
+assert(profile_float_negate(1.5) is -1.5)
+assert(profile_float_negate(-1.5) is 1.5)
+assert(profile_int_to_float(16777217) is 16777217.0)
+assert(profile_int_divide(16777217, identity_int(1)) is 16777217.0)
+assert(fixed_u64_u32_divide(18446744073709551615, 3) is identity_f64(6148914691236516864.0))
+assert(profile_int_divide(3, 2) is 1.5)
+
+[:profile-int=[profile_int_value] profile-comparison=[profile_comparison_marker] fixed-i64=[fixed_i64_equal]/[fixed_i64_order] signed-unsigned=[i64_u64_negative_zero]/[u64_i64_zero_negative]/[i64_u64_zero_equal]/[u64_i64_zero_equal]/[i64_u64_zero_not_less]/[u64_i64_zero_not_greater]/[i64_u64_negative_not_equal_max]/[u64_i64_max_not_equal_negative]/[i64_u64_negative_high]/[u64_i64_high_negative]/[i64_u64_zero_high]/[u64_i64_high_zero] narrow=[signed_narrow_order]/[signed_narrow_reverse]/[unsigned_narrow_order]/[unsigned_narrow_reverse]/[u32_high_order]/[u32_low_reverse] float-mix=[mixed_f32_greater]/[mixed_f64_less]/[mixed_float_not_equal] byte=[byte_ordered]/[byte_reverse]/[byte_equal]/[byte_not_equal]]
+
+f16_above_midpoint = identity_f16(1.00048828125000000000001)
+f16_expected_above = identity_f16(1.0009765625)
+f16_at_midpoint = identity_f16(1.00048828125)
+f16_one = identity_f16(1.0)
+f16_direct_marker = if equal_f16(f16_above_midpoint, f16_expected_above) then [:f16-above-midpoint-rounds-up] else [:failed-f16-above-midpoint-rounding]
+f16_midpoint_marker = if equal_f16(f16_at_midpoint, f16_one) and less_f16(f16_at_midpoint, f16_above_midpoint) then [:f16-midpoint-ties-to-even-one] else [:failed-f16-midpoint-ties-to-even]
+
+f16_rebound = rebind_f16(f16_above_midpoint, f16_one)
+f16_rebind_marker = if equal_f16(f16_rebound, f16_one) and less_f16(f16_rebound, f16_above_midpoint) then [:f16-local-rebind-returned-f16] else [:failed-f16-local-rebind-return]
+
+f16_from_2049 = f16_from_i16(2049)
+f16_from_2051 = f16_from_i16(2051)
+f16_integer_cast_marker = if equal_f16(f16_from_2049, identity_f16(2048.0)) and equal_f16(f16_from_2051, identity_f16(2052.0)) then [:i16-to-f16-ties-even] else [:failed-i16-to-f16-ties-even]
+
+f16_sum = add_f16(f16_one, f16_expected_above)
+f16_arithmetic_marker = if f16_sum is identity_f32(2.0009765625) and f16_sum is not identity_f32(2.0) then [:f16-f16-add-stays-f32] else [:failed-f16-f16-add-f32-result]
+
+f16_min_subnormal = identity_f16(0.000000059604644775390625)
+f16_next_subnormal = identity_f16(0.00000011920928955078125)
+f16_subnormal_marker = if f16_min_subnormal is not identity_f16(0.0) and less_f16(f16_min_subnormal, f16_next_subnormal) then [:f16-min-subnormal-preserved] else [:failed-f16-min-subnormal]
+
+[:f16-profile=[f16_direct_marker]/[f16_midpoint_marker]/[f16_rebind_marker]/[f16_integer_cast_marker]/[f16_arithmetic_marker]/[f16_subnormal_marker]]

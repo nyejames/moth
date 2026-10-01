@@ -1116,6 +1116,50 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
 }
 
 #[test]
+fn borrow_problem_hir_extractor_maps_oversized_index_to_dynamic_projection() {
+    let region = RegionId(0);
+    let source = LocalId(0);
+    let target = LocalId(1);
+
+    // Above `u32::MAX`, so the `FixedIndex` path cannot represent it.
+    let index = int_expression(10, i64::from(u32::MAX) + 1, region);
+    let module = module_with_block(HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![hir_local(source, region), hir_local(target, region)],
+        statements: vec![HirStatement {
+            id: HirNodeId(0),
+            kind: HirStatementKind::Assign {
+                target: HirPlace::Local(target),
+                value: HirExpression {
+                    id: HirValueId(11),
+                    kind: HirExpressionKind::Load(HirPlace::Index {
+                        base: Box::new(HirPlace::Local(source)),
+                        index: Box::new(index),
+                    }),
+                    ty: builtin_type_ids::INT,
+                    value_kind: ValueKind::RValue,
+                    region,
+                    span: None,
+                },
+            },
+            span: None,
+        }],
+        terminator: HirTerminator::Return(load_expression(12, target, region)),
+    });
+    let function = function_for(HirBlockId(0));
+    let problem = from_hir(&module, &function, None, None).expect("indexed load should extract");
+
+    assert!(
+        problem
+            .places()
+            .iter()
+            .any(|place| place.projections.as_ref() == [ProjectionElem::DynamicIndex]),
+        "an index above u32 range must lower to the dynamic projection path"
+    );
+}
+
+#[test]
 fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
     let region = RegionId(0);
     let source_local = LocalId(0);
@@ -1715,7 +1759,7 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     }
 }
 
-fn int_expression(id: u32, value: i32, region: RegionId) -> HirExpression {
+fn int_expression(id: u32, value: i64, region: RegionId) -> HirExpression {
     HirExpression {
         id: HirValueId(id),
         kind: HirExpressionKind::Int(value),

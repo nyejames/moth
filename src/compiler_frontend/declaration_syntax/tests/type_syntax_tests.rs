@@ -23,6 +23,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::datatypes::number::NumberScale;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
@@ -270,6 +272,77 @@ fn declaration_context_parses_named_optional_type() {
             } if name == point
         )
     ));
+}
+
+#[test]
+fn dec_family_spellings_parse_as_builtin_number_types() {
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+
+    for (spelling, expected_scale) in [
+        ("Dec", 0u16),
+        ("Dec0", 0),
+        ("Dec1", 1),
+        ("Dec2", 2),
+        ("Dec256", 256),
+    ] {
+        let name = string_table.intern(spelling);
+        let stream = stream_from_tokens(
+            vec![symbol_token(name), token(TokenTag::EOF)],
+            &mut string_table,
+        );
+
+        let parsed = parse_type_annotation_test(
+            &stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &mut string_table,
+        )
+        .unwrap_or_else(|failure| {
+            panic!("{spelling:?} should parse as a builtin scaled type: {failure:?}")
+        });
+
+        let expected_scale =
+            NumberScale::new(expected_scale).expect("test scale is within capacity");
+        assert!(
+            matches!(
+                parsed,
+                ParsedTypeRef::BuiltinNumber { scale, span: Some(_) } if scale == expected_scale
+            ),
+            "{spelling:?} should be the builtin scaled type at scale {expected_scale}, got {parsed:?}"
+        );
+    }
+}
+
+#[test]
+fn invalid_and_retired_scaled_spellings_stay_named_types() {
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+
+    // Invalid scale spellings (`Dec01`, `Dec257`) stay named so resolution reports the
+    // familiar unknown-type diagnostic, and the retired `Number` family spellings are
+    // ordinary named types now.
+    for spelling in ["Dec01", "Dec257", "DecBox", "Number", "Number0", "Number2"] {
+        let name = string_table.intern(spelling);
+        let stream = stream_from_tokens(
+            vec![symbol_token(name), token(TokenTag::EOF)],
+            &mut string_table,
+        );
+
+        let parsed = parse_type_annotation_test(
+            &stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &mut string_table,
+        )
+        .unwrap_or_else(|failure| panic!("{spelling:?} should parse as a named type: {failure:?}"));
+
+        assert!(
+            matches!(
+                parsed,
+                ParsedTypeRef::Named { name: parsed_name, span: Some(_) } if parsed_name == name
+            ),
+            "{spelling:?} must stay on the named-type path, got {parsed:?}"
+        );
+    }
 }
 
 #[test]
@@ -679,6 +752,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
+        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -779,6 +853,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
+        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -840,6 +915,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
+        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -907,6 +983,7 @@ fn bare_generic_type_name_requires_type_arguments() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
+        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,

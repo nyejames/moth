@@ -1,0 +1,115 @@
+integer_targets |value Dec0| -> String:
+    as_int Int = cast value catch:
+        then -1
+    ;
+    as_i8 I8 = cast value catch:
+        then 0
+    ;
+    as_i16 I16 = cast value catch:
+        then 0
+    ;
+    as_i32 I32 = cast value catch:
+        then 0
+    ;
+    as_i64 I64 = cast value catch:
+        then 0
+    ;
+    as_u8 U8 = cast value catch:
+        then 0
+    ;
+    as_u16 U16 = cast value catch:
+        then 0
+    ;
+    as_u32 U32 = cast value catch:
+        then 0
+    ;
+    as_u64 U64 = cast value catch:
+        then 0
+    ;
+    return [:[as_int]/[as_i8]/[as_i16]/[as_i32]/[as_i64]/[as_u8]/[as_u16]/[as_u32]/[as_u64]]
+;
+
+int_to_number |value Int| -> Dec0:
+    return cast value
+;
+u64_to_number |value U64| -> Dec2:
+    return cast value
+;
+integer_to_number256 |value Int| -> Dec256:
+    return cast value
+;
+widen_to_number4 |value Dec1| -> Dec4:
+    return cast value
+;
+narrow_to_number2 |value Dec4| -> Dec2, Error!:
+    return cast! value
+;
+number_to_u64 |value Dec0| -> U64, Error!:
+    return cast! value
+;
+fraction_to_i8 |value Dec1| -> I8, Error!:
+    return cast! value
+;
+number_to_int |value Dec0| -> Int, Error!:
+    return cast! value
+;
+add_float |value Float, increment Float| -> Float:
+    return value + increment
+;
+
+
+all_targets = integer_targets(42)
+int_source = int_to_number(42)
+profile_float = add_float(16777216.0, 1.0)
+maximum_u64 Dec0 = 18446744073709551615
+u64_value = number_to_u64(maximum_u64) catch:
+    then 0
+;
+u64_source = u64_to_number(u64_value)
+
+wide256 = integer_to_number256(42)
+wide256_matches = wide256 is 42
+wide4 = widen_to_number4(12.3)
+narrowed = narrow_to_number2(12.3400) catch:
+    then 0.0
+;
+narrow_error_code ~U32 = 0
+inexact_narrowing = narrow_to_number2(12.3456) catch |narrow_error|:
+    narrow_error_code = narrow_error.code
+    then 0.0
+;
+
+negative_u64_code ~U32 = 0
+negative_u64 = number_to_u64(-1) catch |negative_error|:
+    negative_u64_code = negative_error.code
+    then 0
+;
+fractional_i8_code ~U32 = 0
+fractional_i8 = fraction_to_i8(12.5) catch |fractional_error|:
+    fractional_i8_code = fractional_error.code
+    then 0
+;
+fraction_before_range_code ~U32 = 0
+fraction_before_range = fraction_to_i8(1000.5) catch |fraction_range_error|:
+    fraction_before_range_code = fraction_range_error.code
+    then 0
+;
+
+int64_maximum = number_to_int(9223372036854775807) catch:
+    then 0
+;
+int64_minimum = number_to_int(-9223372036854775808) catch:
+    then 0
+;
+int64_high_code ~U32 = 0
+int64_high = number_to_int(9223372036854775808) catch |high_error|:
+    int64_high_code = high_error.code
+    then 0
+;
+int64_low_code ~U32 = 0
+int64_low = number_to_int(-9223372036854775809) catch |low_error|:
+    int64_low_code = low_error.code
+    then 0
+;
+
+[:number casts targets=[all_targets] int-source=[int_source] U64max=[u64_value]/[u64_source] scale=[wide4]/[narrowed]/[narrow_error_code] scale256=[wide256_matches] integer-failures=[negative_u64_code]/[fractional_i8_code]/[fraction_before_range_code] int64=[int64_maximum]/[int64_minimum]/[int64_high_code]/[int64_low_code] float64=[profile_float]]

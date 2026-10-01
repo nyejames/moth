@@ -3,8 +3,8 @@ message = "Testing host functions"
 io.line([: [message]])
 
 -- Test with different data types
-number = 42
-io.line([: Number: [number]])
+numeric_value = 42
+io.line([: Number: [numeric_value]])
 
 -- Test with expressions
 result = 10 + 5

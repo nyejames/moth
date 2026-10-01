@@ -416,7 +416,9 @@ fn insert_from_expression(
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
+        | ExpressionKind::Number(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::FixedScalar(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)

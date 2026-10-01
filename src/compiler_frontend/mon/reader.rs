@@ -5,14 +5,20 @@
 //! byte spans; validation then consumes that shape against an immutable prepared schema and
 //! produces the public owned [`Value`] tree.
 
+use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::number::{NumberScale, effective_decimal_scale};
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::numeric_text::parse::{
-    materialize_normalized_f64, materialize_normalized_i32, parse_numeric_literal,
+    literal_kind_initialises, materialize_normalized_fixed_scalar, materialize_normalized_float,
+    materialize_normalized_int, parse_numeric_literal,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 
 use super::schema::{PreparedFields, PreparedType, PreparedVariants, clone_default};
 use super::{
     BudgetState, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema, Span, Value,
+    fixed_scalar_to_value,
 };
 
 /// Decode one complete MON document against a prepared root record schema.
@@ -1223,10 +1229,11 @@ fn validate_value(
             RawKind::String(value) => Ok(Value::String(value)),
             _ => type_mismatch(raw.span, path, "expected string"),
         },
-        PreparedType::Int => validate_int(raw, budget, path),
-        PreparedType::Float => validate_float(raw, budget, path),
+        PreparedType::Int { width } => validate_int(raw, *width, budget, path),
+        PreparedType::Float { precision } => validate_float(raw, *precision, budget, path),
         PreparedType::Integer => validate_integer(raw, budget, path),
         PreparedType::Decimal { scale } => validate_decimal(raw, *scale, budget, path),
+        PreparedType::Fixed(scalar) => validate_fixed(raw, *scalar, budget, path),
         PreparedType::Optional(inner) => {
             if matches!(raw.kind, RawKind::None) {
                 Ok(Value::None)
@@ -1294,6 +1301,7 @@ fn type_mismatch<T>(span: Span, path: &[PathSegment], detail: &str) -> Result<T,
 
 fn validate_int(
     raw: RawValue<'_>,
+    width: IntWidth,
     _budget: &mut BudgetState<'_>,
     path: &[PathSegment],
 ) -> Result<Value, MonError> {
@@ -1309,13 +1317,14 @@ fn validate_int(
             "Int requires whole-number spelling",
         ));
     }
-    materialize_normalized_i32(&number.normalized, number.text.starts_with('-'))
+
+    // The receiving node carries the profile the schema was prepared under, so an `Int64`
+    // boundary materialises its own range instead of the delivered `Int32` default.
+    materialize_normalized_int(&number.normalized, number.text.starts_with('-'), width)
         .map(Value::Int)
         .map_err(|reason| {
             let code = match reason {
-                crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange => {
-                    MonErrorCode::NumericRange
-                }
+                NumberLiteralErrorReason::OutsideIntRange => MonErrorCode::NumericRange,
                 _ => MonErrorCode::NumericSyntax,
             };
             MonError::new(
@@ -1329,6 +1338,7 @@ fn validate_int(
 
 fn validate_float(
     raw: RawValue<'_>,
+    precision: FloatPrecision,
     _budget: &mut BudgetState<'_>,
     path: &[PathSegment],
 ) -> Result<Value, MonError> {
@@ -1336,16 +1346,15 @@ fn validate_float(
     let RawKind::Number(number) = raw.kind else {
         return type_mismatch(span, path, "expected Float numeric literal");
     };
-    materialize_normalized_f64(&number.normalized, number.text.starts_with('-'))
+
+    // `Float` materialises at the profile the receiving node captured, rounding once at that
+    // precision, exactly as the fixed binary floats round at their own.
+    materialize_normalized_float(&number.normalized, number.text.starts_with('-'), precision)
         .map(Value::Float)
         .map_err(|reason| {
             let code = match reason {
-                crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::NonFiniteFloat => {
-                    MonErrorCode::NonFiniteFloat
-                }
-                crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::ParseOverflow => {
-                    MonErrorCode::NonFiniteFloat
-                }
+                NumberLiteralErrorReason::NonFiniteFloat => MonErrorCode::NonFiniteFloat,
+                NumberLiteralErrorReason::ParseOverflow => MonErrorCode::NonFiniteFloat,
                 _ => MonErrorCode::NumericSyntax,
             };
             MonError::new(
@@ -1353,6 +1362,60 @@ fn validate_float(
                 Some(span),
                 path,
                 format!("cannot materialise Float ({reason:?})"),
+            )
+        })
+}
+
+/// Decode one explicit-width scalar or `Byte` literal.
+///
+/// WHAT: fixed integers and `Byte` require whole-number spelling and their own exact range,
+///       unsigned widths reject every negative spelling including `-0`, and fixed binary floats
+///       accept every finite numeric category, rounding once at their own precision. Both the
+///       category rule and the materialisation come from the shared numeric-text owner, so a MON
+///       literal agrees with the same spelling reaching the same width from source.
+/// WHY:  the budget was already charged before the normalized magnitude was retained, and this arm
+///       only reads those facts, so an explicit-width literal needs no new budget kind.
+fn validate_fixed(
+    raw: RawValue<'_>,
+    scalar: FixedScalar,
+    _budget: &mut BudgetState<'_>,
+    path: &[PathSegment],
+) -> Result<Value, MonError> {
+    let span = raw.span;
+    let RawKind::Number(number) = raw.kind else {
+        return Err(MonError::new(
+            MonErrorCode::TypeMismatch,
+            Some(span),
+            path,
+            format!("expected {} numeric literal", scalar.name()),
+        ));
+    };
+    if !literal_kind_initialises(number.kind, scalar) {
+        return Err(MonError::new(
+            MonErrorCode::NumericType,
+            Some(span),
+            path,
+            format!("{} requires whole-number spelling", scalar.name()),
+        ));
+    }
+
+    materialize_normalized_fixed_scalar(&number.normalized, number.text.starts_with('-'), scalar)
+        .map(fixed_scalar_to_value)
+        .map_err(|reason| {
+            let code = match reason {
+                NumberLiteralErrorReason::NonFiniteFloat
+                | NumberLiteralErrorReason::NonFiniteFixedFloat(_) => MonErrorCode::NonFiniteFloat,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(_)
+                | NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => {
+                    MonErrorCode::NumericRange
+                }
+                _ => MonErrorCode::NumericSyntax,
+            };
+            MonError::new(
+                code,
+                Some(span),
+                path,
+                format!("cannot materialise {} ({reason:?})", scalar.name()),
             )
         })
 }
@@ -1381,7 +1444,7 @@ fn validate_integer(
 
 fn validate_decimal(
     raw: RawValue<'_>,
-    scale: u8,
+    scale: NumberScale,
     budget: &mut BudgetState<'_>,
     path: &[PathSegment],
 ) -> Result<Value, MonError> {
@@ -1389,12 +1452,12 @@ fn validate_decimal(
     let RawKind::Number(number) = raw.kind else {
         return type_mismatch(span, path, "expected exact Decimal numeric literal");
     };
-    if decimal_effective_scale(&number) > scale as usize {
+    if effective_decimal_scale(&number.normalized) > scale.get() as usize {
         return Err(MonError::new(
             MonErrorCode::NumericScale,
             Some(span),
             path,
-            format!("Decimal literal exceeds declared scale {scale}"),
+            format!("Decimal literal exceeds declared scale {}", scale.get()),
         ));
     }
 
@@ -1416,28 +1479,6 @@ fn take_signed_normalized_text(
     }
 
     Ok(number.normalized)
-}
-
-fn decimal_effective_scale(number: &NumericRaw<'_>) -> usize {
-    let (coefficient, exponent) = match number.normalized.split_once('e') {
-        Some((coefficient, exponent)) => (coefficient, Some(exponent)),
-        None => (number.normalized.as_str(), None),
-    };
-    let (exponent_magnitude, negative_exponent) = match exponent {
-        None => (0, false),
-        Some(exponent) => {
-            let negative_exponent = exponent.starts_with('-');
-            let digits = exponent
-                .strip_prefix('+')
-                .or_else(|| exponent.strip_prefix('-'))
-                .unwrap_or(exponent);
-            (
-                super::schema::saturating_decimal_usize(digits),
-                negative_exponent,
-            )
-        }
-    };
-    super::schema::decimal_effective_scale(coefficient, exponent_magnitude, negative_exponent)
 }
 
 fn validate_record(

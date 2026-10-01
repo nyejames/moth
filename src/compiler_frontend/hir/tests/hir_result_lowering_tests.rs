@@ -15,6 +15,8 @@ use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_exp
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::numeric::HirNumericOp;
@@ -1030,7 +1032,10 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         matches!(
             statement.kind,
             HirStatementKind::NumericOp {
-                op: HirNumericOp::IntAdd,
+                op: HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Int
+                },
                 ..
             }
         )

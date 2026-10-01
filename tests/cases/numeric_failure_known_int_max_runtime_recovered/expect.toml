@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["k1 known-int runtime control=2147483647 copy=2147483647 copy-sum=2147483647 overflow-code=301 success=2147483647"]

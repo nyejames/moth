@@ -167,7 +167,7 @@ pub(crate) use handoff_materialization::{
 pub(crate) use preparation::{
     RuntimeTemplateReason, TemplateHelperKind, TemplatePreparation, TemplatePreparationFacts,
     TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
-    refresh_kind_from_preparation,
+    prepare_tir_view_with_source_scope, refresh_kind_from_preparation,
 };
 
 #[cfg(test)]

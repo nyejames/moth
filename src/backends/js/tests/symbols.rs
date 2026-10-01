@@ -44,10 +44,12 @@ fn missing_field_name_metadata_is_an_internal_compiler_error() {
     });
 
     let borrow_analysis = BorrowCheckReport::default();
+    let numeric_proofs = NumericProofs::default();
     let path_table = path_fork.snapshot_table();
     let mut emitter = JsEmitter::new(
         &module,
         &borrow_analysis,
+        &numeric_proofs,
         &string_table,
         &path_table,
         default_config(),
@@ -148,6 +150,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

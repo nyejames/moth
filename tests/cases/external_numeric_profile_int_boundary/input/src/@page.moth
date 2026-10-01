@@ -1,0 +1,6 @@
+@external_int.js identity_int
+
+positive = identity_int(9007199254740991)
+negative = identity_int(-9007199254740991)
+large = identity_int(5000000000)
+io.line([: external_native_int positive=[positive] negative=[negative] large=[large]])

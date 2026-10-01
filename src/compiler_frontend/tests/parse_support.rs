@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -251,6 +252,7 @@ pub(crate) fn parse_single_file_ast_build_result(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
+            numeric_profile: NumericProfile::STANDARD,
             root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &style_directives,

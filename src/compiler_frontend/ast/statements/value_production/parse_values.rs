@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -177,6 +178,7 @@ pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
         produced_values,
         &target.result_type_ids,
         type_interner.environment(),
+        context.numeric_profile.float_precision,
         target.receiver_kind,
     )
 }
@@ -279,6 +281,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 expression,
                 expected_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 mismatch_context_for_receiver(receiver_kind),
             )?;
         }
@@ -316,6 +319,7 @@ fn validate_and_coerce_produced_values(
     produced_values: Vec<Expression>,
     expected_type_ids: &[TypeId],
     type_environment: &TypeEnvironment,
+    float_precision: FloatPrecision,
     receiver_kind: ValueReceiverKind,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
     let mut checked_values = Vec::with_capacity(produced_values.len());
@@ -330,6 +334,7 @@ fn validate_and_coerce_produced_values(
             produced_value,
             *expected_type_id,
             type_environment,
+            float_precision,
             mismatch_context,
         )?);
     }
@@ -353,6 +358,12 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
 // Distinguishing expression starts from statement keywords or terminators lets us report
 // TooManyReturnValues instead of the misleading TooFewReturnValues.
 fn is_expression_start_tag(tag: TokenTag) -> bool {
+    // Explicit-width scalars and `Byte` open a type-annotation expression attempt, matching the
+    // builtin scalar spellings below.
+    if tag.is_builtin_scalar_type_name() {
+        return true;
+    }
+
     matches!(
         tag,
         TokenTag::SYMBOL
@@ -365,11 +376,6 @@ fn is_expression_start_tag(tag: TokenTag) -> bool {
             | TokenTag::OPEN_CURLY
             | TokenTag::OPEN_PARENTHESIS
             | TokenTag::TEMPLATE_HEAD
-            | TokenTag::DATATYPE_INT
-            | TokenTag::DATATYPE_FLOAT
-            | TokenTag::DATATYPE_BOOL
-            | TokenTag::DATATYPE_STRING
-            | TokenTag::DATATYPE_CHAR
             | TokenTag::SUBTRACT
             | TokenTag::COPY
             | TokenTag::MUTABLE

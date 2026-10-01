@@ -1,3 +1,3 @@
-#[loop 1 to & 3 |number|:
-    range-[number];
+#[loop 1 to & 3 |numeric_value|:
+    range-[numeric_value];
 ]

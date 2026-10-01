@@ -236,6 +236,8 @@ fn validate_expression(
                         validate_expression(expression, context)?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // Resolution removes pending literals before this stage.
+                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
                 }
             }
             Ok(())
@@ -363,6 +365,8 @@ fn validate_expression(
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::FixedScalar(_)
+        | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)

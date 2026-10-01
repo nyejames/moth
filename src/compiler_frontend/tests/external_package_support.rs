@@ -6,11 +6,11 @@
 //!      outside AST/HIR fixture modules.
 
 use crate::compiler_frontend::external_packages::test_support::{
-    TestExternalAbiType, TestExternalAccessKind, TestExternalReturnAlias,
+    TestExternalAccessKind, TestExternalReturnAlias, TestExternalReturnType,
     register_test_external_function,
 };
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalFunctionId, ExternalPackageRegistry, ExternalSignatureType,
+    ExternalFunctionId, ExternalPackageRegistry, ExternalSignatureType,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
@@ -26,16 +26,11 @@ pub(crate) fn register_external_function(
     name: &'static str,
     param_access: Vec<TestExternalAccessKind>,
     return_alias: TestExternalReturnAlias,
-    return_type: TestExternalAbiType,
+    return_type: TestExternalReturnType,
 ) -> ExternalFunctionId {
     let parameters = param_access
         .into_iter()
-        .map(|access_kind| {
-            (
-                ExternalSignatureType::Abi(ExternalAbiType::I32),
-                access_kind,
-            )
-        })
+        .map(|access_kind| (ExternalSignatureType::NativeInt, access_kind))
         .collect::<Vec<_>>();
 
     register_test_external_function(

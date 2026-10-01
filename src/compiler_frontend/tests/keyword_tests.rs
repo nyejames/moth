@@ -67,6 +67,48 @@ fn keyword_shadow_policy_shares_the_canonical_keyword_set() {
 }
 
 #[test]
+fn dec_scale_identifiers_are_reserved_without_prefix_reservation() {
+    for spelling in [
+        "dec", "Dec", "Dec0", "Dec256", "DEC256", "_dec01", "_dec257", "__dEc2",
+    ] {
+        assert_eq!(
+            keyword_shadow_match(spelling),
+            Some("Dec"),
+            "{spelling:?} belongs to the reserved Dec family"
+        );
+    }
+
+    for ordinary_name in ["DecBox", "Decimal", "dec2extra"] {
+        assert_eq!(
+            keyword_shadow_match(ordinary_name),
+            None,
+            "{ordinary_name:?} is not a Dec-family spelling"
+        );
+    }
+}
+
+#[test]
+fn retired_number_spellings_are_ordinary_identifiers() {
+    // The retired `Number` family reservation is gone: its former reserved spellings
+    // fall back to ordinary identifier policy for declarations, bindings and nominals.
+    for reclaimed in [
+        "Number",
+        "number",
+        "_Number",
+        "Number0",
+        "Number2",
+        "Number256",
+    ] {
+        assert_eq!(
+            keyword_shadow_match(reclaimed),
+            None,
+            "{reclaimed:?} must be reclaimed as an ordinary identifier"
+        );
+        assert!(is_valid_identifier(reclaimed));
+    }
+}
+
+#[test]
 fn identifier_policy_matches_tokenizer_identifier_characters() {
     assert!(is_identifier_continue('a'));
     assert!(is_identifier_continue('9'));
@@ -180,6 +222,18 @@ fn source_word_classifier_maps_builtin_type_words() {
         ("None", TokenTag::DATATYPE_NONE),
         ("True", TokenTag::DATATYPE_TRUE),
         ("False", TokenTag::DATATYPE_FALSE),
+        ("I8", TokenTag::DATATYPE_I8),
+        ("I16", TokenTag::DATATYPE_I16),
+        ("I32", TokenTag::DATATYPE_I32),
+        ("I64", TokenTag::DATATYPE_I64),
+        ("U8", TokenTag::DATATYPE_U8),
+        ("U16", TokenTag::DATATYPE_U16),
+        ("U32", TokenTag::DATATYPE_U32),
+        ("U64", TokenTag::DATATYPE_U64),
+        ("F16", TokenTag::DATATYPE_F16),
+        ("F32", TokenTag::DATATYPE_F32),
+        ("F64", TokenTag::DATATYPE_F64),
+        ("Byte", TokenTag::DATATYPE_BYTE),
     ];
 
     for (source, expected_tag) in types {
@@ -189,7 +243,37 @@ fn source_word_classifier_maps_builtin_type_words() {
         assert_eq!(classified.token_tag, expected_tag);
         assert_eq!(classified.bool_value, None);
         assert_eq!(keyword_token_tag(source), Some(expected_tag));
+        assert!(
+            expected_tag.is_builtin_scalar_type_name()
+                || matches!(
+                    expected_tag,
+                    TokenTag::DATATYPE_NONE | TokenTag::DATATYPE_TRUE | TokenTag::DATATYPE_FALSE
+                ),
+            "{source:?} must share the builtin scalar spelling set unless it is a non-scalar type word"
+        );
     }
+}
+
+#[test]
+fn fixed_scalar_spellings_are_case_sensitive_and_exact() {
+    // Lookalikes must stay ordinary symbols: only the exact keyword spelling is a type name.
+    for lookalike in ["u8", "i64", "f32", "byte", "I128", "U08", "Bytes", "U8v2"] {
+        assert_eq!(
+            classify_source_word(lookalike),
+            None,
+            "{lookalike:?} must not classify as a keyword"
+        );
+    }
+
+    // The lowercase forms are reserved identifiers for the same reason `int` is: they would
+    // otherwise shadow the builtin type spelling after case folding.
+    for shadow in ["u8", "i8", "_U8", "Byte", "F64"] {
+        assert!(
+            keyword_shadow_match(shadow).is_some(),
+            "{shadow:?} must be a reserved keyword shadow"
+        );
+    }
+    assert_eq!(keyword_shadow_match("i128"), None);
 }
 
 #[test]

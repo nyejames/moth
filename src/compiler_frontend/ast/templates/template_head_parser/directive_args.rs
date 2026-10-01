@@ -315,8 +315,9 @@ pub(crate) fn parse_optional_slot_target_argument(
             name,
         ) => Ok(SlotKey::Named(name)),
         crate::compiler_frontend::ast::expressions::expression::ExpressionKind::Int(index) => {
-            if index <= 0 {
-                return Err(with_current_token_span(
+            match usize::try_from(index) {
+                Ok(position) if position > 0 => Ok(SlotKey::Positional(position)),
+                _ => Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_template_directive(
                         Some(directive_name),
@@ -324,10 +325,8 @@ pub(crate) fn parse_optional_slot_target_argument(
                         expression.span,
                     ),
                 )
-                .into());
+                .into()),
             }
-
-            Ok(SlotKey::Positional(index as usize))
         }
         _ => Err(with_current_token_span(
             token_stream,

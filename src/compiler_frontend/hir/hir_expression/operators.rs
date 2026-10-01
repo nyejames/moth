@@ -24,13 +24,18 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<HirBinOp, CompilerError> {
         match op {
-            Operator::Add => Ok(HirBinOp::Add),
-            Operator::Subtract => Ok(HirBinOp::Sub),
-            Operator::Multiply => Ok(HirBinOp::Mul),
-            Operator::Divide => Ok(HirBinOp::Div),
-            Operator::IntDivide => Ok(HirBinOp::IntDiv),
-            Operator::Modulus => Ok(HirBinOp::Mod),
-            Operator::Exponent => Ok(HirBinOp::Exponent),
+            Operator::Add
+            | Operator::Subtract
+            | Operator::Multiply
+            | Operator::Divide
+            | Operator::IntDivide
+            | Operator::Modulus
+            | Operator::Exponent => {
+                return_hir_transformation_error!(
+                    "Arithmetic operators must be lowered through HirStatementKind::NumericOp",
+                    self.hir_error_location(span)
+                )
+            }
             Operator::And => Ok(HirBinOp::And),
             Operator::Or => Ok(HirBinOp::Or),
             Operator::GreaterThan => Ok(HirBinOp::Gt),
@@ -77,14 +82,9 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    // WHAT: Infers binary-op result kinds for lowered runtime expressions.
-    // WHY: Runtime RPN lowering needs a final type for each expression node.
-    pub(super) fn infer_binop_result_type(
-        &mut self,
-        left: TypeId,
-        right: TypeId,
-        op: HirBinOp,
-    ) -> TypeId {
+    // WHAT: Infers result kinds for the plain binary operators that remain in runtime HIR.
+    // WHY: checked numeric arithmetic gets its result type from the shared NumericOp domain.
+    pub(super) fn infer_binop_result_type(&self, op: HirBinOp) -> TypeId {
         match op {
             HirBinOp::Eq
             | HirBinOp::Ne
@@ -95,25 +95,8 @@ impl<'a> HirBuilder<'a> {
             | HirBinOp::And
             | HirBinOp::Or => builtin_type_ids::BOOL,
 
-            // Checked numeric arithmetic is lowered through `HirStatementKind::NumericOp`, so the
-            // only source-level plain binary operators that still reach this path are comparisons
-            // and booleans. Runtime template appends use a distinct compiler-owned operator.
+            // Runtime template appends use a distinct compiler-owned operator.
             HirBinOp::StringAppend => self.type_environment.builtins().string,
-            HirBinOp::Add => {
-                let float = self.type_environment.builtins().float;
-
-                if left == float || right == float {
-                    float
-                } else {
-                    left
-                }
-            }
-
-            HirBinOp::Sub | HirBinOp::Mul | HirBinOp::Mod | HirBinOp::Exponent => left,
-
-            HirBinOp::Div => self.type_environment.builtins().float,
-
-            HirBinOp::IntDiv => builtin_type_ids::INT,
         }
     }
 }

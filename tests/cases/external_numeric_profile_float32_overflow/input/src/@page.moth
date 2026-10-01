@@ -1,0 +1,16 @@
+@external_float.js overflow_float
+
+checked_float || -> Int, Error!:
+    value = overflow_float()
+    if value > 0.0:
+        return 1
+    ;
+    return 0
+;
+
+code ~U32 = 0
+ignored = checked_float() catch |err|:
+    code = err.code
+    then 0
+;
+io.line([: external_native_float32 overflow-code=[code]])

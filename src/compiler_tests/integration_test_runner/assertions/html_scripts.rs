@@ -11,16 +11,16 @@
 //! Supported shapes:
 //! - `<script>` with no `type`, executed as classic script source
 //! - `<script type="text/javascript">` and `<script type="application/javascript">`
+//! - exactly one inline `<script type="module">`, with no classic executable scripts and no
+//!   import map; the Node harness evaluates it as an ES module and stages its relative JS graph
 //!
 //! Recognised but not executed (browsers do not run these as JavaScript either):
-//! - `<script type="importmap">`, `type="application/json"`, `type="speculationrules"`
+//! - `<script type="importmap">`, `type="application/json"`, `type="speculationrules">`
 //!
 //! Deliberately unsupported:
-//! - `<script type="module">`. The harness concatenates the inline sources it extracts into one
-//!   classic script in a workspace that holds no emitted glue, provider or runtime module and no
-//!   import map, so it cannot resolve a module specifier, apply module scope or preserve module
-//!   evaluation order. Executing a module block through that model would let a case claim runtime
-//!   evidence the harness never produced, which is exactly what this owner exists to prevent.
+//! - module pages with a classic executable script, multiple module scripts, or any import map.
+//!   Node's native ESM loader handles relative imports but does not implement the browser
+//!   import-map resolver, so running one of those shapes would not reproduce browser semantics.
 //!
 //! Everything else — an external `src`, an unknown `type`, an execution-changing attribute, a
 //! nameless or malformed attribute token, an unterminated tag or an unterminated attribute
@@ -31,13 +31,10 @@
 
 use super::node_harness::RenderHarnessError;
 
-/// `type` values the harness executes as JavaScript.
-///
-/// Classic script types only: the harness has no module graph, so `module` is rejected by
-/// `MODULE_SCRIPT_TYPE` rather than executed under classic semantics.
+/// `type` values the harness executes as classic JavaScript.
 const EXECUTABLE_SCRIPT_TYPES: [&str; 2] = ["text/javascript", "application/javascript"];
 
-/// The module `type` the harness recognises but refuses to execute.
+/// The module `type` the harness recognises and can execute in the restricted ESM path.
 const MODULE_SCRIPT_TYPE: &str = "module";
 
 /// `type` values that mark a data block the harness deliberately skips.
@@ -50,12 +47,25 @@ const DATA_SCRIPT_TYPES: [&str; 3] = ["importmap", "application/json", "speculat
 /// not, or execute it in an order the real page does not use.
 const EXECUTION_CHANGING_ATTRIBUTES: [&str; 2] = ["nomodule", "async"];
 
-/// Returns the inline script sources the harness will execute, in document order.
+/// The two non-mixed execution modes understood by the rendered-output harness.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ExecutableScripts {
+    pub classic: Vec<String>,
+    pub module: Option<String>,
+}
+
+/// Returns the supported inline script sources in document order.
 ///
-/// Empty inline scripts are dropped because running them is a no-op; every other supported block
-/// is returned verbatim so the harness executes exactly the emitted source.
-pub(crate) fn extract_executable_scripts(html: &str) -> Result<Vec<String>, RenderHarnessError> {
-    let mut scripts = Vec::new();
+/// Empty classic scripts are dropped as before. The single module block is retained verbatim so
+/// the harness can import it with native ESM semantics instead of concatenating it as classic JS.
+pub(crate) fn extract_executable_scripts(
+    html: &str,
+) -> Result<ExecutableScripts, RenderHarnessError> {
+    let mut classic = Vec::new();
+    let mut module = None;
+    let mut module_count = 0usize;
+    let mut has_classic_script = false;
+    let mut has_import_map = false;
     let mut offset = 0usize;
 
     while let Some(tag_start) = find_script_tag_start(html, offset) {
@@ -104,21 +114,27 @@ pub(crate) fn extract_executable_scripts(html: &str) -> Result<Vec<String>, Rend
         }
 
         match open_tag.attribute("type") {
-            None => push_non_empty(&mut scripts, body),
+            None => {
+                has_classic_script = true;
+                push_non_empty(&mut classic, body);
+            }
             Some(script_type) => {
                 let normalized = script_type.trim().to_ascii_lowercase();
                 if normalized == MODULE_SCRIPT_TYPE {
-                    return Err(RenderHarnessError::script_shape(format!(
-                        "rendered_output: the emitted HTML contains a '<script \
-                         type=\"{MODULE_SCRIPT_TYPE}\">' block. The harness executes inline \
-                         sources as one classic script and materializes no emitted glue, provider \
-                         or runtime module and no import map, so it cannot run module semantics. \
-                         Executing it anyway would claim runtime evidence the harness never \
-                         produced."
-                    )));
-                }
-                if EXECUTABLE_SCRIPT_TYPES.contains(&normalized.as_str()) {
-                    push_non_empty(&mut scripts, body);
+                    module_count += 1;
+                    if module_count > 1 {
+                        return Err(RenderHarnessError::script_shape(
+                            "rendered_output: the emitted HTML contains multiple inline module \
+                             scripts. The Node harness supports exactly one module script."
+                                .to_owned(),
+                        ));
+                    }
+                    module = Some(body.to_owned());
+                } else if EXECUTABLE_SCRIPT_TYPES.contains(&normalized.as_str()) {
+                    has_classic_script = true;
+                    push_non_empty(&mut classic, body);
+                } else if normalized == "importmap" {
+                    has_import_map = true;
                 } else if !DATA_SCRIPT_TYPES.contains(&normalized.as_str()) {
                     return Err(RenderHarnessError::script_shape(format!(
                         "rendered_output: the emitted HTML contains an unsupported script type \
@@ -130,7 +146,24 @@ pub(crate) fn extract_executable_scripts(html: &str) -> Result<Vec<String>, Rend
         }
     }
 
-    Ok(scripts)
+    if module.is_some() && has_classic_script {
+        return Err(RenderHarnessError::script_shape(
+            "rendered_output: the emitted HTML mixes classic executable scripts with a module \
+             script. The Node harness supports classic-only pages or one module-only page."
+                .to_owned(),
+        ));
+    }
+
+    if module.is_some() && has_import_map {
+        return Err(RenderHarnessError::script_shape(
+            "rendered_output: the emitted HTML contains an import map alongside a module script. \
+             Node's native ESM loader does not implement the browser import-map resolver, so the \
+             harness cannot execute this page honestly."
+                .to_owned(),
+        ));
+    }
+
+    Ok(ExecutableScripts { classic, module })
 }
 
 fn push_non_empty(scripts: &mut Vec<String>, body: &str) {

@@ -1,0 +1,10 @@
+value I32 = 1
+result ~= ""
+
+if value is:
+    1e0 => result = "exponent"
+    else => result = "other"
+;
+
+
+[:pattern_result=[result]]

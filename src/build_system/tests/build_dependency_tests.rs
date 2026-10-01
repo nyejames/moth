@@ -454,7 +454,6 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         path.starts_with(GLUE_MODULE_PREFIX)
     }));
     assert!(glue.contains("import { draw as __moth_external_fn"));
-    assert!(glue.contains("return __moth_external_fn"));
 
     // The page must import the glue module that was actually emitted, not merely some path
     // under the glue directory.

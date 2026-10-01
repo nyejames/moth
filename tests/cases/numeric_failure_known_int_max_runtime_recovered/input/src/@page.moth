@@ -1,0 +1,22 @@
+@limits max_value
+
+increment |value Int| -> Int, Error!:
+    return value + 1
+;
+
+valid_top #Int = max_value + 0
+copied = copy valid_top
+copied_sum = copy valid_top + 0
+
+caller_top ~Int = max_value
+overflow_code ~U32 = 0
+ignored = increment(caller_top) catch |overflow_error|:
+    overflow_code = overflow_error.code
+    then 0
+;
+
+success = increment(2147483646) catch:
+    then -1
+;
+
+[: k1 known-int runtime control=[valid_top] copy=[copied] copy-sum=[copied_sum] overflow-code=[overflow_code] success=[success]]

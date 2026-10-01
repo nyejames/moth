@@ -1,0 +1,125 @@
+-- JS-side checked recovery and invalidation coverage for bounded integers:
+-- recovered error codes, mutations preserved across recovery, first-failure
+-- ordering, once-only operand evaluation of a proven operation, and both the
+-- proven and the retained narrowing paths through the 64-bit carrier. Invalidation
+-- coverage here is the mutating-call and reassignment shapes; independent block
+-- reset is owned by the analysis unit tests. HTML-Wasm rejects this surface, so
+-- its block expects the existing structured rejection.
+
+u8_sum |left U8, right U8| -> U32:
+    return left + right
+;
+
+grow_then_fail |target ~Int| -> Int, Error!:
+    target += 10
+    target += 2147483647
+    return target
+;
+
+divide_zero |value Int, divisor Int| -> Int, Error!:
+    return value // divisor
+;
+
+first_failure |huge Int, divisor Int| -> Int, Error!:
+    overflowed = huge + 1
+    divided = huge // divisor
+    return overflowed + divided
+;
+
+narrow_down |value U32| -> U8, Error!:
+    return cast! value
+;
+
+narrow_round_trip |value U32| -> U32, Error!:
+    wide U64 = cast value
+    return cast! wide
+;
+
+double_narrow |value U32| -> U32, Error!:
+    wide U64 = cast value
+    doubled = wide + wide
+    return cast! doubled
+;
+
+record_once |calls ~Int, marker U8| -> U8:
+    calls += 1
+    return marker
+;
+
+set_to_max |target ~U32|:
+    target = 4294967295
+;
+
+pinned_then_call || -> U32, Error!:
+    small ~U32 = 0
+    small = small + 1
+    set_to_max(~small)
+    return small + 1
+;
+
+rebound |value U32| -> U32, Error!:
+    small ~U32 = 0
+    small = small + 1
+    small = value
+    return small + 1
+;
+
+holder ~Int = 1
+mutation_code ~U32 = 0
+mutation_result = grow_then_fail(~holder) catch |holder_error|:
+    mutation_code = holder_error.code
+    then 0
+;
+
+zero_code ~U32 = 0
+zero_result = divide_zero(10, 0) catch |zero_error|:
+    zero_code = zero_error.code
+    then 0
+;
+
+order_code ~U32 = 0
+order_result = first_failure(2147483647, 0) catch |order_error|:
+    order_code = order_error.code
+    then 0
+;
+
+narrow_fail_code ~U32 = 0
+narrow_rejected = narrow_down(300) catch |narrow_error|:
+    narrow_fail_code = narrow_error.code
+    then 0
+;
+
+narrow_ok = narrow_down(200) catch:
+    then 0
+;
+
+round_trip = narrow_round_trip(4294967295) catch:
+    then 0
+;
+
+double_small = double_narrow(1000) catch:
+    then 0
+;
+
+double_overflow_code ~U32 = 0
+double_rejected = double_narrow(3000000000) catch |double_error|:
+    double_overflow_code = double_error.code
+    then 0
+;
+
+pinned_code ~U32 = 0
+pinned_result = pinned_then_call() catch |pinned_error|:
+    pinned_code = pinned_error.code
+    then 0
+;
+
+rebound_code ~U32 = 0
+rebound_result = rebound(4294967295) catch |rebound_error|:
+    rebound_code = rebound_error.code
+    then 0
+;
+
+left_calls ~Int = 0
+once_sum = u8_sum(record_once(~left_calls, 200), 55)
+
+[:bounded recovery codes=[pinned_code]/[rebound_code]/[mutation_code]/[order_code]/[zero_code]/[narrow_fail_code]/[double_overflow_code] results=[pinned_result]/[rebound_result]/[mutation_result]/[order_result]/[zero_result]/[narrow_rejected]/[double_rejected] holder=[holder] narrow-ok=[narrow_ok] round-trip=[round_trip] double=[double_small] once=[once_sum]/[left_calls]]

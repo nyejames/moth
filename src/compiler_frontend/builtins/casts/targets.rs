@@ -13,10 +13,15 @@
 //!      without adding broad context-dependent APIs.
 
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
+use crate::compiler_frontend::datatypes::number::NumberScale;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
 /// The set of builtin types that may be a cast source or target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastTarget {
@@ -26,6 +31,52 @@ pub(crate) enum BuiltinCastTarget {
     Char,
     Float,
     Error,
+    /// An explicit-width scalar or the `Byte` octet type.
+    ///
+    /// WHAT: covers every `FixedScalar` identity, including `Byte`, as a builtin cast
+    ///      source or target. `Int`/`Float` never alias a matching-width fixed type.
+    /// WHY: numeric conversions between `Int`, `Float` and fixed scalars resolve through
+    ///      this one classification so evidence and policy owners share the same vocabulary.
+    Fixed(FixedScalar),
+    /// One exact decimal `Dec` scale as a cast source or target.
+    ///
+    /// WHAT: classifies the lazy `Dec`/`Dec0`..`Dec256` identities so cast resolution
+    ///      treats them like every other builtin target. The scale is part of the identity.
+    /// WHY: the scale is part of identity, so per-pair evidence resolves `Dec` conversions
+    ///      without enumerating a 257-scale matrix.
+    Number(NumberScale),
+}
+
+impl BuiltinCastTarget {
+    /// The bounded numeric domain of this target: `Int`, `Float` or a non-`Byte` fixed scalar.
+    ///
+    /// `BuiltinCastTarget::Number` deliberately stays outside this projection. Its exact
+    /// conversions are classified pair-by-pair in the lazy evidence path, never by the
+    /// bounded numeric matrices.
+    pub(crate) fn numeric_scalar(self) -> Option<NumericScalar> {
+        match self {
+            BuiltinCastTarget::Int => Some(NumericScalar::Int),
+            BuiltinCastTarget::Float => Some(NumericScalar::Float),
+            BuiltinCastTarget::Fixed(FixedScalar::Byte) => None,
+            BuiltinCastTarget::Fixed(scalar) => Some(NumericScalar::Fixed(scalar)),
+            BuiltinCastTarget::Bool
+            | BuiltinCastTarget::String
+            | BuiltinCastTarget::Char
+            | BuiltinCastTarget::Error
+            | BuiltinCastTarget::Number(_) => None,
+        }
+    }
+}
+
+impl From<NumericScalar> for BuiltinCastTarget {
+    fn from(scalar: NumericScalar) -> Self {
+        match scalar {
+            NumericScalar::Int => BuiltinCastTarget::Int,
+            NumericScalar::Float => BuiltinCastTarget::Float,
+            NumericScalar::Fixed(scalar) => BuiltinCastTarget::Fixed(scalar),
+            NumericScalar::Number(scale) => BuiltinCastTarget::Number(scale),
+        }
+    }
 }
 
 /// Whether a builtin cast is infallible or fallible.
@@ -35,28 +86,43 @@ pub(crate) enum BuiltinCastFallibility {
     Fallible,
 }
 
-/// Stable policy identifier for one row in the initial builtin evidence table.
+/// Resolved compiler-owned builtin cast policy.
 ///
-/// WHAT: every initial builtin evidence row gets exactly one variant so policy
-///      lookup stays table-driven rather than rebuilding match logic on every
-///      call site. The single source of truth is
-///      `compiler_frontend::builtins::casts::evidence::INITIAL_BUILTIN_EVIDENCE_ROWS`.
-/// WHY: callers should ask the policy owner for a known policy and not re-derive
-///      source/target combinations inline at AST or folding time.
+/// WHAT: carries the resolved builtin conversion policy and its complete numeric domains from
+///       evidence selection through folding and HIR to runtime lowering.
+/// WHY: callers consume the selected policy rather than reconstructing the source/target rules
+///      owned by `casts::evidence` and implemented by `casts::policies`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BuiltinCastPolicyId {
-    IntToFloat,
-    IntToString,
-    FloatToString,
+    /// Numeric conversion between bounded scalars or eligible exact decimal `Dec` pairs.
+    ///
+    /// This reuses the bounded numeric policy for ordinary bounded pairs while
+    /// `NumericScalar::Number` branches keep arbitrary-precision values out of `ExactNumericValue`.
+    NumericConversion {
+        source: NumericScalar,
+        target: NumericScalar,
+    },
+    /// Infallible `Byte` to `U8` conversion.
+    ByteToU8,
+    /// Infallible `U8` to `Byte` conversion.
+    U8ToByte,
+    /// Infallible numeric text conversion for `Int`, `Float`, fixed numeric scalars and `Dec`.
+    ///
+    /// WHAT: carries the numeric domain whose canonical text the value formats to. Never holds
+    ///       `Byte`, whose text conversion composes through `U8`.
+    /// WHY: every numeric type shares one text contract, so the policy carries the domain and the
+    ///      policy owner applies that domain's formatting rules.
+    NumericToString(NumericScalar),
+    /// Fallible numeric text parse for `Int`, `Float`, fixed numeric scalars and `Dec`.
+    ///
+    /// The destination domain owns the accepted grammar, range, precision or exact Dec scale.
+    StringToNumeric(NumericScalar),
     BoolToString,
     CharToString,
     CharToInt,
     StringToError,
     ErrorToString,
-    FloatToInt,
     IntToChar,
-    StringToInt,
-    StringToFloat,
     StringToBool,
     StringToChar,
 }
@@ -90,20 +156,13 @@ pub(crate) struct CastTargetResolution {
     pub(crate) requires_optional_wrap_after_cast: bool,
 }
 
-/// Returns the builtin target classification for a type, if it is a supported
-/// cast source or target.
+/// Classifies builtin type identities without consulting source names or path state.
 ///
-/// WHAT: maps `Bool`, `Int`, `String`, `Char`, and `Float` to their builtin target
-///      variants using `TypeEnvironment::builtins()`. Resolves `Error` by matching
-///      the type's nominal path against the preseeded builtin error path.
-/// WHY: classification is shared between cast target resolution and evidence
-///      construction. Centralising it here means the policy table can stay
-///      table-driven while still relying on one well-defined mapping rule.
-pub(crate) fn builtin_cast_target_for_type(
+/// Dec scales are resolved through their existing environment-owned identities and stay
+/// exact; source nominal types are intentionally excluded.
+pub(crate) fn builtin_cast_target_for_builtin_type(
     type_id: TypeId,
     type_environment: &TypeEnvironment,
-    string_table: &StringTable,
-    path_fork: &PathInternerFork,
 ) -> Option<BuiltinCastTarget> {
     let builtins = type_environment.builtins();
 
@@ -121,6 +180,38 @@ pub(crate) fn builtin_cast_target_for_type(
     }
     if type_id == builtins.float {
         return Some(BuiltinCastTarget::Float);
+    }
+
+    // Fixed scalars (including `Byte`) are distinct seeded identities. A direct
+    // definition check keeps optional unwrapping in the receiving-type caller below.
+    if let Some(TypeDefinition::Builtin(builtin)) = type_environment.get(type_id)
+        && let BuiltinTypeKey::FixedScalar(scalar) = builtin.key
+    {
+        return Some(BuiltinCastTarget::Fixed(scalar));
+    }
+
+    type_environment
+        .number_scale(type_id)
+        .map(BuiltinCastTarget::Number)
+}
+
+/// Returns the builtin target classification for a type, if it is a supported
+/// cast source or target.
+///
+/// WHAT: maps builtin identities through [`builtin_cast_target_for_builtin_type`] and resolves
+///      `Error` by matching the type's nominal path against the preseeded builtin error path.
+///      `Int`/`Float` never alias a matching-width fixed type.
+/// WHY: classification is shared between cast target resolution and evidence
+///      construction. Centralising it here means the policy table can stay
+///      table-driven while still relying on one well-defined mapping rule.
+pub(crate) fn builtin_cast_target_for_type(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> Option<BuiltinCastTarget> {
+    if let Some(target) = builtin_cast_target_for_builtin_type(type_id, type_environment) {
+        return Some(target);
     }
 
     let path = type_environment.nominal_path(type_id)?;

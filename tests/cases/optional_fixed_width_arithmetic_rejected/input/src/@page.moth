@@ -1,0 +1,6 @@
+hide_optional_arithmetic ||:
+    optional_value U8? = none
+    fixed_value U8 = 1
+    result = optional_value + fixed_value
+;
+[:optional fixed-width arithmetic rejected]

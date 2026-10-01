@@ -1,0 +1,3 @@
+same_canonical_number |value Dec0| -> Dec:
+    return cast value
+;

@@ -50,6 +50,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
@@ -92,6 +93,8 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
+    /// The compilation boundary's numeric widths constant folding and materialisation read.
+    pub numeric_profile: NumericProfile,
 }
 /// State that changes between constants, supplied by the environment builder per call.
 ///
@@ -403,8 +406,12 @@ impl ConstantResolutionSession {
             .map_err(ExpressionParseError::from)?;
         if !initializer_is_compile_time_constant {
             if let ExpressionKind::Runtime(rpn) = &declaration.value.kind
-                && let Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) =
-                    constant_fold(rpn.items.clone(), string_table)
+                && let Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) = constant_fold(
+                    rpn.items.clone(),
+                    string_table,
+                    self.module_view.numeric_profile,
+                    Some(&scope_context),
+                )
             {
                 return Err(ExpressionParseError::from(diagnostic));
             }
@@ -413,6 +420,7 @@ impl ConstantResolutionSession {
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(declaration.id),
                 header.name_span,
+                None,
             )
             .into());
         }
@@ -455,6 +463,7 @@ impl ConstantResolutionSession {
             vec![],
             0,
             Rc::clone(&module_view.template_ir_store),
+            module_view.numeric_profile,
         )
         .with_style_directives(&module_view.style_directives)
         .with_build_profile(module_view.build_profile)

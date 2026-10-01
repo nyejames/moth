@@ -25,7 +25,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
@@ -225,8 +227,18 @@ impl Hash for FiniteFloat {
 /// payloads, collection elements and option payloads all project through the same conversion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
-    Int(i32),
+    Int(i64),
+    /// An exact decimal coefficient paired with its canonical scale.
+    ///
+    /// `NumberValue` shares immutable coefficient storage, so cloning this owned interface value
+    /// increments the backing reference count without copying arbitrary-precision limbs.
+    Number(NumberValue),
     Float(FiniteFloat),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    ///
+    /// WHY: `FixedScalarValue` is `Copy` with exact-bit `Eq`/`Hash`, so `U64` maxima,
+    ///      signed minima, `-0.0` and `F16` subnormals round-trip without lossy conversion.
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     /// A folded template string or plain string literal, retaining structural pieces when
@@ -298,7 +310,9 @@ impl PublicFoldedValue {
             }
             Self::OptionSome(value) => value.visit_type_identities(visitor),
             Self::Int(_)
+            | Self::Number(_)
             | Self::Float(_)
+            | Self::FixedScalar(_)
             | Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)
@@ -394,6 +408,20 @@ pub(crate) struct FoldedValueProjectionContext<'a> {
     pub(crate) path_fork: &'a PathInternerFork,
 }
 
+fn project_number_value(
+    value: &NumberValue,
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> Result<PublicFoldedValue, CompilerError> {
+    if type_environment.number_scale(type_id) != Some(value.scale()) {
+        return Err(CompilerError::compiler_error(format!(
+            "folded Dec value at scale {} disagrees with its semantic type",
+            value.scale()
+        )));
+    }
+    Ok(PublicFoldedValue::Number(value.clone()))
+}
+
 /// Convert one finalized and normalized AST compile-time expression to an owned
 /// [`PublicFoldedValue`].
 ///
@@ -416,6 +444,10 @@ pub(crate) fn convert_expression_to_folded_value(
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
         ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
+        ExpressionKind::Number(value) => {
+            project_number_value(value, expression.type_id, type_environment)
+        }
+        ExpressionKind::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(*value)),
         ExpressionKind::Bool(value) => Ok(PublicFoldedValue::Bool(*value)),
         ExpressionKind::Char(value) => Ok(PublicFoldedValue::Char(*value)),
         ExpressionKind::StringSlice(string_id) => Ok(PublicFoldedValue::String(
@@ -563,6 +595,10 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
         match visit {
             ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
             ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
+            ConstValueVisit::Number(value) => {
+                project_number_value(value, metadata.type_id, type_environment)
+            }
+            ConstValueVisit::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(value)),
             ConstValueVisit::Bool(value) => Ok(PublicFoldedValue::Bool(value)),
             ConstValueVisit::Char(value) => Ok(PublicFoldedValue::Char(value)),
             ConstValueVisit::String(value) => match value {

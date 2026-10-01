@@ -12,6 +12,7 @@ A struct declares a nominal runtime type with named fields.
 - The declaration form is `Name = | fields |`.
 - Struct names use `PascalCase`.
 - Every field has a name and explicit type.
+- A field keeps its declared type identity. An `Int` field is not an `I32` field and a `Byte` field is not a `U8` field, even when two of those types share a physical width.
 - Field names must be unique.
 - A field may provide `= default`.
 - Every field default must fully evaluate at compile time.

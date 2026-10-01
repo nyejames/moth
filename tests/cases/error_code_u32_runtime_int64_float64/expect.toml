@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "error code u32 dynamic zero=0 wide=2147483648 max=4294967295 zero-recorded=1 zero-echoed=0 wide-equality=true max-equality=true wide-recorded=true max-recorded=true named=0 positional=2147483648 defaulted=0 named-message=dynamic named positional-message=dynamic positional preserved-code=4294967295 preserved-message=deep failure recovered=outer fallback text-code=0/1 text-message=text converted failure text-back=text converted failure core=311/312 cast=241/242 foreign-i32=2147483648/true/true/recovered i32 boundary/wide i32 boundary failure foreign-max=4294967295/true/true/recovered u32 max/wide u32 max failure"

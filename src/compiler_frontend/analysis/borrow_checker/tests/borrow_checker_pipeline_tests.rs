@@ -185,6 +185,8 @@ fn successful_borrow_report_can_be_stored_on_module() {
             type_environment:
                 crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
             borrow_analysis,
+            numeric_proofs:
+                crate::compiler_frontend::analysis::numeric_proofs::NumericProofs::default(),
             path_table: Arc::new(path_fork.snapshot_table()),
         },
         link_facts: ModuleLinkFacts {

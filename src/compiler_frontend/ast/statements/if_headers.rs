@@ -408,8 +408,13 @@ fn parse_option_present_capture_if_header(
         .into());
     };
 
-    let pattern =
-        parse_option_pattern(token_stream, inner_type_id, string_table, type_environment)?;
+    let pattern = parse_option_pattern(
+        token_stream,
+        inner_type_id,
+        context.numeric_profile,
+        string_table,
+        type_environment,
+    )?;
     let MatchPattern::OptionPresentCapture {
         name,
         binding_span,

@@ -1,0 +1,16 @@
+overflow_int |value Int| -> Int, Error!:
+    return value + 1
+;
+
+divide_float |numerator Float, denominator Float| -> Float, Error!:
+    return numerator / denominator
+;
+
+int_result = overflow_int(2147483647) catch:
+    then -7
+;
+float_result = divide_float(10.0, 0.0) catch:
+    then -8.5
+;
+
+[: numeric failure recovered int=[int_result] float=[float_result]]

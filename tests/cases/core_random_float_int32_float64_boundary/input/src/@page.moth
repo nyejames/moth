@@ -1,0 +1,12 @@
+@core/random random_float
+
+zero = random_float()
+interior = random_float()
+near_one = random_float()
+
+zero_ok = zero is 0.0
+interior_ok = interior is 0.5
+near_one_ok = near_one is 0.9999999999999999
+below_one = near_one < 1.0
+
+[:core_random_float zero=[zero_ok] interior=[interior_ok] near_one=[near_one_ok] below_one=[below_one]]

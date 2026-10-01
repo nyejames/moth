@@ -22,7 +22,8 @@ use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorFi
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::generic_nominal_inference::{
-    GenericNominalConstructorInput, GenericNominalTemplate, infer_generic_nominal_constructor,
+    GenericNominalConstructorContext, GenericNominalConstructorInput, GenericNominalTemplate,
+    infer_generic_nominal_constructor, seed_generic_nominal_constructor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -94,11 +95,39 @@ pub(super) fn parse_struct_constructor_expression(
     }
 
     // ------------------------
-    //  Parse raw arguments with constructor-field expectations
+    //  Seed generic context before parsing field values
     // ------------------------
     let constructor_field_views = ConstructorField::from_struct_declarations(fields);
-    let field_expectations =
+    let is_generic_struct = context
+        .generic_declarations_by_path
+        .as_ref()
+        .and_then(|generic_declarations| generic_declarations.get(struct_path))
+        .is_some_and(|kind| matches!(kind, GenericDeclarationKind::Struct));
+    let generic_constructor_seed = if is_generic_struct {
+        Some(seed_generic_nominal_constructor(
+            GenericNominalConstructorContext {
+                nominal_path: struct_path,
+                display_name: &struct_name_display,
+                template: GenericNominalTemplate::StructFields(&constructor_field_views),
+                span: constructor_span,
+            },
+            context,
+            type_interner.environment(),
+            string_table,
+        )?)
+    } else {
+        None
+    };
+
+    let mut field_expectations =
         expectations_from_constructor_fields(&constructor_field_views, path_fork);
+    if let Some(seed) = &generic_constructor_seed {
+        seed.bind_parse_expectations(
+            &mut field_expectations,
+            type_interner.environment_mut_for_derived_types(),
+        );
+    }
+
     let raw_args = parse_call_arguments_typed_with_expectations(
         token_stream,
         context,
@@ -114,44 +143,44 @@ pub(super) fn parse_struct_constructor_expression(
     // ------------------------
     //  Resolve generic instance
     // ------------------------
-    let (resolved_fields, generic_instance_key, instance_type_id) = if let Some(generic_decls) =
-        &context.generic_declarations_by_path
-        && let Some(kind) = generic_decls.get(struct_path)
-        && matches!(kind, GenericDeclarationKind::Struct)
-    {
-        let inference = infer_generic_nominal_constructor(
-            GenericNominalConstructorInput {
-                nominal_path: struct_path,
-                display_name: &struct_name_display,
-                template: GenericNominalTemplate::StructFields(&constructor_field_views),
-                constructor_fields: Some(&constructor_field_views),
-                raw_args: Some(&raw_args),
-                span: constructor_span,
-                path_fork,
-            },
-            context,
-            type_interner,
-            string_table,
-        )?;
+    let (resolved_fields, generic_instance_key, instance_type_id) =
+        if let Some(seed) = generic_constructor_seed {
+            let inference = infer_generic_nominal_constructor(
+                GenericNominalConstructorInput {
+                    context: GenericNominalConstructorContext {
+                        nominal_path: struct_path,
+                        display_name: &struct_name_display,
+                        template: GenericNominalTemplate::StructFields(&constructor_field_views),
+                        span: constructor_span,
+                    },
+                    constructor_fields: Some(&constructor_field_views),
+                    raw_args: Some(&raw_args),
+                    path_fork,
+                },
+                seed,
+                context,
+                type_interner,
+                string_table,
+            )?;
 
-        let resolved_fields = {
-            let type_env = type_interner.environment();
-            type_env
-                .fields_for(inference.instance_type_id)
-                .map(|field_defs| {
-                    ConstructorField::from_field_definitions_with_defaults(field_defs, fields)
-                })
-                .unwrap_or_else(|| constructor_field_views.clone())
+            let resolved_fields = {
+                let type_env = type_interner.environment();
+                type_env
+                    .fields_for(inference.instance_type_id)
+                    .map(|field_defs| {
+                        ConstructorField::from_field_definitions_with_defaults(field_defs, fields)
+                    })
+                    .unwrap_or_else(|| constructor_field_views.clone())
+            };
+
+            (
+                resolved_fields,
+                inference.instance_key,
+                Some(inference.instance_type_id),
+            )
+        } else {
+            (constructor_field_views, None, None)
         };
-
-        (
-            resolved_fields,
-            inference.instance_key,
-            Some(inference.instance_type_id),
-        )
-    } else {
-        (constructor_field_views, None, None)
-    };
 
     // ------------------------
     //  Validate arguments against fields
@@ -168,6 +197,7 @@ pub(super) fn parse_struct_constructor_expression(
             path_fork,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
+            float_precision: context.numeric_profile.float_precision,
         },
     )?;
 
@@ -213,6 +243,7 @@ pub(super) fn parse_struct_constructor_expression(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                     Some(field_name),
                     value.span,
+                    None,
                 )
                 .into());
             }

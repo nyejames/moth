@@ -3,10 +3,10 @@ can_error |name String| -> String, Int, Error!:
 ;
 
 rethrow |name String| -> String, Int, Error!:
-    value, number = can_error(name) catch |err|:
+    value, numeric_value = can_error(name) catch |err|:
         return! err
     ;
-    return value, number
+    return value, numeric_value
 ;
 
 first, count = rethrow("Ana") catch:

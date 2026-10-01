@@ -1,0 +1,63 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/@page.moth"
+line = 4
+column = 22
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 2
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/copy_consumer/@mod.moth"
+line = 4
+column = 27
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 3
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/error_consumer/@mod.moth"
+line = 4
+column = 22
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 4
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/local_consumer/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 5
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/record_consumer/@mod.moth"
+line = 4
+column = 23
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 6
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/record_consumer/nominal_consumer/@mod.moth"
+line = 4
+column = 38
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 7
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/unary_consumer/@mod.moth"
+line = 3
+column = 12

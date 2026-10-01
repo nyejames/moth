@@ -1,0 +1,13 @@
+render_generated_body type T |token T, flag Bool| -> String:
+    formatted_value Dec17 = if flag:
+        then 1.23000
+    else
+        then -0.1200
+    ;
+    return [formatted_value]
+;
+
+positive_text = render_generated_body(0, true)
+negative_text = render_generated_body(0, false)
+
+[: generated Dec body=[positive_text]/[negative_text]]

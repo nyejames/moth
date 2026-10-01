@@ -82,6 +82,8 @@ impl<'hir> JsEmitter<'hir> {
             emitter.emit_line(&format!(
                 "const code = error && error[{code_field_literal}] !== undefined ? error[{code_field_literal}] : error && error.code;",
             ));
+            // Error.code is the canonical unsigned code in every profile, so it always rides
+            // the exact JS Number carrier; unknown shapes fall back to the plain zero code.
             emitter.emit_line("return typeof code === \"number\" ? code : 0;");
         });
         self.emit_line("}");

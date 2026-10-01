@@ -1,0 +1,3 @@
+number_to_byte |value Dec0| -> Byte:
+    return cast value
+;

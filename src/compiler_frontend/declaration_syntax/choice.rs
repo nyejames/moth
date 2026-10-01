@@ -130,18 +130,11 @@ impl ChoiceVariantPayloadSyntax {
 }
 
 pub(crate) fn starts_rejected_choice_payload_shorthand(tag: TokenTag) -> bool {
-    matches!(
-        tag,
-        TokenTag::DATATYPE_INT
-            | TokenTag::DATATYPE_FLOAT
-            | TokenTag::DATATYPE_BOOL
-            | TokenTag::DATATYPE_STRING
-            | TokenTag::DATATYPE_CHAR
-            | TokenTag::DATATYPE_NONE
-            | TokenTag::OPEN_CURLY
-            | TokenTag::MUTABLE
-            | TokenTag::SYMBOL
-    )
+    tag.is_builtin_scalar_type_name()
+        || matches!(
+            tag,
+            TokenTag::DATATYPE_NONE | TokenTag::OPEN_CURLY | TokenTag::MUTABLE | TokenTag::SYMBOL
+        )
 }
 
 /// Parse `Choice :: VariantA, VariantB, ...;` declarations.

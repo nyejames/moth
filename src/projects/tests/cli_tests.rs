@@ -5,11 +5,12 @@ use super::run_build_command_with_output_plan;
 #[cfg(feature = "timers")]
 use super::run_build_command_with_output_plan_for_tests;
 use super::{
-    Command, build_warnings_messages, compact_whitespace, get_command, help_build_flag_entries,
-    integration_run_status, is_standalone_version_request, run_build_command,
+    Command, CommandInputArgument, build_warnings_messages, compact_whitespace, get_command,
+    help_build_flag_entries, integration_run_status, is_standalone_version_request,
+    materialise_command_inputs, run_build_command,
 };
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
+use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::compiler_frontend::Flag;
@@ -24,6 +25,7 @@ use crate::compiler_frontend::build_config::{
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::{
@@ -33,6 +35,7 @@ use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::check::{CheckOptions, run_check};
 use crate::projects::command_status::CommandStatus;
 use crate::projects::dev_server::DevServerOptions;
+use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
 #[cfg(feature = "timers")]
@@ -45,6 +48,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "timers")]
 use std::time::Duration;
+
+/// The builder every command test compiles under; its numeric profile is the standard
+/// `Int32`/`Float64` one these fixtures were authored against.
+fn test_project_builder() -> ProjectBuilder {
+    ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
+}
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
@@ -78,6 +87,7 @@ fn dev_command_uses_default_options() {
             path: String::from("main.moth"),
             options: DevServerOptions::default(),
             flags: Vec::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -91,7 +101,7 @@ fn build_command_uses_current_directory_when_path_is_missing() {
         Command::Build {
             path: String::new(),
             flags: Vec::new(),
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -115,6 +125,7 @@ fn build_command_writes_the_validated_directory_output_plan() {
     .expect("should write page source");
 
     let status = run_build_command(
+        &test_project_builder(),
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &[],
@@ -143,6 +154,8 @@ fn build_command_executes_with_typed_config_input() {
     else {
         panic!("build command expected");
     };
+    let inputs = materialise_command_inputs(&inputs, NumericProfile::STANDARD)
+        .expect("the parsed build input should materialise under the standard profile");
     let enabled = BuildInputName::new("enabled").expect("test input name should validate");
     assert_eq!(
         inputs
@@ -153,7 +166,7 @@ fn build_command_executes_with_typed_config_input() {
         "build should retain the typed Bool value"
     );
 
-    let status = run_build_command(&path, &flags, &inputs);
+    let status = run_build_command(&test_project_builder(), &path, &flags, &inputs);
 
     assert_eq!(status, CommandStatus::Success);
     assert!(
@@ -180,6 +193,8 @@ fn check_command_executes_with_typed_config_input() {
     else {
         panic!("check command expected");
     };
+    let inputs = materialise_command_inputs(&inputs, NumericProfile::STANDARD)
+        .expect("the parsed check input should materialise under the standard profile");
     let enabled = BuildInputName::new("enabled").expect("test input name should validate");
     assert_eq!(
         inputs
@@ -190,7 +205,11 @@ fn check_command_executes_with_typed_config_input() {
         "check should retain the typed Bool value"
     );
 
-    let status = run_check(&path, CheckOptions { terse, inputs });
+    let status = run_check(
+        &path,
+        CheckOptions { terse, inputs },
+        &test_project_builder(),
+    );
 
     assert_eq!(status, CommandStatus::Success);
     assert!(
@@ -215,6 +234,7 @@ fn failed_output_plan_records_the_build_command_total() {
     // lets this unit test inspect the command total without rendering it.
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
     let status = run_build_command_with_output_plan(
+        &test_project_builder(),
         entry_file
             .to_str()
             .expect("temporary path should be valid UTF-8"),
@@ -261,7 +281,7 @@ fn build_command_supports_mixed_path_and_flag_ordering() {
         Command::Build {
             path: String::from("main.moth"),
             flags: vec![Flag::Release],
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -328,6 +348,7 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
                 inputs: BuildConfigInputSet::new(),
             },
             flags: Vec::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -392,6 +413,7 @@ fn dev_command_supports_path_and_flag_ordering() {
                 inputs: BuildConfigInputSet::new(),
             },
             flags: Vec::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -642,7 +664,7 @@ fn check_command_uses_default_options() {
         Command::Check {
             path: String::new(),
             terse: false,
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -657,7 +679,7 @@ fn check_command_parses_path_and_terse_flag() {
         Command::Check {
             path: String::from("main.moth"),
             terse: true,
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -672,7 +694,7 @@ fn check_command_supports_mixed_argument_ordering() {
         Command::Check {
             path: String::from("main.moth"),
             terse: true,
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -778,7 +800,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::Release],
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 
@@ -788,7 +810,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::HtmlWasm],
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 
@@ -799,7 +821,7 @@ fn build_command_returns_exact_flags() {
         Command::Build {
             path: String::new(),
             flags: vec![Flag::Release, Flag::HtmlWasm],
-            inputs: BuildConfigInputSet::new(),
+            inputs: Vec::new(),
         }
     );
 }
@@ -814,6 +836,7 @@ fn dev_command_returns_exact_flags() {
             path: String::new(),
             options: DevServerOptions::default(),
             flags: vec![Flag::Release],
+            inputs: Vec::new(),
         }
     );
 
@@ -824,6 +847,7 @@ fn dev_command_returns_exact_flags() {
             path: String::new(),
             options: DevServerOptions::default(),
             flags: vec![Flag::HtmlWasm],
+            inputs: Vec::new(),
         }
     );
 }
@@ -1110,6 +1134,7 @@ fn successful_build_records_command_build_total() {
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
     let status = run_build_command(
+        &test_project_builder(),
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
@@ -1152,6 +1177,7 @@ fn build_command_total_excludes_renderer_work() {
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
     let (status, _) = run_build_command_with_output_plan_for_tests(
+        &test_project_builder(),
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
@@ -1212,6 +1238,7 @@ fn build_success_counts_emitted_artifacts_not_planned_ones() {
 
     let reported_count = std::cell::Cell::new(None);
     let (status, _) = run_build_command_with_output_plan_for_tests(
+        &test_project_builder(),
         root.to_str().expect("temporary path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
@@ -1259,6 +1286,7 @@ fn failed_output_write_records_build_command_total() {
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
     let status = run_build_command_with_output_plan(
+        &test_project_builder(),
         entry_file
             .to_str()
             .expect("temporary path should be valid UTF-8"),
@@ -1303,19 +1331,30 @@ fn failed_output_write_records_build_command_total() {
 //  Shared `--input name=value` command parser
 // -------------------------
 
-fn command_inputs(command: &Command) -> &BuildConfigInputSet {
+fn command_inputs(command: &Command) -> &[CommandInputArgument] {
     match command {
-        Command::Build { inputs, .. } | Command::Check { inputs, .. } => inputs,
-        Command::Dev { options, .. } => &options.inputs,
+        Command::Build { inputs, .. }
+        | Command::Check { inputs, .. }
+        | Command::Dev { inputs, .. } => inputs,
         _ => panic!("command variant does not carry build-config inputs"),
     }
+}
+
+/// Materialise one parsed command's retained `--input` arguments under the standard profile.
+///
+/// The command layer defers profile-dependent materialisation until it owns the selected
+/// builder, so a test that wants typed values materialises the retained arguments itself.
+fn materialise_inputs(command: &Command) -> BuildConfigInputSet {
+    materialise_command_inputs(command_inputs(command), NumericProfile::STANDARD)
+        .expect("retained command inputs should materialise under the standard profile")
 }
 
 fn single_input(argument: &str) -> (BuildInputName, PrimitiveBuildValue) {
     let (name_text, value_text) = argument.split_once('=').expect("test argument has '='");
     (
         BuildInputName::new(name_text).expect("test input name should validate"),
-        PrimitiveBuildValue::from_command_text(value_text).expect("test input value should infer"),
+        PrimitiveBuildValue::from_command_text(value_text, NumericProfile::STANDARD)
+            .expect("test input value should infer"),
     )
 }
 
@@ -1323,11 +1362,11 @@ fn cli_float(value: f64) -> PrimitiveBuildValue {
     PrimitiveBuildValue::Float(FiniteFloat::new(value).expect("test float should be finite"))
 }
 
-/// Every command variant shares one parser and one typed carrier: the same argument text
-/// infers the same value with the same command location on build, check and dev, and no
+/// Every command variant shares one parser and one materialisation path: the same argument text
+/// produces the same typed value with the same command location on build, check and dev, and no
 /// project config, source contract or build-system state exists in this test.
 #[test]
-fn every_command_infers_primitive_values_immediately_from_one_parser() {
+fn every_command_materialises_primitive_values_from_one_parser() {
     let cases: &[(&str, PrimitiveBuildValue)] = &[
         ("analytics=true", PrimitiveBuildValue::Bool(true)),
         ("channel=false", PrimitiveBuildValue::Bool(false)),
@@ -1371,7 +1410,7 @@ fn every_command_infers_primitive_values_immediately_from_one_parser() {
         for (argument, expected_value) in cases {
             let command = get_command(&args(&[command_name, ".", "--input", argument]))
                 .unwrap_or_else(|error| panic!("{command_name} should parse {argument}: {error}"));
-            let inputs = command_inputs(&command);
+            let inputs = materialise_inputs(&command);
             let (name, _) = single_input(argument);
             let entry = inputs
                 .get(&name)
@@ -1425,8 +1464,11 @@ fn every_command_rejects_incomplete_quoted_input_suffixes() {
 
     for command_name in ["build", "check", "dev"] {
         for (argument, name, expected_reason) in cases {
-            let error = get_command(&args(&[command_name, ".", "--input", argument]))
-                .expect_err("a quote-leading value with a suffix must be rejected");
+            let command = get_command(&args(&[command_name, ".", "--input", argument]))
+                .expect("the argument shape parses; only materialisation inspects the value");
+            let error =
+                materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+                    .expect_err("a quote-leading value with a suffix must be rejected");
             assert!(
                 error.contains(&format!("Invalid value for --input '{name}'")),
                 "{command_name} {argument:?}: {error}"
@@ -1446,8 +1488,9 @@ fn every_command_splits_at_the_first_equals_and_preserves_the_remainder() {
         let command = get_command(&args(&[command_name, ".", "--input", argument]))
             .expect("command should parse the URL input");
         let (name, _) = single_input(argument);
-        let entry = command_inputs(&command)
+        let entry = materialise_inputs(&command)
             .get(&name)
+            .cloned()
             .expect("URL input should be retained");
         assert_eq!(
             entry.value(),
@@ -1460,7 +1503,7 @@ fn every_command_splits_at_the_first_equals_and_preserves_the_remainder() {
 #[test]
 fn every_command_rejects_duplicate_input_names_deterministically() {
     for command_name in ["build", "check", "dev"] {
-        let error = get_command(&args(&[
+        let command = get_command(&args(&[
             command_name,
             ".",
             "--input",
@@ -1468,7 +1511,46 @@ fn every_command_rejects_duplicate_input_names_deterministically() {
             "--input",
             "retries=9",
         ]))
-        .expect_err("duplicate input names must be rejected");
+        .expect("the argument shape parses; duplicates are decided when values materialise");
+        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+            .expect_err("duplicate input names must be rejected");
+        assert!(
+            error.contains("Duplicate --input name 'retries'"),
+            "{command_name}: {error}"
+        );
+        assert!(
+            error.contains("argument position 2"),
+            "{command_name}: the earlier argument position must be reported: {error}"
+        );
+    }
+}
+
+/// Materialisation is deferred until the command owns the builder, so value diagnostics and
+/// duplicate rejection must still surface with their text and the earlier argument position.
+#[test]
+fn deferred_command_input_diagnostics_keep_their_text_and_positions() {
+    for command_name in ["build", "check", "dev"] {
+        let command = get_command(&args(&[command_name, ".", "--input", "retries=2147483648"]))
+            .expect("the argument shape parses; the value is rejected when it materialises");
+        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+            .expect_err("Int overflow must reject during materialisation");
+        assert!(
+            error.contains("Invalid value for --input 'retries'"),
+            "{command_name}: {error}"
+        );
+        assert!(error.contains("2147483648"), "{command_name}: {error}");
+
+        let command = get_command(&args(&[
+            command_name,
+            ".",
+            "--input",
+            "retries=4",
+            "--input",
+            "retries=9",
+        ]))
+        .expect("duplicate names are decided when values materialise");
+        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+            .expect_err("a repeated name must reject");
         assert!(
             error.contains("Duplicate --input name 'retries'"),
             "{command_name}: {error}"
@@ -1522,22 +1604,29 @@ fn input_flag_requires_a_value_argument_with_name_equals_separator() {
 
 #[test]
 fn command_inputs_surface_the_compiler_owned_rejections() {
-    let overflow = get_command(&args(&["build", ".", "--input", "retries=2147483648"]))
+    let command = get_command(&args(&["build", ".", "--input", "retries=2147483648"]))
+        .expect("the argument shape parses; the value is rejected when it materialises");
+    let overflow = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
         .expect_err("Int overflow must be a diagnostic, not String fallback");
     assert!(
         overflow.contains("whole-number value '2147483648' is outside the Int range"),
         "{overflow}"
     );
 
-    let non_finite = get_command(&args(&["check", ".", "--input", "ratio=1e400"]))
+    let command = get_command(&args(&["check", ".", "--input", "ratio=1e400"]))
+        .expect("the argument shape parses; the value is rejected when it materialises");
+    let non_finite = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
         .expect_err("non-finite exponent values must reject");
     assert!(
         non_finite.contains("float value '1e400' is not finite"),
         "{non_finite}"
     );
 
-    let unterminated = get_command(&args(&["dev", ".", "--input", "label=\"abc"]))
-        .expect_err("an unterminated String quote must be rejected");
+    let command = get_command(&args(&["dev", ".", "--input", "label=\"abc"]))
+        .expect("the argument shape parses; the value is rejected when it materialises");
+    let unterminated =
+        materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+            .expect_err("an unterminated String quote must be rejected");
     assert!(
         unterminated.contains("Invalid value for --input 'label'"),
         "{unterminated}"
@@ -1551,7 +1640,9 @@ fn command_inputs_surface_the_compiler_owned_rejections() {
         "{unterminated}"
     );
 
-    let bad_char = get_command(&args(&["build", ".", "--input", "separator=':'x"]))
+    let command = get_command(&args(&["build", ".", "--input", "separator=':'x"]))
+        .expect("the argument shape parses; the value is rejected when it materialises");
+    let bad_char = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
         .expect_err("trailing text after a Char literal must be rejected");
     assert!(
         bad_char.contains("not a complete Moth Char literal"),
@@ -1577,15 +1668,11 @@ fn parsed_inputs_stay_on_the_programmatic_command_options() {
 
     assert_eq!(command_inputs(&build).len(), 2);
     assert_eq!(command_inputs(&check).len(), 1);
+    assert_eq!(command_inputs(&dev).len(), 1);
 
-    let Command::Dev { options, .. } = dev else {
-        panic!("dev command expected");
-    };
-    assert_eq!(options.inputs.len(), 1);
     let (name, value) = single_input("retries=4");
     assert_eq!(
-        options
-            .inputs
+        materialise_inputs(&dev)
             .get(&name)
             .expect("dev retains retries")
             .value(),
@@ -1602,8 +1689,9 @@ fn unknown_input_names_remain_in_the_set_for_later_contract_validation() {
     let command = get_command(&args(&["build", ".", "--input", argument]))
         .expect("unknown input names parse and stay in the set");
     let (name, value) = single_input(argument);
-    let entry = command_inputs(&command)
+    let entry = materialise_inputs(&command)
         .get(&name)
+        .cloned()
         .expect("unknown name must remain in the set");
     assert_eq!(entry.value(), &value);
 }

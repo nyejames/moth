@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
     PremergeFailure,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::{
@@ -90,6 +91,8 @@ enum DirectoryModuleTaskOutcome {
 pub(super) struct BoundaryCompilationContext<'a> {
     config: &'a Config,
     build_profile: FrontendBuildProfile,
+    /// The selected builder's boundary numeric profile for this compile call.
+    numeric_profile: NumericProfile,
     project_path_resolver: &'a ProjectPathResolver,
     source_files: Arc<SourceDatabase>,
     style_directives: &'a StyleDirectiveRegistry,
@@ -120,6 +123,7 @@ impl<'a> BoundaryCompilationContext<'a> {
     pub(super) fn new(
         config: &'a Config,
         build_profile: FrontendBuildProfile,
+        numeric_profile: NumericProfile,
         project_path_resolver: &'a ProjectPathResolver,
         source_files: Arc<SourceDatabase>,
         style_directives: &'a StyleDirectiveRegistry,
@@ -145,6 +149,7 @@ impl<'a> BoundaryCompilationContext<'a> {
         Self {
             config,
             build_profile,
+            numeric_profile,
             project_path_resolver,
             source_files,
             style_directives,
@@ -670,7 +675,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     .external_dependency_resolution_table,
             );
         let compile_context = ModuleCompilationContext {
-            options: self.boundary.config.frontend_options(),
+            options: self
+                .boundary
+                .config
+                .frontend_options(self.boundary.numeric_profile),
             build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
             root_role_override: (check_only_provider_bindings.is_some()
@@ -768,8 +776,36 @@ fn compile_check_only_job(
     // Resolve this transient unit against borrowed canonical facts and only its own source
     // facts. The transient slice is private to this job: it validates compatibility and
     // selects values without copying or comparing a sibling check-only unit.
-    let check_only_source_facts =
-        config_boundary::source_contract_facts_for_current_module(&prepared);
+    let check_only_source_facts = match config_boundary::source_contract_facts_for_current_module(
+        &mut prepared,
+        compile_context.boundary.numeric_profile,
+    ) {
+        Ok(facts) => facts,
+        Err(failure) => {
+            // A rejected numeric default in this check-only unit's own source is reported at its
+            // authored span, exactly like the equivalent canonical declaration.
+            let outcome = match failure {
+                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                },
+                PremergeFailure::Infrastructure(error) => {
+                    DirectoryModuleTaskOutcome::Infrastructure(error)
+                }
+                // Mixed double-failures only arise at source-finalization tails and never
+                // reach module tasks; abort through the typed lane if one ever does.
+                PremergeFailure::Mixed { error, .. } => {
+                    DirectoryModuleTaskOutcome::Infrastructure(*error)
+                }
+            };
+            return DirectoryModuleTaskResult {
+                module_id,
+                string_table_base_len: base_len,
+                path_base_len,
+                outcome,
+            };
+        }
+    };
     let check_only_inputs = build_config_index.filter_inputs_to_known_facts(
         &compile_context.boundary.build_config_inputs,
         &check_only_source_facts,
@@ -779,6 +815,7 @@ fn compile_check_only_job(
             &check_only_source_facts,
             &check_only_inputs,
             &compile_context.boundary.builder_globals,
+            compile_context.boundary.numeric_profile,
         ) {
         Ok(values) => values,
         Err(error) => {

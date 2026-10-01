@@ -1,0 +1,33 @@
+-- After the Dec keyword cutover the retired Number spellings are ordinary
+-- identifiers again: `Number` names a nominal, `Number` names a variant and
+-- lowercase `number` binds a value, while the Dec spellings carry the exact
+-- decimal values through the same flow.
+
+Number type T = |
+    value T,
+|
+
+Price ::
+    Number |value Dec2|,
+    Zero,
+;
+
+held Number of Dec2 = Number(1.25)
+held_value Dec2 = held.value
+held_text String = cast held_value
+
+token Price = Price::Number(1.25)
+token_peer Price = Price::Number(1.25)
+token_same = token is token_peer
+
+number Dec2 = 1.25
+
+whole Dec = 42
+echo_zero |value Dec0| -> Dec0:
+    return value
+;
+alias_value = echo_zero(whole)
+
+scaled Dec3 = 1.235
+
+[:dec reclaim type=[held_text] variant=[token_same] number=[number] whole=[whole] alias=[alias_value] scaled=[scaled]]

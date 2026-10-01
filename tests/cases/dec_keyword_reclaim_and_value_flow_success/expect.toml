@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "dec reclaim type=1.25 variant=true number=1.25 whole=42 alias=42 scaled=1.235"

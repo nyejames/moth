@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -34,6 +35,7 @@ type OptionPatternResult<T> =
 pub fn parse_option_pattern(
     token_stream: &mut AstCursor,
     option_inner_type_id: TypeId,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> OptionPatternResult<MatchPattern> {
@@ -52,6 +54,7 @@ pub fn parse_option_pattern(
     let pattern = parse_non_choice_pattern(
         token_stream,
         option_inner_type_id,
+        numeric_profile,
         string_table,
         type_environment,
     )?;

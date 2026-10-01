@@ -82,12 +82,12 @@ fn display_definition(
             super::ids::BuiltinTypeKey::Bool => "Bool".to_owned(),
             super::ids::BuiltinTypeKey::Int => "Int".to_owned(),
             super::ids::BuiltinTypeKey::Float => "Float".to_owned(),
-            // Decimal is intentionally inactive in the Alpha surface.
-            super::ids::BuiltinTypeKey::Decimal => "Decimal".to_owned(),
+            super::ids::BuiltinTypeKey::Number(scale) => scale.to_string(),
             super::ids::BuiltinTypeKey::String => "String".to_owned(),
             super::ids::BuiltinTypeKey::Char => "Char".to_owned(),
             super::ids::BuiltinTypeKey::Range => "Range".to_owned(),
             super::ids::BuiltinTypeKey::None => "None".to_owned(),
+            super::ids::BuiltinTypeKey::FixedScalar(scalar) => scalar.name().to_owned(),
         },
         TypeDefinition::Struct(struct_def) => {
             let name = path_name(struct_def.path, path_table, table, "<anonymous struct>");

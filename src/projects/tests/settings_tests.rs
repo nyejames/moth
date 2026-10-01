@@ -1,5 +1,6 @@
 //! Focused tests for the project config to compiler-options projection.
 
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::projects::settings::Config;
 
@@ -9,14 +10,14 @@ fn frontend_options_use_the_configured_loop_limit() {
         template_const_loop_iteration_limit: 42,
         ..Config::default()
     };
-    let options = config.frontend_options();
+    let options = config.frontend_options(NumericProfile::STANDARD);
 
     assert_eq!(options.template_const_loop_iteration_limit, 42);
 }
 
 #[test]
 fn frontend_options_fall_back_to_the_default_loop_limit() {
-    let options = Config::default().frontend_options();
+    let options = Config::default().frontend_options(NumericProfile::STANDARD);
 
     assert_eq!(
         options.template_const_loop_iteration_limit,

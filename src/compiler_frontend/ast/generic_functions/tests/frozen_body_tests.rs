@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, render_payload,
 };
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -916,6 +917,7 @@ fn preparation_clones_share_one_frozen_donor_allocation() {
         parse_single_file_ast_build_result(source).expect("generic source should build");
     let preparation = build_result
         .materialisation_context
+        .expect("module builds retain their materialisation context")
         .finish_preparation()
         .expect("generic template identity index should build");
     // Clone before the first cache fill: a non-shared cache would freeze once per clone here.
@@ -1529,27 +1531,15 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
 }
 
 #[test]
-fn generated_materialisation_keeps_live_path_string_pair_aligned() {
+fn generated_materialisation_requires_live_table_to_extend_requester_prefix() {
     let fixture = resource_body_materialisation_fixture();
     let mut boundary_strings = fixture.preparation.string_table.clone();
-    let mut boundary_paths = fixture.owner_path_fork.fork_source().fork_for_module();
-    let provider_path = boundary_paths
-        .try_intern_portable_path("provider-only/generated", &mut boundary_strings)
-        .expect("the provider path should fit");
+    boundary_strings.intern("provider-only/generated");
 
-    let (generated_strings, requester_remap, boundary_base_len) = fixture
+    fixture
         .preparation
-        .fork_materialisation_string_table(&boundary_strings)
+        .validate_requester_string_prefix(&boundary_strings)
         .expect("the requester table should remain a live-table prefix");
-    assert!(requester_remap.is_identity());
-    assert_eq!(boundary_base_len, boundary_strings.len());
-
-    let generated_paths = boundary_paths.fork_source().fork_for_module();
-    assert_eq!(
-        generated_paths.render_portable(provider_path, &generated_strings, &mut Vec::new()),
-        "provider-only/generated",
-        "generated paths must resolve through the current boundary string table"
-    );
 }
 
 #[test]
@@ -1558,7 +1548,7 @@ fn generated_materialisation_rejects_an_incompatible_string_prefix() {
     let incompatible_strings = StringTable::new();
     let error = fixture
         .preparation
-        .fork_materialisation_string_table(&incompatible_strings)
+        .validate_requester_string_prefix(&incompatible_strings)
         .expect_err("an incompatible requester prefix must be rejected");
 
     assert!(
@@ -1629,6 +1619,8 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
 
     let template = build_result
         .materialisation_context
+        .as_mut()
+        .expect("module builds retain their materialisation context")
         .generic_function_templates_mut()
         .values_mut()
         .next()
@@ -1661,6 +1653,7 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
 
     let mut preparation = build_result
         .materialisation_context
+        .expect("module builds retain their materialisation context")
         .finish_preparation()
         .expect("generic template identity index should build");
     preparation.module_origin = Some(module_origin.clone());
@@ -1728,11 +1721,15 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         ));
     let assets_component = build_result
         .materialisation_context
+        .as_mut()
+        .expect("module builds retain their materialisation context")
         .context
         .string_table
         .intern("assets");
     let logo_component = build_result
         .materialisation_context
+        .as_mut()
+        .expect("module builds retain their materialisation context")
         .context
         .string_table
         .intern("logo.svg");
@@ -1740,6 +1737,8 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
     let (body_source_file, body_path_syntax) = {
         let template = build_result
             .materialisation_context
+            .as_mut()
+            .expect("module builds retain their materialisation context")
             .generic_function_templates_mut()
             .values_mut()
             .next()
@@ -1884,6 +1883,8 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .expect("test body path rows should be unique");
     build_result
         .materialisation_context
+        .as_mut()
+        .expect("module builds retain their materialisation context")
         .context
         .stage0_resolution_facts = Some(Arc::new(Stage0ResolutionFacts::ordinary(
         resolved_references,
@@ -1892,6 +1893,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
 
     let mut preparation = build_result
         .materialisation_context
+        .expect("module builds retain their materialisation context")
         .finish_preparation()
         .expect("generic template identity index should build");
     preparation.module_origin = Some(module_origin.clone());
@@ -1988,17 +1990,22 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
     );
 
     let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+    let mut live_strings = fixture
+        .preparation
+        .string_table
+        .clone_preserving_inherited_prefix();
     let materialised = fixture
         .context
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
-                path_fork: &mut path_fork,
+                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                boundary_string_table: &fixture.preparation.string_table,
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                string_table: &mut live_strings,
+                path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
                 template_const_loop_iteration_limit: fixture
@@ -2201,17 +2208,22 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
 fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
     let fixture = resource_body_materialisation_fixture();
     let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+    let mut live_strings = fixture
+        .preparation
+        .string_table
+        .clone_preserving_inherited_prefix();
     let materialised = fixture
         .context
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
-                path_fork: &mut path_fork,
+                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                boundary_string_table: &fixture.preparation.string_table,
                 external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                string_table: &mut live_strings,
+                path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
                 build_profile: fixture.preparation.build_profile,
                 template_const_loop_iteration_limit: fixture
@@ -2288,20 +2300,25 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
     let fixture = resource_body_materialisation_fixture();
     let materialise = || {
         let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+        let mut live_strings = fixture
+            .preparation
+            .string_table
+            .clone_preserving_inherited_prefix();
         fixture
             .context
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
-                    path_fork: &mut path_fork,
+                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    boundary_string_table: &fixture.preparation.string_table,
                     external_package_registry: fixture
                         .preparation
                         .external_package_registry
                         .as_ref(),
+                    string_table: &mut live_strings,
+                    path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
                     build_profile: fixture.preparation.build_profile,
                     template_const_loop_iteration_limit: fixture
@@ -2370,8 +2387,8 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
         .and_then(|parameter| parameter.folded_default.as_ref())
         .expect("the frozen suffix parameter should have a default");
 
-    // `materialise_ast_at` creates a fresh table for each call. This repeat proof therefore keeps
-    // the one table shared by all folded-value projections inside one generated materialisation.
+    // This repeat proof keeps the one table shared by all folded-value projections inside one
+    // generated materialisation.
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let external_registry = ExternalPackageRegistry::new();
@@ -2456,20 +2473,25 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
 
     let materialise_once = || {
         let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+        let mut live_strings = fixture
+            .preparation
+            .string_table
+            .clone_preserving_inherited_prefix();
         fixture
             .context
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
-                    path_fork: &mut path_fork,
+                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    boundary_string_table: &fixture.preparation.string_table,
                     external_package_registry: fixture
                         .preparation
                         .external_package_registry
                         .as_ref(),
+                    string_table: &mut live_strings,
+                    path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
                     build_profile: fixture.preparation.build_profile,
                     template_const_loop_iteration_limit: fixture

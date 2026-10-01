@@ -3,8 +3,8 @@ A range loop counts through numbers.
 `to` stops before the end value:
 
 [codeblock, $code("moth"):
-    loop 0 to 5 |number|:
-        io.line([: [number]])
+    loop 0 to 5 |value|:
+        io.line([: [value]])
     ;
 ]
 
@@ -13,8 +13,8 @@ This produces `0`, `1`, `2`, `3` and `4`.
 Use `to &` when the end value should be included:
 
 [codeblock, $code("moth"):
-    loop 0 to & 5 |number|:
-        io.line([: [number]])
+    loop 0 to & 5 |value|:
+        io.line([: [value]])
     ;
 ]
 
@@ -25,8 +25,8 @@ This also produces `5`.
 You can leave out the first `0`.
 
 [codeblock, $code("moth"):
-    loop to 5 |number|:
-        io.line([: [number]])
+    loop to 5 |value|:
+        io.line([: [value]])
     ;
 ]
 
@@ -35,8 +35,8 @@ You can leave out the first `0`.
 Use `by` to skip between values:
 
 [codeblock, $code("moth"):
-    loop 0 to 10 by 2 |number|:
-        io.line([: [number]])
+    loop 0 to 10 by 2 |value|:
+        io.line([: [value]])
     ;
 ]
 
@@ -47,15 +47,22 @@ This produces `0`, `2`, `4`, `6` and `8`.
 The direction comes from the bounds. You do not need a `reverse` keyword.
 
 [codeblock, $code("moth"):
-    loop 5 to 0 |number|:
-        io.line([: [number]])
+    loop 5 to 0 |value|:
+        io.line([: [value]])
     ;
 ]
 
-Float ranges need an explicit step:
+Any range that uses `Float` needs an explicit step:
 
 [codeblock, $code("moth"):
     loop 0.0 to 1.0 by 0.1 |amount|:
         io.line([: [amount]])
     ;
 ]
+
+The value binding takes the range's numeric type, and the optional index binding
+is always `Int`.
+
+Fixed-width bounds and steps promote to a common type before the loop runs, and a
+fixed binary float range also needs an explicit step. Ranges run on HTML-JS and
+experimental HTML-Wasm; see @../progress (Progress) for current support.

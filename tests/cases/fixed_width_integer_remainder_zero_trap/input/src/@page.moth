@@ -1,0 +1,5 @@
+remainder_i64 |dividend I64, divisor I64| -> I64:
+    return dividend % divisor
+;
+
+result = remainder_i64(42, 0)

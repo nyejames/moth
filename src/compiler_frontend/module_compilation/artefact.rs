@@ -10,6 +10,7 @@ use crate::builder_surface::external_import_providers::provider::{
     RequiredRuntimeImport, RuntimeAssetIdentity,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::{
@@ -94,6 +95,16 @@ pub(crate) struct ModuleExecutable {
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
+    /// Conservative bounded-integer proof facts computed from this exact validated HIR under
+    /// the boundary `NumericProfile`.
+    ///
+    /// WHAT: statement-keyed proven-safe operation/narrowing facts paired with this executable;
+    ///       the empty default table retains every runtime check.
+    /// WHY: the table is computed inside the compiler service after HIR validation and before
+    ///      publication, so backends consume facts that pair with the immutable statement ids
+    ///      they lower. Facts carry no interned strings, paths or dense layouts, so they need
+    ///      no remap when the executable is published.
+    pub(crate) numeric_proofs: NumericProofs,
     /// Immutable path identity table shared by the enclosing project/package compilation boundary.
     /// It covers every `PathId` retained by this executable after publication.
     ///

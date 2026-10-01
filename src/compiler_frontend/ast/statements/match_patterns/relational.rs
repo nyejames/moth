@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -28,6 +29,7 @@ type RelationalPatternResult<T> = Result<T, ExpressionParseError>;
 pub(super) fn parse_relational_pattern(
     token_stream: &mut AstCursor,
     subject_type_id: TypeId,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> RelationalPatternResult<MatchPattern> {
@@ -52,6 +54,7 @@ pub(super) fn parse_relational_pattern(
     let value = parse_literal_pattern(
         token_stream,
         subject_type_id,
+        numeric_profile,
         string_table,
         type_environment,
     )?;
@@ -60,7 +63,7 @@ pub(super) fn parse_relational_pattern(
 }
 /// Ensure the subject type supports relational ordering.
 ///
-/// Only `int`, `float`, and `char` may appear in relational patterns.
+/// Int, Float, Char, fixed-width numeric scalars, Byte and the Dec family have ordered comparisons.
 fn ensure_relational_subject_type(
     subject_type_id: TypeId,
     span: Option<SourceSpan>,
@@ -71,7 +74,9 @@ fn ensure_relational_subject_type(
 
     let is_ordered_scalar = subject_type_id == builtins.int
         || subject_type_id == builtins.float
-        || subject_type_id == builtins.char;
+        || subject_type_id == builtins.char
+        || type_environment.fixed_scalar(subject_type_id).is_some()
+        || type_environment.number_scale(subject_type_id).is_some();
 
     if !is_ordered_scalar {
         return Err(CompilerDiagnostic::invalid_match_pattern(

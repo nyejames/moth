@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ fn compile_single_file_for_filesystem_test(
     super::compilation::compile_single_file_frontend_with_inputs(
         config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
+        NumericProfile::STANDARD,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::default(),
         builder_surface,
         extension,

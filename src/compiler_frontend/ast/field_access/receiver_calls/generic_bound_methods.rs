@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
-use crate::compiler_frontend::ast::generic_bounds::evidence_for_type;
+use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -129,13 +129,19 @@ fn evidence_for_bound_method<'a>(
     type_environment: &TypeEnvironment,
 ) -> Result<Option<&'a TraitEvidenceDefinition>, ExpressionParseError> {
     let evidence_environment = scope_context.trait_evidence_environment();
-    Ok(evidence_for_type(
+    match evidence_for_type(
         receiver_type_id,
         trait_id,
         type_environment,
+        scope_context.trait_environment(),
         evidence_environment,
-    )
-    .and_then(|evidence_id| evidence_environment.get(evidence_id)))
+        scope_context.numeric_profile,
+    ) {
+        Some(BoundEvidenceSelection::Registered(evidence_id)) => {
+            Ok(evidence_environment.get(evidence_id))
+        }
+        Some(BoundEvidenceSelection::BuiltinCastProof { .. }) | None => Ok(None),
+    }
 }
 
 #[allow(

@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::{
 };
 use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
+    CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -591,11 +591,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
         self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
 
-        // Register compiler-owned builtin evidence rows for every initial
-        // (source, target) row in the cast plan. Must run before
-        // `validate_trait_evidence` so user-declared conformances that would
-        // override builtin evidence or conflict with incompatible builtin
-        // evidence are rejected while trait ids are already stable.
+        // Register compiler-owned builtin evidence rows for the profile-complete
+        // cast plan. Must run before `validate_trait_evidence` so user-declared
+        // conformances that would override builtin evidence or conflict with
+        // incompatible builtin evidence are rejected while trait ids are already
+        // stable.
         let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
         Self::register_builtin_cast_evidence(
             &trait_environment,
@@ -603,6 +603,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.type_environment,
             string_table,
             self.path_fork,
+            self.context.numeric_profile,
         )?;
         self.project_imported_trait_evidence(
             &trait_environment,
@@ -898,6 +899,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             vec![],
             0,
             Rc::clone(&self.context.template_ir_store),
+            self.context.numeric_profile,
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
@@ -1047,6 +1049,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
             declaring_file_id,
+            numeric_profile: self.context.numeric_profile,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
             visible_external_symbols: Some(&visibility.visible_external_symbols),
             visible_source_bindings: Some(&visibility.visible_source_names),

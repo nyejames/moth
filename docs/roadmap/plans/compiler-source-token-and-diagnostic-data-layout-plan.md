@@ -23,6 +23,17 @@ not box `CompilerMessages` or suppress the lint. The other exercised validation 
 recorded as passed, and the generic scaling exception remains separately accepted without changing
 its budget. Detailed measurements and the complete disposition live in
 `benchmarks/frontend-optimization-results.md`.
+**Clippy threshold note (added at `3d8342efb`):** the `result_large_err` failures described in this
+plan's historical workflow records are now **manually suppressed from default Clippy behaviour** by
+the repository's committed `clippy.toml` (`large-error-threshold = 256`; the lint's default
+threshold is 128 bytes). That commit made a pre-existing machine-local threshold file into
+repository-owned policy so configured checkouts, CI and fresh clones stay green. It does not mean
+Clippy blocks on this lint today, and it is not a lint allowance or a boxing workaround. This plan
+owns removing that suppression: when its diagnostic-layout phases complete, lower or delete
+`clippy.toml` and re-check native and feature-configured Clippy **without the config** to confirm
+the failures are gone at the default threshold. Historical records below that describe Clippy as
+red describe the pre-config state and must not be read as current blocking behaviour.
+
 After the Phase 3 closeout, this plan pauses through the roadmap order: MON
 syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
 const evaluation, with Phase 4 resuming only after explicit reactivation.
@@ -34,7 +45,9 @@ one compact data-oriented architecture before broad diagnostic representation wo
 
 This is a compiler-wide representation change, not a narrow Clippy patch. It must remove the root
 causes of `clippy::result_large_err`, remove existing boxed-diagnostic workarounds and leave one clear
-extension model for future diagnostics and tooling.
+extension model for future diagnostics and tooling. Completion is verified against default Clippy
+behaviour: the `clippy.toml` threshold suppression is lowered or removed and native and
+feature-configured Clippy are re-checked without it.
 
 ## Historical activation validation bridge
 

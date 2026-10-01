@@ -6,13 +6,13 @@
 
 use super::CoreJsHelper;
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
-pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
-    CoreJsHelper {
-        name: "__moth_text_length",
-        // A valid UTF-16 surrogate pair is one scalar, so it advances the index twice and the
-        // count once. Every other code unit, including a lone surrogate, counts on its own.
-        source: r#"function __moth_text_length(text) {
+macro_rules! core_text_length_helper_source {
+    ($return_expression:literal) => {
+        concat!(
+            r#"function __moth_text_length(text) {
     const value = __moth_string_value(text);
     let count = 0;
     let index = 0;
@@ -26,9 +26,20 @@ pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
             value.charCodeAt(index + 1) <= 0xdfff;
         index += isSurrogatePair ? 2 : 1;
         count += 1;
-    }
-    return count;
-}"#,
+    }"#,
+            "\n    return ",
+            $return_expression,
+            ";\n}"
+        )
+    };
+}
+
+pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
+    CoreJsHelper {
+        name: "__moth_text_length",
+        // A valid UTF-16 surrogate pair is one scalar, so it advances the index twice and the
+        // count once. Every other code unit, including a lone surrogate, counts on its own.
+        source: core_text_length_helper_source!("count"),
     },
     CoreJsHelper {
         name: "__moth_text_is_empty",
@@ -50,6 +61,34 @@ pub(crate) const CORE_TEXT_JS_HELPERS: &[CoreJsHelper] = &[
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_core_text_helpers(&mut self) {
-        self.emit_referenced_core_helpers(CORE_TEXT_JS_HELPERS);
+        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
+            .expect("Int always has a JavaScript numeric carrier");
+
+        for helper in CORE_TEXT_JS_HELPERS {
+            if !self.referenced_external_runtime_function(helper.name) {
+                continue;
+            }
+
+            if helper.name == "__moth_text_length" {
+                match carrier {
+                    JsNumericCarrier::ExactInteger { .. } => {
+                        self.emit_javascript_source(helper.source);
+                    }
+                    JsNumericCarrier::BigInteger { .. } => {
+                        self.emit_javascript_source(core_text_length_helper_source!(
+                            "BigInt(count)"
+                        ));
+                    }
+                    JsNumericCarrier::BinaryFloat { .. } => {
+                        unreachable!("Int carrier cannot be a binary float")
+                    }
+                    JsNumericCarrier::ScaledInteger { .. } => {
+                        unreachable!("Int carrier cannot be a Number")
+                    }
+                }
+            } else {
+                self.emit_javascript_source(helper.source);
+            }
+        }
     }
 }

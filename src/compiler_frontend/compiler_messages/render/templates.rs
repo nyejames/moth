@@ -9,6 +9,7 @@ use super::named_value_or_default;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_template_slot_message(
@@ -46,11 +47,12 @@ pub(crate) fn invalid_template_slot_message(
 pub(crate) fn compile_time_evaluation_error_message(
     reason: CompileTimeEvaluationErrorReason,
     operation: Option<StringId>,
+    numeric_profile: Option<NumericProfile>,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let operation_text = named_value_or_default(operation, string_table, "this expression");
 
-    match reason {
+    let mut message = match reason {
         CompileTimeEvaluationErrorReason::IntegerOverflow => {
             format!("Compile-time integer overflow while evaluating {operation_text}.")
         }
@@ -119,7 +121,16 @@ pub(crate) fn compile_time_evaluation_error_message(
                 "Cannot use a resource-bearing or site-root string for {operation_text}. Those pieces have no final text until the build assigns URL contexts. Keep the operation at runtime or use plain text without structural pieces."
             )
         }
+    };
+
+    // The message is owned on every arm, so the profile suffix appends into the existing
+    // String instead of allocating a second copy of the whole message.
+    if let Some(profile) = numeric_profile {
+        use std::fmt::Write as _;
+        write!(message, " Numeric profile: {profile}.")
+            .expect("an owned String write cannot fail on a finite in-memory buffer");
     }
+    message
 }
 
 pub(crate) fn compile_time_evaluation_error_suggestion(

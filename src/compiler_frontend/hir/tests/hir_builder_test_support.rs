@@ -143,7 +143,7 @@ impl<'a> HirBuilder<'a> {
 
     /// Registers the builtin `Error` nominal struct in the test type environment.
     ///
-    /// WHAT: adds the canonical `Error { message: String, code: Int }` struct so tests can
+    /// WHAT: adds the canonical `Error { message: String, code: U32 }` struct so tests can
     ///       construct fallible return types whose error slot is builtin `Error`.
     pub(crate) fn test_register_builtin_error_type(
         &mut self,
@@ -155,6 +155,7 @@ impl<'a> HirBuilder<'a> {
         use crate::compiler_frontend::datatypes::definitions::{
             FieldDefinition, StructTypeDefinition,
         };
+        use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
         use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 
         if let Some(existing) = self.test_builtin_error_type_id() {
@@ -185,7 +186,10 @@ impl<'a> HirBuilder<'a> {
                 },
                 FieldDefinition {
                     name: code_path,
-                    type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::INT,
+                    type_id:
+                        crate::compiler_frontend::datatypes::ids::builtin_type_ids::fixed_scalar(
+                            FixedScalar::U32,
+                        ),
                     span: None,
                 },
             ]

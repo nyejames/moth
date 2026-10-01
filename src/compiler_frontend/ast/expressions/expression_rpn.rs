@@ -11,9 +11,9 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind, Operator};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -56,6 +56,8 @@ impl ExpressionRpn {
             ExpressionRpnItem::Operand(expression) => {
                 !matches!(expression.kind, ExpressionKind::ValueBlock { .. })
             }
+            // A deferred literal is not a statement body; resolution removes it before lowering.
+            ExpressionRpnItem::PendingNumericLiteral { .. } => true,
             ExpressionRpnItem::Operator { .. } => true,
         })
     }
@@ -71,6 +73,18 @@ impl ExpressionRpn {
 pub enum ExpressionRpnItem {
     /// An expression operand whose value is only known at runtime.
     Operand(Expression),
+    /// A numeric literal awaiting destination-aware materialisation.
+    ///
+    /// WHAT: retains the literal token (with parser-owned `-` already folded into its sign),
+    ///       its span and its value mode between parsing and `evaluate_expression`.
+    /// WHY: a direct fixed-scalar boundary materialises the literal in its own type with no
+    ///      `Int` intermediate, so the destination must still be unknown at parse time.
+    ///      `evaluate_expression` resolves every pending item; later stages never see one.
+    PendingNumericLiteral {
+        token: NumericLiteralToken,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    },
     /// A symbolic or keyword operator with its exact source span preserved for diagnostics.
     Operator {
         operator: Operator,
@@ -83,8 +97,21 @@ impl ExpressionRpnItem {
     pub fn source_span(&self) -> Option<SourceSpan> {
         match self {
             ExpressionRpnItem::Operand(expression) => expression.span,
+            ExpressionRpnItem::PendingNumericLiteral { span, .. } => *span,
             ExpressionRpnItem::Operator { span, .. } => *span,
         }
+    }
+
+    /// True for resolved operands and deferred numeric literals alike.
+    ///
+    /// WHAT: treats a pending literal as an operand for parse-time shape checks such as
+    ///       adjacent-operand rejection and named-entry stops.
+    /// WHY: the literal already occupies operand position; only its value is unresolved.
+    pub fn is_operand_or_pending_literal(&self) -> bool {
+        matches!(
+            self,
+            ExpressionRpnItem::Operand(_) | ExpressionRpnItem::PendingNumericLiteral { .. }
+        )
     }
 }
 

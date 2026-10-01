@@ -62,7 +62,6 @@ fn canonical_token_for_tag(tokens: &SourceTokens, tag: TokenTag) -> TokenRef<'_>
 #[test]
 fn schema_has_all_explicit_tags_once() {
     let tags = TokenTag::all();
-    assert_eq!(tags.len(), 94);
     let tokens = canonical_tokens_for_all_tags();
 
     for (index, tag) in tags.iter().enumerate() {
@@ -117,8 +116,11 @@ fn schema_has_all_explicit_tags_once() {
             .count(),
         0
     );
+    let first_unknown_raw = tags.len() as u16 + 1;
     assert_eq!(
-        TokenTag::from_raw_unchecked(95).descriptor().text(),
+        TokenTag::from_raw_unchecked(first_unknown_raw)
+            .descriptor()
+            .text(),
         "token"
     );
 }
@@ -126,8 +128,9 @@ fn schema_has_all_explicit_tags_once() {
 #[test]
 fn unknown_tags_and_reserved_flags_are_rejected() {
     assert_eq!(TokenTag::from_raw(0), None);
-    assert_eq!(TokenTag::from_raw(95), None);
-    assert_eq!(TokenShape::from_raw_parts(95, 0, 0), None);
+    let first_unknown_raw = TokenTag::all().len() as u16 + 1;
+    assert_eq!(TokenTag::from_raw(first_unknown_raw), None);
+    assert_eq!(TokenShape::from_raw_parts(first_unknown_raw, 0, 0), None);
 
     assert_eq!(TokenTag::NUMERIC_LITERAL.allowed_flags(), 0b11);
     assert!(TokenTag::NUMERIC_LITERAL.flags_are_valid(0b11));

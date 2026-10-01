@@ -50,8 +50,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_component_is_config_file, dependency_component_is_support_root_file,
 };
@@ -191,7 +193,7 @@ pub(crate) fn invalid_map_type_message(
         InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
             let type_name = diagnostic_type_name(key_type, context);
             format!(
-                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Bool, and Char. Use a package or user-defined map type for custom key behavior."
+                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
         InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {
@@ -371,6 +373,52 @@ pub(crate) fn unsupported_operator_types_message(
         );
     }
 
+    // Byte is deliberately not an arithmetic scalar, including under unary minus.
+    let byte_type = builtin_type_ids::fixed_scalar(FixedScalar::Byte);
+    let is_unary_minus = operator == DiagnosticOperator::Subtract && rhs.is_none();
+    if is_arithmetic_operator(operator) && (lhs == byte_type || rhs == Some(byte_type)) {
+        return "`Byte` has no arithmetic operators.".to_owned();
+    }
+
+    // Unary minus never promotes an unsigned value to a signed domain.
+    if is_unary_minus
+        && let Some(scalar) = diagnostic_fixed_scalar(lhs)
+        && scalar.class() == FixedScalarClass::UnsignedInteger
+    {
+        let operand = diagnostic_type_name(lhs, context);
+        return format!(
+            "Unary `-` does not apply to unsigned `{operand}`. Convert the value to a signed type with `cast` first."
+        );
+    }
+
+    // Arithmetic requires one complete common type for fixed integer operand ranges.
+    if is_arithmetic_operator(operator)
+        && let Some(rhs) = rhs
+        && let (Some(left_scalar), Some(right_scalar)) =
+            (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs))
+        && is_fixed_integer(left_scalar)
+        && is_fixed_integer(right_scalar)
+        && common_fixed_integer(left_scalar, right_scalar).is_none()
+    {
+        let left = diagnostic_type_name(lhs, context);
+        let right = diagnostic_type_name(rhs, context);
+        return format!(
+            "`{left}` and `{right}` have no common integer type for `{operator_spelling}`. Convert one operand with `cast` first."
+        );
+    }
+
+    // Fixed-width values do not implicitly mix with Int/Float or the other fixed numeric family.
+    if (is_arithmetic_operator(operator) || is_comparison_operator(operator))
+        && let Some(rhs) = rhs
+        && implicitly_mixed_numeric_pair(lhs, rhs)
+    {
+        let left = diagnostic_type_name(lhs, context);
+        let right = diagnostic_type_name(rhs, context);
+        return format!(
+            "`{left}` and `{right}` do not mix implicitly. Convert one operand with `cast` first."
+        );
+    }
+
     // Factual exact-operator fallback for every other unsupported operand combination.
     if let Some(rhs) = rhs {
         let left = diagnostic_type_name(lhs, context);
@@ -382,6 +430,64 @@ pub(crate) fn unsupported_operator_types_message(
         let operand = diagnostic_type_name(lhs, context);
         format!("Operator `{operator_spelling}` does not support operand type `{operand}`.")
     }
+}
+
+fn is_arithmetic_operator(operator: DiagnosticOperator) -> bool {
+    matches!(
+        operator,
+        DiagnosticOperator::Add
+            | DiagnosticOperator::Subtract
+            | DiagnosticOperator::Multiply
+            | DiagnosticOperator::Divide
+            | DiagnosticOperator::IntDivide
+            | DiagnosticOperator::Modulus
+            | DiagnosticOperator::Exponent
+    )
+}
+
+fn is_comparison_operator(operator: DiagnosticOperator) -> bool {
+    matches!(
+        operator,
+        DiagnosticOperator::GreaterThan
+            | DiagnosticOperator::GreaterThanOrEqual
+            | DiagnosticOperator::LessThan
+            | DiagnosticOperator::LessThanOrEqual
+            | DiagnosticOperator::Equality
+            | DiagnosticOperator::NotEqual
+    )
+}
+
+fn diagnostic_fixed_scalar(type_id: TypeId) -> Option<FixedScalar> {
+    FixedScalar::ALL
+        .into_iter()
+        .find(|scalar| builtin_type_ids::fixed_scalar(*scalar) == type_id)
+}
+
+fn is_fixed_integer(scalar: FixedScalar) -> bool {
+    matches!(
+        scalar.class(),
+        FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger
+    )
+}
+
+fn is_fixed_numeric(scalar: FixedScalar) -> bool {
+    is_fixed_integer(scalar) || scalar.class() == FixedScalarClass::BinaryFloat
+}
+
+fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
+    match (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs)) {
+        (Some(left), Some(right)) => {
+            (is_fixed_integer(left) && right.class() == FixedScalarClass::BinaryFloat)
+                || (left.class() == FixedScalarClass::BinaryFloat && is_fixed_integer(right))
+        }
+        (Some(scalar), None) => is_fixed_numeric(scalar) && is_profile_numeric(rhs),
+        (None, Some(scalar)) => is_fixed_numeric(scalar) && is_profile_numeric(lhs),
+        (None, None) => false,
+    }
+}
+
+fn is_profile_numeric(type_id: TypeId) -> bool {
+    type_id == builtin_type_ids::INT || type_id == builtin_type_ids::FLOAT
 }
 
 fn generic_parameter_operator_message(

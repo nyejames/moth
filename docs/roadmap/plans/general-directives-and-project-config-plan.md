@@ -137,7 +137,7 @@ Only a single explicitly typed top-level compile-time binding is eligible. Rejec
 
 Source-level placement includes top-level declaration items in normal files and module roots wherever an ordinary compile-time constant is legal. The existing `export:` block remains a declaration grouping until its later migration, so an otherwise legal `$config` constant there uses ordinary visibility rules. Support and facade declarations keep their existing package-isolation and public-surface restrictions. A purpose directive is unnecessary for compile-time declarations.
 
-The input-contract domain stays `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. Fixed I*/U*/F* types, Byte and Number/NumberN are deliberately excluded even after numeric support lands. Retain early explicit primitive annotations rather than adding alias resolution, inferred types, collections or user-defined records to input contracts.
+The input-contract domain stays `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. Fixed I*/U*/F* types, Byte and Dec/DecN are deliberately excluded even after numeric support lands. Retain early explicit primitive annotations rather than adding alias resolution, inferred types, collections or user-defined records to input contracts.
 
 NumericProfile is selected before typed command inputs and config compilation. Both bootstrap and source contracts use that same Int range and Float precision through the delivered numeric materialisation owner. Default Int32/Float64 behaviour remains. Neither `$config`, `$project` nor `$html_builder` selects or exposes the profile, and the directive migration adds no profile CLI syntax. Profile compatibility remains separate from the boundary-local input namespace.
 
@@ -398,7 +398,7 @@ Use manifest-backed language/project cases for public behaviour, subsystem-local
 | Registry safety | Core override, duplicate builder names, wrong context, unknown directive and known deferred directive. |
 | `$config` syntax | Required/present/absent input forms, explicit primitive type, invalid modifier targets, missing target, duplicate modifiers and invalid argument forms. |
 | Defaults | Source literal-only rejection, bootstrap earlier folded helpers, forward-reference failure, optional absence normalisation and no type inference from overrides. |
-| Numeric profile | All four Int/Float width combinations, Int64 input above i32 range, Float32 rounding/finite checks, matching bootstrap/source normalisation and rejection of fixed-width/Byte/Number input contracts. |
+| Numeric profile | All four Int/Float width combinations, Int64 input above i32 range, Float32 rounding/finite checks, matching bootstrap/source normalisation and rejection of fixed-width/Byte/Dec input contracts. |
 | Input resolution | CLI/global/default order, bootstrap/source matching, conflicting defaults despite override, unknown input after source inventory and package-boundary isolation. |
 | Metadata separation | `$project(version = "1.0")` does not provide or block source input `version`. An explicit same-name `$config` does. Renamed argument slots do not rename contracts. |
 | Required version | Missing version fails even if a version contract exists. Literal version works. Earlier `$config` version works. `none` fails for required String version. |

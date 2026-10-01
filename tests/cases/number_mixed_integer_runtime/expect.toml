@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "mixed Dec integers Int=84/84/true/true I8=84/84/true/true I16=84/84/true/true I32=84/84/true/true I64=84/84/true/true U8=84/84/true/true U16=84/84/true/true U32=84/84/true/true U64max=36893488147419103230/36893488147419103230/true/true scale-mixed-less=true/true float32=16777216 sub-mixed=7.25/-7.25 div-mixed=0.2/4.2 rem-mixed=-1.25/2 i64-exact=-1/-1 i64-order=true/true"

@@ -1,0 +1,5 @@
+InvalidScaleName = |
+    beyond_max Dec257,
+|
+
+[: Dec scale above 256 is rejected]

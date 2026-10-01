@@ -52,7 +52,7 @@ roadmap entry.
 
 The required initial runtime surface is Int, finite Float, every fixed I*/U*/F*
 type, Byte and Char on HTML-JS and HTML-Wasm. Their ordering is already owned by
-the numeric/Char authorities. This plan does not wait for a Wasm Number runtime
+the numeric/Char authorities. This plan does not wait for a Wasm Dec runtime
 or a public ordering trait and does not redesign numeric semantics.
 
 ## Required authorities
@@ -219,8 +219,8 @@ Required initial eligible types are:
 - Char
 - transparent aliases of those types
 
-Number/NumberN may join the same classification when their canonical natural
-ordering and the selected target's comparison are delivered. Wasm Number support
+Dec/DecN may join the same classification when their canonical natural
+ordering and the selected target's comparison are delivered. Wasm Dec support
 remains a separate runtime prerequisite. Byte is already required, not a deferred
 numeric scaffold. Ordering does not give Byte arithmetic or bitwise operations.
 
@@ -587,7 +587,7 @@ Run the source contract through HTML-JS with explicit Moth ordering and reachabl
 - [ ] Reuse one helper when both memory policies select the same implementation.
 - [ ] Sort growable arrays and fixed wrapper item arrays without changing wrapper state.
 - [ ] Implement explicit Int/Float, fixed I*/U*/F*, Byte and Char comparison through the shared semantic classification.
-- [ ] Use delivered Number comparison only when semantically classified and target-supported. Keep its Wasm runtime gate separate.
+- [ ] Use delivered Dec comparison only when semantically classified and target-supported. Keep its Wasm runtime gate separate.
 - [ ] Emit no default JavaScript lexicographic sort and no subtraction-based numeric comparator.
 - [ ] Emit helpers only when reachable and share them across call sites.
 - [ ] Remove the replaced JavaScript target rejection.

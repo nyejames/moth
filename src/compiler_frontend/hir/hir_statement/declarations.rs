@@ -21,6 +21,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::TypeId;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue, HirModuleConst};
 use crate::compiler_frontend::hir::expressions::{
@@ -129,11 +130,16 @@ impl<'a> HirBuilder<'a> {
         value_id: ConstValueId,
     ) -> Result<HirConstValue, CompilerError> {
         let mut path_scratch = Vec::new();
-        store.fold_value(value_id, &mut |_, visit| {
+        store.fold_value(value_id, &mut |metadata, visit| {
             increment_frontend_counter(FrontendCounter::HirConstValueConversions);
             match visit {
                 ConstValueVisit::Int(value) => Ok(HirConstValue::Int(value)),
                 ConstValueVisit::Float(value) => Ok(HirConstValue::Float(value)),
+                ConstValueVisit::Number(value) => {
+                    self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
+                    Ok(HirConstValue::Number(value.clone()))
+                }
+                ConstValueVisit::FixedScalar(value) => Ok(HirConstValue::FixedScalar(value)),
                 ConstValueVisit::Bool(value) => Ok(HirConstValue::Bool(value)),
                 ConstValueVisit::Char(value) => Ok(HirConstValue::Char(value)),
                 ConstValueVisit::String(value) => match value {
@@ -227,6 +233,23 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Float(value) => self.make_expression(
                     span,
                     HirExpressionKind::Float(value),
+                    ty,
+                    ValueKind::Const,
+                    region,
+                ),
+                ConstValueVisit::Number(value) => {
+                    self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
+                    self.make_expression(
+                        span,
+                        HirExpressionKind::Number(value.clone()),
+                        ty,
+                        ValueKind::Const,
+                        region,
+                    )
+                }
+                ConstValueVisit::FixedScalar(value) => self.make_expression(
+                    span,
+                    HirExpressionKind::FixedScalar(value),
                     ty,
                     ValueKind::Const,
                     region,
@@ -390,6 +413,25 @@ impl<'a> HirBuilder<'a> {
         });
         self.module_const_values = store;
         result
+    }
+
+    fn validate_number_value_type(
+        &self,
+        value: &NumberValue,
+        type_id: TypeId,
+        span: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        if self.type_environment.number_scale(type_id) != Some(value.scale()) {
+            return_hir_transformation_error!(
+                format!(
+                    "HIR invariant: Dec value scale {} does not match resolved type {type_id:?}",
+                    value.scale()
+                ),
+                self.hir_error_location(span)
+            );
+        }
+
+        Ok(())
     }
 
     fn resolve_const_struct_id(

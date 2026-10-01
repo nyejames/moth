@@ -208,14 +208,12 @@ pub fn parse_function_signature_syntax(
             });
         }
 
-        TokenTag::DATATYPE_INT
-        | TokenTag::DATATYPE_FLOAT
-        | TokenTag::DATATYPE_BOOL
-        | TokenTag::DATATYPE_STRING
-        | TokenTag::DATATYPE_CHAR
-        | TokenTag::DATATYPE_NONE
-        | TokenTag::OPEN_CURLY
-        | TokenTag::SYMBOL => {
+        tag if tag.is_builtin_scalar_type_name()
+            || matches!(
+                tag,
+                TokenTag::DATATYPE_NONE | TokenTag::OPEN_CURLY | TokenTag::SYMBOL
+            ) =>
+        {
             let found = current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
                 CompilerError::compiler_error(
                     "signature diagnostic requested without a current token",

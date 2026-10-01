@@ -1,0 +1,5 @@
+Box type T = |
+    value T,
+|
+
+b Box of U8 = Box(300)

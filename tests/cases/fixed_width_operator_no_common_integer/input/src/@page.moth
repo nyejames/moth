@@ -1,0 +1,7 @@
+hidden ||:
+    left I64 = 1
+    right U64 = 1
+    value = left + right
+;
+
+[:unreachable]

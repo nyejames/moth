@@ -1,0 +1,5 @@
+project #= (
+    name = "numeric_failure_config_origin_record_overflow_rejected",
+    entry_root = "src",
+)
+html #= ()

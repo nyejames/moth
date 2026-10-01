@@ -1,0 +1,5 @@
+project #= (
+    name = "numeric_failure_runtime_error_fn_recovered",
+    entry_root = "src",
+)
+html #= ()

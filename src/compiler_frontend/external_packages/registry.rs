@@ -7,9 +7,10 @@
 //! the ID-indexed maps, and the prelude.
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
+use super::abi::{ExternalAbiType, ExternalSignatureType};
 use super::definitions::{
-    ExternalConstantDef, ExternalFunctionDef, ExternalFunctionSpec, ExternalPackage,
-    ExternalTypeDef, ExternalTypeSpec,
+    ExternalConstantDef, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionSpec,
+    ExternalPackage, ExternalTypeDef, ExternalTypeSpec,
 };
 use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
@@ -401,6 +402,31 @@ impl ExternalPackageRegistry {
             .clone();
 
         constant.name = path.leaf().to_owned();
+
+        if !matches!(
+            (&constant.data_type, constant.value),
+            (
+                ExternalSignatureType::NativeInt | ExternalSignatureType::Abi(ExternalAbiType::I32),
+                ExternalConstantValue::Int(_)
+            ) | (
+                ExternalSignatureType::NativeFloat
+                    | ExternalSignatureType::Abi(ExternalAbiType::F64),
+                ExternalConstantValue::Float(_)
+            ) | (
+                ExternalSignatureType::Abi(ExternalAbiType::Bool),
+                ExternalConstantValue::Bool(_)
+            ) | (
+                ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+                ExternalConstantValue::StringSlice(_)
+            )
+        ) {
+            return_compiler_error!(
+                "External constant '{}' declares semantic type {:?} incompatible with payload {:?}.",
+                constant.name,
+                constant.data_type,
+                constant.value
+            );
+        }
 
         self.reject_duplicate_path(
             &package_path_str,
@@ -1141,9 +1167,8 @@ pub(crate) mod test_support {
     use super::ExternalPackageRegistry;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum TestExternalAbiType {
-        I32,
-        Utf8Str,
+    pub enum TestExternalReturnType {
+        NativeInt,
         Void,
     }
 
@@ -1159,12 +1184,11 @@ pub(crate) mod test_support {
         AliasArgs(Vec<usize>),
     }
 
-    impl From<TestExternalAbiType> for ExternalAbiType {
-        fn from(value: TestExternalAbiType) -> Self {
+    impl From<TestExternalReturnType> for ExternalSignatureType {
+        fn from(value: TestExternalReturnType) -> Self {
             match value {
-                TestExternalAbiType::I32 => ExternalAbiType::I32,
-                TestExternalAbiType::Utf8Str => ExternalAbiType::Utf8Str,
-                TestExternalAbiType::Void => ExternalAbiType::Void,
+                TestExternalReturnType::NativeInt => ExternalSignatureType::NativeInt,
+                TestExternalReturnType::Void => ExternalSignatureType::Abi(ExternalAbiType::Void),
             }
         }
     }
@@ -1195,7 +1219,7 @@ pub(crate) mod test_support {
         name: impl Into<String>,
         parameters: Vec<(ExternalSignatureType, TestExternalAccessKind)>,
         return_alias: TestExternalReturnAlias,
-        return_type: TestExternalAbiType,
+        return_type: TestExternalReturnType,
     ) -> Result<ExternalFunctionId, CompilerError> {
         registry.register_function(ExternalFunctionDef {
             name: name.into(),
@@ -1206,7 +1230,7 @@ pub(crate) mod test_support {
                     access_kind: access_kind.into(),
                 })
                 .collect(),
-            returns: external_success_returns(return_type.into(), return_alias.into()),
+            returns: external_success_returns(return_type, return_alias.into()),
             error_return_type: None,
             lowerings: ExternalFunctionLowerings::default(),
         })

@@ -25,10 +25,12 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId,
 };
+use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolPath;
 use crate::compiler_frontend::semantic_identity::{
@@ -174,14 +176,22 @@ pub(crate) enum CanonicalBuiltinType {
     Bool,
     Int,
     Float,
-    // Decimal is intentionally inactive in the Alpha surface. The variant is kept to mirror the
-    // stable builtin TypeId layout seeded by `TypeEnvironment::new`.
-    Decimal,
     String,
     Char,
     Range,
     None,
     Error,
+    /// Explicit-width builtin scalar or the `Byte` octet type.
+    ///
+    /// Distinct from `Int`/`Float`: a fixed width is part of the identity, so a matching
+    /// `NumericProfile` width never unifies the two.
+    FixedScalar(FixedScalar),
+    /// Arbitrary-precision decimal identity at one canonical scale.
+    ///
+    /// `Dec` means scale zero and `Dec0` shares that identity; `Dec1`..`Dec256`
+    /// carry their scale. Unlike the seeded scalars there is no per-scale seeded `TypeId`:
+    /// consumers intern the scale lazily into their local environment.
+    Number(NumberScale),
 }
 
 /// Binding-backed opaque external type identity.
@@ -633,9 +643,9 @@ pub(crate) fn project_type_id_to_canonical_identity(
     })?;
 
     match definition {
-        TypeDefinition::Builtin(builtin) => {
-            Ok(CanonicalTypeIdentity::Builtin(project_builtin(builtin.key)))
-        }
+        TypeDefinition::Builtin(builtin) => Ok(CanonicalTypeIdentity::Builtin(
+            canonical_builtin_for_key(builtin.key),
+        )),
         TypeDefinition::Struct(def) => {
             let origin = context
                 .nominal_origins
@@ -715,17 +725,66 @@ pub(crate) fn project_type_id_to_canonical_identity(
 }
 
 /// Maps a builtin scalar key to its canonical builtin identity.
-fn project_builtin(key: BuiltinTypeKey) -> CanonicalBuiltinType {
+///
+/// WHAT: the single owner of `BuiltinTypeKey -> CanonicalBuiltinType`.
+/// WHY: generated blueprints, sidecar publication and import projection all need this mapping and
+///      must agree, so they call this function instead of keeping private copies.
+pub(crate) fn canonical_builtin_for_key(key: BuiltinTypeKey) -> CanonicalBuiltinType {
     match key {
         BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
         BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
         BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
-        BuiltinTypeKey::Decimal => CanonicalBuiltinType::Decimal,
         BuiltinTypeKey::String => CanonicalBuiltinType::String,
         BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
         BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
         BuiltinTypeKey::None => CanonicalBuiltinType::None,
+        BuiltinTypeKey::Number(scale) => CanonicalBuiltinType::Number(scale),
+        BuiltinTypeKey::FixedScalar(scalar) => CanonicalBuiltinType::FixedScalar(scalar),
     }
+}
+
+/// Maps a canonical builtin identity back to its `BuiltinTypeKey` shape.
+///
+/// WHAT: the pure inverse of [`canonical_builtin_for_key`], the one owner of
+///       `CanonicalBuiltinType -> BuiltinTypeKey`.
+/// WHY: environments resolve canonical builtin identities through their `builtin_ids` key map
+///      instead of a second identity-to-seeded-id table. Seeded scalars always have an entry;
+///      `Dec` scales appear once a consumer interned that scale.
+///
+/// Returns `None` for `Error`, which is a source-declared nominal rather than a keyed builtin.
+pub(crate) fn builtin_key_for_canonical_builtin(
+    builtin: CanonicalBuiltinType,
+) -> Option<BuiltinTypeKey> {
+    Some(match builtin {
+        CanonicalBuiltinType::Bool => BuiltinTypeKey::Bool,
+        CanonicalBuiltinType::Int => BuiltinTypeKey::Int,
+        CanonicalBuiltinType::Float => BuiltinTypeKey::Float,
+        CanonicalBuiltinType::String => BuiltinTypeKey::String,
+        CanonicalBuiltinType::Char => BuiltinTypeKey::Char,
+        CanonicalBuiltinType::Range => BuiltinTypeKey::Range,
+        CanonicalBuiltinType::None => BuiltinTypeKey::None,
+        CanonicalBuiltinType::Number(scale) => BuiltinTypeKey::Number(scale),
+        CanonicalBuiltinType::FixedScalar(scalar) => BuiltinTypeKey::FixedScalar(scalar),
+        CanonicalBuiltinType::Error => return None,
+    })
+}
+
+/// Interns a canonical builtin identity into the consumer environment.
+///
+/// WHAT: the one mutating owner of `CanonicalBuiltinType -> consumer-local TypeId`.
+/// WHY: import projection and generated materialisation interning each have to name the
+///      consumer-local `TypeId` again; seeded identities resolve through the deterministic
+///      seeded layout, while `Dec` scales intern lazily into the given environment so
+///      every consumer share of one scale keeps one local `TypeId`.
+///
+/// Returns `None` for `Error`, which is a source-declared nominal materialised by a real
+/// compilation, so its `TypeId` must come from the declaring environment.
+pub(crate) fn intern_canonical_builtin(
+    builtin: CanonicalBuiltinType,
+    type_environment: &mut TypeEnvironment,
+) -> Option<TypeId> {
+    let key = builtin_key_for_canonical_builtin(builtin)?;
+    Some(type_environment.intern_builtin_key(key))
 }
 
 /// Projects a constructed type, validating exact arity for each builtin constructor.

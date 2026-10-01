@@ -6,6 +6,7 @@
 //! kinds become user-facing prose.
 
 use super::*;
+use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
 };
@@ -375,13 +376,19 @@ fn diagnostic_label_message_text(
     match message {
         DiagnosticLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
         DiagnosticLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
-        DiagnosticLabelMessage::ExpectedTypeDeclaredHere => {
-            "expected type declared here".to_owned()
-        }
         DiagnosticLabelMessage::ValueMovedHere => "value moved here".to_owned(),
         DiagnosticLabelMessage::RenderedText(text) => string_table.resolve(*text).to_owned(),
-        DiagnosticLabelMessage::GenericInstantiationCallSite => {
-            "while instantiating this generic call".to_owned()
+        DiagnosticLabelMessage::ConfigInputOrigin { input_name, origin } => {
+            let origin_text = match origin {
+                BuildConfigValueOrigin::ExplicitInput => "an explicit input",
+                BuildConfigValueOrigin::BuilderGlobal => "a builder-provided global",
+                BuildConfigValueOrigin::FixedProjectField => "a fixed project field",
+                BuildConfigValueOrigin::DeclarationDefault => "its declaration default",
+            };
+            format!(
+                "configuration input `{}` resolved from {origin_text}",
+                string_table.resolve(*input_name)
+            )
         }
         DiagnosticLabelMessage::GenericInstantiationBodySite => {
             "generic body operation failed here".to_owned()

@@ -1,0 +1,14 @@
+unused_number_helper |value Dec2| -> Dec2:
+    literal Dec2 = 12.34
+    return value
+;
+
+visible_control || -> Int:
+    if false:
+        removed Dec256 = 1e-256
+    ;
+    return 23
+;
+
+result = visible_control()
+[: number unreachable regions ignored [result]]

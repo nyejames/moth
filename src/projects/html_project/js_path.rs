@@ -125,6 +125,7 @@ pub(crate) fn compile_html_module_js(
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
     let js_lowering_config = JsLoweringConfig::html_page_bundle(
         input.build_profile.is_release(),
+        input.numeric_profile,
         Arc::clone(&input.external_package_registry),
         input.reachability.backend_selection().clone(),
         Arc::clone(&source_function_names),
@@ -141,6 +142,7 @@ pub(crate) fn compile_html_module_js(
         lower_hir_to_js(
             input.hir_module,
             input.borrow_analysis,
+            input.numeric_proofs,
             string_table,
             js_lowering_config,
             input.type_environment,
@@ -160,6 +162,7 @@ pub(crate) fn compile_html_module_js(
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
             let linked_config = JsLoweringConfig::html_page_bundle(
                 input.build_profile.is_release(),
+                input.numeric_profile,
                 Arc::clone(&linked.module.link_facts.external_package_registry),
                 linked.reachability.backend_selection().clone(),
                 Arc::clone(&source_function_names),
@@ -175,6 +178,7 @@ pub(crate) fn compile_html_module_js(
                 lower_hir_to_js(
                     &linked.module.executable.hir,
                     &linked.module.executable.borrow_analysis,
+                    &linked.module.executable.numeric_proofs,
                     string_table,
                     linked_config,
                     &linked.module.executable.type_environment,
@@ -249,6 +253,7 @@ pub(crate) fn compile_html_module_js(
         input.external_package_registry.as_ref(),
         &route.logical_html_path,
         input.build_profile.is_release(),
+        input.numeric_profile,
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
 

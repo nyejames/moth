@@ -1,0 +1,9 @@
+hide_byte_option_equality ||:
+    absent Byte? = none
+    another_absent Byte? = none
+    absent_equal = absent is another_absent
+    raw Byte = 5
+    present Byte? = raw
+    present_equal = present is raw
+;
+[:Byte option equality succeeds]

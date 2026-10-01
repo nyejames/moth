@@ -1,0 +1,8 @@
+@helper readings
+
+render_readings || -> String:
+    values, first = readings()
+    return [:fixed width cross module return first=[first]]
+;
+
+[:[render_readings()]]

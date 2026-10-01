@@ -29,6 +29,7 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, GenericParameterId, GenericParameterListId, NominalTypeId,
     TypeConstructor, TypeId,
 };
+use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageRegistry, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
     IO_INPUT_EXTERNAL_TYPE_ID,
@@ -276,21 +277,30 @@ fn projection_context<'a>(
 
 #[test]
 fn projects_every_builtin_scalar() {
-    let env = TypeEnvironment::new();
+    let mut env = TypeEnvironment::new();
     let resolver = MapNominalOriginResolver::new();
     let generic_resolver = MapGenericParameterOriginResolver::new();
     let registry = ExternalPackageRegistry::new();
     let context = projection_context(&resolver, &generic_resolver, &registry);
+    let number_zero_scale = NumberScale::from_name("Dec").expect("Dec is scale zero");
+    let number_two_scale = NumberScale::new(2).expect("scale two is within the Dec range");
 
     let cases = [
         (env.builtins().bool, CanonicalBuiltinType::Bool),
         (env.builtins().int, CanonicalBuiltinType::Int),
         (env.builtins().float, CanonicalBuiltinType::Float),
-        (env.builtins().decimal, CanonicalBuiltinType::Decimal),
         (env.builtins().string, CanonicalBuiltinType::String),
         (env.builtins().char, CanonicalBuiltinType::Char),
         (env.builtins().range, CanonicalBuiltinType::Range),
         (env.builtins().none, CanonicalBuiltinType::None),
+        (
+            env.intern_number(number_zero_scale),
+            CanonicalBuiltinType::Number(number_zero_scale),
+        ),
+        (
+            env.intern_number(number_two_scale),
+            CanonicalBuiltinType::Number(number_two_scale),
+        ),
     ];
 
     for (type_id, expected_builtin) in cases {

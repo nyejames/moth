@@ -10,6 +10,7 @@ mod js_expr;
 mod js_function;
 mod js_statement;
 mod lookups;
+mod numeric_carrier;
 mod output;
 pub(crate) mod package_bindings;
 mod reachability;
@@ -29,6 +30,7 @@ pub(crate) use runtime::collection_javascript_helpers;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
 
 use crate::backends::structural_string::StructuralStringUrlMap;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
@@ -69,6 +71,12 @@ pub struct JsLoweringConfig {
     /// Emit human-readable formatting.
     pub pretty: bool,
 
+    /// Compiler-owned numeric widths for this compilation boundary.
+    ///
+    /// WHAT: controls the JS carrier and precision selected for profile `Int`/`Float` values.
+    /// WHY: literals, operations and casts must preserve the same frontend numeric contract.
+    pub numeric_profile: NumericProfile,
+
     /// Automatically invoke the module start function.
     pub auto_invoke_start: bool,
 
@@ -98,9 +106,10 @@ impl JsLoweringConfig {
     /// and any caller that needs a complete standalone JS bundle without HTML glue.
     /// WHY: the default must be all-functions emission so tests see every function;
     /// glue is disabled because no HTML builder is involved.
-    pub fn direct_js(release_build: bool) -> Self {
+    pub fn direct_js(release_build: bool, numeric_profile: NumericProfile) -> Self {
         JsLoweringConfig {
             pretty: !release_build,
+            numeric_profile,
             auto_invoke_start: false,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -120,13 +129,14 @@ impl JsLoweringConfig {
     /// owns it.
     pub fn html_page_bundle(
         release_build: bool,
+        numeric_profile: NumericProfile,
         external_package_registry: Arc<ExternalPackageRegistry>,
         selection: HirBackendSelection,
         source_function_names: Arc<HashMap<OriginFunctionId, String>>,
         module_private_function_names: Arc<HashMap<ModulePrivateExecutableIdentity, String>>,
         generated_function_names: Arc<HashMap<GeneratedFunctionIdentity, String>>,
     ) -> Self {
-        let mut config = Self::direct_js(release_build);
+        let mut config = Self::direct_js(release_build, numeric_profile);
         config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config.external_module_export_glue_enabled = true;
@@ -145,10 +155,11 @@ impl JsLoweringConfig {
     /// silently lowered through glue that the artifact path cannot emit.
     pub(crate) fn html_wasm_companion(
         release_build: bool,
+        numeric_profile: NumericProfile,
         external_package_registry: Arc<ExternalPackageRegistry>,
         selection: HirBackendSelection,
     ) -> Self {
-        let mut config = Self::direct_js(release_build);
+        let mut config = Self::direct_js(release_build, numeric_profile);
         config.function_emission_policy = JsFunctionEmissionPolicy::Selected(selection);
         config.external_package_registry = external_package_registry;
         config

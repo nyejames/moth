@@ -2,15 +2,17 @@
 //!
 //! WHAT: validates declaration-site trait bounds on concrete `Struct of T` and `Choice of T`
 //! instantiations once concrete type arguments are known.
-//! WHY: nominal generic instances are keyed only by constructor plus type arguments. Until
+//! WHY: nominal generic instances are keyed only by constructor plus type arguments, so
 //! only reusable canonical/compiler-owned evidence may satisfy those bounds.
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
+use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
 };
@@ -26,8 +28,23 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 type GenericBoundValidationResult<T> = Result<T, CompilerDiagnostic>;
 
+/// Evidence selected for a concrete trait bound in the requester context.
+///
+/// Only registered evidence carries an evidence ID. An on-demand builtin proof retains the
+/// exact requester-local source and trait pair so request freezing can canonicalize it without
+/// mutating the evidence registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BoundEvidenceSelection {
+    Registered(TraitEvidenceId),
+    BuiltinCastProof {
+        source_type_id: TypeId,
+        trait_id: TraitId,
+    },
+}
+
 pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) trait_environment: Option<&'a TraitEnvironment>,
     pub(crate) trait_evidence_environment: Option<&'a TraitEvidenceEnvironment>,
     pub(crate) generated_evidence_pairs: Option<&'a FxHashSet<(TypeId, TraitId)>>,
@@ -45,6 +62,7 @@ impl<'a> GenericBoundEvidenceContext<'a> {
         trait_evidence_environment: &'a TraitEvidenceEnvironment,
         visibility: &'a FileVisibility,
         resolved_type_aliases: &'a FxHashMap<PathId, ResolvedTypeAlias>,
+        numeric_profile: NumericProfile,
     ) -> Self {
         Self {
             type_environment,
@@ -56,6 +74,7 @@ impl<'a> GenericBoundEvidenceContext<'a> {
             visible_type_alias_names: Some(&visibility.visible_type_alias_names),
             visible_namespace_records: Some(&visibility.visible_namespace_records),
             resolved_type_aliases: Some(resolved_type_aliases),
+            numeric_profile,
         }
     }
 
@@ -115,34 +134,49 @@ pub(crate) fn validate_nominal_generic_bound_evidence(
 }
 
 /// Resolve reusable evidence for one concrete type, including evidence declared on a generic
-/// nominal constructor.
+/// nominal constructor, then consider a matching on-demand builtin cast proof.
 ///
-/// WHAT: checks exact builtin and canonical evidence first, then falls back from a concrete
-/// generic instance to the evidence registered for its nominal constructor.
-/// WHY: `Box must TRAIT` is one reusable conformance for every valid `Box of T` instance; the
-/// public interface therefore carries the constructor identity while consumers validate a
-/// concrete instance identity. Declaration-site bounds on the instance arguments are validated
-/// separately by [`validate_type_recursive`].
+/// WHAT: preserves exact registered evidence precedence and the generic constructor fallback.
+///      Only after those registered rows are absent can the compiler-owned cast pair policy prove
+///      a builtin core cast trait on demand.
+/// WHY: the public interface carries constructor identity while consumers validate a concrete
+///      instance. Pair-scoped builtin selection leaves the requester's evidence registry unchanged.
 pub(crate) fn evidence_for_type(
     type_id: TypeId,
     trait_id: TraitId,
     type_environment: &TypeEnvironment,
+    trait_environment: &TraitEnvironment,
     evidence_environment: &TraitEvidenceEnvironment,
-) -> Option<TraitEvidenceId> {
+    numeric_profile: NumericProfile,
+) -> Option<BoundEvidenceSelection> {
     let exact = evidence_environment
         .builtin_for(type_id, trait_id)
         .or_else(|| evidence_environment.canonical_for(type_id, trait_id));
-    if exact.is_some() {
-        return exact;
+    if let Some(evidence_id) = exact {
+        return Some(BoundEvidenceSelection::Registered(evidence_id));
     }
 
-    let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(type_id) else {
-        return None;
-    };
-    let base_type_id = type_environment.type_id_for_nominal_id(instance.base)?;
-    evidence_environment
-        .builtin_for(base_type_id, trait_id)
-        .or_else(|| evidence_environment.canonical_for(base_type_id, trait_id))
+    if let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(type_id) {
+        let base_type_id = type_environment.type_id_for_nominal_id(instance.base)?;
+        if let Some(evidence_id) = evidence_environment
+            .builtin_for(base_type_id, trait_id)
+            .or_else(|| evidence_environment.canonical_for(base_type_id, trait_id))
+        {
+            return Some(BoundEvidenceSelection::Registered(evidence_id));
+        }
+    }
+
+    builtin_cast_proves_core_trait(
+        type_id,
+        trait_id,
+        type_environment,
+        trait_environment,
+        numeric_profile,
+    )
+    .then_some(BoundEvidenceSelection::BuiltinCastProof {
+        source_type_id: type_id,
+        trait_id,
+    })
 }
 
 fn validate_type_recursive(
@@ -269,7 +303,9 @@ fn validate_single_bound(
             concrete_type_id,
             trait_id,
             context.type_environment,
+            trait_environment,
             evidence_environment,
+            context.numeric_profile,
         )
         .is_some();
 

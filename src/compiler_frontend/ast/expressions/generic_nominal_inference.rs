@@ -11,7 +11,8 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_argument::order_call_arguments_by_retained_slot;
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallValidationError, expectations_from_constructor_fields,
+    CallValidationError, ExpectedParameterType, ParameterExpectation,
+    expectations_from_constructor_fields,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::generic_bounds::{
@@ -38,19 +39,90 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
+#[derive(Clone, Copy)]
 pub(crate) enum GenericNominalTemplate<'a> {
     StructFields(&'a [ConstructorField]),
     ChoiceVariants(&'a [ChoiceVariantDefinition]),
 }
 
-pub(crate) struct GenericNominalConstructorInput<'a> {
+/// Contextual facts available before a nominal constructor's arguments are parsed.
+///
+/// WHAT: identifies the generic nominal template and the surrounding expected-result boundary.
+/// WHY: that boundary must seed literal expectations before argument parsing, while inference
+///      later reuses the same bindings alongside evidence collected from parsed arguments.
+#[derive(Clone, Copy)]
+pub(crate) struct GenericNominalConstructorContext<'a> {
     pub nominal_path: &'a PathId,
     pub display_name: &'a str,
     pub template: GenericNominalTemplate<'a>,
+    pub span: Option<SourceSpan>,
+}
+
+/// Contextual bindings and source evidence collected before argument parsing.
+///
+/// WHAT: retains partial generic substitutions for constructor parse expectations and inference.
+/// WHY: one seed must govern literal materialisation and later argument compatibility/conflicts.
+pub(crate) struct GenericNominalConstructorSeed {
+    bindings: GenericTypeBindings,
+    evidence_locations: NominalBindingEvidenceLocations,
+}
+
+impl GenericNominalConstructorSeed {
+    /// Substitutes the contextual bindings into constructor parse expectations.
+    ///
+    /// WHAT: rewrites each known field expectation through the partial mapping; fields whose
+    ///      parameters stay unbound keep their generic expectation.
+    /// WHY: a field fixed by the expected result is its argument's immediate receiving boundary,
+    ///      while the template field views stay generic for argument inference.
+    pub(crate) fn bind_parse_expectations(
+        &self,
+        expectations: &mut [ParameterExpectation],
+        type_environment: &mut TypeEnvironment,
+    ) {
+        let mapping = self.bindings.replacement_map();
+        for expectation in expectations {
+            if let ExpectedParameterType::Known(type_id) = &mut expectation.expected_type {
+                *type_id = type_environment.substitute_type_id(*type_id, mapping);
+            }
+        }
+    }
+}
+
+pub(crate) struct GenericNominalConstructorInput<'a> {
+    pub context: GenericNominalConstructorContext<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
     pub raw_args: Option<&'a [CallArgument]>,
-    pub span: Option<SourceSpan>,
     pub path_fork: &'a PathInternerFork,
+}
+
+/// Collect contextual generic bindings before constructor argument parsing.
+///
+/// WHAT: applies the existing expected-result matching rules to a nominal template and retains
+///      both partial substitutions and the first evidence span for each binding.
+/// WHY: argument literals need those concrete substitutions at their immediate field boundary;
+///      argument inference then continues from this exact state instead of recomputing it.
+pub(crate) fn seed_generic_nominal_constructor(
+    constructor_context: GenericNominalConstructorContext<'_>,
+    context: &ScopeContext,
+    type_environment: &TypeEnvironment,
+    string_table: &mut StringTable,
+) -> Result<GenericNominalConstructorSeed, CallValidationError> {
+    let mut bindings = GenericTypeBindings::new();
+    let mut evidence_locations = NominalBindingEvidenceLocations::new();
+
+    collect_expected_type_bindings(
+        &constructor_context,
+        context,
+        type_environment,
+        &mut bindings,
+        &mut evidence_locations,
+        string_table,
+    )?;
+
+    Ok(GenericNominalConstructorSeed {
+        bindings,
+        evidence_locations,
+    })
 }
 
 pub(crate) struct GenericNominalInference {
@@ -62,26 +134,15 @@ pub(crate) struct GenericNominalInference {
 
 pub(crate) fn infer_generic_nominal_constructor(
     input: GenericNominalConstructorInput<'_>,
+    seed: GenericNominalConstructorSeed,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<GenericNominalInference, CallValidationError> {
-    let mut bindings = GenericTypeBindings::new();
-    let mut evidence_locations = NominalBindingEvidenceLocations::new();
+    let mut bindings = seed.bindings;
+    let mut evidence_locations = seed.evidence_locations;
 
-    // ------------------------
-    //  Collect type bindings
-    // ------------------------
-    // First from the expected result type (contextual type information),
-    // then from the constructor arguments themselves.
-    collect_expected_type_bindings(
-        &input,
-        context,
-        type_interner.environment(),
-        &mut bindings,
-        &mut evidence_locations,
-        string_table,
-    )?;
+    // Constructor-argument evidence extends the context-derived partial bindings.
     collect_constructor_argument_bindings(
         &input,
         type_interner.environment(),
@@ -95,11 +156,11 @@ pub(crate) fn infer_generic_nominal_constructor(
     // ------------------------
     let canonical_parameters = type_interner
         .environment()
-        .canonical_parameters_for_nominal(input.nominal_path)
+        .canonical_parameters_for_nominal(input.context.nominal_path)
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generic nominal '{}' has no canonical parameter list after registration",
-                input.display_name
+                input.context.display_name
             ))
         })?;
 
@@ -115,9 +176,9 @@ pub(crate) fn infer_generic_nominal_constructor(
 
     if !missing_parameters.is_empty() {
         let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
-            Some(string_table.intern(input.display_name)),
+            Some(string_table.intern(input.context.display_name)),
             InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
-            input.span,
+            input.context.span,
         );
         return Err(diagnostic.into());
     }
@@ -127,11 +188,11 @@ pub(crate) fn infer_generic_nominal_constructor(
     let (instance_type_id, instance_key) = {
         let nominal_id = type_interner
             .environment()
-            .nominal_id_for_path(input.nominal_path);
+            .nominal_id_for_path(input.context.nominal_path);
         let nominal_id = nominal_id.ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Generic nominal '{}' has no canonical nominal identity after registration",
-                input.display_name
+                input.context.display_name
             ))
         })?;
 
@@ -145,7 +206,7 @@ pub(crate) fn infer_generic_nominal_constructor(
             .collect::<Option<Vec<TypeIdentityKey>>>();
 
         let instance_key = argument_keys.map(|arguments| GenericInstantiationKey {
-            base_path: input.nominal_path.to_owned(),
+            base_path: input.context.nominal_path.to_owned(),
             arguments,
         });
 
@@ -157,6 +218,7 @@ pub(crate) fn infer_generic_nominal_constructor(
 
     let evidence_context = GenericBoundEvidenceContext {
         type_environment: type_interner.environment(),
+        numeric_profile: context.shared.numeric_profile,
         trait_environment: Some(context.trait_environment()),
         trait_evidence_environment: Some(context.trait_evidence_environment()),
         generated_evidence_pairs: Some(context.shared.generated_evidence_pairs.as_ref()),
@@ -180,11 +242,11 @@ pub(crate) fn infer_generic_nominal_constructor(
     };
     if let Err(mut diagnostic) = validate_nominal_generic_bound_evidence(
         instance_type_id,
-        Some(string_table.intern(input.display_name)),
-        input.span,
+        Some(string_table.intern(input.context.display_name)),
+        input.context.span,
         &evidence_context,
     ) {
-        diagnostic.primary_span = input.span;
+        diagnostic.primary_span = input.context.span;
         return Err(CallValidationError::Diagnostic(diagnostic));
     }
     Ok(GenericNominalInference {
@@ -248,7 +310,7 @@ struct NominalBindingEvidenceContext<'a> {
 /// WHY: this is the primary inference source; constructor-argument inference only fills
 /// gaps that the expected type leaves ambiguous.
 fn collect_expected_type_bindings(
-    input: &GenericNominalConstructorInput<'_>,
+    constructor_context: &GenericNominalConstructorContext<'_>,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     bindings: &mut GenericTypeBindings,
@@ -256,8 +318,8 @@ fn collect_expected_type_bindings(
     string_table: &mut StringTable,
 ) -> Result<(), CallValidationError> {
     let mut evidence_context = NominalBindingEvidenceContext {
-        nominal_path: input.nominal_path,
-        display_name: input.display_name,
+        nominal_path: constructor_context.nominal_path,
+        display_name: constructor_context.display_name,
         bindings,
         evidence_locations,
         type_environment,
@@ -271,15 +333,15 @@ fn collect_expected_type_bindings(
                 let Some(base_path) = type_environment.nominal_path_by_id(instance.base) else {
                     continue;
                 };
-                if base_path != input.nominal_path {
+                if base_path != constructor_context.nominal_path {
                     continue;
                 }
                 let canonical_parameters = type_environment
-                    .canonical_parameters_for_nominal(input.nominal_path)
+                    .canonical_parameters_for_nominal(constructor_context.nominal_path)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "Generic nominal '{}' has no canonical parameter list after registration",
-                            input.display_name
+                            constructor_context.display_name
                         ))
                     })?;
 
@@ -296,14 +358,16 @@ fn collect_expected_type_bindings(
                         &mut evidence_context,
                         parameter_type_id,
                         argument,
-                        input.span,
+                        constructor_context.span,
                     )?;
                 }
             }
 
             // A concrete struct definition of the same path lets us bind field types.
-            Some(TypeDefinition::Struct(def)) if &def.path == input.nominal_path => {
-                if let GenericNominalTemplate::StructFields(template_fields) = input.template {
+            Some(TypeDefinition::Struct(def)) if &def.path == constructor_context.nominal_path => {
+                if let GenericNominalTemplate::StructFields(template_fields) =
+                    constructor_context.template
+                {
                     let Some(expected_fields) = type_environment.fields_for(expected_type_id)
                     else {
                         continue;
@@ -317,14 +381,16 @@ fn collect_expected_type_bindings(
                             .zip(expected_fields)
                             .map(|(template, expected)| (template.type_id, expected.type_id)),
                         &mut evidence_context,
-                        input.span,
+                        constructor_context.span,
                     )?;
                 }
             }
 
             // A concrete choice definition of the same path lets us bind variant payload types.
-            Some(TypeDefinition::Choice(def)) if &def.path == input.nominal_path => {
-                if let GenericNominalTemplate::ChoiceVariants(template_variants) = input.template {
+            Some(TypeDefinition::Choice(def)) if &def.path == constructor_context.nominal_path => {
+                if let GenericNominalTemplate::ChoiceVariants(template_variants) =
+                    constructor_context.template
+                {
                     let Some(expected_variants) = type_environment.variants_for(expected_type_id)
                     else {
                         continue;
@@ -333,7 +399,7 @@ fn collect_expected_type_bindings(
                         template_variants,
                         expected_variants,
                         &mut evidence_context,
-                        input.span,
+                        constructor_context.span,
                     )?;
                 }
             }
@@ -367,8 +433,8 @@ fn collect_constructor_argument_bindings(
     let resolved_slots = order_call_arguments_by_retained_slot(raw_args, expectations.len())?;
 
     let mut evidence_context = NominalBindingEvidenceContext {
-        nominal_path: input.nominal_path,
-        display_name: input.display_name,
+        nominal_path: input.context.nominal_path,
+        display_name: input.context.display_name,
         bindings,
         evidence_locations,
         type_environment,

@@ -1,0 +1,275 @@
+format_f16 |value F16| -> String:
+    return cast value
+;
+format_f32 |value F32| -> String:
+    return cast value
+;
+format_f64 |value F64| -> String:
+    return cast value
+;
+format_float |value Float| -> String:
+    return cast value
+;
+
+parse_f16 |text String| -> F16, Error!:
+    return cast! text
+;
+parse_f32 |text String| -> F32, Error!:
+    return cast! text
+;
+parse_f64 |text String| -> F64, Error!:
+    return cast! text
+;
+parse_float |text String| -> Float, Error!:
+    return cast! text
+;
+round_f64_to_f16 |value F64| -> F16, Error!:
+    return cast! value
+;
+round_f64_to_f32 |value F64| -> F32, Error!:
+    return cast! value
+;
+round_i64_to_f32 |value I64| -> F32:
+    return cast value
+;
+round_u64_to_f32 |value U64| -> F32:
+    return cast value
+;
+round_i64_to_f16 |value I64| -> F16, Error!:
+    return cast! value
+;
+round_u64_to_f16 |value U64| -> F16, Error!:
+    return cast! value
+;
+i64_via_f64_to_f32 |value I64| -> F32, Error!:
+    intermediate F64 = cast value
+    return cast! intermediate
+;
+u64_via_f64_to_f32 |value U64| -> F32, Error!:
+    intermediate F64 = cast value
+    return cast! intermediate
+;
+
+multiply_f32 |left F32, right F32| -> F32, Error!:
+    return left * right
+;
+divide_f32 |left F32, right F32| -> F32, Error!:
+    return left / right
+;
+divide_f64 |left F64, right F64| -> F64, Error!:
+    return left / right
+;
+divide_f16 |left F16, right F16| -> F32, Error!:
+    return left / right
+;
+divide_float |left Float, right Float| -> Float, Error!:
+    return left / right
+;
+multiply_f64 |left F64, right F64| -> F64, Error!:
+    return left * right
+;
+multiply_f16 |left F16, right F16| -> F32, Error!:
+    return left * right
+;
+multiply_profile_float |left Float, right Float| -> Float, Error!:
+    return left * right
+;
+capture_f64_to_f16 |value F64| -> U32:
+    code ~U32 = 0
+    ignored = round_f64_to_f16(value) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_f64_to_f32 |value F64| -> U32:
+    code ~U32 = 0
+    ignored = round_f64_to_f32(value) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_f32_multiply |left F32, right F32| -> U32:
+    code ~U32 = 0
+    ignored = multiply_f32(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_divide_f16 |left F16, right F16| -> U32:
+    code ~U32 = 0
+    ignored = divide_f16(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_divide_f32 |left F32, right F32| -> U32:
+    code ~U32 = 0
+    ignored = divide_f32(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_divide_f64 |left F64, right F64| -> U32:
+    code ~U32 = 0
+    ignored = divide_f64(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+capture_divide_float |left Float, right Float| -> U32:
+    code ~U32 = 0
+    ignored = divide_float(left, right) catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+
+f16_near_tie_above = parse_f16("1.00048828125000000001") catch:
+    then 0.0
+;
+f16_near_tie_below = parse_f16("1.00146484374999999999") catch:
+    then 0.0
+;
+
+f32_half_tie_even = parse_f32("1.000000059604644775390625") catch:
+    then 0.0
+;
+f32_half_tie_odd = parse_f32("1.000000178813934326171875") catch:
+    then 0.0
+;
+f16_min_normal = parse_f16("0.00006103515625") catch:
+    then 0.0
+;
+f16_min_subnormal = parse_f16("0.000000059604644775390625") catch:
+    then 0.0
+;
+f32_min_normal = parse_f32("1.1754943508222875e-38") catch:
+    then 0.0
+;
+f32_min_subnormal = parse_f32("1.401298464324817e-45") catch:
+    then 0.0
+;
+f16_underflow_negative = parse_f16("-0.00000001") catch:
+    then 1.0
+;
+f32_underflow_negative = parse_f32("-1e-50") catch:
+    then 1.0
+;
+
+i64_direct_f32 = round_i64_to_f32(4611686293305294849)
+i64_via_f32 = i64_via_f64_to_f32(4611686293305294849) catch:
+    then 0.0
+;
+u64_direct_f32 = round_u64_to_f32(9223372586610589697)
+u64_via_f32 = u64_via_f64_to_f32(9223372586610589697) catch:
+    then 0.0
+;
+i64_f16_in_range = round_i64_to_f16(65519) catch:
+    then 0.0
+;
+u64_f16_in_range = round_u64_to_f16(65519) catch:
+    then 0.0
+;
+f16_threshold_below = round_f64_to_f16(65519.99) catch:
+    then 0.0
+;
+f16_threshold_error = capture_f64_to_f16(65520.0)
+f32_max = round_f64_to_f32(3.4028234663852886e38) catch:
+    then 0.0
+;
+f32_overflow_error = capture_f64_to_f32(3.4028236e38)
+f32_nonfinite_operation_error = capture_f32_multiply(f32_max, 2.0)
+
+negative_f64 = parse_f64("-0.0") catch:
+    then 1.0
+;
+positive_f64 = parse_f64("0.0") catch:
+    then 1.0
+;
+negative_profile_float = parse_float("-0.0") catch:
+    then 1.0
+;
+negative_f32_from_f64 = round_f64_to_f32(negative_f64) catch:
+    then 1.0
+;
+negative_f16_from_f64 = round_f64_to_f16(negative_f64) catch:
+    then 1.0
+;
+negative_f64_product = multiply_f64(negative_f64, 1.0) catch:
+    then 1.0
+;
+negative_f32_product = multiply_f32(negative_f32_from_f64, 1.0) catch:
+    then 1.0
+;
+negative_f16_product = multiply_f16(negative_f16_from_f64, 1.0) catch:
+    then 1.0
+;
+negative_profile_product = multiply_profile_float(negative_profile_float, 1.0) catch:
+    then 1.0
+;
+negative_f32_underflow = f32_underflow_negative
+negative_f16_underflow = f16_underflow_negative
+negative_f16_as_f32 F32 = cast negative_f16_from_f64
+negative_f32_as_f64 F64 = cast negative_f32_from_f64
+negative_profile_float_as_text String = format_float(negative_profile_float)
+negative_f32_text String = format_f32(negative_f32_from_f64)
+negative_f16_text String = format_f16(negative_f16_from_f64)
+negative_f32_cast_text String = format_f64(negative_f32_as_f64)
+negative_f16_cast_text String = format_f32(negative_f16_as_f32)
+negative_f64_product_text String = format_f64(negative_f64_product)
+negative_f32_product_text String = format_f32(negative_f32_product)
+negative_f16_product_text String = format_f32(negative_f16_product)
+negative_profile_product_text String = format_float(negative_profile_product)
+negative_f32_underflow_text String = format_f32(negative_f32_underflow)
+negative_f16_underflow_text String = format_f16(negative_f16_underflow)
+
+f16_near_tie_above_text = format_f16(f16_near_tie_above)
+f16_near_tie_below_text = format_f16(f16_near_tie_below)
+f32_tie_even_text = format_f32(f32_half_tie_even)
+f32_tie_odd_text = format_f32(f32_half_tie_odd)
+f16_normal_text = format_f16(f16_min_normal)
+f16_subnormal_text = format_f16(f16_min_subnormal)
+f32_normal_text = format_f32(f32_min_normal)
+f32_subnormal_text = format_f32(f32_min_subnormal)
+i64_direct_f32_text = format_f32(i64_direct_f32)
+i64_via_f32_text = format_f32(i64_via_f32)
+u64_direct_f32_text = format_f32(u64_direct_f32)
+u64_via_f32_text = format_f32(u64_via_f32)
+i64_f16_text = format_f16(i64_f16_in_range)
+u64_f16_text = format_f16(u64_f16_in_range)
+f16_threshold_below_text = format_f16(f16_threshold_below)
+f32_max_text = format_f32(f32_max)
+
+f16_positive_zero = parse_f16("0") catch:
+    then 1.0
+;
+f32_positive_zero = parse_f32("0") catch:
+    then 1.0
+;
+float_positive_zero = parse_float("0") catch:
+    then 1.0
+;
+negative_f32_underflow_equals_zero = negative_f32_underflow is f32_positive_zero
+negative_f16_underflow_equals_zero = negative_f16_underflow is f16_positive_zero
+negative_f32_equals_zero = negative_f32_from_f64 is f32_positive_zero
+negative_f16_equals_zero = negative_f16_from_f64 is f16_positive_zero
+negative_profile_float_equals_zero = negative_profile_float is float_positive_zero
+negative_f64_product_equals_zero = negative_f64_product is positive_f64
+negative_f32_product_equals_zero = negative_f32_product is f32_positive_zero
+negative_f16_product_equals_zero = negative_f16_product is f32_positive_zero
+negative_profile_product_equals_zero = negative_profile_product is float_positive_zero
+f64_zero_division_error = capture_divide_f64(1.0, negative_f64)
+f32_zero_division_error = capture_divide_f32(1.0, negative_f32_from_f64)
+f16_zero_division_error = capture_divide_f16(1.0, negative_f16_from_f64)
+profile_zero_division_error = capture_divide_float(1.0, negative_profile_float)
+f32_underflow_division_error = capture_divide_f32(1.0, negative_f32_underflow)
+f16_underflow_division_error = capture_divide_f16(1.0, negative_f16_underflow)
+
+[:float boundaries near-ties-f16=[f16_near_tie_above_text]/[f16_near_tie_below_text] ties-f32=[f32_tie_even_text]/[f32_tie_odd_text] subnormal-f16=[f16_normal_text]/[f16_subnormal_text] subnormal-f32=[f32_normal_text]/[f32_subnormal_text] int-f32=[i64_direct_f32_text]/[i64_via_f32_text]/[u64_direct_f32_text]/[u64_via_f32_text] int-f16=[i64_f16_text]/[u64_f16_text] limits=[f16_threshold_below_text]/[f16_threshold_error]/[f32_max_text]/[f32_overflow_error]/[f32_nonfinite_operation_error] zero=[negative_f32_equals_zero]/[negative_f32_text]/[negative_f16_equals_zero]/[negative_f16_text]/[negative_f32_cast_text]/[negative_f16_cast_text]/[negative_profile_float_equals_zero]/[negative_profile_float_as_text] zero-arith=[negative_f64_product_equals_zero]/[negative_f64_product_text]/[negative_f32_product_equals_zero]/[negative_f32_product_text]/[negative_f16_product_equals_zero]/[negative_f16_product_text]/[negative_profile_product_equals_zero]/[negative_profile_product_text] underflow=[negative_f32_underflow_equals_zero]/[negative_f32_underflow_text]/[f32_underflow_division_error]/[negative_f16_underflow_equals_zero]/[negative_f16_underflow_text]/[f16_underflow_division_error] division=[f64_zero_division_error]/[f32_zero_division_error]/[f16_zero_division_error]/[profile_zero_division_error]]

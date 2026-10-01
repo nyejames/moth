@@ -16,17 +16,23 @@ parse_offset_minute || -> Int, Error!:
 ;
 
 -- An out-of-range hour is rejected instead of rolling over
-hour_code = parse_hour() catch |hour_err|:
-    then hour_err.code
+hour_code ~U32 = 0
+hour_value = parse_hour() catch |hour_err|:
+    hour_code = hour_err.code
+    then 0
 ;
 
 -- The offset hour and offset minute carry the time-of-day range rule
 -- independently, so neither field can rely on the other to reject.
-offset_hour_code = parse_offset_hour() catch |offset_hour_err|:
-    then offset_hour_err.code
+offset_hour_code ~U32 = 0
+offset_hour_value = parse_offset_hour() catch |offset_hour_err|:
+    offset_hour_code = offset_hour_err.code
+    then 0
 ;
-offset_minute_code = parse_offset_minute() catch |offset_minute_err|:
-    then offset_minute_err.code
+offset_minute_code ~U32 = 0
+offset_minute_value = parse_offset_minute() catch |offset_minute_err|:
+    offset_minute_code = offset_minute_err.code
+    then 0
 ;
 
 [: timestamp_parse_field_out_of_range code=[hour_code] offset_hour_code=[offset_hour_code] offset_minute_code=[offset_minute_code]]

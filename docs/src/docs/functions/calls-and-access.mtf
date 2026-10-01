@@ -69,6 +69,12 @@ An existing mutable place needs explicit `~` at the call site.
 
 Passing an existing place without `~` to a mutable parameter is invalid.
 
+For `increment(~count)`, HTML-JS keeps normal write-through to `count`.
+HTML-Wasm currently rejects reachable mutable function parameters at their
+declaration because its call-argument ABI has no writable argument slot. This
+restriction is specific to mutable parameters, not ordinary mutable locals or
+immutable parameters.
+
 A fresh rvalue can satisfy a mutable parameter without source `~`:
 
 [codeblock, $code("moth"):

@@ -10,7 +10,7 @@ Think of four layers plus records of what changed:
 
 **Public semantic interface.** Exported identities, types, values, access and effect facts, plus stable lifetime summaries. The accepted set of summaries covers fresh roots, aliases, retained parameters and outlives constraints. What actually ships today is narrower: fresh roots, parameter aliases and an imprecise unknown.
 
-**Executable state.** Module-local `TypeEnvironment`, validated HIR, the resource table and borrow facts. Local lifetime-region and escape facts belong to this lane in the accepted design, and their validation is deferred.
+**Executable state.** Module-local `TypeEnvironment`, validated HIR, the resource table, borrow facts and optional profile-aware statement-keyed numeric-proof facts paired with the executable. Local lifetime-region and escape facts belong to this lane in the accepted design, and their validation is deferred.
 
 **Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, reactive features, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
 
@@ -101,7 +101,7 @@ To **monomorphise** a call is to stamp out a concrete version of a generic funct
 
 That stamping has to put the new code somewhere, and the declaring module is sealed. So concrete generic functions live in **generated sidecars** owned by the consuming project or package compilation. New code grows beside the base. The base stays put.
 
-In the accepted design each sidecar carries its request identity, generated-local type context, concrete HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. Today a sidecar stores its identity and module, keeps the completed summary separately, and leaves lifetime and fingerprint retention deferred. A generated function may itself request further instances.
+In the accepted design each sidecar carries its request identity, generated-local type context, concrete HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. Today a sidecar stores its identity and module, keeps its completed summary separately and leaves lifetime and fingerprint retention deferred. Its module executable carries its own statement-keyed numeric-proof table, computed from its HIR under the boundary profile after validation. A generated function may itself request further instances.
 
 Two owners meet here, and the split matters.
 

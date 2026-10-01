@@ -7,13 +7,13 @@
 //!      - `policies` — pure policy functions that operate on `BuiltinCastLiteral`
 //!      - `traits`   — central names and registration helpers for core cast traits
 //!      - `resolution` — AST cast resolver wiring
-//!      - `numeric_limits` — Alpha signed i32 cast range shared by folding and runtime
 //! WHY: the cast owner needs one clearly mapped location that parser, AST, and
 //!      folding stages can all reach for cast answers without depending on
 //!      parser orchestration modules or backend code.
+//! NOTE: `Int` range policy lives on `IntWidth::{min_value, max_value, contains}`;
+//!      there is no separate cast-owned numeric-limit module.
 
 pub(crate) mod evidence;
-pub(crate) mod numeric_limits;
 pub(crate) mod policies;
 pub(crate) mod resolution;
 pub(crate) mod targets;

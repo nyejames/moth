@@ -14,6 +14,8 @@ Modes:
   bench                Run the full benchmark suite and update local/public summaries
   bench-check          Run the full benchmark suite without writing benchmark history
   bench-ci             Preflight all cases, then measure the quick subset without recording
+  bench-validate       Preflight every manifest case without measurements
+  bench-scaling        Check the declared scaling-series budgets without recording
   bench-report         Print a local-only benchmark drilldown report
   bench-frontend-check Run the focused frontend benchmark suite without writing history
   bench-frontend       Run the focused frontend benchmark suite and record
@@ -29,6 +31,7 @@ Modes:
   first-party-deps     Check first-party package roots for third-party runtime dependencies
   honesty-audit        Classify the test-honesty findings and write the canonical inventory
                        (use --update-evidence to refresh the tracked durable copy)
+  cache-maintain       Prune old timing reports and report the target size budget
   span-census          Measure LocalSpan bit-split candidates over the corpus";
 
 /// Distinguishes the supported xtask benchmark modes.
@@ -61,6 +64,8 @@ pub enum BenchmarkMode {
     BenchValidate,
     /// Fit and check the growth exponent of every declared scaling series.
     BenchScaling,
+    /// Prune old timing reports while retaining all Cargo build artifacts.
+    CacheMaintain,
     /// Run Samply-backed profiling on benchmark cases.
     BenchProfile(ProfileOptions),
     /// Prove that a no-timer release binary contains no timer-only markers.
@@ -125,6 +130,7 @@ impl BenchmarkMode {
             "bench-data-layout-check" => Some(BenchmarkMode::BenchDataLayoutCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
             "bench-scaling" => Some(BenchmarkMode::BenchScaling),
+            "cache-maintain" => Some(BenchmarkMode::CacheMaintain),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
             "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),

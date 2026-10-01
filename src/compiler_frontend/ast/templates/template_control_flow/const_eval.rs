@@ -161,6 +161,8 @@ fn substitute_source_consts_in_rpn_item(
             substitute_source_consts_in_expression(expression.clone(), context, string_table),
         ),
         operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
+        // Resolution removes pending literals before this stage.
+        pending @ ExpressionRpnItem::PendingNumericLiteral { .. } => pending.clone(),
     }
 }
 
@@ -178,7 +180,12 @@ fn fold_substituted_runtime_condition(
     // itself is returned by move.
     add_ast_counter(AstCounter::ExpressionOperandClones, rpn.items.len());
 
-    match constant_fold(rpn.items.clone(), string_table) {
+    match constant_fold(
+        rpn.items.clone(),
+        string_table,
+        context.numeric_profile,
+        Some(context),
+    ) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()

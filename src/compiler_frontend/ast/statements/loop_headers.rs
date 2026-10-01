@@ -25,10 +25,14 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidLoopHeaderReason, RangeOperandKind,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, binary_operation_domain,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
@@ -598,28 +602,25 @@ fn parse_range_loop_spec_cursor(
             .set_position(range_start)
             .map_err(ExpressionParseError::from)?;
 
-        let start = if token_stream.current_tag() == TokenTag::EXCLUSIVE_RANGE {
-            let span = Some(token_stream.current_span());
-            Expression::new(
-                ExpressionKind::Int(0),
-                span,
-                builtin_type_ids::INT,
-                DataType::Int,
-                ValueMode::ImmutableOwned,
-            )
-        } else {
-            parse_cursor_expression_until(CursorExpressionUntilInput {
-                token_stream,
-                expression_start: range_start,
-                expression_end: range_end,
-                context,
-                type_interner,
-                value_mode: &ValueMode::ImmutableReference,
-                string_table,
-                path_fork,
-                stop_tokens: &[TokenTag::EXCLUSIVE_RANGE],
-            })?
-        };
+        let (start_expression, omitted_start_span) =
+            if token_stream.current_tag() == TokenTag::EXCLUSIVE_RANGE {
+                (None, Some(token_stream.current_span()))
+            } else {
+                (
+                    Some(parse_cursor_expression_until(CursorExpressionUntilInput {
+                        token_stream,
+                        expression_start: range_start,
+                        expression_end: range_end,
+                        context,
+                        type_interner,
+                        value_mode: &ValueMode::ImmutableReference,
+                        string_table,
+                        path_fork,
+                        stop_tokens: &[TokenTag::EXCLUSIVE_RANGE],
+                    })?),
+                    None,
+                )
+            };
 
         let end_kind = match token_stream.current_tag() {
             TokenTag::EXCLUSIVE_RANGE => {
@@ -634,7 +635,11 @@ fn parse_range_loop_spec_cursor(
             TokenTag::EOF if token_stream.position() >= range_end => {
                 return loop_header_error(
                     InvalidLoopHeaderReason::MissingRangeSeparator,
-                    start.span,
+                    omitted_start_span.or_else(|| {
+                        start_expression
+                            .as_ref()
+                            .and_then(|expression| expression.span)
+                    }),
                 );
             }
             _ => {
@@ -646,7 +651,14 @@ fn parse_range_loop_spec_cursor(
         };
 
         if token_stream.position() >= range_end || token_stream.current_tag() == TokenTag::EOF {
-            return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start.span);
+            return loop_header_error(
+                InvalidLoopHeaderReason::MissingRangeEndBound,
+                omitted_start_span.or_else(|| {
+                    start_expression
+                        .as_ref()
+                        .and_then(|expression| expression.span)
+                }),
+            );
         }
 
         let end_start = token_stream.position();
@@ -699,43 +711,13 @@ fn parse_range_loop_spec_cursor(
         };
 
         let type_environment = type_interner.environment();
-        let is_start_numeric = is_numeric_type_id(start.type_id, type_environment);
-        let is_end_numeric = is_numeric_type_id(end.type_id, type_environment);
-        let is_step_numeric = step
-            .as_ref()
-            .map(|expression| is_numeric_type_id(expression.type_id, type_environment));
-
-        if !is_start_numeric {
-            return Err(CompilerDiagnostic::invalid_range_operand(
-                RangeOperandKind::Start,
-                start.type_id,
-                start.span,
-            )
-            .into());
-        }
-        if !is_end_numeric {
-            return Err(CompilerDiagnostic::invalid_range_operand(
-                RangeOperandKind::End,
-                end.type_id,
-                end.span,
-            )
-            .into());
-        }
-        if let Some(step_expression) = step.as_ref().filter(|_| is_step_numeric == Some(false)) {
-            return Err(CompilerDiagnostic::invalid_range_operand(
-                RangeOperandKind::Step,
-                step_expression.type_id,
-                step_expression.span,
-            )
-            .into());
-        }
-
-        let uses_float = start.type_id == type_environment.builtins().float
-            || end.type_id == type_environment.builtins().float
-            || step
-                .as_ref()
-                .is_some_and(|expression| expression.type_id == type_environment.builtins().float);
-        if uses_float && step.is_none() {
+        let domain = range_numeric_domain(
+            start_expression.as_ref(),
+            &end,
+            step.as_ref(),
+            type_environment,
+        )?;
+        if domain.is_binary_float() && step.is_none() {
             return loop_header_error(InvalidLoopHeaderReason::FloatRangeMissingStep, end.span);
         }
         if let Some(step_expression) = &step
@@ -743,6 +725,14 @@ fn parse_range_loop_spec_cursor(
         {
             return loop_header_error(InvalidLoopHeaderReason::ZeroRangeStep, step_expression.span);
         }
+
+        let start = if let Some(start) = start_expression {
+            start
+        } else {
+            let end_domain = NumericScalar::from_type_id(end.type_id, type_environment)
+                .expect("range numeric validation ensures the end has a numeric domain");
+            contextual_range_zero(end_domain, omitted_start_span)
+        };
 
         Ok(RangeLoopSpec {
             start,
@@ -756,6 +746,84 @@ fn parse_range_loop_spec_cursor(
         .set_position(saved_position)
         .map_err(ExpressionParseError::from)?;
     result
+}
+
+fn range_operand_domain(
+    expression: &Expression,
+    kind: RangeOperandKind,
+    type_environment: &TypeEnvironment,
+) -> LoopHeaderResult<NumericScalar> {
+    let domain = NumericScalar::from_type_id(expression.type_id, type_environment);
+    match domain {
+        Some(domain) if domain.is_integer() || domain.is_binary_float() => Ok(domain),
+        _ => Err(CompilerDiagnostic::invalid_range_operand(
+            kind,
+            expression.type_id,
+            expression.span,
+        )
+        .into()),
+    }
+}
+
+fn range_numeric_domain(
+    start: Option<&Expression>,
+    end: &Expression,
+    step: Option<&Expression>,
+    type_environment: &TypeEnvironment,
+) -> LoopHeaderResult<NumericScalar> {
+    let end_domain = range_operand_domain(end, RangeOperandKind::End, type_environment)?;
+    let start_domain = match start {
+        Some(expression) => {
+            range_operand_domain(expression, RangeOperandKind::Start, type_environment)?
+        }
+        None => end_domain,
+    };
+    let Some(mut domain) = binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
+    else {
+        return Err(CompilerDiagnostic::invalid_range_operand(
+            RangeOperandKind::End,
+            end.type_id,
+            end.span,
+        )
+        .into());
+    };
+
+    if let Some(step_expression) = step {
+        let step_domain =
+            range_operand_domain(step_expression, RangeOperandKind::Step, type_environment)?;
+        let Some(promoted) = binary_operation_domain(NumericOperator::Add, domain, step_domain)
+        else {
+            return Err(CompilerDiagnostic::invalid_range_operand(
+                RangeOperandKind::Step,
+                step_expression.type_id,
+                step_expression.span,
+            )
+            .into());
+        };
+        domain = promoted;
+    }
+
+    Ok(domain)
+}
+
+fn contextual_range_zero(domain: NumericScalar, span: Option<SourceSpan>) -> Expression {
+    match domain {
+        NumericScalar::Int => Expression::int(0, span, ValueMode::ImmutableOwned),
+        NumericScalar::Float => Expression::float(0.0, span, ValueMode::ImmutableOwned),
+        NumericScalar::Fixed(scalar) => {
+            let zero = match scalar.class() {
+                FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 0),
+                FixedScalarClass::UnsignedInteger => FixedScalarValue::unsigned(scalar, 0),
+                FixedScalarClass::BinaryFloat => FixedScalarValue::binary_float(scalar, 0.0),
+                FixedScalarClass::Octet => None,
+            }
+            .expect("numeric range domain has a representable zero");
+            Expression::fixed_scalar(zero, span, ValueMode::ImmutableOwned)
+        }
+        NumericScalar::Number(_) => {
+            unreachable!("Number range domains are rejected before contextual zero materialisation")
+        }
+    }
 }
 
 fn parse_cursor_expression(
@@ -1086,63 +1154,17 @@ fn token_string_id_at(
     token_stream.token_string_id_at_in(index, string_table)
 }
 
-fn is_numeric_type_id(type_id: TypeId, type_environment: &TypeEnvironment) -> bool {
-    type_id == type_environment.builtins().int || type_id == type_environment.builtins().float
-}
-
 fn range_binding_type(
     range: &RangeLoopSpec,
     type_environment: &TypeEnvironment,
 ) -> LoopHeaderResult<TypeId> {
-    let is_start_numeric = is_numeric_type_id(range.start.type_id, type_environment);
-    let is_end_numeric = is_numeric_type_id(range.end.type_id, type_environment);
-    let is_step_numeric = range
-        .step
-        .as_ref()
-        .map(|s| is_numeric_type_id(s.type_id, type_environment));
-
-    if !is_start_numeric {
-        return Err(CompilerDiagnostic::invalid_range_operand(
-            RangeOperandKind::Start,
-            range.start.type_id,
-            range.start.span,
-        )
-        .into());
-    }
-    if !is_end_numeric {
-        return Err(CompilerDiagnostic::invalid_range_operand(
-            RangeOperandKind::End,
-            range.end.type_id,
-            range.end.span,
-        )
-        .into());
-    }
-    if let Some(step_expression) = range
-        .step
-        .as_ref()
-        .filter(|_| is_step_numeric == Some(false))
-    {
-        return Err(CompilerDiagnostic::invalid_range_operand(
-            RangeOperandKind::Step,
-            step_expression.type_id,
-            step_expression.span,
-        )
-        .into());
-    }
-
-    // Determine whether the loop variable should be `Float` or `Int`.
-    let uses_float = range.start.type_id == type_environment.builtins().float
-        || range.end.type_id == type_environment.builtins().float
-        || range
-            .step
-            .as_ref()
-            .is_some_and(|s| s.type_id == type_environment.builtins().float);
-
-    Ok(if uses_float {
-        type_environment.builtins().float
-    } else {
-        type_environment.builtins().int
-    })
+    Ok(range_numeric_domain(
+        Some(&range.start),
+        &range.end,
+        range.step.as_ref(),
+        type_environment,
+    )?
+    .type_id(type_environment))
 }
 
 fn declare_loop_bindings(
@@ -1231,6 +1253,9 @@ fn is_zero_numeric_literal(expression: &Expression) -> bool {
     match expression.kind {
         ExpressionKind::Int(value) => value == 0,
         ExpressionKind::Float(value) => value == 0.0,
+        ExpressionKind::FixedScalar(value) => {
+            value.as_i64() == Some(0) || value.as_u64() == Some(0) || value.as_f64() == Some(0.0)
+        }
         _ => false,
     }
 }

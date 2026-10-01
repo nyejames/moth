@@ -5,6 +5,7 @@
 use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -76,6 +77,7 @@ pub(crate) struct TestCaseSpec {
     pub tags: Vec<String>,
     pub contract: Option<String>,
     pub role: Option<CaseRole>,
+    pub numeric_profile: NumericProfile,
     pub backend_id: BackendId,
     pub entry_path: PathBuf,
     pub flags: Vec<Flag>,
@@ -95,22 +97,28 @@ pub(crate) enum ExpectationMode {
     Failure,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct RenderedOutputExpectation {
     pub exact: Option<String>,
     pub contains: Vec<String>,
     pub not_contains: Vec<String>,
     pub contains_in_order: Vec<String>,
     pub contains_exactly_once: Vec<String>,
+    pub runtime_error_contains: Vec<String>,
+    pub runtime_trap_contains: Vec<String>,
+    pub math_random_samples: Option<Vec<f64>>,
 }
 
 impl RenderedOutputExpectation {
+    // Host inputs such as math_random_samples configure execution, but are not assertions.
     pub(crate) fn is_present(&self) -> bool {
         self.exact.is_some()
             || !self.contains.is_empty()
             || !self.not_contains.is_empty()
             || !self.contains_in_order.is_empty()
             || !self.contains_exactly_once.is_empty()
+            || !self.runtime_error_contains.is_empty()
+            || !self.runtime_trap_contains.is_empty()
     }
 
     pub(crate) fn assertion_count(&self) -> usize {
@@ -119,6 +127,8 @@ impl RenderedOutputExpectation {
             + self.not_contains.len()
             + self.contains_in_order.len()
             + self.contains_exactly_once.len()
+            + self.runtime_error_contains.len()
+            + self.runtime_trap_contains.len()
     }
 }
 
@@ -480,6 +490,7 @@ impl CaseRole {
 
 pub(crate) struct ParsedExpectationFile {
     pub entry: Option<String>,
+    pub numeric_profile: NumericProfile,
     pub backend_expectations: Vec<ParsedBackendExpectation>,
 }
 

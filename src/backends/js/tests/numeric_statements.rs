@@ -1,8 +1,10 @@
 //! Checked numeric operation lowering tests for JavaScript output.
 
 use super::support::*;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -74,6 +76,7 @@ fn lower_minimal_module_with_float_statement(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -104,7 +107,7 @@ fn trap_mode_format_float_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5, 64, \"Float\")));"
         ),
         "trap-mode FormatFloat must assign the scalar trap result"
     );
@@ -124,7 +127,9 @@ fn return_error_mode_format_float_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_format_float(1.5));"),
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_format_float(1.5, 64, \"Float\"));"
+        ),
         "ReturnError FormatFloat must assign the helper carrier directly"
     );
     assert!(
@@ -260,6 +265,22 @@ fn lower_minimal_module_with_numeric_op(
     operands: HirNumericOperands,
     result_type: TypeId,
 ) -> String {
+    lower_minimal_module_with_numeric_op_for_profile(
+        op,
+        failure_mode,
+        operands,
+        result_type,
+        NumericProfile::STANDARD,
+    )
+}
+
+fn lower_minimal_module_with_numeric_op_for_profile(
+    op: HirNumericOp,
+    failure_mode: NumericFailureMode,
+    operands: HirNumericOperands,
+    result_type: TypeId,
+    numeric_profile: NumericProfile,
+) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -302,8 +323,9 @@ fn lower_minimal_module_with_numeric_op(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        default_config(),
+        JsLoweringConfig::direct_js(false, numeric_profile),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -311,14 +333,28 @@ fn lower_minimal_module_with_numeric_op(
     .source
 }
 
-/// Verifies that trap-mode `IntAdd` assigns the scalar success value to the result local.
+fn int_op(operator: NumericOperator) -> HirNumericOp {
+    HirNumericOp {
+        operator,
+        domain: NumericScalar::Int,
+    }
+}
+
+fn float_op(operator: NumericOperator) -> HirNumericOp {
+    HirNumericOp {
+        operator,
+        domain: NumericScalar::Float,
+    }
+}
+
+/// Verifies that trap-mode Int addition assigns the scalar success value to the result local.
 #[test]
 fn trap_mode_int_add_lowers_to_trapped_helper() {
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -329,20 +365,20 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2, -2147483648, 2147483647)));"
         ),
-        "trap-mode IntAdd must assign the scalar trap result"
+        "trap-mode Int addition must assign the checked Number carrier result"
     );
 }
 
-/// Verifies that return-error-mode `IntAdd` assigns the fallible carrier directly.
+/// Verifies that return-error-mode Int addition assigns the fallible carrier directly.
 #[test]
 fn return_error_mode_int_add_lowers_to_carrier() {
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
+        int_op(NumericOperator::Add),
         NumericFailureMode::ReturnError,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -352,12 +388,14 @@ fn return_error_mode_int_add_lowers_to_carrier() {
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_int_add(1, 2));"),
-        "ReturnError IntAdd must assign the helper carrier directly"
+        output.contains(
+            "__moth_assign_value(moth_result_l0, __moth_int_add(1, 2, -2147483648, 2147483647));"
+        ),
+        "ReturnError Int addition must assign the helper carrier directly"
     );
     assert!(
         !output.contains("__moth_numeric_trap(__moth_int_add"),
-        "ReturnError IntAdd must not wrap the helper in __moth_numeric_trap"
+        "ReturnError Int addition must not wrap the helper in __moth_numeric_trap"
     );
 }
 
@@ -368,7 +406,7 @@ fn int_neg_lowers_to_unary_helper() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntNeg,
+        int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
             operand: int_expression(1, 1, types.int, region),
@@ -378,9 +416,9 @@ fn int_neg_lowers_to_unary_helper() {
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1)));"
+            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1, -2147483648, 2147483647)));"
         ),
-        "trap-mode IntNeg must lower to the unary helper"
+        "trap-mode Int negation must lower to the checked unary helper"
     );
 }
 
@@ -391,7 +429,7 @@ fn float_div_lowers_to_helper() {
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_numeric_op(
-        HirNumericOp::FloatDiv,
+        float_op(NumericOperator::Divide),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: float_expression(1, 1.0, types.float, region),
@@ -404,7 +442,7 @@ fn float_div_lowers_to_helper() {
         output.contains(
             "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_div(1, 2)));"
         ),
-        "trap-mode FloatDiv must lower to the checked float helper"
+        "trap-mode Float division must lower to the checked float helper"
     );
 }
 
@@ -422,8 +460,8 @@ fn numeric_helpers_not_emitted_without_numeric_op() {
         "modules without NumericOp must not emit __moth_numeric_trap"
     );
     assert!(
-        !source.contains("const __BS_INT_MIN ="),
-        "modules without NumericOp must not emit numeric range constants"
+        !source.contains("function __moth_bigint_add("),
+        "modules without a BigInteger-domain operation must not emit that helper family"
     );
 }
 
@@ -434,7 +472,7 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -456,8 +494,8 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
         "numeric modules must emit __moth_numeric_trap"
     );
     assert!(
-        source.contains("const __BS_INT_MIN ="),
-        "numeric modules must emit numeric range constants"
+        source.contains("__moth_int_add(1, 2, -2147483648, 2147483647)"),
+        "numeric operations must pass the semantic Int bounds to the shared helper"
     );
     assert!(
         !source.contains("function __moth_format_float("),
@@ -479,7 +517,7 @@ fn numeric_trap_returns_ok_and_throws_err() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -508,7 +546,7 @@ fn int_ok_helper_normalizes_negative_zero() {
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntNeg,
+        int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
             operand: int_expression(1, 0, types.int, region),
@@ -524,45 +562,14 @@ fn int_ok_helper_normalizes_negative_zero() {
     );
 }
 
-/// Verifies that the shared `__moth_int_check` helper enforces the i32 range and reports
-/// `IntOverflow` on failure.
-#[test]
-fn int_check_helper_contains_overflow_error() {
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
-
-    let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
-        NumericFailureMode::Trap,
-        HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
-        },
-        types.int,
-    );
-
-    let check = helper_source(&source, "__moth_int_check");
-    let overflow = BuiltinErrorCode::IntOverflow;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        overflow.default_message(),
-        overflow.as_i32()
-    );
-
-    assert!(
-        check.contains(&expected),
-        "__moth_int_check must use IntOverflow error result"
-    );
-}
-
-/// Verifies that integer helpers delegate final i32 validation to `__moth_int_check`.
+/// Verifies that exact-Number integer helpers delegate range checking to `__moth_int_check`.
 #[test]
 fn int_helpers_delegate_to_int_check() {
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntAdd,
+        int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: int_expression(1, 1, types.int, region),
@@ -574,102 +581,12 @@ fn int_helpers_delegate_to_int_check() {
     let add = helper_source(&source, "__moth_int_add");
 
     assert!(
-        add.contains("return __moth_int_check(result);"),
-        "__moth_int_add must delegate i32 validation to __moth_int_check"
+        add.contains("return __moth_int_check(a + b, min, max);"),
+        "__moth_int_add must pass its semantic result range to __moth_int_check"
     );
     assert!(
         !add.contains("Number.isInteger(result)"),
-        "__moth_int_add must not duplicate the i32 range check"
-    );
-}
-
-/// Verifies that `DivideByZero` code and message appear in the division helpers.
-#[test]
-fn int_div_helper_contains_divide_by_zero_error() {
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
-
-    let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntDiv,
-        NumericFailureMode::Trap,
-        HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
-        },
-        types.int,
-    );
-
-    let div = helper_source(&source, "__moth_int_div");
-    let divide_by_zero = BuiltinErrorCode::DivideByZero;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        divide_by_zero.default_message(),
-        divide_by_zero.as_i32()
-    );
-
-    assert!(
-        div.contains(&expected),
-        "__moth_int_div must use DivideByZero error result"
-    );
-}
-
-/// Verifies that `InvalidExponent` code and message appear in `__moth_int_pow`.
-#[test]
-fn int_pow_helper_contains_invalid_exponent_error() {
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
-
-    let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::IntPow,
-        NumericFailureMode::Trap,
-        HirNumericOperands::Binary {
-            left: int_expression(1, 2, types.int, region),
-            right: int_expression(2, 3, types.int, region),
-        },
-        types.int,
-    );
-
-    let pow = helper_source(&source, "__moth_int_pow");
-    let invalid_exponent = BuiltinErrorCode::InvalidExponent;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        invalid_exponent.default_message(),
-        invalid_exponent.as_i32()
-    );
-
-    assert!(
-        pow.contains(&expected),
-        "__moth_int_pow must use InvalidExponent error result"
-    );
-}
-
-/// Verifies that `FloatNonFinite` code and message appear in the float helpers.
-#[test]
-fn float_helpers_contain_non_finite_error() {
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
-
-    let source = lower_minimal_module_with_numeric_op(
-        HirNumericOp::FloatAdd,
-        NumericFailureMode::Trap,
-        HirNumericOperands::Binary {
-            left: float_expression(1, 1.0, types.float, region),
-            right: float_expression(2, 2.0, types.float, region),
-        },
-        types.float,
-    );
-
-    let add = helper_source(&source, "__moth_float_add");
-    let non_finite = BuiltinErrorCode::FloatNonFinite;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        non_finite.default_message(),
-        non_finite.as_i32()
-    );
-
-    assert!(
-        add.contains(&expected),
-        "__moth_float_add must use FloatNonFinite error result"
+        "__moth_int_add must not duplicate the integer carrier check"
     );
 }
 
@@ -681,11 +598,11 @@ fn numeric_op_arity_mismatch_returns_error() {
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    // IntAdd is binary but we supply unary operands.
+    // Int addition is binary but we supply unary operands.
     let numeric_statement = statement(
         1,
         HirStatementKind::NumericOp {
-            op: HirNumericOp::IntAdd,
+            op: int_op(NumericOperator::Add),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Unary {
                 operand: int_expression(1, 1, types.int, region),
@@ -721,6 +638,7 @@ fn numeric_op_arity_mismatch_returns_error() {
     let result = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

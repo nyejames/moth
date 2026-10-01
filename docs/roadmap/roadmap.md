@@ -11,7 +11,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [Numeric types and semantics](./plans/number_type_numeric_plan.md) - Ready next after delivered MON v1. Deliver fixed-width integers/floats, a compilation-wide numeric profile and runtime Byte first, then Number/NumberN and the final Error.code U32 migration. Reuse the MON codec and preserve ordinary Int/Float APIs.
+- [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
 
@@ -39,7 +39,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 
-- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Number. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Dec. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
 
@@ -96,7 +96,7 @@ language. Compiler-owned `$mon` convenience is accepted direction, but its exact
 invocation syntax is not defined. Source typing, automatic schema extraction,
 backend operations and builder commands are not delivered by the Rust-only v1
 delivery. Consume the numeric checkpoint's fixed-width, profile-aware and exact
-Number schema support without reimplementing numeric materialisation.
+Dec schema support without reimplementing numeric materialisation.
 
 Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
 a collection even at a map receiving context, and `::Variant(...)` uses a known

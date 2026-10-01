@@ -1,0 +1,17 @@
+format_float |value Float| -> String:
+    return cast value
+;
+
+format_f16 |value F16| -> String:
+    return cast value
+;
+
+format_f32 |value F32| -> String:
+    return cast value
+;
+
+format_f64 |value F64| -> String:
+    return cast value
+;
+
+[:profile=[format_float(1.0000001192092896)]|[format_float(-0.0)] fixed=[format_f16(0.015625)]|[format_f32(1.0000001192092896)]|[format_f64(1.0000001192092896)]]

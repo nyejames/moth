@@ -1,0 +1,7 @@
+assert_condition |condition Bool| -> String:
+    assert(condition)
+    return "after assert"
+;
+
+result = assert_condition(false)
+[: [result]]

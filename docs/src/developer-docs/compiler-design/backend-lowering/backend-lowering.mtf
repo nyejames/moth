@@ -17,6 +17,7 @@ A lowerer receives explicit records:
 - external boundary classifications
 - builder lifecycle/runtime plan
 - per-function link facts
+- paired profile-aware numeric-proof facts for check elision only; they do not change source legality or mutate HIR
 - selected-function, import, export and capability plans, plus the semantic layout identities the target needs
 
 A lowerer does **not**:
@@ -103,6 +104,13 @@ The JS backend speaks host values and functions. It leans on the host GC for rea
 
 `greet` in JavaScript form is ordinary host code that preserves Moth contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.
 
+`NumericProofs` lets JS replace a proven-safe checked integer operation with native carrier arithmetic and omit only the impossible checks; for a proven narrowing it omits only the range predicate. Operands still lower once, in source order. Trap operations assign the raw scalar result; `ReturnError` operations preserve the existing success branch and `{tag, value}` carrier. Narrowings retain their Number/BigInt carrier conversion and success branch/carrier. JavaScript's exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt operations remain exact. The Moth `Dec` domain, `Float`, binary floats, `Byte` and `Power` stay on checked paths.
+
+Emitted F16 values call native `Math.f16round`, so a JavaScript host executing F16 code must
+provide it built in. The compiler's integration test harness uses Node, which requires Node 24 or
+newer. It selects the `node` executable and asserts this prerequisite once as an infrastructure
+failure that names the executable and its version.
+
 ## Wasm lowering
 
 The accepted final Wasm design uses a **structured** path:
@@ -137,6 +145,8 @@ At a binding-backed boundary, the closed external-boundary classification and th
 Borrow facts, last-use facts and validated lifetime topology stay upstream inputs and validation context. They never become a source for new physical decisions here.
 
 What the lowerer emits follows the plan exactly. Where the plan chose a GC-native representation, planned ownership-specific operations may be absent from the target encoding. Where it chose affine, inferred-region, declared-region or REC handling, the lowerer emits what the plan says and nothing more.
+
+Wasm consumes integer-operation proofs only in trap mode. It marks a proven statement with explicit `ProvenSafe`; it does not infer safety from missing scratch. The emitter uses native integer opcodes and omits the checked predicates. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`. Wasm's existing `CastOp`, `ReturnError` and `Dec` gates remain; fallible casts and narrowing have no Wasm proof-elision path.
 
 Every backend answers to the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 

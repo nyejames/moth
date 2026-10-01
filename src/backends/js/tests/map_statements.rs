@@ -69,6 +69,7 @@ fn map_get_statement_lowers_to_helper() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -145,6 +146,7 @@ fn map_set_statement_without_result_emits_plain_call() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -242,6 +244,7 @@ fn map_infallible_ops_lower_to_plain_helpers() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -326,6 +329,7 @@ fn map_remove_statement_lowers_to_helper() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

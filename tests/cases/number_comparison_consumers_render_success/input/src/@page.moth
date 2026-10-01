@@ -1,0 +1,65 @@
+classify_number |value Dec2| -> String:
+    label = if value is:
+        < -1.25 => then "below"
+        <= -1.25 => then "negative-boundary"
+        > 1.25 => then "above"
+        >= 1.25 => then "positive-boundary"
+        else => then "middle"
+    ;
+    return label
+;
+
+classify_optional_number |value Dec2?| -> String:
+    label = if value is:
+        none => then "none"
+        0 => then "zero"
+        < 0 => then "negative"
+        else => then "positive"
+    ;
+    return label
+;
+
+compare_options |left Dec2?, right Dec2?| -> Bool:
+    return left is right
+;
+
+Amount ::
+    Present |value Dec2|,
+    Empty,
+;
+
+compare_amounts |left Amount, right Amount| -> Bool:
+    return left is right
+;
+
+direct_below = classify_number(-1.50)
+direct_negative_boundary = classify_number(-1.25)
+direct_above = classify_number(1.50)
+direct_positive_boundary = classify_number(1.25)
+direct_middle = classify_number(0)
+
+absent_option Dec2? = none
+zero_option Dec2? = 0
+negative_option Dec2? = -0.25
+positive_option Dec2? = 0.25
+optional_absent = classify_optional_number(absent_option)
+optional_zero = classify_optional_number(zero_option)
+optional_negative = classify_optional_number(negative_option)
+optional_positive = classify_optional_number(positive_option)
+
+same_option_left Dec2? = 1.25
+same_option_right Dec2? = 1.25
+different_option_right Dec2? = 1.26
+same_option = compare_options(same_option_left, same_option_right)
+different_option = compare_options(same_option_left, different_option_right)
+some_none_option = compare_options(same_option_left, absent_option)
+
+same_amount_left Amount = Amount::Present(1.25)
+same_amount_right Amount = Amount::Present(1.25)
+different_amount_right Amount = Amount::Present(1.26)
+empty_amount Amount = Amount::Empty
+same_amount = compare_amounts(same_amount_left, same_amount_right)
+different_payload_amount = compare_amounts(same_amount_left, different_amount_right)
+distinct_tag_amount = compare_amounts(same_amount_left, empty_amount)
+
+[: number comparison direct=[direct_below]/[direct_negative_boundary]/[direct_above]/[direct_positive_boundary]/[direct_middle] optional=[optional_absent]/[optional_zero]/[optional_negative]/[optional_positive] options=[same_option]/[different_option]/[some_none_option] choices=[same_amount]/[different_payload_amount]/[distinct_tag_amount]]

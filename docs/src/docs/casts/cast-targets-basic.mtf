@@ -3,13 +3,15 @@ A cast needs a clear destination type.
 These are supported cast targets:
 
 - `Bool`
-- `Int`
+- the numeric types: `Int`, `Float`, the fixed-width integers and binary floats, `Byte`, and the exact `Dec` family
 - `String`
 - `Char`
-- `Float`
 - `Error`
 
-Not every source type can convert to every target.
+Not every source type can convert to every target. `Byte` and `U8` convert in
+both directions without failing, and other `Byte` numeric conversions go through
+`U8`. HTML-JS executes casts to these targets. Wasm still gates fallible casts
+and other remaining conversions. See @../progress (Progress) for current support.
 
 An annotation gives the cast its target:
 

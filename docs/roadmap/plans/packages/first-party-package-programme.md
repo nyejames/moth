@@ -189,9 +189,9 @@ folding and runtime conversion consume that profile. Validate both Float
 precisions and both Int widths through the existing numeric owners rather than
 adding package-local rounding, range or overflow rules.
 
-The fixed type family and runtime Byte land before Number/NumberN in the same
-serial checkpoint. Number retains exact scale semantics and initially has
-HTML-JS runtime support only. Wasm scalar support does not imply a Number runtime,
+The fixed type family and runtime Byte land before Dec/DecN in the same
+serial checkpoint. Dec retains exact scale semantics and initially has
+HTML-JS runtime support only. Wasm scalar support does not imply a Dec runtime,
 completed collection runtime or a lowering for every Core host function.
 
 Error.code changes to U32 at the end of that checkpoint. Preserve existing code
@@ -515,7 +515,7 @@ while any fixed-width API needs its own explicit signature and range contract.
 Start with an inventory because the package is already broad. Add common omissions, not specialised
 numeric subfields. Consume the shared numeric profile and preserve deliberate
 Float signatures. Package-specific `round` and approximation rules remain in the
-Math reference rather than inheriting cast or Number rounding semantics.
+Math reference rather than inheriting cast or Dec rounding semantics.
 
 #### `@core/time`
 
@@ -573,7 +573,7 @@ The package design must decide parsing, serialization, value inspection, object 
 construction, number handling, ordering and error semantics. It must not assume reflection, automatic
 struct conversion or generic derivation. Defer any operation whose final Moth value shape cannot be
 represented. Account explicitly for U64/I64 values, binary floating precision and
-exact Number scales. Do not assume a JavaScript Number conversion preserves every
+exact Dec scales. Do not assume a JavaScript Number conversion preserves every
 Moth numeric value or that MON's public representation is automatically the JSON API.
 
 ## Candidate capability domains

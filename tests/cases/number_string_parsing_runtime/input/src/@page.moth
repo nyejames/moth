@@ -1,0 +1,61 @@
+parse_number0 |text String| -> Dec0, Error!:
+    return cast! text
+;
+parse_number1 |text String| -> Dec1, Error!:
+    return cast! text
+;
+parse_number2 |text String| -> Dec2, Error!:
+    return cast! text
+;
+parse_number256 |text String| -> Dec256, Error!:
+    return cast! text
+;
+
+parsed_scale0 = parse_number0("1.234e3") catch:
+    then 0
+;
+parsed_scale1 = parse_number1("123e-1") catch:
+    then 0.0
+;
+parsed_scale2 = parse_number2("1.234e1") catch:
+    then 0.0
+;
+parsed_exponent = parse_number2("1234e-2") catch:
+    then 0.0
+;
+parsed_tiny = parse_number256("1e-256") catch:
+    then 0.0
+;
+tiny_matches = parsed_tiny is 1e-256
+parsed_signed_huge_zero = parse_number256("-0e-99999999999999999999999999999999999999999999999999") catch:
+    then 1.0
+;
+huge_zero_matches = parsed_signed_huge_zero is 0
+
+uppercase_error_code ~U32 = 0
+uppercase = parse_number2("1E3") catch |uppercase_error|:
+    uppercase_error_code = uppercase_error.code
+    then 0.0
+;
+plus_error_code ~U32 = 0
+leading_plus = parse_number2("+1") catch |plus_error|:
+    plus_error_code = plus_error.code
+    then 0.0
+;
+inexact_error_code ~U32 = 0
+inexact_scale = parse_number2("1.234") catch |inexact_error|:
+    inexact_error_code = inexact_error.code
+    then 0.0
+;
+negative_huge_error_code ~U32 = 0
+negative_huge_nonzero = parse_number256("1e-99999999999999999999999999999999999999999999999999") catch |negative_huge_error|:
+    negative_huge_error_code = negative_huge_error.code
+    then 0.0
+;
+capacity_error_code ~U32 = 0
+positive_huge_capacity = parse_number256("1e9000000000") catch |capacity_error|:
+    capacity_error_code = capacity_error.code
+    then 0.0
+;
+
+[:number parsing scale=[parsed_scale0]/[parsed_scale1]/[parsed_scale2]/[parsed_exponent] tiny=[tiny_matches] signed-huge-zero=[huge_zero_matches] malformed=[uppercase_error_code]/[plus_error_code] exactness=[inexact_error_code]/[negative_huge_error_code]/[capacity_error_code]]

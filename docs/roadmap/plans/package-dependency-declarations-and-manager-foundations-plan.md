@@ -161,7 +161,7 @@ its exported types are explicit-width because private arithmetic and folded
 constants may use Int/Float.
 
 Preserve the distinct canonical identities of Int/Float, fixed I*/U*/F* types,
-Byte and Number scales through facade projection, generated requests and reuse.
+Byte and Dec scales through facade projection, generated requests and reuse.
 Include the profile in semantic artefact compatibility and the existing ABI,
 layout and physical-variant inputs. Error.code uses the delivered U32 contract,
 not a package-local signed-code adapter. Preserve source aliases independently
@@ -171,7 +171,7 @@ Foreign WIT/components retain explicit foreign widths and separate value
 conversion contracts. They do not inherit Moth's profile or replace the semantic
 interface of a Moth-source dependency. F16 and Byte need explicit foreign mapping
 contracts. Package compatibility does not authorise a WIT loader, new numeric
-conversions or a Wasm Number runtime in this plan.
+conversions or a Wasm Dec runtime in this plan.
 
 ## Accepted preliminary rules
 
@@ -399,7 +399,7 @@ Review gate: declaration, resolution and compilation must have separate owners.
 - package output identity does not depend on consumer alias
 - source packages share all four supported numeric-profile combinations with their consumer
 - an incompatible precompiled profile is rejected even when only private implementation arithmetic uses Int/Float
-- exported fixed widths, Byte, Number scale and U32 Error.code preserve canonical identity beneath aliases
+- exported fixed widths, Byte, Dec scale and U32 Error.code preserve canonical identity beneath aliases
 - foreign WIT projections remain distinct from Moth-native package interfaces
 
 ## Stop conditions

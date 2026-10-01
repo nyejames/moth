@@ -48,6 +48,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 - [frontend module map](src/compiler_frontend/mod.rs); [CompilerFrontend stage facade](src/compiler_frontend/pipeline.rs) — held by the services below, not an entry point of its own; its semantic stage methods are frontend-private
 - [module_compilation](src/compiler_frontend/module_compilation/): compiler-owned module compilation boundary — [service.rs](src/compiler_frontend/module_compilation/service.rs) `compile_module`, the canonical local semantic sequence, [context.rs](src/compiler_frontend/module_compilation/context.rs) the provider interfaces and options one job reads, [options.rs](src/compiler_frontend/module_compilation/options.rs) frontend options, [prepared.rs](src/compiler_frontend/module_compilation/prepared.rs) provider-independent prepared input, [artefact.rs](src/compiler_frontend/module_compilation/artefact.rs) `Module` executable/link-fact/compiler-metadata lanes and `CompiledModuleArtifact`, [generated/](src/compiler_frontend/module_compilation/generated/) request canonicalisation, materialisation, convergence, sidecars and the per-transaction generated delta, [outcome.rs](src/compiler_frontend/module_compilation/outcome.rs) success/diagnosed classification, [external_imports.rs](src/compiler_frontend/module_compilation/external_imports.rs) provider and builder runtime import candidates, [stages.rs](src/compiler_frontend/module_compilation/stages.rs) warning-preserving HIR and borrow wrappers. kw: FrontendOptions, PreparedModuleInput, ModuleSemanticResult.
+    - [generated/requests.rs](src/compiler_frontend/module_compilation/generated/requests.rs): canonical generated-request type and evidence identities, including on-demand builtin cast proofs from the frozen requester.
 - [single_source_compilation](src/compiler_frontend/single_source_compilation/): the two named short compiler paths that stop at folded AST — [config.rs](src/compiler_frontend/single_source_compilation/config.rs) the `config.moth` stage sequence, dialect surface and live source-span outcome, [moth_template.rs](src/compiler_frontend/single_source_compilation/moth_template.rs) the direct `.mtf` fold and source-span finalization boundary. kw: compile_config_source, ConfigCompilationOutcome, compile_moth_template_source, InvalidConfigReason.
 - [source](src/compiler_frontend/source/): build-lifetime source registration, database-owned logical path identities, loaded snapshots, exact compact spans and lazy line indexes. kw: SourceDatabase, SourceId, SourceSlot, SourceRecord, LocalSpan, SourceSpan.
 - [tokenizer](src/compiler_frontend/tokenizer/): lex source/templates into tokens with source-owned exact spans. kw: TokenizeMode, SourceSpan, TokenShape.
@@ -74,6 +75,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
 - [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
+    - [number.rs](src/compiler_frontend/datatypes/number.rs): canonical `NumberScale` and immutable `NumberValue`, exact receiving materialisation, exact arithmetic and integer/rescale conversion, and the allocation-free decimal scale-fit policy shared with MON receivers.
+    - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.
 - [value_mode.rs](src/compiler_frontend/value_mode.rs): access modes (frontend root, shared by coercion and lowering).
 - [traits](src/compiler_frontend/traits/): trait definitions, evidence, syntax helpers.
@@ -147,6 +150,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [diagnostics.rs](src/compiler_frontend/analysis/borrow_checker/diagnostics.rs).
     - [return_alias.rs](src/compiler_frontend/analysis/borrow_checker/return_alias.rs): return-provenance classification and callee-summary projection, split from the retained metadata in [metadata.rs](src/compiler_frontend/analysis/borrow_checker/metadata.rs).
     - [problem/](src/compiler_frontend/analysis/borrow_checker/problem/): the solver-independent borrow problem, including [call_effects.rs](src/compiler_frontend/analysis/borrow_checker/problem/call_effects.rs) call-boundary access and result provenance.
+- [numeric_proofs](src/compiler_frontend/analysis/numeric_proofs/mod.rs): conservative bounded-integer operation and narrowing side table.
 
 ## Backends
 
@@ -156,11 +160,16 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [JS backend](src/backends/js/): HIR → JS. kw — readable JS, GC baseline, reachable emission.
     - [emitter.rs](src/backends/js/emitter.rs), [js_expr.rs](src/backends/js/js_expr.rs), [js_statement.rs](src/backends/js/js_statement.rs), [js_function.rs](src/backends/js/js_function.rs), [js_calls.rs](src/backends/js/js_calls.rs), [output.rs](src/backends/js/output.rs), [reachability.rs](src/backends/js/reachability.rs)
     - [runtime](src/backends/js/runtime/): helpers for strings/maps/casts.
+        - [float_power.js](src/backends/js/runtime/float_power.js): demand-emitted fdlibm binary64 power shared by checked Float32/Float64 operations.
 - [Wasm backend](src/backends/wasm/): experimental core Wasm. kw — HIR→LIR, linear memory, emit.
     - [backend.rs](src/backends/wasm/backend.rs): Wasm backend driver and request handling.
     - [hir_to_lir](src/backends/wasm/hir_to_lir/): semantic lowering to Wasm LIR.
     - [lir](src/backends/wasm/lir/): Wasm-neutral low IR.
     - [emit](src/backends/wasm/emit/): binary emission/sections/validation.
+        - [checked_integer.rs](src/backends/wasm/emit/checked_integer.rs): checked integer trap emission, exact overflow checks and full-width power.
+        - [checked_float.rs](src/backends/wasm/emit/checked_float.rs): precision-specific float arithmetic, zero-divisor checks and finite-result traps.
+        - [float_power.rs](src/backends/wasm/emit/float_power.rs): portable binary64 power helper using fdlibm high/low arithmetic.
+        - [float_remainder.rs](src/backends/wasm/emit/float_remainder.rs): exact dividend-sign binary64 remainder using integer significands.
     - [runtime](src/backends/wasm/runtime/): imports/memory/strings.
 - [HTML-Wasm artifact plan](src/projects/html_project/wasm/): bootstrap/export roots.
 
@@ -180,6 +189,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 ## Tests/tooling
 
 - [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/). Production code, not `#[cfg(test)]`.
+- [configuration input-origin tests](src/compiler_tests/config_input_origin_tests.rs): structured profile and input-origin diagnostics from independent real project builds.
 - [frontend stage-boundary tests](src/compiler_frontend/tests/frontend_pipeline_tests.rs): one stage at a time, for handoffs a stage-local test cannot see. Not the canonical sequence — that is `compile_module`.
 - [architecture boundary rules](xtask/src/architecture_boundary.rs): the compiler/build dependency direction the source audit enforces.
 - [first-party package dependency audit](xtask/src/first_party_deps.rs): scoped first-party implementation-root validation for manifests, vendored roots and lexically classified JavaScript module imports, using [first-party JavaScript inventory](src/first_party_js/mod.rs).

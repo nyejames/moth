@@ -4,8 +4,8 @@
 ["unclosed string
 
 -- Type error  
-number = 42
-io.line([: [number + "string"]])
+numeric_value = 42
+io.line([: [numeric_value + "string"]])
 
 -- Undefined variable
 io.line([: [undefined_variable]])

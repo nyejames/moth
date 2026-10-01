@@ -6,8 +6,10 @@ parse || -> Int, Error!:
 ;
 
 -- An invalid calendar day is rejected instead of rolling over
-code = parse() catch |err|:
-    then err.code
+code ~U32 = 0
+ignored = parse() catch |err|:
+    code = err.code
+    then 0
 ;
 
 [: timestamp_parse_calendar_invalid_day code=[code]]

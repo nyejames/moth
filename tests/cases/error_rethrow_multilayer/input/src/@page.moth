@@ -10,10 +10,10 @@ middle || -> String, Int, Error!:
 ;
 
 outer || -> String, Int, Error!:
-    value, number = middle() catch |err|:
+    value, numeric_value = middle() catch |err|:
         return! err
     ;
-    return value, number
+    return value, numeric_value
 ;
 
 result, count = outer() catch:

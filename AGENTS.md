@@ -28,7 +28,7 @@ Read the selected heading through the next heading of the same or higher level. 
 - **Exact language syntax or user-visible semantic work:** read `docs/src/developer-docs/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, declared regions or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
 - **Tests:** read relevant sections of `docs/src/developer-docs/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
 - **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. This is the explicitly invoked audit framework, not the Slice review. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
-- **Final validation:** read `docs/src/developer-docs/style-guide/validation.mtf` before selecting, running or reporting a final gate. It need not remain loaded during implementation.
+- **Validation:** read `docs/src/developer-docs/style-guide/validation.mtf` before selecting or reporting checks. Choose by branch, checkpoint and affected behaviour rather than treating every slice as merge readiness.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
 Before changing tokenization, parsing, type checking, language semantics, diagnostics, lowering, semantic tests or authoritative language documentation for a feature, read that feature's canonical unsuffixed reference. Also read the canonical reference when correctness depends on precise feature semantics or edge cases not fully specified by the cheatsheet. Do not infer the exact language contract from examples, tests, compiler behaviour, the cheatsheet or a Basic page.
@@ -89,7 +89,7 @@ Required workflow:
 4. Decide whether to extend, consolidate, replace or remove the existing path.
 5. Implement the smallest coherent slice without transitional duplication.
 6. Add or update tests when behaviour or a real internal invariant changed.
-7. Review progress, index and audit-log update rules, run the correct final gate and perform the Slice review.
+7. Review progress, index and audit-log update rules. Run the checks appropriate to the branch and checkpoint and perform the Slice review.
 
 For multi-phase work, re-check ownership, duplication, stale paths and test gaps after each phase. Every non-trivial implementation plan must end with the Slice review. If the user changes accepted behaviour, treat that request as authoritative for the task and call out implementation conflicts.
 
@@ -119,9 +119,16 @@ Report documentation made inaccurate by implementation as a separate follow-up. 
 
 ## Validation and benchmarking
 
-Code-bearing work ends with `just validate`. Documentation-only work uses the documentation release-build gate. Read the validation guide before selecting or reporting the final gate. Prefer `--terse` for Moth `check` diagnostics.
+Use the lightest checks that cover the current change. `docs/src/developer-docs/style-guide/validation.mtf` owns gate scope and cadence, including generic validation instructions in older plans. A slice review or feature-branch commit is not automatically a full-validation checkpoint.
 
-- Use `just bench-check` for non-recording performance evidence.
+- During feature-branch work, prefer targeted Cargo checks, filtered tests, selected integration cases and affected feature lanes. These are sufficient for intermediate commits when they cover the changed behaviour.
+- Run `just validate` at important branch boundaries and broader integration checkpoints. Ordinary feature-branch commits do not require `just validate-full`, including intermediate validation/toolchain changes.
+- Reserve `just validate-full` for the final stages of a completed plan or feature preparing to merge into `main`, and release readiness. Validate the final integrated tree again after changes invalidate that evidence.
+- Every commit landing on `main`, including documentation-only commits, must have passing `just validate-full` evidence for its resulting tree. Intermediate feature-branch commits do not each need retrospective full runs.
+
+Documentation-only branch checkpoints use the documentation gate. Report the exact commands, scope and results without claiming unrun gates. Prefer `--terse` for Moth `check` diagnostics. A passing run for the same final tree and build configuration can serve merge readiness without a duplicate run just because a commit was created.
+
+- Use `just bench-check` for non-recording performance evidence when the change needs it, not by default for every slice.
 - Use the `timers` or `detailed_timers` feature flags for quick rough stage timings.
 - Keep raw profiling and benchmark data local.
 - Treat profiling as attribution evidence, not proof of correctness or improvement.
@@ -144,4 +151,4 @@ Review in this order:
 6. Review diagnostics. Use the correct lane, preserve source context, avoid user-input panics and centralise repeated diagnostic construction.
 7. Review tests. Protect observable behaviour or real invariants, keep each test under the correct owner and remove redundant or implementation-shaped coverage.
 8. Review progress, index and documentation effects under their update rules. Mark an audit-log row stale if this slice materially changed an area it records.
-9. Confirm the correct validation path ran and report exactly what was and was not validated.
+9. Confirm the selected checkpoint checks ran and report exactly what was and was not validated.

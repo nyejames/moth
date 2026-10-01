@@ -54,9 +54,9 @@ conversion and finite validation stay in the shared numeric boundary. Constants
 materialise directly at the selected Float precision and their exact expectations
 must be profile-aware, not fixed f64 spellings.
 
-Fixed I*/U*/F* and Number support does not automatically add Math overloads or
+Fixed I*/U*/F* and Dec support does not automatically add Math overloads or
 change `round`'s package-specific tie rule to the numeric cast's ties-to-even rule.
-Number retains its own exact scale semantics. Keep package-specific accuracy,
+Dec retains its own exact scale semantics. Keep package-specific accuracy,
 domain and signed-zero guarantees in the Math reference. Reconcile boundary
 rounding there before enabling Float32, while retaining explicitly documented
 approximation limits rather than promising correctly rounded transcendentals.
@@ -197,7 +197,7 @@ Every other approximating sample is a bounded comparison.
 
 - A Wasm lowering set, with an accepted numerical contract rather than a JS transliteration.
 - Compile-time folding once the Core const-eval prerequisite and a precision contract exist.
-- Profile-aware constants, rounding and finite-boundary coverage during the shared numeric migration. Fixed-width and Number types do not implicitly extend this Float-only API or replace its function-specific rounding rules.
+- Profile-aware constants, rounding and finite-boundary coverage during the shared numeric migration. Fixed-width and Dec types do not implicitly extend this Float-only API or replace its function-specific rounding rules.
 - `ExternalConstantDef::data_type` is registered but never read by production code, so a constant's
   declared ABI type is unenforced: mutating `PI`'s type survives the whole suite. Either the field
   gains a consumer in the constant path or it should go; the owner is the external-package registry,

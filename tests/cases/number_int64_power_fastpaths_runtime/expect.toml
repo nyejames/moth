@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "Dec Int64 exponents even=1 odd=-1 zero=0 tiny_positive=0 tiny_negative=0 float32=16777216"

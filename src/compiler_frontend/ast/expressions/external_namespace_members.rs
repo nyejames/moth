@@ -18,8 +18,11 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{
-    ExternalConstantId, ExternalConstantValue, ExternalFunctionId,
+    ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
+    ExternalFunctionId, ExternalSignatureType,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -73,6 +76,7 @@ pub(super) fn parse_external_namespace_function_member(
             CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
             Some(member_name),
             member_span,
+            None,
         )
         .into());
     }
@@ -182,6 +186,7 @@ pub(super) fn parse_external_namespace_constant_member(
             CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
             Some(member_name),
             member_span,
+            None,
         )
         .into());
     }
@@ -189,15 +194,14 @@ pub(super) fn parse_external_namespace_constant_member(
     // External constants are always immutable owned values.
     let value_mode = ValueMode::ImmutableOwned;
 
-    let constant_expression = match constant_definition.value {
-        ExternalConstantValue::Float(value) => Expression::float(value, member_span, value_mode),
-        ExternalConstantValue::Int(value) => Expression::int(value, member_span, value_mode),
-        ExternalConstantValue::StringSlice(value) => {
-            let string_id = string_table.intern(value);
-            Expression::string_slice(string_id, member_span, value_mode)
-        }
-        ExternalConstantValue::Bool(value) => Expression::bool(value, member_span, value_mode),
-    };
+    let constant_expression = project_external_constant(
+        constant_definition,
+        member_name,
+        member_span,
+        context.numeric_profile,
+        value_mode,
+        string_table,
+    )?;
 
     push_expression_operand(
         token_stream,
@@ -211,4 +215,61 @@ pub(super) fn parse_external_namespace_constant_member(
     )?;
 
     Ok(())
+}
+
+/// Projects an external constant using its semantic signature type.
+///
+/// WHAT: keeps foreign I32/F64 values fixed-width while native Moth Int/Float values use
+///       their profile-selected literal constructors.
+/// WHY: constants share the same ABI-versus-language distinction as external function slots.
+pub(super) fn project_external_constant(
+    constant_definition: &ExternalConstantDef,
+    constant_name: StringId,
+    span: Option<SourceSpan>,
+    numeric_profile: NumericProfile,
+    value_mode: ValueMode,
+    string_table: &mut StringTable,
+) -> Result<Expression, CompilerDiagnostic> {
+    match (&constant_definition.data_type, constant_definition.value) {
+        (ExternalSignatureType::NativeFloat, ExternalConstantValue::Float(value)) => {
+            Expression::float_from_external_constant(
+                value,
+                numeric_profile,
+                constant_name,
+                span,
+                value_mode,
+            )
+        }
+        (ExternalSignatureType::Abi(ExternalAbiType::F64), ExternalConstantValue::Float(value)) => {
+            let value =
+                FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
+                    CompilerDiagnostic::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::FloatOverflow,
+                        Some(constant_name),
+                        span,
+                        Some(numeric_profile),
+                    )
+                })?;
+            Ok(Expression::fixed_scalar(value, span, value_mode))
+        }
+        (ExternalSignatureType::NativeInt, ExternalConstantValue::Int(value)) => {
+            Ok(Expression::int(i64::from(value), span, value_mode))
+        }
+        (ExternalSignatureType::Abi(ExternalAbiType::I32), ExternalConstantValue::Int(value)) => {
+            let value = FixedScalarValue::signed(FixedScalar::I32, i64::from(value))
+                .expect("an I32 constant payload always fits the I32 scalar");
+            Ok(Expression::fixed_scalar(value, span, value_mode))
+        }
+        (
+            ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+            ExternalConstantValue::StringSlice(value),
+        ) => {
+            let string_id = string_table.intern(value);
+            Ok(Expression::string_slice(string_id, span, value_mode))
+        }
+        (ExternalSignatureType::Abi(ExternalAbiType::Bool), ExternalConstantValue::Bool(value)) => {
+            Ok(Expression::bool(value, span, value_mode))
+        }
+        _ => unreachable!("registered external constant has mismatched signature and payload"),
+    }
 }

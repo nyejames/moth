@@ -1,0 +1,131 @@
+-- Phase 8 acceptance: Error.code is a genuine U32 at runtime.
+--
+-- Dynamic code parameters 0, 2147483648 and 4294967295 are produced through
+-- mutable carriers and function boundaries, recovered through ordinary Error!
+-- handling, and observed with U32 arithmetic and strict equality, because
+-- formatting or typed forwarding alone could hide a stale carrier. Codes from
+-- Core routines, backend casts and the foreign wrapper are observed on the
+-- same U32 surface.
+@error_code_helper echo_code, record_low_code, code_is_i32_boundary, code_is_u32_max
+@i32_boundary_error.js wide_i32_code
+@u32_max_error.js wide_u32_max_code
+@core/time timestamp_from_unix_milliseconds, to_iso_string
+
+CodeBox = |
+    code ~U32,
+|
+
+fill_zero |box ~CodeBox|:
+    box.code = 0
+;
+
+fill_i32_boundary |box ~CodeBox|:
+    box.code = 2147483648
+;
+
+fill_u32_max |box ~CodeBox|:
+    box.code = 4294967295
+;
+
+zero_box ~CodeBox = CodeBox(code = 0)
+wide_box ~CodeBox = CodeBox(code = 0)
+max_box ~CodeBox = CodeBox(code = 0)
+fill_zero(~zero_box)
+fill_i32_boundary(~wide_box)
+fill_u32_max(~max_box)
+zero_code = zero_box.code
+wide_code = wide_box.code
+max_code = max_box.code
+
+zero_recorded = record_low_code(zero_code)
+zero_echoed = echo_code(Error("public code", zero_code))
+wide_equality = wide_code is 2147483648
+max_equality = max_code is 4294967295
+wide_recorded_equality = code_is_i32_boundary(wide_code)
+max_recorded_equality = code_is_u32_max(max_code)
+
+-- Named, positional and default-zero construction over dynamic U32 values.
+named_order = Error(message = "dynamic named", code = zero_code)
+named_code = named_order.code
+positional_order = Error("dynamic positional", wide_code)
+positional_code = positional_order.code
+default_order = Error("dynamic default")
+default_code = default_order.code
+named_message = named_order.message
+positional_message = positional_order.message
+
+-- Nested Error! recovery preserves the source code and message unchanged.
+deep_error |carried U32| -> String, Error!:
+    return! Error("deep failure", carried)
+;
+
+middle_error |carried U32| -> String, Error!:
+    ignored = deep_error(carried)!
+    return "unreached"
+;
+
+preserved_code ~U32 = 0
+preserved_message ~= "untouched"
+recovered_text = middle_error(max_code) catch |preserved_err|:
+    preserved_code = copy preserved_err.code
+    preserved_message = copy preserved_err.message
+    then "outer fallback"
+;
+
+-- String -> Error recovers with code 0; Error -> String recovers the message.
+from_text Error = cast "text converted failure"
+from_text_code = from_text.code
+text_code_plus_one = from_text.code + 1
+from_text_message = from_text.message
+text_back String = cast from_text
+
+-- Core-produced code observed through a U32 addition.
+core_probe || -> Int, Error!:
+    edge = timestamp_from_unix_milliseconds(253402300800000.0)
+    iso = to_iso_string(edge)!
+    return 0
+;
+
+core_parse_code ~U32 = 0
+core_probe_value = core_probe() catch |core_err|:
+    core_parse_code = core_err.code
+    then 0
+;
+core_code_plus_one = core_parse_code + 1
+
+-- Backend-generated cast code observed through a U32 addition.
+cast_probe |value F64| -> Int, Error!:
+    return cast! value
+;
+
+backend_cast_code ~U32 = 0
+cast_probe_value = cast_probe(3.4028234663852886e38) catch |backend_err|:
+    backend_cast_code = backend_err.code
+    then 0
+;
+backend_code_plus_one = backend_cast_code + 1
+
+-- Foreign error codes reach recovery as genuine U32 values for both the
+-- unsigned i32 boundary and the full U32 maximum; equality rows observe the
+-- carrier directly because those boundaries cannot take a code + 1.
+foreign_i32_code ~U32 = 0
+foreign_i32_message ~= "unset"
+foreign_i32_text = wide_i32_code() catch |i32_err|:
+    foreign_i32_code = copy i32_err.code
+    foreign_i32_message = copy i32_err.message
+    then "recovered i32 boundary"
+;
+foreign_i32_direct = foreign_i32_code is 2147483648
+foreign_i32_recorded = code_is_i32_boundary(foreign_i32_code)
+
+foreign_max_code ~U32 = 0
+foreign_max_message ~= "unset"
+foreign_max_text = wide_u32_max_code() catch |max_err|:
+    foreign_max_code = copy max_err.code
+    foreign_max_message = copy max_err.message
+    then "recovered u32 max"
+;
+foreign_max_direct = foreign_max_code is 4294967295
+foreign_max_recorded = code_is_u32_max(foreign_max_code)
+
+[:error code u32 dynamic zero=[zero_code] wide=[wide_code] max=[max_code] zero-recorded=[zero_recorded] zero-echoed=[zero_echoed] wide-equality=[wide_equality] max-equality=[max_equality] wide-recorded=[wide_recorded_equality] max-recorded=[max_recorded_equality] named=[named_code] positional=[positional_code] defaulted=[default_code] named-message=[named_message] positional-message=[positional_message] preserved-code=[preserved_code] preserved-message=[preserved_message] recovered=[recovered_text] text-code=[from_text_code]/[text_code_plus_one] text-message=[from_text_message] text-back=[text_back] core=[core_parse_code]/[core_code_plus_one] cast=[backend_cast_code]/[backend_code_plus_one] foreign-i32=[foreign_i32_code]/[foreign_i32_direct]/[foreign_i32_recorded]/[foreign_i32_text]/[foreign_i32_message] foreign-max=[foreign_max_code]/[foreign_max_direct]/[foreign_max_recorded]/[foreign_max_text]/[foreign_max_message]]

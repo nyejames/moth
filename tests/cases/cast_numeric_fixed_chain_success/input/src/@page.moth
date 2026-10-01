@@ -1,0 +1,19 @@
+u #U8 = 200
+w #U16 = cast u
+n #Int = cast w
+const_raw #Byte = 200
+octet #U8 = cast const_raw
+back #Byte = cast octet
+octet2 #U8 = cast back
+m #Int = cast octet2
+total #Int = n + m
+half #F16 = cast 65519.0 catch:
+    then 0
+;
+half_float #Float = cast half
+big #I64 = 9007199254740993
+double #F64 = cast big
+double_float #Float = cast double
+
+[: fixed numeric chain: [total]]
+[: fixed float rounding: [half_float] [double_float]]

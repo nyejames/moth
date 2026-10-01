@@ -98,6 +98,7 @@ fn choice_variant_construction_emits_tagged_carrier() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -218,6 +219,7 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -331,6 +333,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -483,6 +486,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

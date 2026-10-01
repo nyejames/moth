@@ -1,0 +1,9 @@
+stringify_integers |i8_value I8, u8_value U8, i16_value I16, u16_value U16, i32_value I32, u32_value U32, i64_value I64, u64_value U64, profile_value Int, dynamic_value I8| -> String:
+    return render(cast i8_value, cast u8_value, cast i16_value, cast u16_value, cast i32_value, cast u32_value, cast i64_value, cast u64_value, cast profile_value, cast dynamic_value)
+;
+
+render |i8_text String, u8_text String, i16_text String, u16_text String, i32_text String, u32_text String, i64_text String, u64_text String, profile_text String, dynamic_text String| -> String:
+    return [:[i8_text]|[u8_text]|[i16_text]|[u16_text]|[i32_text]|[u32_text]|[i64_text]|[u64_text]|[profile_text]|[dynamic_text]]
+;
+
+[:[stringify_integers(-128, 255, -32768, 65535, -2147483648, 4294967295, -9223372036854775808, 18446744073709551615, -2147483648, -128)];[stringify_integers(127, 0, 32767, 0, 2147483647, 0, 9223372036854775807, 9223372036854775808, 2147483647, 127)]]

@@ -5,6 +5,8 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::number::NumberScale;
 
 // -------------------------------
 //  Diagnostic Payload Supporting Types
@@ -142,9 +144,14 @@ pub enum UnsupportedBackendFeatureReason {
     FloatFormatting,
     FloatBoundaryValidation,
     GenericRuntimeValues,
+    FixedWidthScalarValues,
     ReactiveExternalCallSink,
     CrossModuleCalls,
     RuntimeAssertionMessages,
+    ErrorValues,
+    FallibleControlFlow,
+    MutableFunctionParameters,
+    NumberValues,
 }
 
 impl UnsupportedBackendFeatureReason {
@@ -158,9 +165,14 @@ impl UnsupportedBackendFeatureReason {
             Self::FloatFormatting => "Float formatting",
             Self::FloatBoundaryValidation => "Float boundary validation",
             Self::GenericRuntimeValues => "generic runtime values",
+            Self::FixedWidthScalarValues => "fixed-width numeric and Byte values",
             Self::ReactiveExternalCallSink => "reactive external-call sink",
             Self::CrossModuleCalls => "cross-module calls",
             Self::RuntimeAssertionMessages => "runtime assertion messages",
+            Self::ErrorValues => "Moth Error values",
+            Self::FallibleControlFlow => "fallible control flow",
+            Self::MutableFunctionParameters => "mutable function parameters",
+            Self::NumberValues => "Dec values",
         }
     }
 }
@@ -545,7 +557,20 @@ pub enum NumberLiteralErrorReason {
     InvalidExponentSignPlacement,
     InvalidSeparatorPlacement,
     OutsideIntRange,
+    /// A literal is outside the inclusive range of the fixed scalar it initialises.
+    OutsideFixedScalarRange(FixedScalar),
+    /// A negative literal cannot initialise an unsigned fixed scalar or `Byte`.
+    NegativeUnsignedLiteral(FixedScalar),
+    /// A fixed binary float literal rounded to a non-finite value at its destination.
+    NonFiniteFixedFloat(FixedScalar),
     NonFiniteFloat,
+    /// A literal's exact decimal value does not fit the receiving `Dec` scale.
+    ///
+    /// WHAT: the literal's smallest exact scale exceeds the destination scale, so a checked
+    ///       exact receiving boundary rejects it instead of rounding or trimming digits.
+    /// WHY: the scale stays structured so the renderer names the receiving `Dec` identity
+    ///      exactly like the fixed-scalar range reasons name their destination.
+    InexactNumberScale(NumberScale),
     ParseOverflow,
 }
 

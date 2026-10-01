@@ -2,7 +2,7 @@
 
 Moth is an early-stage project. Right now, things are moving very fast. While core design is shifting less and less, there is still a lot of foundational work to do.
 
-This project is **closed to contributions** until its reached more of a hardening, optimisation and "extra feature proposals" phase. 
+This project is **closed to contributions** until its reached more of a hardening, optimisation and "extra feature proposals" phase.
 
 Get in touch if you're interested in discussing the project. Please don't yeet PRs at the repo, they won't be accepted.
 
@@ -39,23 +39,41 @@ See the hosted docs site for the compiled versions of these mtf files.
 
 The complete testing policy is in [testing.mtf](docs/src/developer-docs/style-guide/testing.mtf).
 
-Run the integration suite during iteration with:
+Use focused tests while working on a feature branch, for example:
 
 ```sh
-cargo run --quiet -- tests
+cargo test -p xtask cache::tests
+cargo run --quiet -- tests --case <id>
 ```
+
+Intermediate branch commits use the smallest checks that cover their changes.
+Run `just validate` at important boundaries. Reserve `just validate-full` for
+final plan or feature merge preparation and release readiness. Every commit
+landing on `main`, including documentation-only commits, needs full validation
+of its resulting tree. The validation guide owns the exact evidence rules.
 
 ## Command guide
 
-- `cargo run build docs --release` - final gate for a strictly documentation-only change
-- `cargo run --quiet -- tests` - fast integration-suite iteration
+- `cargo check -p <package>` - quick compile check during branch work
+- `cargo test -p <package> <filter>` - focused Rust tests for a slice
+- `cargo run --quiet -- build docs --release` - documentation-only branch checkpoint
+- `cargo run --quiet -- tests` - complete integration suite
 - `cargo run --quiet -- tests --case <id> [--backend <id>]` - exact focused integration run
 - `cargo run --quiet -- tests --tag <tag> [--tag <tag>]` - logical AND tag selection
 - `cargo run --quiet -- tests --list [filters]` - list selected suite metadata without compiling
 - `cargo run --quiet -- tests --audit` - validate and write the complete suite inventory
-- `just validate` - required final gate for code-bearing changes
-- `just bench-check` - performance sanity check (does not write any files)
+- `cargo clippy` or `just clippy` - ordinary linting with the same toolchain, scope and warning policy
+- `cargo fmt` or `just fmt` - ordinary formatting with the same formatter and scope
+- `just validate` - routine correctness at important feature-branch boundaries
+- `just validate-perf` - non-recording benchmark and scaling evidence when the change needs it
+- `just validate-full` - final merge preparation, every main commit and release readiness
+- `just cache-maintain` - conservative timing-report retention and a soft target size warning
+- `just cache-evict-preview` - preview explicit workspace dev/test eviction before `just cache-evict`
+- `just bench-check` - non-recording performance evidence
 - `just bench` - intentional benchmark-history recording (updates the benchmark log)
 - `just bench-report` - inspect local benchmark history
 - `just profile-case <case> [filter]` - profile a selected benchmark case
 
+[validation.mtf](docs/src/developer-docs/style-guide/validation.mtf) owns exact gate scope,
+shared Cargo defaults, cache safety and feature coverage. Rust uses the repository's
+unpinned stable channel. Environment overrides remain available.

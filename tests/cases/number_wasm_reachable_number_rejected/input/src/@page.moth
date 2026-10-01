@@ -1,0 +1,13 @@
+identity type T |value T| -> T:
+    return value
+;
+
+echo_optional |value Dec2?| -> Dec2?:
+    return identity(value)
+;
+
+maybe Dec2? = none
+echoed = echo_optional(maybe)
+none_result = echoed is none
+
+[: wasm reachable optional Dec none=[none_result]]

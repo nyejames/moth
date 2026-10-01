@@ -462,7 +462,6 @@ impl TraitEnvironment {
 
     /// Returns the recorded `CoreTraitKind` for a `TraitId`, or `None` when
     /// the trait is not compiler-owned.
-    #[allow(dead_code)] // Used by the cast surface tests and downstream phase 4 callers.
     pub(crate) fn core_trait_kind(&self, trait_id: TraitId) -> Option<CoreTraitKind> {
         self.core_trait_kinds.get(&trait_id).copied()
     }

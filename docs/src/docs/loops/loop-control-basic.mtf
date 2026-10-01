@@ -4,16 +4,16 @@ Use `continue` when the current iteration should stop but the loop itself should
 keep going.
 
 [codeblock, $code("moth"):
-    loop 0 to 10 |number|:
-        if number is 2:
+    loop 0 to 10 |value|:
+        if value is 2:
             continue
         ;
 
-        if number is 7:
+        if value is 7:
             break
         ;
 
-        io.line([: [number]])
+        io.line([: [value]])
     ;
 ]
 

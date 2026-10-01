@@ -485,9 +485,16 @@ fn render_payload_message(
         DiagnosticPayload::InvalidTemplateSlot { reason, slot_name } => {
             invalid_template_slot_message(*reason, *slot_name, string_table)
         }
-        DiagnosticPayload::CompileTimeEvaluationError { reason, operation } => {
-            compile_time_evaluation_error_message(*reason, *operation, string_table)
-        }
+        DiagnosticPayload::CompileTimeEvaluationError {
+            reason,
+            operation,
+            numeric_profile,
+        } => compile_time_evaluation_error_message(
+            *reason,
+            *operation,
+            *numeric_profile,
+            string_table,
+        ),
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             "Cannot infer the type of an empty `{}` literal. Add an explicit type annotation."
                 .to_owned()

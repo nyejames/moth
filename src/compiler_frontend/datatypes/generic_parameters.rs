@@ -6,9 +6,12 @@
 
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
+use crate::compiler_frontend::symbols::identifier_policy::{
+    is_camel_case_type_name, reserved_dec_family_spelling, strip_leading_underscores,
+};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -280,5 +283,13 @@ fn is_generic_parameter_name(name: &str) -> bool {
 }
 
 fn is_reserved_generic_parameter_name(name: &str) -> bool {
-    matches!(name, "Int" | "Float" | "Bool" | "String" | "Char") || is_reserved_builtin_symbol(name)
+    matches!(name, "Int" | "Float" | "Bool" | "String" | "Char")
+        || is_reserved_builtin_symbol(name)
+        // Explicit-width spellings and `Byte` are builtin type names too, so a generic parameter
+        // must not shadow them just as it must not shadow `Int`.
+        || FixedScalar::from_name(name).is_some()
+        // The reserved `Dec` family shares the identifier-shadow reservation: any casing,
+        // leading-underscore and digit-suffix spelling would shadow the builtin exact-decimal
+        // type, so it is rejected through the same family predicate the shadow policy uses.
+        || reserved_dec_family_spelling(strip_leading_underscores(name))
 }

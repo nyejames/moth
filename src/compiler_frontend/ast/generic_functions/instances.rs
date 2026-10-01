@@ -5,6 +5,7 @@
 //! WHY: call inference and emission deduplicate instances by source function path and canonical
 //! `TypeId` arguments, not by rendered names or local dependency aliases.
 
+use crate::compiler_frontend::ast::generic_bounds::BoundEvidenceSelection;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
@@ -36,8 +37,9 @@ pub(crate) struct GenericFunctionInstantiationRequest {
     /// public origin or an artefact-scoped private identity before stable-request
     /// canonicalisation.
     pub(crate) declaration_identity: Option<GeneratedDeclarationIdentity>,
-    /// Ordered local evidence selections, canonicalized when the stable request is installed.
-    pub(crate) evidence: Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>,
+    /// Ordered requester-local evidence selections, canonicalized when the stable request is
+    /// installed.
+    pub(crate) evidence: Box<[BoundEvidenceSelection]>,
     pub(crate) key: GenericFunctionInstanceKey,
     pub(crate) instance_path: PathId,
     pub(crate) call_span: Option<SourceSpan>,

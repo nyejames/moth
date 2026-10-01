@@ -1,0 +1,7 @@
+hidden ||:
+    small U8 = 1
+    natural Int = 1
+    value = small + natural
+;
+
+[:unreachable]

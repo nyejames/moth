@@ -50,11 +50,11 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn expression(value: i32) -> Expression {
+fn expression(value: i64) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)
 }
 
-fn dynamic_node(store: &mut TemplateIrStore, value: i32) -> TemplateIrNodeId {
+fn dynamic_node(store: &mut TemplateIrStore, value: i64) -> TemplateIrNodeId {
     let site_id = store.next_expression_site_id();
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {

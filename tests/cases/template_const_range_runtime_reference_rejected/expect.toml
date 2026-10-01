@@ -1,0 +1,6 @@
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]

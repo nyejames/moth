@@ -1,4 +1,7 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::mon::{Field, Limits, Schema, SchemaType, Variant, decode_document};
 
 fn schema(fields: Vec<Field>) -> PreparedSchema {
@@ -453,4 +456,171 @@ fn finite_float_boundaries_materialise_and_round_trip() {
     let encoded = encode_document(&value, &schema).expect("float boundaries encode");
     let round_tripped = decode_document(&encoded, &schema).expect("float boundaries decode");
     assert_eq!(bits_of(&round_tripped), boundaries.map(f64::to_bits));
+}
+
+#[test]
+fn explicit_width_and_profile_values_round_trip_through_the_writer() {
+    let profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits32,
+    };
+    let explicit = Schema::record(vec![
+        Field::required("i8", SchemaType::I8),
+        Field::required("i16", SchemaType::I16),
+        Field::required("i32", SchemaType::I32),
+        Field::required("i64", SchemaType::I64),
+        Field::required("u8", SchemaType::U8),
+        Field::required("u16", SchemaType::U16),
+        Field::required("u32", SchemaType::U32),
+        Field::required("u64", SchemaType::U64),
+        Field::required("half", SchemaType::F16),
+        Field::required("single", SchemaType::F32),
+        Field::required("double", SchemaType::F64),
+        Field::required("octet", SchemaType::Byte),
+        Field::required("wide", SchemaType::Int),
+        Field::required("ratio", SchemaType::Float),
+    ])
+    .with_profile(profile)
+    .prepare()
+    .expect("explicit-width schema prepares");
+
+    let value = Value::Record(vec![
+        ("i8".into(), Value::I8(i8::MIN)),
+        ("i16".into(), Value::I16(i16::MIN)),
+        ("i32".into(), Value::I32(i32::MIN)),
+        ("i64".into(), Value::I64(i64::MIN)),
+        ("u8".into(), Value::U8(u8::MAX)),
+        ("u16".into(), Value::U16(u16::MAX)),
+        ("u32".into(), Value::U32(u32::MAX)),
+        ("u64".into(), Value::U64(u64::MAX)),
+        ("half".into(), Value::F16(-0.0)),
+        ("single".into(), Value::F32(-0.0)),
+        ("double".into(), Value::F64(-0.0)),
+        ("octet".into(), Value::Byte(u8::MAX)),
+        ("wide".into(), Value::Int(i64::MAX)),
+        ("ratio".into(), Value::Float(f64::from(0.1f32))),
+    ]);
+    let encoded = encode_document(&value, &explicit).expect("explicit-width values encode");
+    assert!(encoded.contains("i8 = -128"), "{encoded}");
+    assert!(encoded.contains("u64 = 18446744073709551615"), "{encoded}");
+    assert!(encoded.contains("half = -0.0"), "{encoded}");
+    assert!(encoded.contains("single = -0.0"), "{encoded}");
+    assert!(encoded.contains("double = -0.0"), "{encoded}");
+    assert!(encoded.contains("wide = 9223372036854775807"), "{encoded}");
+    // `Float` is written at the captured Float32 precision, so the carrier's short text round-trips.
+    assert!(encoded.contains("ratio = 0.1"), "{encoded}");
+    let decoded = decode_document(&encoded, &explicit).expect("encoded document decodes");
+    assert_eq!(decoded, value);
+    let Value::Record(decoded_fields) = &decoded else {
+        panic!("writer produced a non-record");
+    };
+    for name in ["half", "single", "double"] {
+        let number = decoded_fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .and_then(|(_, value)| match value {
+                Value::F16(number) | Value::F32(number) | Value::F64(number) => Some(*number),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("decoded {name} field is not a fixed binary float"));
+        assert_eq!(number.to_bits(), (-0.0f64).to_bits(), "{name}");
+    }
+
+    // An inexact programmatic payload materialises at its own precision instead of failing.
+    let half_only = Schema::value(SchemaType::F16)
+        .prepare()
+        .expect("F16 schema prepares");
+    assert_eq!(
+        encode_value(&Value::F16(0.1), &half_only).expect("F16 payload materialises"),
+        "0.1"
+    );
+    let half_record = schema(vec![Field::required("value", SchemaType::F16)]);
+    let rounded_half = encode_document(
+        &Value::Record(vec![("value".into(), Value::F16(0.1))]),
+        &half_record,
+    )
+    .expect("F16 payload materialises");
+    assert_eq!(rounded_half, "(value = 0.1)");
+    assert_eq!(
+        decode_document(&rounded_half, &half_record).expect("F16 text decodes"),
+        Value::Record(vec![("value".into(), Value::F16(0.099_975_585_937_5))])
+    );
+
+    // Profile validity failures stay structured and fail fast.
+    let standard = Schema::record(vec![Field::required("value", SchemaType::Int)])
+        .prepare()
+        .expect("default schema prepares");
+    assert_eq!(
+        encode_document(
+            &Value::Record(vec![("value".into(), Value::Int(i64::from(i32::MAX) + 1))]),
+            &standard,
+        )
+        .unwrap_err()
+        .code,
+        MonErrorCode::NumericRange
+    );
+    assert_eq!(
+        encode_document(
+            &Value::Record(vec![("value".into(), Value::Float(1.0e300))]),
+            &Schema::record(vec![Field::required("value", SchemaType::Float)])
+                .with_profile(profile)
+                .prepare()
+                .expect("Float32 profile schema prepares"),
+        )
+        .unwrap_err()
+        .code,
+        MonErrorCode::NonFiniteFloat
+    );
+    assert_eq!(
+        encode_value(&Value::I8(i8::MIN), &half_only)
+            .unwrap_err()
+            .code,
+        MonErrorCode::TypeMismatch
+    );
+}
+
+#[test]
+fn fixed_width_and_byte_map_keys_emit_in_insertion_order() {
+    let schema = schema(vec![Field::required(
+        "values",
+        SchemaType::Map {
+            key: Box::new(SchemaType::Byte),
+            value: Box::new(SchemaType::U64),
+        },
+    )]);
+    let value = Value::Record(vec![(
+        "values".into(),
+        Value::Map(vec![
+            (Value::Byte(9), Value::U64(u64::MAX)),
+            (Value::Byte(1), Value::U64(0)),
+            (Value::Byte(255), Value::U64(7)),
+        ]),
+    )]);
+    let encoded = encode_document(&value, &schema).expect("fixed-key map encodes");
+    assert!(
+        encoded.contains("9 = 18446744073709551615, 1 = 0, 255 = 7"),
+        "{encoded}"
+    );
+    assert_eq!(
+        decode_document(&encoded, &schema).expect("fixed-key map decodes"),
+        value
+    );
+
+    // A duplicate decoded key is still rejected on the completion path.
+    let duplicate = encode_document(
+        &Value::Record(vec![(
+            "values".into(),
+            Value::Map(vec![
+                (Value::Byte(4), Value::U64(1)),
+                (Value::Byte(4), Value::U64(2)),
+            ]),
+        )]),
+        &schema,
+    )
+    .expect_err("duplicate Byte keys fail");
+    assert_eq!(duplicate.code, MonErrorCode::DuplicateMapKey);
+    assert_eq!(
+        duplicate.path.last(),
+        Some(&PathSegment::MapKey("4".into()))
+    );
 }

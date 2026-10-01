@@ -549,3 +549,4 @@ mod build_infrastructure_tests;
 mod build_orchestration_tests;
 mod build_profile_tests;
 mod module_lane_tests;
+mod numeric_profile_threading_tests;

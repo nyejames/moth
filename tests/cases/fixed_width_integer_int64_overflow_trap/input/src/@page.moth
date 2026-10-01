@@ -1,0 +1,5 @@
+increment_int |value Int| -> Int:
+    return value + 1
+;
+
+result = increment_int(9223372036854775807)

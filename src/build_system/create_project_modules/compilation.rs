@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
@@ -660,6 +661,7 @@ pub(crate) fn order_packages_by_dependency(
 pub(crate) fn compile_directory_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -671,6 +673,7 @@ pub(crate) fn compile_directory_frontend(
     match compile_directory_frontend_in_premerge_lane(
         config,
         build_profile,
+        numeric_profile,
         validated_output_settings,
         style_directives,
         builder_surface,
@@ -707,6 +710,7 @@ pub(crate) fn compile_directory_frontend(
 fn compile_directory_frontend_in_premerge_lane(
     config: &Config,
     build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -862,7 +866,9 @@ fn compile_directory_frontend_in_premerge_lane(
             let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
                 package_waves.waves(),
                 string_table,
-            );
+                numeric_profile,
+            )
+            .map_err(DirectoryPremergeFailure::project)?;
             let Some(root_module_id) = package_index
                 .module_identities()
                 .module_id_for_directory(package_index.entry_root())
@@ -941,7 +947,7 @@ fn compile_directory_frontend_in_premerge_lane(
             }
         };
         let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table)?;
+            config_boundary::effective_project_fields(config, string_table, numeric_profile)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
@@ -1054,14 +1060,18 @@ fn compile_directory_frontend_in_premerge_lane(
         let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
             &project_module_waves,
             string_table,
-        );
+            numeric_profile,
+        )
+        .map_err(DirectoryPremergeFailure::project)?;
         let mut all_project_source_facts = project_source_facts.clone();
         if mode.includes_check_only() {
             all_project_source_facts.extend(
                 config_boundary::source_contract_facts_from_check_only_jobs(
                     &project_check_only_jobs,
                     string_table,
-                ),
+                    numeric_profile,
+                )
+                .map_err(DirectoryPremergeFailure::project)?,
             );
         }
         // Canonical resolution must use only canonical source facts, but explicit inputs are checked
@@ -1080,6 +1090,7 @@ fn compile_directory_frontend_in_premerge_lane(
             &config_globals,
             project_fallback,
             string_table,
+            numeric_profile,
         )
         .map_err(DirectoryPremergeFailure::project)?;
         if let Some(input) = config_boundary::first_unknown_build_config_input(
@@ -1147,6 +1158,7 @@ fn compile_directory_frontend_in_premerge_lane(
                     &config_globals,
                     package_fallback_span,
                     string_table,
+                    numeric_profile,
                 )?;
                 let deferred_build_config_values = build_config_values.clone();
                 timing_scope_attributed!(
@@ -1162,6 +1174,7 @@ fn compile_directory_frontend_in_premerge_lane(
                         canonical::BoundaryCompilationContext::new(
                             config,
                             build_profile,
+                            numeric_profile,
                             &path_resolver,
                             Arc::clone(source_files.sources()),
                             style_directives,
@@ -1263,6 +1276,7 @@ fn compile_directory_frontend_in_premerge_lane(
                         canonical::BoundaryCompilationContext::new(
                             config,
                             build_profile,
+                            numeric_profile,
                             &path_resolver,
                             Arc::clone(source_files.sources()),
                             style_directives,
@@ -1340,6 +1354,7 @@ fn compile_directory_frontend_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
                 build_profile,
+                numeric_profile,
                 &project_path_resolver,
                 project_source_files,
                 style_directives,

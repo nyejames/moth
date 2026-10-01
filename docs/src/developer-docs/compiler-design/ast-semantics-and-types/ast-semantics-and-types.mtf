@@ -147,7 +147,7 @@ Diagnostic transport and rendering wait for the diagnostics article. The semanti
 
 - **Accepted design:** AST resolves source meaning and emits typed semantic facts.
 - **Current implementation:** progress rows for type, coercion and language coverage.
-- **Queued work:** anonymous record and numeric plans may change examples of type identity, not the ownership boundary.
+- **Queued work:** runtime anonymous records may add type-identity examples without changing the ownership boundary.
 - **Deferred or outside scope:** HIR and backend type reconstruction from source.
 
 ## Exit state

@@ -1,6 +1,7 @@
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowDropSite, BorrowDropSiteKind, BorrowFacts,
 };
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -106,6 +107,14 @@ pub(crate) fn build_module(
 
 pub(crate) fn default_borrow_facts() -> BorrowFacts {
     BorrowFacts::default()
+}
+
+/// Empty proof table: every statement retains its full runtime check contract.
+///
+/// WHY: existing lowering tests exercise the retained-check behavior, so they pass the contract
+///       `NumericProofs::default()` (empty = retain all checks) before publication analysis.
+pub(crate) fn default_numeric_proofs() -> NumericProofs {
+    NumericProofs::default()
 }
 
 pub(crate) fn borrow_facts_with_drop_site(

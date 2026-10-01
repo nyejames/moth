@@ -38,7 +38,6 @@ use crate::compiler_frontend::hir::ids::{
 };
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOp;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -388,7 +387,7 @@ impl<'a> HirDisplayContext<'a> {
                 let _ = write!(
                     out,
                     "numeric_{}_{}(",
-                    op.source_name(),
+                    op,
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
@@ -413,6 +412,28 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                inclusive,
+                domain,
+                candidate_result,
+                in_range_result,
+            } => {
+                format!(
+                    "({}, {}) = float_range_candidate_{}({}, {}, {}, {}, {})",
+                    self.local_label(*candidate_result),
+                    self.local_label(*in_range_result),
+                    domain,
+                    self.render_expression(current),
+                    self.render_expression(step),
+                    self.render_expression(end),
+                    self.render_expression(ascending),
+                    if *inclusive { "inclusive" } else { "exclusive" }
+                )
+            }
             HirStatementKind::FormatFloat {
                 source,
                 failure_mode,
@@ -556,6 +577,10 @@ impl<'a> HirDisplayContext<'a> {
         match kind {
             HirExpressionKind::Int(value) => value.to_string(),
             HirExpressionKind::Float(value) => value.to_string(),
+            HirExpressionKind::FixedScalar(value) => value.to_string(),
+            // `HirExpressionKind::Number` literals render through the canonical
+            // exact-value Display.
+            HirExpressionKind::Number(value) => value.to_string(),
             HirExpressionKind::Bool(value) => value.to_string(),
             HirExpressionKind::Char(value) => format!("'{}'", value.escape_debug()),
             HirExpressionKind::StringLiteral(value) => {
@@ -815,12 +840,12 @@ impl<'a> HirDisplayContext<'a> {
                 BuiltinTypeKey::Bool => "Bool".to_owned(),
                 BuiltinTypeKey::Int => "Int".to_owned(),
                 BuiltinTypeKey::Float => "Float".to_owned(),
-                // Decimal is intentionally inactive in the Alpha surface.
-                BuiltinTypeKey::Decimal => "Decimal".to_owned(),
+                BuiltinTypeKey::Number(scale) => scale.to_string(),
                 BuiltinTypeKey::Char => "Char".to_owned(),
                 BuiltinTypeKey::String => "String".to_owned(),
                 BuiltinTypeKey::Range => "Range".to_owned(),
                 BuiltinTypeKey::None => "()".to_owned(),
+                BuiltinTypeKey::FixedScalar(scalar) => scalar.name().to_owned(),
             },
             TypeDefinition::Struct(StructTypeDefinition { path, .. }) => self.path_label(*path),
             TypeDefinition::Choice(ChoiceTypeDefinition { path, .. }) => {
@@ -1193,11 +1218,6 @@ impl Display for HirBinOp {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             HirBinOp::StringAppend => write!(f, "++"),
-            HirBinOp::Add => write!(f, "+"),
-            HirBinOp::Sub => write!(f, "-"),
-            HirBinOp::Mul => write!(f, "*"),
-            HirBinOp::Div => write!(f, "/"),
-            HirBinOp::Mod => write!(f, "%"),
             HirBinOp::Eq => write!(f, "=="),
             HirBinOp::Ne => write!(f, "!="),
             HirBinOp::Lt => write!(f, "<"),
@@ -1206,8 +1226,6 @@ impl Display for HirBinOp {
             HirBinOp::Ge => write!(f, ">="),
             HirBinOp::And => write!(f, "&&"),
             HirBinOp::Or => write!(f, "||"),
-            HirBinOp::IntDiv => write!(f, "//"),
-            HirBinOp::Exponent => write!(f, "^"),
         }
     }
 }
@@ -1218,11 +1236,5 @@ impl Display for HirUnaryOp {
             HirUnaryOp::Neg => write!(f, "-"),
             HirUnaryOp::Not => write!(f, "!"),
         }
-    }
-}
-
-impl Display for HirNumericOp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.source_name())
     }
 }

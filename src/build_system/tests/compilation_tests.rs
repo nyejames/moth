@@ -13,6 +13,7 @@ use crate::build_system::create_project_modules::module_artifact_store::{
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::build_config::{
     BuildConfigValueOrigin, BuildInputName, BuildInputType, ConfigResolutionRecord,
@@ -24,6 +25,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 
@@ -128,6 +130,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 resource_table: ModuleResourceTable::new(),
                 type_environment: TypeEnvironment::new(),
                 borrow_analysis: BorrowCheckReport::default(),
+                numeric_proofs: NumericProofs::default(),
                 path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
             },
             link_facts: ModuleLinkFacts {
@@ -202,6 +205,7 @@ fn generated_sidecar(
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
@@ -518,8 +522,12 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
     let names = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -547,8 +555,12 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
 
     assert_eq!(
         fields
@@ -612,6 +624,7 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
                 input_name.as_str(),
                 input_contract,
                 input_value.as_ref(),
+                NumericProfile::STANDARD,
             ),
             qualifier_span: None,
             value_location: None,
@@ -627,8 +640,12 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
             span: None,
         });
 
-    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
-        .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(
+        &config,
+        &mut string_table,
+        NumericProfile::STANDARD,
+    )
+    .expect("the effective project snapshot should build");
     assert_eq!(
         fields
             .iter()
@@ -820,6 +837,7 @@ fn check_only_success_result_with_warnings() -> (
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: base_link_facts,

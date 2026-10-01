@@ -12,6 +12,7 @@ use crate::compiler_frontend::compiler_messages::{
     NumberLiteralErrorReason, OperatorOperandPosition, SymbolicSpacingConstruct,
     SymbolicSpacingError,
 };
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
@@ -82,15 +83,50 @@ pub(crate) fn invalid_number_literal_message(
         NumberLiteralErrorReason::OutsideIntRange => {
             format!("Integer literal '{literal}' is outside the supported Int range.")
         }
+        NumberLiteralErrorReason::OutsideFixedScalarRange(scalar) => {
+            let name = scalar.name();
+            match fixed_scalar_inclusive_range(scalar) {
+                Some(range) => {
+                    format!("Integer literal '{literal}' is outside the {name} range {range}.")
+                }
+                None => format!("Integer literal '{literal}' is outside the {name} range."),
+            }
+        }
+        NumberLiteralErrorReason::NegativeUnsignedLiteral(scalar) => {
+            format!(
+                "Numeric literal '{literal}' is negative, but {} cannot hold negative values.",
+                scalar.name()
+            )
+        }
+        NumberLiteralErrorReason::NonFiniteFixedFloat(scalar) => {
+            format!(
+                "Float literal '{literal}' does not materialize to a finite {}.",
+                scalar.name()
+            )
+        }
         NumberLiteralErrorReason::NonFiniteFloat => {
             format!("Float literal '{literal}' does not materialize to a finite Float.")
         }
+        NumberLiteralErrorReason::InexactNumberScale(scale) => {
+            format!("Numeric literal '{literal}' does not fit {scale} exactly.")
+        }
         NumberLiteralErrorReason::ParseOverflow => {
-            format!(
-                "Invalid integer literal / Float literal '{literal}': value is too large to represent."
-            )
+            format!("Numeric literal '{literal}' is too large to represent.")
         }
     }
+}
+
+/// The inclusive range a fixed scalar's literals must fall inside.
+///
+/// WHY: the materialisation diagnostic names the exact destination range, and the fixed scalar
+/// already owns that fact. Binary floats have no integer range and reject non-finite results
+/// instead, so they render no range at all.
+fn fixed_scalar_inclusive_range(scalar: FixedScalar) -> Option<String> {
+    if let Some((min, max)) = scalar.signed_range() {
+        return Some(format!("{min} to {max}"));
+    }
+
+    scalar.unsigned_max().map(|max| format!("0 to {max}"))
 }
 
 pub(crate) fn invalid_style_directive_message(

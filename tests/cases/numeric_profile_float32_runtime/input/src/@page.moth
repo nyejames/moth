@@ -1,0 +1,31 @@
+add |left Float, right Float| -> Float:
+    return left + right
+;
+
+multiply |left Float, right Float| -> Float, Error!:
+    return left * right
+;
+
+format_float |value Float| -> String:
+    return cast value
+;
+
+parse_float |text String| -> Float, Error!:
+    return cast! text
+;
+
+sum_text = format_float(add(0.1, 0.2))
+overflow_value = multiply(3.4e38, 3.4e38) catch:
+    then -1.0
+;
+overflow_text = format_float(overflow_value)
+parsed_value = parse_float("1.000000059604644775390626") catch:
+    then 0.0
+;
+parsed_text = format_float(parsed_value)
+tiny_text = format_float(0.0000001)
+threshold_text = format_float(0.000001)
+large_text = format_float(1e21)
+negative_large_text = format_float(-1e21)
+
+[: float32 sum=[sum_text] overflow=[overflow_text] decimal=[parsed_text] thresholds=[tiny_text]|[threshold_text]|[large_text]|[negative_large_text]]

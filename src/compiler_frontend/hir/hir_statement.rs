@@ -317,6 +317,9 @@ impl<'a> HirBuilder<'a> {
             self.emit_statement_to_current_block(prelude, span)?;
         }
 
+        // A compound-assignment target is a side-effect-free local/field place. Its synthetic
+        // RHS reads that place once; checked arithmetic or store conversion may split control
+        // flow, so this single Assign is emitted only in the success continuation.
         let lowered_value = self.lower_expression_value_to_current_block(value)?;
 
         // Authored assignment: the statement span covers the whole `target = value` operation.

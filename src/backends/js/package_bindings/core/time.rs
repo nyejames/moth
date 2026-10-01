@@ -19,7 +19,7 @@ fn error_result_source(error: BuiltinErrorCode) -> String {
     format!(
         "__moth_error_result(\"{}\", {})",
         error.default_message(),
-        error.as_i32()
+        error.as_u32()
     )
 }
 
@@ -97,7 +97,6 @@ fn timestamp_from_iso_string_helper() -> String {
 ///      rejected rather than pulled in.
 fn to_iso_string_helper() -> String {
     let out_of_range = error_result_source(BuiltinErrorCode::TimeTimestampOutOfRange);
-
     format!(
         r#"function __moth_time_to_iso_string(millis) {{
     if (!(millis >= {RENDERABLE_MIN_MILLIS} && millis <= {RENDERABLE_MAX_MILLIS})) {{
@@ -111,14 +110,14 @@ fn to_iso_string_helper() -> String {
 /// One compiler-owned `@core/time` helper body.
 ///
 /// WHAT: pairs a helper name with its generated source.
-/// WHY: the source embeds compiler-owned error codes and range bounds, so it is built once
-///      rather than written as a literal.
+/// WHY: the source embeds the canonical unsigned error codes and range bounds, so emission and
+///      first-party dependency validation consume one identical inventory.
 pub(crate) struct TimeJsHelper {
     pub name: &'static str,
     pub source: String,
 }
 
-/// The compiler-owned `@core/time` helper bodies, built once for the process.
+/// Canonical `@core/time` helpers for first-party dependency inventory.
 static CORE_TIME_JS_HELPERS: LazyLock<[TimeJsHelper; 2]> = LazyLock::new(|| {
     [
         TimeJsHelper {
@@ -132,17 +131,15 @@ static CORE_TIME_JS_HELPERS: LazyLock<[TimeJsHelper; 2]> = LazyLock::new(|| {
     ]
 });
 
-/// Returns the `@core/time` helpers consumed by emission and first-party validation.
-///
-/// WHY: both consumers need the same generated source, and the numeric codes come from
-/// `BuiltinErrorCode` rather than a literal.
+/// Returns the `@core/time` helpers inventoried for dependency validation.
 pub(crate) fn core_time_js_helpers() -> &'static [TimeJsHelper] {
-    &*CORE_TIME_JS_HELPERS
+    &CORE_TIME_JS_HELPERS[..]
 }
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_core_time_helpers(&mut self) {
-        for helper in core_time_js_helpers() {
+        let helpers = core_time_js_helpers();
+        for helper in helpers {
             if self.referenced_external_runtime_function(helper.name) {
                 self.emit_javascript_source(&helper.source);
             }

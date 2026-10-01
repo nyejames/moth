@@ -11,6 +11,9 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    PlaceExpression, PlaceExpressionKind,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -206,6 +209,25 @@ fn const_record_root_and_field_path(
     (current, fields)
 }
 
+fn const_record_root_and_field_path_from_place(
+    place: &PlaceExpression,
+) -> (&PathId, Vec<StringId>) {
+    let mut fields = Vec::new();
+    let mut current = place;
+    loop {
+        match &current.kind {
+            PlaceExpressionKind::Local(path) => {
+                fields.reverse();
+                return (path, fields);
+            }
+            PlaceExpressionKind::Field { base, field } => {
+                fields.push(*field);
+                current = base;
+            }
+        }
+    }
+}
+
 fn with_const_record_field<T>(
     receiver_value: &Expression,
     field_name: StringId,
@@ -286,6 +308,59 @@ fn clone_const_record_field_from_receiver(
         path_fork,
         Expression::to_owned,
     )
+}
+
+/// Project a field access or copied field from an explicit const-record initializer.
+pub(crate) fn project_explicit_const_record_field(
+    expression: &Expression,
+    scope_context: &ScopeContext,
+    path_fork: &PathInternerFork,
+) -> Option<Expression> {
+    let (root_path, fields) = match &expression.kind {
+        ExpressionKind::FieldAccess { base, field } => {
+            let (root, fields) = const_record_root_and_field_path(base, *field);
+            let ExpressionKind::Reference(path) = &root.kind else {
+                return None;
+            };
+            (path, fields)
+        }
+        ExpressionKind::Copy(place) => {
+            let PlaceExpressionKind::Field { .. } = &place.kind else {
+                return None;
+            };
+            const_record_root_and_field_path_from_place(place)
+        }
+        _ => return None,
+    };
+
+    let projected = scope_context
+        .with_explicit_constant_expression(root_path, path_fork, |constant| {
+            if !constant.is_const_record_value() {
+                return None;
+            }
+
+            project_const_record_fields(
+                constant,
+                &fields,
+                Some(scope_context),
+                path_fork,
+                |field_value| {
+                    let mut projected = field_value.to_owned();
+                    projected
+                        .synthetic_interface_provenance
+                        .merge(&constant.synthetic_interface_provenance);
+                    projected
+                },
+            )
+        })
+        .flatten()?;
+    if projected.type_id != expression.type_id {
+        return None;
+    }
+
+    // The projected leaf inherits aggregate dependencies from the borrowed explicit root.
+    // The evaluator separately adopts the authored field-access metadata.
+    Some(projected)
 }
 
 fn resolved_projected_field(

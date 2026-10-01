@@ -1,0 +1,15 @@
+unused_error_helper || -> Error!:
+    return! Error("unreachable authored error")
+;
+
+load_message |fail Bool| -> String, Error!:
+    if fail:
+        return! Error("authored failure")
+    ;
+    return "success"
+;
+
+message = load_message(true) catch |err|:
+    then [:recovered=[err.message]]
+;
+[:[message]]

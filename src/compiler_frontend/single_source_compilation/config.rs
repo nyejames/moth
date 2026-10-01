@@ -37,6 +37,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing_in_cursor;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -84,6 +85,12 @@ pub(crate) struct ConfigCompilationRequest<'a> {
     pub(crate) builder_config_globals: &'a BuilderConfigGlobalSet,
     /// Builder-schema policy for grouped-project fields.
     pub(crate) project_field_config_policies: ProjectFieldConfigPolicies,
+    /// The compilation boundary's `Int` width and `Float` precision.
+    ///
+    /// WHY: config values typed `Int`/`Float` fold under the same boundary widths as project
+    ///      source, and the config service is the first thing a build compiles after the builder
+    ///      has settled the profile.
+    pub(crate) numeric_profile: NumericProfile,
 }
 
 /// The folded config source a caller validates and applies.
@@ -316,6 +323,7 @@ fn compile_prepared_config_source(
             path_fork,
             entry_dir: authored_scope,
             build_profile: FrontendBuildProfile::Dev,
+            numeric_profile: request.numeric_profile,
             file_value_resolution: None,
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
             build_config_values: std::sync::Arc::new(Default::default()),

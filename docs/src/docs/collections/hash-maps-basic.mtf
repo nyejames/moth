@@ -34,4 +34,6 @@ Maps remember insertion order.
     count = scores.length
 ]
 
-Builtin keys are limited to `String`, `Int`, `Bool` and `Char`.
+Builtin keys are `String`, `Int`, `Bool`, `Char`, every fixed-width integer and
+`Byte`. Floats, `Dec` and `DecN` are not key types. Maps run on HTML-JS.
+Wasm still rejects map runtime work. See @../progress (Progress) for current support.

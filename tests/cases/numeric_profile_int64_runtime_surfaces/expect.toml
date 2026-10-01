@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "int64 runtime surfaces collection=2/3 checked=9007199254740992/9007199254740993/9007199254740992/9007199254740993 values=10,21,30 text=3 safe_boundary=9007199254740995 range=12 iteration=64 char=129419/🦋 division=300/9007199254741290/301 user=41/9007199254741031/42 default=0/9007199254740990/1 fixed=102/9007199254741092/103/2 map=a/b/2/9007199254740992 random=true zero=0"

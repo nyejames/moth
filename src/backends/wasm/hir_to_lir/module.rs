@@ -7,6 +7,7 @@ use crate::backends::wasm::hir_to_lir::imports::register_required_host_imports;
 use crate::backends::wasm::lir::types::WasmLirFunctionId;
 use crate::backends::wasm::request::{WasmBackendRequest, WasmFunctionEmissionPolicy};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     CompilerError, CompilerMessages,
 };
@@ -21,6 +22,7 @@ use rustc_hash::FxHashSet;
 pub(crate) fn lower_hir_module_to_lir(
     hir_module: &HirModule,
     borrow_facts: &BorrowFacts,
+    numeric_proofs: &NumericProofs,
     request: &WasmBackendRequest,
     string_table: &StringTable,
     path_table: &PathTable,
@@ -31,6 +33,7 @@ pub(crate) fn lower_hir_module_to_lir(
     let mut context = WasmLirLoweringContext::new(
         hir_module,
         borrow_facts,
+        numeric_proofs,
         request,
         string_table,
         path_table,

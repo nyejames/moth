@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn parses_config_constant_declarations() {
@@ -68,6 +69,7 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
         let build_config_inputs =
             crate::compiler_frontend::build_config::BuildConfigInputSet::new();
         let services = ProjectConfigParseServices {
+            numeric_profile: NumericProfile::STANDARD,
             style_directives: &style_directives,
             frontend_surface: &frontend_surface,
             build_config_inputs: &build_config_inputs,
@@ -149,6 +151,10 @@ fn persists_direct_project_config_resolution_records_in_live_config() {
 
 #[test]
 fn loads_canonical_config_file_from_project_root() {
+    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
+    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
+    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -182,6 +188,7 @@ fn loads_canonical_config_file_from_project_root() {
         ))));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -205,6 +212,7 @@ fn loads_canonical_config_file_from_project_root() {
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         crate::build_system::BuildProfile::Dev,
+        NumericProfile::STANDARD,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -353,6 +361,7 @@ fn directory_projects_require_config_moth() {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
+        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,

@@ -9,13 +9,22 @@
 
 use std::fmt;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 /// The interpreter the production harness runs.
 const NODE_EXECUTABLE: &str = "node";
+
+/// The major version whose JavaScript builtins include F16 (`Math.f16round`).
+///
+/// Emitted F16 values call the native builtin directly; supporting the same
+/// implementation the compiler emits means the runtime must be at least Node 24.
+const NODE_REQUIRED_MAJOR: u32 = 24;
+
+/// The wall-clock budget for the one-shot runtime capability probe.
+const NODE_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Wall-clock budget for one Node harness process.
 ///
@@ -193,6 +202,59 @@ impl HarnessWorkspace {
         Ok(path)
     }
 
+    /// Writes one validated relative file path, creating its parent directories inside the
+    /// workspace as needed.
+    ///
+    /// Artifact paths have already passed `BuiltArtifactIndex`'s output-path validation. This
+    /// second boundary check prevents a future caller from using this filesystem helper with an
+    /// absolute path or traversal component.
+    pub(crate) fn write_relative(
+        &self,
+        relative_path: &Path,
+        contents: impl AsRef<[u8]>,
+    ) -> Result<PathBuf, RenderHarnessError> {
+        // Backslash is checked against the path text (not only components) because Windows
+        // treats it as a separator and would otherwise split it away before this guard runs.
+        if relative_path
+            .as_os_str()
+            .as_encoded_bytes()
+            .contains(&b'\\')
+        {
+            return Err(RenderHarnessError::workspace(format!(
+                "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."
+            )));
+        }
+        let safe_components = relative_path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)));
+        if relative_path.as_os_str().is_empty() || !safe_components {
+            return Err(RenderHarnessError::workspace(format!(
+                "rendered_output: refusing to write an unsafe relative harness path '{relative_path:?}'."
+            )));
+        }
+
+        let path = self.directory.path().join(relative_path);
+        let parent = path.parent().ok_or_else(|| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: relative harness path '{relative_path:?}' has no parent directory."
+            ))
+        })?;
+        std::fs::create_dir_all(parent).map_err(|error| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: failed to create harness artifact directory '{}': {error}",
+                parent.display()
+            ))
+        })?;
+        std::fs::write(&path, contents).map_err(|error| {
+            RenderHarnessError::workspace(format!(
+                "rendered_output: failed to write harness artifact '{}': {error}",
+                path.display()
+            ))
+        })?;
+
+        Ok(path)
+    }
+
     /// Removes the workspace, reporting failure instead of discarding it.
     pub(crate) fn close(self) -> Result<(), RenderHarnessError> {
         let path = self.directory.keep();
@@ -248,6 +310,107 @@ pub(crate) struct NodeRunOutput {
     pub stdout: String,
 }
 
+/// Verifies once per process that the selected Node runtime satisfies the emitted contracts.
+///
+/// WHAT: remembers one static probe outcome and re-reports it as an infrastructure failure.
+/// WHY: the emitted JavaScript calls native F16 builtins directly, so an older runtime makes
+///      every F16 fixture fail inside its page instead of stating the unmet prerequisite
+///      once. Fatal by design: an unsupported runtime is a `Spawn` failure for every produced
+///      page rather than something individual cases skip around.
+pub(crate) fn require_compatible_node_runtime() -> Result<(), RenderHarnessError> {
+    static PROBE_RESULT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+
+    let probe = PROBE_RESULT.get_or_init(|| probe_node_runtime(NODE_EXECUTABLE));
+    probe
+        .as_ref()
+        .map_err(|message| RenderHarnessError::spawn(message.clone()))
+        .copied()
+}
+
+fn probe_node_runtime(executable: &str) -> Result<(), String> {
+    let mut child = Command::new(executable)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            format!("rendered_output: the Node harness could not start '{executable}': {error}")
+        })?;
+
+    // Only stdout carries the version string; a stalled probe is killed and reaped by the same
+    // bounded deadline logic the page harness uses, never left behind. The capture handle is
+    // joined before any result is inspected, so a report never leaves a live capture thread behind.
+    if let Some(stdout_pipe) = child.stdout.take() {
+        let stdout_capture = std::thread::spawn(move || capture_stream(stdout_pipe));
+        let exit = wait_for_exit(&mut child, NODE_VERSION_PROBE_TIMEOUT);
+
+        // wait_for_exit performs the kill-and-reap itself on every failure path, so the reports
+        // below must not terminate the already-reaped child a second time.
+        let plain_exit = match exit {
+            Ok(status) => status,
+            Err(timeout_error) => {
+                let _ = join_capture(stdout_capture, "stdout");
+                return Err(format!(
+                    "rendered_output: the Node runtime probe did not exit; {}",
+                    timeout_error.message
+                ));
+            }
+        };
+        let captured = match join_capture(stdout_capture, "stdout") {
+            Ok(captured) => captured,
+            Err(read_error) => {
+                return Err(format!(
+                    "rendered_output: the Node version could not be read: {}",
+                    read_error.message
+                ));
+            }
+        };
+        let version = match String::from_utf8(captured.bytes) {
+            Ok(version) => version.trim().to_owned(),
+            Err(_) => "<invalid utf-8>".to_owned(),
+        };
+        if captured.truncated {
+            return Err(
+                "rendered_output: the Node version could not be read: the probe output was \
+                 truncated by the capture bound."
+                    .to_owned(),
+            );
+        }
+        if !plain_exit.success() {
+            return Err(format!(
+                "rendered_output: '{executable} --version' exited with a failure status: {version}"
+            ));
+        }
+        let major = parse_node_major(&version).ok_or_else(|| {
+            format!("rendered_output: could not read a Node version from '{version}'")
+        })?;
+        if major < NODE_REQUIRED_MAJOR {
+            return Err(format!(
+                "rendered_output: '{executable}' is Node {version}, but emitted F16 values call \
+                 native 'Math.f16round', which landed in Node 24. Make the '{executable}' \
+                 executable on PATH a Node 24+ installation and rerun."
+            ));
+        }
+
+        Ok(())
+    } else {
+        // The requested pipe was absent; the child still leaves without a pending read race.
+        let termination = terminate(&mut child);
+        Err(format!(
+            "rendered_output: the probe could not capture its version output. termination \
+             outcome: {}",
+            render_termination_suffix(termination)
+        ))
+    }
+}
+
+/// Reads the major version from a `vMAJOR.[…]` version string.
+fn parse_node_major(version: &str) -> Option<u32> {
+    let digits = version.trim().strip_prefix('v')?.split('.').next()?;
+    digits.parse().ok()
+}
+
 /// Runs one Node script inside `working_directory` under the harness deadline.
 ///
 /// WHAT: spawns Node with piped output, drains both streams on their own threads, waits for exit
@@ -259,6 +422,7 @@ pub(crate) fn run_node_script(
     script_path: &Path,
     working_directory: &Path,
 ) -> Result<NodeRunOutput, RenderHarnessError> {
+    require_compatible_node_runtime()?;
     run_node_script_within(script_path, working_directory, NODE_EXECUTION_TIMEOUT)
 }
 
@@ -287,6 +451,16 @@ pub(crate) fn run_script_with_executable_for_test(
     timeout: Duration,
 ) -> Result<NodeRunOutput, RenderHarnessError> {
     run_script_with_executable(executable, script_path, working_directory, timeout)
+}
+
+#[cfg(test)]
+pub(crate) fn probe_node_runtime_for_test(executable: &str) -> Result<(), String> {
+    probe_node_runtime(executable)
+}
+
+#[cfg(test)]
+pub(crate) fn parse_node_major_for_test(version: &str) -> Option<u32> {
+    parse_node_major(version)
 }
 
 fn run_script_with_executable(

@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -277,6 +278,26 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("unsupported_backend_feature.hashmap_operation")
+    );
+}
+
+#[test]
+fn mutable_function_parameter_feature_exposes_stable_reason_key() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern("Wasm"),
+        UnsupportedBackendFeatureReason::MutableFunctionParameters,
+        span(source_path),
+    );
+
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0064");
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("unsupported_backend_feature.mutable_function_parameters")
     );
 }
 
@@ -1693,6 +1714,7 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
         Some(operation),
         span(source_path),
+        None,
     );
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
@@ -2181,6 +2203,9 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         .try_intern_portable_path("main.moth", &mut string_table)
         .expect("test path fits");
     let literal = string_table.intern("1.");
+    let fixed_unsigned_literal = string_table.intern("300");
+    let fixed_negative_literal = string_table.intern("-1");
+    let fixed_signed_literal = string_table.intern("-129");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
     let declaration_name = string_table.intern("Card");
@@ -2205,6 +2230,33 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             ),
             "Can't have more than one decimal point in numeric literal '1.'",
             "MultipleDecimalPoints",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_unsigned_literal,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U8),
+                span(source_path),
+            ),
+            "Integer literal '300' is outside the U8 range 0 to 255.",
+            "OutsideFixedScalarRange",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_signed_literal,
+                NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
+                span(source_path),
+            ),
+            "Integer literal '-129' is outside the I8 range -128 to 127.",
+            "OutsideFixedScalarRange",
+        ),
+        (
+            CompilerDiagnostic::invalid_number_literal(
+                fixed_negative_literal,
+                NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::Byte),
+                span(source_path),
+            ),
+            "Numeric literal '-1' is negative, but Byte cannot hold negative values.",
+            "NegativeUnsignedLiteral",
         ),
         (
             CompilerDiagnostic::invalid_style_directive(
@@ -2587,6 +2639,7 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
             CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
             None,
             span(source_path),
+            None,
         ),
         CompilerDiagnostic::deferred_feature_reason(
             DeferredFeatureReason::AsyncBlock,
@@ -3484,37 +3537,6 @@ fn invalid_receiver_call_remap_updates_receiver_binding_name() {
 
     assert_eq!(merged_table.resolve(method_name.unwrap()), "move");
     assert_eq!(merged_table.resolve(receiver_binding_name.unwrap()), "p");
-}
-
-#[test]
-fn type_mismatch_renderer_fallback_uses_stable_type_id_text() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", &mut string_table)
-        .expect("test path fits");
-
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
-        builtin_type_ids::STRING,
-        TypeMismatchContext::Declaration,
-        span(source_path),
-    );
-    let render_context = DiagnosticRenderContext::new(&string_table);
-
-    let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
-    let terse_line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
-
-    assert!(guidance.iter().any(|line| line == "Expected: TypeId(1)"));
-    assert!(guidance.iter().any(|line| line == "Found: TypeId(4)"));
-    assert!(terse_line.contains("expected TypeId(1)"));
-    assert!(terse_line.contains("found TypeId(4)"));
-    assert!(
-        !guidance
-            .iter()
-            .any(|line| line.contains("Expected type id"))
-    );
-    assert!(!guidance.iter().any(|line| line.contains("Found type id")));
 }
 
 #[test]

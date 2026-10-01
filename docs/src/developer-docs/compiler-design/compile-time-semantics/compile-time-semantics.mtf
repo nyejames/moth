@@ -139,7 +139,21 @@ Accepted ownership splits cleanly:
 - **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
 - compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
 
-The richer `Number`, `NumberN` and `Byte` redesign is queued and deferred rather than landing now. Keep that surface question separate from the ownership split above, which is accepted and stable regardless of how far coverage grows.
+The frontend/HIR implements fixed-width and `Byte` literal typing, fixed-width
+operator semantics, casts and numeric constant folding. HTML-JS executes
+fixed-width, `Byte` and `Dec` values and recovers checked numeric failures
+through builtin `Error!`. Experimental HTML-Wasm executes fixed integers,
+`Byte`, `F16`, `F32` and `F64` with checked trap-mode arithmetic, infallible
+numeric expression casts that do not involve `F16`, integer-to-`F16` and
+widening `F16` casts, `Byte -> U8` and `U8 -> Byte`, and infallible
+integer-to-`String` expression casts from profile `Int` and fixed signed/unsigned
+integer types. HTML-Wasm rejects reachable `Dec` values and recoverable
+numeric failure. Its remaining builtin runtime casts stay gated, including
+fallible casts, conversions involving `Bool`, `Char` or `Error` (including
+`Char -> Int`), parsing from `String` and statement-form casts. Keep
+implementation coverage separate from this accepted ownership split; the
+canonical numeric and cast references and the progress matrix record current
+support.
 
 ## What can fail here
 
@@ -163,8 +177,8 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 ## Roadmap and current status
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
-- **Current implementation:** folded constants, typed build configuration values, immutable `@project` and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The rich numeric redesign is deferred.
-- **Queued work:** `number_type_numeric_plan.md`, plus the accepted general-directive/config and HTML page-purpose migrations.
+- **Current implementation:** folded constants, typed build configuration values, immutable `@project` and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The accepted numeric family follows the canonical numeric and cast references; the progress matrix records backend support.
+- **Queued work:** the accepted general-directive/config and HTML page-purpose migrations.
 - **Deferred or outside scope:** structural `$feature` selection, trait objects and broad runtime reflection.
 
 ## Exit state

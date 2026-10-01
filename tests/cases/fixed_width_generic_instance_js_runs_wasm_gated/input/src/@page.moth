@@ -1,0 +1,16 @@
+Box type T = |
+    value T,
+|
+
+make_boxes || -> {Box of Byte}, U8:
+    box Box of Byte = Box(200)
+    raw U8 = cast box.value
+    return {box}, raw
+;
+
+render_boxes || -> String:
+    items, raw = make_boxes()
+    return [:fixed width generic instance value=[raw]]
+;
+
+[:[render_boxes()]]

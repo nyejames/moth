@@ -1,0 +1,10 @@
+result ~= "unset"
+hide_optional_pattern ||:
+    maybe U8? = 200
+    if maybe is:
+        200 => result = "present"
+        else => result = "other"
+    ;
+;
+
+[:optional_u8_literal_pattern=accepted]

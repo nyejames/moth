@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["number comparison direct=below/negative-boundary/above/positive-boundary/middle optional=none/zero/negative/positive options=true/false/false choices=true/false/false"]

@@ -28,9 +28,15 @@ use crate::compiler_frontend::ast::templates::{
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
+use crate::compiler_frontend::compiler_messages::{
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -356,11 +362,12 @@ pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
         DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
         DataType::Int => builtin_type_ids::INT,
         DataType::Float => builtin_type_ids::FLOAT,
-        // Decimal is intentionally inactive in the Alpha surface. The hint is
-        // preserved only for diagnostic round-tripping of the inactive builtin.
-        DataType::Decimal => builtin_type_ids::DECIMAL,
+        // Dec scales are lazily interned in the receiving environment, so a diagnostic
+        // spelling alone cannot supply a canonical hint.
+        DataType::Number(_) => builtin_type_ids::NONE,
         DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
+        DataType::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
         DataType::Range => builtin_type_ids::RANGE,
         DataType::None | DataType::Inferred => builtin_type_ids::NONE,
         DataType::Struct { type_id, .. } | DataType::Choices { type_id, .. } => *type_id,
@@ -406,6 +413,28 @@ impl Expression {
     /// Returns true if this expression represents a const-record value.
     pub fn is_const_record_value(&self) -> bool {
         matches!(self.const_record_state, ConstRecordState::ConstRecord)
+    }
+
+    /// Adopt the authored metadata of the expression a substitution replaces.
+    ///
+    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, reactive facts,
+    ///       const-record state and division provenance, and unions the synthetic-interface
+    ///       provenance of the authored operand into the replacement.
+    /// WHY: substituted compile-time operands must stay indistinguishable from their authored
+    ///      node for diagnostics and identity; one owner prevents repeated clones between a
+    ///      projection helper and the general evaluator.
+    pub(crate) fn preserve_authored_metadata(&mut self, authored: &Expression) {
+        self.span = authored.span;
+        self.diagnostic_type = authored.diagnostic_type.clone();
+        self.function_receiver = authored.function_receiver.clone();
+        self.value_mode = authored.value_mode.clone();
+        self.reactive_source = authored.reactive_source.clone();
+        self.reactive_template = authored.reactive_template.clone();
+        self.const_record_state = authored.const_record_state;
+        self.contains_regular_division |= authored.contains_regular_division;
+        self.synthetic_interface_provenance = self
+            .synthetic_interface_provenance
+            .union(&authored.synthetic_interface_provenance);
     }
 
     /// Marks whether this expression originates from a regular division operator.
@@ -510,7 +539,7 @@ impl Expression {
     }
 
     /// Constructs an integer literal expression.
-    pub fn int(value: i32, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
+    pub fn int(value: i64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Int(value),
             builtin_type_ids::INT,
@@ -529,6 +558,78 @@ impl Expression {
             span,
             value_mode,
         )
+    }
+
+    /// Constructs one exact decimal `Dec` value with its resolved receiving identity.
+    ///
+    /// WHAT: carries the immutable materialised value and the explicit `TypeId` selected by the
+    ///       receiving context; Dec identities are lazy and cannot be guessed from a builtin
+    ///       seed.
+    /// WHY: every Dec expression must retain the actual scale identity chosen by the paired
+    ///      environment rather than reconstructing or interning it at a later phase.
+    pub fn number(
+        value: NumberValue,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Self {
+        let scale = value.scale();
+        Self::scalar_literal(
+            ExpressionKind::Number(value),
+            type_id,
+            DataType::Number(scale),
+            span,
+            value_mode,
+        )
+    }
+    /// Constructs one materialised fixed-width scalar or `Byte` literal expression.
+    ///
+    /// WHAT: carries the already-materialised `FixedScalarValue` with the seeded builtin
+    ///       `TypeId` and `DataType` for its scalar identity.
+    /// WHY: the literal parser owns destination-aware materialisation; every later stage
+    ///      consumes the value through this one constructor instead of re-deriving identity.
+    pub fn fixed_scalar(
+        value: FixedScalarValue,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Self {
+        Self::scalar_literal(
+            ExpressionKind::FixedScalar(value),
+            builtin_type_ids::fixed_scalar(value.scalar()),
+            DataType::FixedScalar(value.scalar()),
+            span,
+            value_mode,
+        )
+    }
+
+    /// Constructs a `Float` expression from a host-package constant.
+    ///
+    /// WHAT: rounds the foreign `f64` payload once at the boundary precision and rejects a
+    ///       non-finite result, reporting the constant's name and reference site.
+    /// WHY: `ExpressionKind::Float` must hold a value exactly representable at the profile
+    ///      precision and `Float` is finite by contract, so every external projection shares one
+    ///      rounding rule and one diagnostic instead of each parse site re-deriving them.
+    pub(crate) fn float_from_external_constant(
+        value: f64,
+        numeric_profile: NumericProfile,
+        constant_name: StringId,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Result<Self, CompilerDiagnostic> {
+        let rounded = numeric_profile.float_precision.round(value);
+
+        if !rounded.is_finite() {
+            // `operation` carries the constant name; the typed profile retains the selected
+            // boundary that made this external value unrepresentable.
+            return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                CompileTimeEvaluationErrorReason::FloatOverflow,
+                Some(constant_name),
+                span,
+                Some(numeric_profile),
+            ));
+        }
+
+        Ok(Self::float(rounded, span, value_mode))
     }
 
     /// Constructs a string slice literal expression.
@@ -1292,6 +1393,8 @@ impl Expression {
         let kind = match &self.kind {
             ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
+            | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }
             | ExpressionKind::Bool(_)
@@ -1474,3 +1577,7 @@ impl Expression {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/external_float_constant_tests.rs"]
+mod external_float_constant_tests;

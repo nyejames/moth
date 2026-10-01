@@ -7,6 +7,7 @@
 //!
 //! This module owns:
 //! - token-to-type annotation parsing for declaration/signature contexts
+//! - the single builtin-scalar spelling owner: token tag to `FixedScalar` identity and back
 //! - optional suffix (`?`) annotation rules
 //! - collection type parsing with fixed-capacity syntax (e.g. `{64 Int}`, `{T}`)
 //! - `parsed_ref_to_data_type` syntax-to-diagnostic spelling
@@ -24,10 +25,12 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMapTypeReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(crate) use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
 
@@ -36,6 +39,47 @@ mod walk;
 
 pub(crate) use parse::*;
 pub(crate) use walk::*;
+
+/// Maps a builtin scalar keyword tag to its explicit-width identity.
+///
+/// WHAT: the one owner of `TokenTag -> FixedScalar`. It covers only the explicit-width
+///       spellings (`I8`..`F64`) and `Byte`, which are profile-independent identities.
+/// WHY: parsing, expression diagnostics and header classification all need this mapping, and a
+///      second copy would let the keyword set and the identity set drift apart. `Int` and `Float`
+///      deliberately return `None`: they are profile-dependent identities with no fixed width.
+pub(crate) fn fixed_scalar_for_builtin_type_tag(tag: TokenTag) -> Option<FixedScalar> {
+    match tag {
+        TokenTag::DATATYPE_I8 => Some(FixedScalar::I8),
+        TokenTag::DATATYPE_I16 => Some(FixedScalar::I16),
+        TokenTag::DATATYPE_I32 => Some(FixedScalar::I32),
+        TokenTag::DATATYPE_I64 => Some(FixedScalar::I64),
+        TokenTag::DATATYPE_U8 => Some(FixedScalar::U8),
+        TokenTag::DATATYPE_U16 => Some(FixedScalar::U16),
+        TokenTag::DATATYPE_U32 => Some(FixedScalar::U32),
+        TokenTag::DATATYPE_U64 => Some(FixedScalar::U64),
+        TokenTag::DATATYPE_F16 => Some(FixedScalar::F16),
+        TokenTag::DATATYPE_F32 => Some(FixedScalar::F32),
+        TokenTag::DATATYPE_F64 => Some(FixedScalar::F64),
+        TokenTag::DATATYPE_BYTE => Some(FixedScalar::Byte),
+        _ => None,
+    }
+}
+
+/// Returns the source spelling of a builtin scalar type keyword tag.
+///
+/// WHAT: covers `Int`, `Float`, `Bool`, `String`, `Char` and every explicit-width spelling.
+/// WHY: diagnostics and receiver surfaces must spell builtin scalar types exactly as authored, so
+///      the spelling comes from `FixedScalar::name` for fixed scalars instead of a second table.
+pub(crate) fn builtin_scalar_type_name_for_tag(tag: TokenTag) -> Option<&'static str> {
+    match tag {
+        TokenTag::DATATYPE_INT => Some("Int"),
+        TokenTag::DATATYPE_FLOAT => Some("Float"),
+        TokenTag::DATATYPE_BOOL => Some("Bool"),
+        TokenTag::DATATYPE_STRING => Some("String"),
+        TokenTag::DATATYPE_CHAR => Some("Char"),
+        _ => fixed_scalar_for_builtin_type_tag(tag).map(FixedScalar::name),
+    }
+}
 
 /// Convert parsed type syntax to a diagnostic `DataType` spelling.
 ///
@@ -50,6 +94,8 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
         ParsedTypeRef::BuiltinFloat { .. } => DataType::Float,
         ParsedTypeRef::BuiltinString { .. } => DataType::StringSlice,
         ParsedTypeRef::BuiltinChar { .. } => DataType::Char,
+        ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => DataType::FixedScalar(*scalar),
+        ParsedTypeRef::BuiltinNumber { scale, .. } => DataType::Number(*scale),
         ParsedTypeRef::Named { name, .. } => DataType::NamedType(*name),
         ParsedTypeRef::Qualified { path, .. } => DataType::NamespacedType { path: path.clone() },
         ParsedTypeRef::Applied {

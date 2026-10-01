@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -26,6 +27,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -42,8 +44,18 @@ use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterface
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
     pub template_const_loop_iteration_limit: usize,
+    /// The compilation boundary's `Int` width and `Float` precision for folds under this context.
+    ///
+    /// WHY: substituted RPN folds and range iteration values must use the same widths
+    ///      as literal materialisation rather than assuming the default profile.
+    pub(crate) numeric_profile: NumericProfile,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
+    /// Optional source-scope lookup for already-resolved module constants.
+    ///
+    /// WHY: AST emission folds TIR before the finalized `ConstValueStore` exists, so
+    ///      range operands need a lazy path back to the active visibility-filtered scope.
+    pub(crate) source_scope: Option<&'a ScopeContext>,
 }
 
 /// Compile-time template folding must keep structural no-output distinct from output that happens
@@ -426,6 +438,8 @@ fn fold_runtime_expression_with_bindings<'a>(
                 }
             }
             ExpressionRpnItem::Operator { .. } => item.clone(),
+            // Resolution removes pending literals before this stage.
+            ExpressionRpnItem::PendingNumericLiteral { .. } => item.clone(),
         };
         substituted.push(new_item);
     }
@@ -442,7 +456,12 @@ fn fold_runtime_expression_with_bindings<'a>(
     // node from the pre-fold items, so this caller keeps its own copy.
     add_ast_counter(AstCounter::ExpressionOperandClones, substituted.len());
 
-    match constant_fold(substituted.clone(), fold_context.string_table) {
+    match constant_fold(
+        substituted.clone(),
+        fold_context.string_table,
+        fold_context.numeric_profile,
+        fold_context.source_scope,
+    ) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()

@@ -13,6 +13,7 @@
 //! reach HIR.
 
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirMapOp};
 use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
@@ -123,7 +124,7 @@ pub enum HirStatementKind {
     ///   carrier (success value or builtin `Error`). A later lowering helper is expected to branch
     ///   with `HirTerminator::FallibleBranch` and unwrap success/error before borrow validation.
     NumericOp {
-        /// The specific checked numeric operation (e.g. `IntAdd`, `FloatDiv`).
+        /// The checked numeric operation (operator plus canonical numeric domain).
         op: HirNumericOp,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
@@ -131,6 +132,27 @@ pub enum HirStatementKind {
         operands: HirNumericOperands,
         /// Local that receives the operation result or fallible carrier.
         result: LocalId,
+    },
+
+    /// Compute the next candidate for a compiler-generated binary-float range loop.
+    ///
+    /// WHAT: performs exactly one profile-precision add/subtract into a backend-local scratch,
+    ///       then reports whether that finite candidate satisfies the authored range endpoint.
+    /// WHY: the rounded step-vs-distance precheck can reject an inclusive endpoint reached by
+    ///      rounding. The candidate destination is written only when the result is finite and in
+    ///      range; the Bool result is always written.
+    ///
+    /// `domain` is limited to profile `Float` and fixed `F32`/`F64` ranges. The expressions are
+    /// already converted to that domain by HIR lowering.
+    FloatRangeCandidate {
+        current: HirExpression,
+        step: HirExpression,
+        end: HirExpression,
+        ascending: HirExpression,
+        inclusive: bool,
+        domain: NumericScalar,
+        candidate_result: LocalId,
+        in_range_result: LocalId,
     },
 
     // -------------------------
@@ -201,6 +223,18 @@ impl HirStatement {
             | HirStatementKind::FormatFloat { source: value, .. }
             | HirStatementKind::ValidateFloat { source: value, .. } => {
                 value.remap_string_ids(remap);
+            }
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                current.remap_string_ids(remap);
+                step.remap_string_ids(remap);
+                end.remap_string_ids(remap);
+                ascending.remap_string_ids(remap);
             }
             HirStatementKind::MapOp { receiver, args, .. } => {
                 receiver.remap_string_ids(remap);

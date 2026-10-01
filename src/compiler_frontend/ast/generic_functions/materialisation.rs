@@ -25,6 +25,7 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstBuildResult;
 #[cfg(test)]
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -42,13 +43,6 @@ pub(crate) use sidecar_build::bootstrap_call_summary_from_signature;
 
 pub(crate) struct MaterialisedGenericAst {
     pub(crate) build_result: AstBuildResult,
-    pub(crate) string_table: StringTable,
-    /// String-table length already present when this generated table was forked.
-    ///
-    /// The generated path fork is created from the same live compiler pair. Nested requests append
-    /// after this boundary, so merge-back must use this captured prefix rather than the requester's
-    /// older preparation prefix.
-    pub(crate) string_table_base_len: usize,
     pub(crate) instance_path: PathId,
 }
 
@@ -62,15 +56,21 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
     pub(crate) requester_context: &'a ModuleMaterialisationPreparation,
     pub(crate) requester_call_span: Option<SourceSpan>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
-    /// The current string table paired with `path_fork`.
+    /// The live requester string table paired with `path_fork`.
     ///
-    /// A provider rebase may extend this table after the requester preparation was frozen. The
-    /// generated sidecar must fork from this live table so path component IDs remain resolvable.
-    pub(crate) boundary_string_table: &'a StringTable,
+    /// WHAT: the exact table generated materialisation interns into, so string IDs need no merge.
+    /// WHY: mirroring `path_fork` keeps generated strings in the requester domain directly; the
+    /// requester table is untouched between materialisation and lowering, so the IDs stay valid.
+    pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork:
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
+    /// The requester boundary's `Int` width and `Float` precision.
+    ///
+    /// WHY: a generated body materialises its own AST outside the requester's compiler instance, so
+    ///      it must carry the same boundary numeric profile rather than defaulting one.
+    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]

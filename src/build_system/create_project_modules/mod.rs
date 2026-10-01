@@ -92,6 +92,7 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
@@ -142,6 +143,9 @@ pub fn compile_project_frontend(
     let result = compile_project_frontend_with_inputs(
         config,
         build_profile,
+        // This config-free entry point exists for standalone fixtures, which compile with the
+        // standard numeric widths.
+        NumericProfile::STANDARD,
         validated_output_settings,
         style_directives,
         builder_surface,
@@ -163,6 +167,7 @@ pub fn compile_project_frontend(
 pub(crate) fn compile_project_frontend_with_inputs(
     config: &mut Config,
     build_profile: BuildProfile,
+    numeric_profile: NumericProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -190,6 +195,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
             compilation::compile_directory_frontend(
                 config,
                 frontend_build_profile,
+                numeric_profile,
                 validated_output_settings,
                 style_directives,
                 builder_surface,
@@ -202,6 +208,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
             compilation::compile_single_file_frontend_with_inputs(
                 config,
                 frontend_build_profile,
+                numeric_profile,
                 style_directives,
                 builder_surface,
                 extension,
@@ -237,6 +244,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
 #[cfg(feature = "boracle")]
 pub(crate) fn compile_single_file_boracle(
     config: &Config,
+    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
@@ -252,6 +260,7 @@ pub(crate) fn compile_single_file_boracle(
     compilation::compile_single_file_boracle_frontend(
         config,
         FrontendBuildProfile::Dev,
+        numeric_profile,
         style_directives,
         builder_surface,
         extension,

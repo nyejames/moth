@@ -10,7 +10,7 @@
 //! This module owns:
 //! - counting inline map nesting depth in parsed type references and rejecting depth
 //!   greater than two before the map type is resolved.
-//! - accepting only `String`, `Int`, `Bool`, and `Char` as supported V1 map keys.
+//! - accepting `String`, `Int`, `Bool`, `Char`, fixed-width integers, and `Byte` keys.
 //!
 //! This module does NOT own:
 //! - `TypeEnvironment::intern_map` or canonical map `TypeId` construction.
@@ -19,6 +19,7 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMapTypeReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarClass;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::source::SourceSpan;
@@ -52,9 +53,9 @@ pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
     }
 }
 
-/// Validates that a map key type is supported for V1 ordered maps.
+/// Validates that a map key type belongs to a supported source scalar family.
 ///
-/// WHAT: accepts only `String`, `Int`, `Bool`, and `Char` keys.
+/// WHAT: accepts `String`, `Int`, `Bool`, `Char`, fixed-width integers, and `Byte`.
 /// WHY: builtin maps are deliberately scalar-keyed. This helper is the canonical owner
 ///      of that policy, so generic parameters and user-defined types follow the same
 ///      rejection path as every other unsupported key.
@@ -64,10 +65,22 @@ pub(crate) fn validate_map_key_type(
     span: Option<SourceSpan>,
 ) -> Result<(), CompilerDiagnostic> {
     let builtins = type_environment.builtins();
+    let is_supported_fixed_scalar =
+        type_environment
+            .fixed_scalar(key_type_id)
+            .is_some_and(|scalar| {
+                matches!(
+                    scalar.class(),
+                    FixedScalarClass::SignedInteger
+                        | FixedScalarClass::UnsignedInteger
+                        | FixedScalarClass::Octet
+                )
+            });
     let is_supported_scalar = key_type_id == builtins.string
         || key_type_id == builtins.int
         || key_type_id == builtins.bool
-        || key_type_id == builtins.char;
+        || key_type_id == builtins.char
+        || is_supported_fixed_scalar;
 
     if is_supported_scalar {
         return Ok(());

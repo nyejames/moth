@@ -1,8 +1,8 @@
 //! JS runtime helper emission.
 //!
-//! This module emits the JS helper functions that implement Moth's runtime
-//! semantics. All helper groups are declared as JS `function` declarations, which means
-//! JS hoisting guarantees correct behaviour regardless of emission order.
+//! This module emits JS helper functions that implement Moth's runtime semantics.
+//! Most helpers are hoisted `function` declarations; the optional float-power source
+//! also initialises constants in the prelude before user code runs.
 //!
 //! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
 //! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
@@ -38,21 +38,51 @@ pub(crate) use collections::collection_javascript_helpers;
 
 use crate::backends::js::JsEmitter;
 
-/// Describes which checked numeric runtime helper families are required by emitted JS.
+/// Describes which checked numeric carrier families are required by emitted JS.
 ///
-/// WHY: arithmetic helpers, Float formatting, and Float boundary validation share the same
-/// `__moth_numeric_trap` carrier wrapper, but the helper bodies themselves should stay
-/// demand-driven so unrelated programs do not grow extra runtime surface.
+/// WHY: each family is shared by every semantic domain with its carrier, while unreachable carrier
+///      families stay out of the generated prelude.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct NumericRuntimeHelperUsage {
-    pub(crate) numeric_ops: bool,
-    pub(crate) format_float: bool,
+    pub(crate) number_integer_ops: bool,
+    pub(crate) big_integer_ops: bool,
+    pub(crate) number_decimal_ops: bool,
+    pub(crate) binary32_ops: bool,
+    pub(crate) binary64_ops: bool,
+    pub(crate) binary_float_power: bool,
+    pub(crate) format_binary16: bool,
+    pub(crate) format_binary32: bool,
+    pub(crate) format_binary64: bool,
     pub(crate) validate_float: bool,
 }
 
 impl NumericRuntimeHelperUsage {
+    pub(crate) fn require_float_formatter(
+        &mut self,
+        precision: crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision,
+    ) {
+        use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+
+        match precision {
+            BinaryFloatPrecision::Binary16 => self.format_binary16 = true,
+            BinaryFloatPrecision::Binary32 => self.format_binary32 = true,
+            BinaryFloatPrecision::Binary64 => self.format_binary64 = true,
+        }
+    }
+
+    pub(crate) fn uses_float_formatter(self) -> bool {
+        self.format_binary16 || self.format_binary32 || self.format_binary64
+    }
+
     pub(crate) fn any(self) -> bool {
-        self.numeric_ops || self.format_float || self.validate_float
+        self.number_integer_ops
+            || self.big_integer_ops
+            || self.number_decimal_ops
+            || self.binary32_ops
+            || self.binary64_ops
+            || self.binary_float_power
+            || self.uses_float_formatter()
+            || self.validate_float
     }
 }
 
@@ -75,12 +105,12 @@ impl<'hir> JsEmitter<'hir> {
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — canonical String conversion, equality, and map-key handling
     ///   cast helpers            — numeric and string casting with Result-typed errors
-    ///   numeric helpers         — checked i32 and finite f64 arithmetic with trap/Error carriers
+    ///   numeric helpers         — checked Number/BigInt integer and profile-precision Float arithmetic
     ///   choice helpers          — structural equality for nominal choice carriers
     ///   reactivity helpers      — reactive source bindings, scheduler, and template-string values
     ///
-    /// All groups use JS `function` declarations, which are hoisted by the JS engine.
-    /// Ordering here is for readability only; correctness does not depend on it.
+    /// Most groups use hoisted JS `function` declarations. Float power also initialises
+    /// top-level constants, so the complete prelude must precede emitted user functions and start.
     pub(crate) fn emit_runtime_prelude(
         &mut self,
         emitted_code_uses_maps: bool,

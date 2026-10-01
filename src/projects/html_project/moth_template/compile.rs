@@ -77,6 +77,9 @@ pub(crate) fn compile_moth_template_with_registry(
     resource_inputs: &mut ResourceInputRegistry,
 ) -> Result<DirectTemplateRegistryCompile, CompilerMessages> {
     let mut path_fork = PathInternerFork::empty();
+    // The profile is read before the request is consumed by source collection, then handed to every
+    // source's fold so one request cannot mix boundary widths.
+    let numeric_profile = request.numeric_profile;
     let sources = match request.collect_sources(string_table, &mut path_fork) {
         Ok(sources) => sources,
         Err(mut messages) => {
@@ -119,6 +122,7 @@ pub(crate) fn compile_moth_template_with_registry(
                     source_code: None,
                     style_directives: &style_directives,
                     file_value_resolution: Some(file_value_bundle),
+                    numeric_profile,
                 },
                 string_table,
             ),

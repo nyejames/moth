@@ -1,0 +1,16 @@
+@helpers to_int
+
+number_to_int |value Dec2| -> Int, Error!:
+    return to_int(value)!
+;
+
+converted = number_to_int(123.00) catch:
+    then -1
+;
+fractional_error_code ~U32 = 0
+fractional = number_to_int(1.25) catch |fractional_error|:
+    fractional_error_code = fractional_error.code
+    then -1
+;
+
+[:generic Dec TRY_CASTABLE_TO_INT [converted]/[fractional]/[fractional_error_code]]

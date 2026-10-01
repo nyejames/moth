@@ -5,6 +5,8 @@
 //! WHY: unresolved names, inferred positions, and source spelling must not
 //!      be confused with resolved semantic type identity.
 
+use super::fixed_scalar::FixedScalar;
+use super::number::NumberScale;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
@@ -22,7 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 pub(crate) enum ParsedCollectionCapacity {
     /// A positive integer literal such as `64`.
     Literal {
-        value: i32,
+        value: i64,
         span: Option<SourceSpan>,
     },
     /// A bare visible constant name such as `capacity`.
@@ -89,6 +91,25 @@ pub enum ParsedTypeRef {
         span: Option<SourceSpan>,
     },
 
+    /// An explicit-width builtin scalar or `Byte`, spelled as its keyword.
+    ///
+    /// WHY: these identities carry width and octet meaning, so the parsed reference keeps the
+    ///      scalar itself instead of a name that later resolution would have to re-derive.
+    BuiltinFixedScalar {
+        scalar: FixedScalar,
+        span: Option<SourceSpan>,
+    },
+
+    /// A bare builtin `Dec`/`Dec0`..`Dec256` spelling with its validated scale.
+    ///
+    /// WHY: the spelling parser owns the scale grammar (leading-zero and above-256 spellings
+    ///      stay named types), so resolution receives the validated scale directly instead of
+    ///      re-deriving it from the authored name.
+    BuiltinNumber {
+        scale: NumberScale,
+        span: Option<SourceSpan>,
+    },
+
     // -----------------
     //  Trait-local Types
     // -----------------
@@ -151,6 +172,8 @@ impl ParsedTypeRef {
             | ParsedTypeRef::BuiltinFloat { .. }
             | ParsedTypeRef::BuiltinString { .. }
             | ParsedTypeRef::BuiltinChar { .. }
+            | ParsedTypeRef::BuiltinFixedScalar { .. }
+            | ParsedTypeRef::BuiltinNumber { .. }
             | ParsedTypeRef::This { .. } => {}
 
             ParsedTypeRef::Collection {

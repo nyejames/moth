@@ -152,8 +152,8 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
 #[test]
 fn duplicate_top_level_function_names_error_during_header_parsing() {
     let result = parse_single_file_headers_with_entry(
-        "simple_function |number Int| -> Int:\n\
-             return number + 1\n\
+        "simple_function |count Int| -> Int:\n\
+             return count + 1\n\
          ;\n\
          \n\
          simple_function |value Int| -> Int:\n\

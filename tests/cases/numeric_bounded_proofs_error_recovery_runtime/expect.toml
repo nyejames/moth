@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "bounded recovery codes=301/301/301/301/300/242/242 results=0/0/0/0/0/0/0 holder=11 narrow-ok=200 round-trip=4294967295 double=2000 once=255/1"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]

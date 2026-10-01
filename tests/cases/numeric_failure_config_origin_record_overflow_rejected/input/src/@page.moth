@@ -1,0 +1,5 @@
+@facade counts
+
+overflow || -> Int, Error!:
+    return counts.maximum + 1
+;

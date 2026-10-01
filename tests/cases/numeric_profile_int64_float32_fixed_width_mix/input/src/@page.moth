@@ -1,0 +1,18 @@
+profile_integer Int = 2147483648
+narrow_code ~U32 = 0
+narrowed I32 = cast profile_integer catch |err|:
+    narrow_code = err.code
+    then 0
+;
+
+fixed_integer I64 = 9007199254740993
+profiled_integer Int = cast fixed_integer
+round_trip_integer I64 = cast profiled_integer
+
+profile_float Float = 0.1
+wide_float F64 = cast profile_float
+
+round_trip_text String = cast round_trip_integer
+wide_float_text String = cast wide_float
+
+[:profile fixed carrier mix narrowed=[narrowed] error=[narrow_code] i64=[round_trip_text] float64=[wide_float_text]]

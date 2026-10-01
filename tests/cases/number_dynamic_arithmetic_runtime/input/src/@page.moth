@@ -1,0 +1,91 @@
+add_zero |left Dec0, right Dec0| -> Dec0:
+    return left + right
+;
+subtract_zero |left Dec0, right Dec0| -> Dec0:
+    return left - right
+;
+multiply_zero |left Dec0, right Dec0| -> Dec0:
+    return left * right
+;
+floor_zero |left Dec0, right Dec0| -> Dec0:
+    return left // right
+;
+remainder_zero |left Dec0, right Dec0| -> Dec0:
+    return left % right
+;
+negate_zero |value Dec0| -> Dec0:
+    return -value
+;
+
+multiply_tenths |left Dec1, right Dec1| -> Dec1:
+    return left * right
+;
+divide_hundredths |left Dec2, right Dec2| -> Dec2:
+    return left / right
+;
+remainder_hundredths |left Dec2, right Dec2| -> Dec2:
+    return left % right
+;
+
+double_tiny |value Dec256| -> Dec256:
+    return value + value
+;
+
+increment_large |value Dec0| -> Dec0:
+    return value + 1
+;
+multiply_then_add |value Dec1, factor Dec1, addend Dec1| -> Dec1:
+    return value * factor + addend
+;
+power_tenths |value Dec1, exponent Int| -> Dec1:
+    return value ^ exponent
+;
+power_chain |value Dec1| -> Dec1:
+    return (value * value) * value
+;
+
+add_float |value Float, increment Float| -> Float:
+    return value + increment
+;
+
+number_to_int |value Dec0| -> Int, Error!:
+    return cast! value
+;
+
+zero_sum = add_zero(100, 25)
+zero_difference = subtract_zero(100, 25)
+zero_product = multiply_zero(7, 6)
+zero_floor = floor_zero(-17, 5)
+zero_remainder = remainder_zero(-17, 5)
+zero_negation = negate_zero(25)
+
+positive_half = multiply_tenths(1.5, 0.9)
+negative_half = multiply_tenths(-1.5, 0.9)
+tie_even_half = multiply_tenths(1.5, 0.3)
+positive_tiny_tie = multiply_tenths(0.5, 0.1)
+negative_tiny_tie = multiply_tenths(-0.5, 0.1)
+
+third = divide_hundredths(1.00, 3.00)
+negative_remainder = remainder_hundredths(-5.25, 2.00)
+
+tiny = double_tiny(1e-256)
+tiny_is_greater = tiny > 1e-256
+large_increment = increment_large(123456789012345678901234567890)
+rounded_each_operation = multiply_then_add(1.5, 0.3, 0.3)
+power_once = power_tenths(1.5, 3)
+power_signed = power_tenths(-1.5, 3)
+power_chain_result = power_chain(1.5)
+
+power_zero = power_tenths(2.5, 0)
+float_profile = add_float(16777216.0, 1.0)
+
+int32_maximum = number_to_int(2147483647) catch:
+    then 0
+;
+int32_overflow_code ~U32 = 0
+int32_overflow = number_to_int(2147483648) catch |int32_error|:
+    int32_overflow_code = int32_error.code
+    then 0
+;
+
+[:number arithmetic zero=[zero_sum]/[zero_difference]/[zero_product]/[zero_floor]/[zero_remainder]/[zero_negation] scale1=[positive_half]/[negative_half]/[tie_even_half] tiny-ties=[positive_tiny_tie]/[negative_tiny_tie] scale2=[third]/[negative_remainder] scale256=[tiny_is_greater] large=[large_increment] operation-rounding=[rounded_each_operation] power=[power_once]/[power_signed]/[power_chain_result]/[power_zero] float64=[float_profile] int32=[int32_maximum]/[int32_overflow_code]]

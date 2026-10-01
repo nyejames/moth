@@ -7,19 +7,20 @@
 use crate::compiler_frontend::compiler_messages::render::terminal::format_payload_guidance;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostics_with_context;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, diagnostic_type_name,
+    DiagnosticRenderContext, diagnostic_type_name, unsupported_operator_types_message,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFieldAccessReason,
-    TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticOperator, InvalidAssignmentTargetReason,
+    InvalidFieldAccessReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
-    BuiltinTypeConstructor, NominalTypeId, TypeConstructor, TypeId,
+    BuiltinTypeConstructor, NominalTypeId, TypeConstructor, TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -211,4 +212,96 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("expected Int, found String"));
     assert!(!lines[0].contains("TypeId("));
+}
+
+#[test]
+fn unsupported_operator_message_explains_unsigned_negation() {
+    assert_eq!(
+        unsupported_operator_message(
+            DiagnosticOperator::Subtract,
+            builtin_type_ids::fixed_scalar(FixedScalar::U8),
+            None,
+        ),
+        "Unary `-` does not apply to unsigned `U8`. Convert the value to a signed type with `cast` first."
+    );
+}
+
+#[test]
+fn unsupported_operator_message_explains_missing_fixed_integer_common_type() {
+    assert_eq!(
+        unsupported_operator_message(
+            DiagnosticOperator::Add,
+            builtin_type_ids::fixed_scalar(FixedScalar::I64),
+            Some(builtin_type_ids::fixed_scalar(FixedScalar::U64)),
+        ),
+        "`I64` and `U64` have no common integer type for `+`. Convert one operand with `cast` first."
+    );
+}
+
+#[test]
+fn unsupported_operator_message_explains_fixed_numeric_mixing() {
+    let cases = [
+        (
+            DiagnosticOperator::Add,
+            builtin_type_ids::fixed_scalar(FixedScalar::U8),
+            builtin_type_ids::INT,
+            "`U8` and `Int` do not mix implicitly. Convert one operand with `cast` first.",
+        ),
+        (
+            DiagnosticOperator::Equality,
+            builtin_type_ids::fixed_scalar(FixedScalar::F32),
+            builtin_type_ids::FLOAT,
+            "`F32` and `Float` do not mix implicitly. Convert one operand with `cast` first.",
+        ),
+        (
+            DiagnosticOperator::Multiply,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::fixed_scalar(FixedScalar::F16),
+            "`I32` and `F16` do not mix implicitly. Convert one operand with `cast` first.",
+        ),
+    ];
+
+    for (operator, lhs, rhs, expected) in cases {
+        assert_eq!(
+            unsupported_operator_message(operator, lhs, Some(rhs)),
+            expected
+        );
+    }
+}
+
+#[test]
+fn unsupported_operator_message_explains_byte_arithmetic() {
+    assert_eq!(
+        unsupported_operator_message(
+            DiagnosticOperator::Add,
+            builtin_type_ids::fixed_scalar(FixedScalar::Byte),
+            Some(builtin_type_ids::fixed_scalar(FixedScalar::Byte)),
+        ),
+        "`Byte` has no arithmetic operators."
+    );
+
+    assert_eq!(
+        unsupported_operator_message(
+            DiagnosticOperator::Subtract,
+            builtin_type_ids::fixed_scalar(FixedScalar::Byte),
+            None,
+        ),
+        "`Byte` has no arithmetic operators."
+    );
+}
+
+fn unsupported_operator_message(
+    operator: DiagnosticOperator,
+    lhs: TypeId,
+    rhs: Option<TypeId>,
+) -> String {
+    let type_environment = TypeEnvironment::new();
+    let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+
+    unsupported_operator_types_message(operator, lhs, rhs, context)
 }

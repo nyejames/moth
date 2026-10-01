@@ -343,6 +343,7 @@ fn resolve_signature_type_annotation(
         TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &expression_context.top_level_declarations,
             declaring_file_id: expression_context.shared.declaring_file_id,
+            numeric_profile: expression_context.numeric_profile,
             visible_declaration_ids: expression_context.visible_declaration_ids.as_ref(),
             visible_external_symbols: expression_context
                 .file_visibility

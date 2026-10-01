@@ -1,0 +1,64 @@
+Ledger = |
+    balance I64,
+|
+
+Reading ::
+    Empty,
+    Sample | value I16 |,
+;
+
+Box type T = |
+    value T,
+|
+
+read_amount |item Reading| -> I16:
+    if item is:
+        Sample(value) => return value
+        Empty => return 0
+    ;
+;
+
+make_byte_values |raw Byte, other Byte| -> {Byte}, U8:
+    values {Byte} = {raw, other}
+    first U8 = cast raw
+    return values, first
+;
+
+ledger ~= Ledger(balance = 9007199254740993)
+copied_ledger ~= copy ledger
+copied_ledger.balance = 99
+original_balance = ledger.balance
+copied_balance = copied_ledger.balance
+
+present_left I32? = 37
+present_right I32? = 37
+options_equal = present_left is present_right
+
+reading = Reading::Sample(value = 300)
+choice_value = read_amount(reading)
+
+box Box of U32 = Box(70000)
+boxed_value = box.value
+
+map_balance I64 = 9007199254740993
+balances {String = I64} = {"retirement" = map_balance}
+
+raw_byte Byte = 255
+other_byte Byte = 128
+as_u8 U8 = cast raw_byte
+restored_byte Byte = cast as_u8
+byte_equal = raw_byte is restored_byte
+byte_greater = raw_byte > other_byte
+byte_values, collection_first = make_byte_values(raw_byte, other_byte)
+
+balance_text String = cast original_balance
+copied_text String = cast copied_balance
+choice_text String = cast choice_value
+boxed_text String = cast boxed_value
+map_text String = cast map_balance
+byte_text String = cast as_u8
+collection_first_text String = cast collection_first
+other_u8 U8 = cast other_byte
+other_byte_text String = cast other_u8
+
+[:fixed aggregate runtime struct=[balance_text] copy=[balance_text]/[copied_text] options-equal=[options_equal] choice=[choice_text] generic=[boxed_text] map-value=[map_text] byte=[byte_text]/[other_byte_text] byte-collection=[collection_first_text] equal=[byte_equal] greater=[byte_greater]]

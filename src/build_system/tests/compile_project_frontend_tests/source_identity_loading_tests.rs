@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -90,6 +91,8 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
 
 #[test]
 fn registered_source_database_retains_exact_text_for_multiple_compiled_sources() {
+    // Hold the shared instrumentation lock; see the mechanism test below.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
@@ -112,6 +115,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,
@@ -143,6 +147,8 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
 
 #[test]
 fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
+    // Hold the shared instrumentation lock; see the mechanism test below.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
@@ -191,6 +197,8 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
 
 #[test]
 fn unselected_preload_read_failure_stays_inert() {
+    // Hold the shared instrumentation lock; see the mechanism test below.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let dir = _temp.path().to_path_buf();
     fs::create_dir_all(dir.join("src")).expect("should create source root");
@@ -214,6 +222,7 @@ fn unselected_preload_read_failure_stays_inert() {
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,
@@ -319,6 +328,12 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
 #[cfg(feature = "timers")]
 #[test]
 fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion() {
+    // Regression history (Sept 2026, 4-thread validation): this test asserts over the whole
+    // snapshot (exactly one unfinished module). `try_start_session` blocks a second *session*
+    // but not a second *compile*: an unguarded parallel compile mints boundary/module ids from
+    // this test's active session via the global attribution gate, adding a phantom `/src`
+    // unfinished record (`left: 2, right: 1`). Keep this lock, and the matching lock on every
+    // other test that calls an instrumented compile entry point (see the mechanism test below).
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
@@ -807,5 +822,144 @@ fn ast_aggregate_metrics_are_not_double_recorded_with_detailed_timers() {
     assert_eq!(
         ast_total_count, 1,
         "detailed AST construction must still record one aggregate span"
+    );
+}
+
+#[cfg(feature = "timers")]
+#[test]
+fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
+    // Defensive guard for the Sept 2026 4-thread validation failure (see mechanism below): this
+    // test owns a session while spawning its own thread, so hold the shared instrumentation
+    // lock against *other* tests' compiles; the spawned thread itself stays deliberately
+    // unguarded to pin the session-sharing mechanism.
+    let dir_a_temp = tempfile::tempdir().expect("should create temp dir");
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Without the shared lock, a second compile on another thread inherits the active session's
+    // ids through the global attribution gate (`register_timing_boundary` only checks global
+    // `attribution_active()`, then mints the id from `collection.id`). That session-sharing
+    // turned `failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion`
+    // red (`left: 2, right: 1`) when unguarded compile tests overlapped it. The pinning here is
+    // the ordering a scoped worker gives: the session is already active before the spawn and the
+    // scope join happens before `finish()`, so the worker always overlaps the session without
+    // simultaneous execution of both compiles. One failing fixture plus one concurrent failing
+    // fixture must yield two boundaries and two unfinished modules. Do not delete this test and
+    // the `lock_counter_test()` guards it documents; a future caller-side capture model must
+    // keep the victim assertions whole-snapshot exact.
+    let dir_a = dir_a_temp.path().to_path_buf();
+    fs::write(
+        dir_a.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir_a.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
+        .expect("should write malformed entry");
+    let dir_b_temp = tempfile::tempdir().expect("should create temp dir");
+    let dir_b = dir_b_temp.path().to_path_buf();
+    fs::create_dir_all(dir_b.join("src")).expect("should create source root");
+    fs::write(
+        dir_b.join("config.moth"),
+        "project #= (\n    name = \"selected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir_b.join("src/@page.moth"), [b'o', b'k', 0xff, b'\n'])
+        .expect("should write invalid UTF-8 source");
+    let mut config_a = Config::new(dir_a.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let timing_session =
+        crate::timing::start_benchmark_collection(true).expect("timing session should start");
+    let result_a = compile_project_frontend(
+        &mut config_a,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    );
+    let Err(messages_a) = result_a else {
+        panic!("first fixture should fail before the concurrent compile starts");
+    };
+    assert_has_diagnostic_code(&messages_a, "MOTH-SYNTAX-0019");
+    assert_eq!(
+        messages_a.error_count(),
+        1,
+        "first fixture should fail with exactly the syntax diagnostic before the concurrent compile starts: {:#?}",
+        messages_a
+    );
+
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                let mut thread_string_table = StringTable::new();
+                let thread_style = StyleDirectiveRegistry::built_ins();
+                let mut thread_config = Config::new(dir_b.clone());
+                let mut thread_surface = BuilderSurface::with_mandatory_core();
+                let thread_error = match compile_project_frontend(
+                    &mut thread_config,
+                    BuildProfile::Dev,
+                    None,
+                    &thread_style,
+                    &mut thread_surface,
+                    &mut thread_string_table,
+                ) {
+                    Err(error) => error,
+                    Ok(_) => panic!("second fixture should fail its existing preparation lane"),
+                };
+
+                // The concurrent fixture must fail for the infrastructure file-error reason, not
+                // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
+                let error_value = thread_error
+                    .infrastructure_error()
+                    .expect("concurrent failure should remain an infrastructure file error");
+                assert_eq!(&error_value.error_type, &ErrorType::File);
+                assert!(
+                    error_value
+                        .msg
+                        .contains("Error reading file when adding new moth files to parse"),
+                    "second fixture should stay in the infrastructure file-error lane: {}",
+                    error_value.msg
+                );
+            })
+            .join()
+            .expect("concurrent compile worker should not panic");
+    });
+    let snapshot = timing_session.finish();
+    let boundary_count = snapshot.boundaries.len();
+    let unfinished_modules = snapshot
+        .modules
+        .iter()
+        .filter(|module| !module.source_facts_finalized)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        boundary_count,
+        2,
+        "the concurrent compile must register its own boundary into the active session: {:#?}",
+        snapshot
+            .boundaries
+            .iter()
+            .map(|boundary| (boundary.id, boundary.display_name.as_str()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        unfinished_modules.len(),
+        2,
+        "both failed preparations must leave unfinished module metadata: {:#?}",
+        snapshot
+            .modules
+            .iter()
+            .map(|module| (module.key.boundary(), module.logical_identity.as_str()))
+            .collect::<Vec<_>>()
+    );
+    // The second fixture's empty project name plus `src` logical path composes `/src`; that
+    // label is the observed signature of the original phantom record, not a filesystem path.
+    assert!(
+        unfinished_modules
+            .iter()
+            .any(|module| module.logical_identity == "/src"),
+        "concurrent fixture must reproduce the original phantom identity: {:#?}",
+        unfinished_modules
+            .iter()
+            .map(|module| module.logical_identity.as_str())
+            .collect::<Vec<_>>()
     );
 }

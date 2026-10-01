@@ -114,6 +114,17 @@ impl SyntheticInterfaceProvenance {
         Self { members: sorted }
     }
 
+    /// Borrow source `#Config` member names in canonical provenance order.
+    pub(crate) fn source_config_member_names(&self) -> impl Iterator<Item = &str> {
+        self.members
+            .iter()
+            .filter(|member| {
+                member.class == SyntheticInterfaceClass::ProjectContext
+                    && member.interface == "source-config"
+            })
+            .map(|member| member.member.as_str())
+    }
+
     /// Provenance carrying a single direct synthetic-interface dependency.
     pub(crate) fn single(member: SyntheticInterfaceMemberIdentity) -> Self {
         Self::from_members(vec![member])

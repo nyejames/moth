@@ -357,7 +357,7 @@ Audit cannot be combined with filters or `--list`. It writes the reporting-owned
 expectation facts, hard-policy violations and primary-less contract-family advisories. The report
 is review input only; it never deletes, merges or rewrites fixtures.
 
-The schema 8 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
+The schema 10 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
 expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered
 and exact-once runtime contracts separately. Per-backend fields keep `baseline_applied`,
 `acceptance_only`, `assertion_kinds`, `golden_present`, `golden_mode`, every rendered-output form,
@@ -379,6 +379,9 @@ a discovered `commit`, `not_a_repository`, or `unknown` with the reason discover
 discovery and a genuine absence are different facts, and a report that names neither its command
 nor its build cannot be told apart from a stale one.
 
+Schema 10 distinguishes explicit Wasm trap assertions from uncaught Moth runtime Error
+assertions in per-backend counts and summary totals.
+
 Reports are written to a sibling temporary file and renamed into place, so a reader never sees a
 partial file. Before the work begins, each report is replaced by one whose run says `completed:
 false`; an interrupted run therefore leaves a report that says it did not finish rather than the
@@ -397,19 +400,29 @@ event array when each event happens, then joins their text with newlines in that
 views are derived from the event array. They never reconstruct chronology after execution.
 
 The harness runs only when a backend declares a rendered-output assertion. It executes the emitted
-page scripts and waits for one documented microtask tick so scheduled reactive updates can flush.
-Do not make extra scheduler turns or incidental microtask counts contractual.
+page scripts, captures pending page microtasks, and waits for Node to report unhandled Promise
+rejections before emitting its summary. Do not make scheduler turns or incidental microtask counts
+contractual.
 
 Choose the narrowest field that owns the behaviour:
 
-- `rendered_output_exact` protects the complete combined output. It is mutually exclusive with the
-  other rendered-output fields. Exact comparison normalizes line endings only and preserves every
-  other whitespace difference.
+- `rendered_output_exact` protects the complete combined output and is mutually exclusive with other
+  text-output fields. It may accompany `runtime_error_contains` or `runtime_trap_contains`.
+  Exact comparison normalizes line endings only and preserves every other whitespace difference.
 - `rendered_output_contains_in_order` protects the relative order of two or more fragments.
 - `rendered_output_contains_exactly_once` protects activation, mounting and helper output from
   duplication.
 - `rendered_output_contains` and `rendered_output_not_contains` protect required and forbidden
   fragments when complete output isn't the contract.
+- `runtime_error_contains` protects the message of an uncaught Moth runtime Error that ends page
+  execution. Only values thrown as `new Error(...)` count. This field does not observe recovered
+  `Error!` results, which need ordinary output assertions.
+- `runtime_trap_contains` protects an uncaught `WebAssembly.RuntimeError` message on `html_wasm`.
+  It requires success mode and at least one non-empty fragment. It cannot accompany
+  `runtime_error_contains`: a host trap never satisfies a Moth Error expectation.
+- Either terminal outcome ends the run. Text assertions check only output captured before it.
+  An unrequested terminal outcome fails the case. Other engine errors, including `TypeError`,
+  `WebAssembly.CompileError` and `WebAssembly.LinkError`, remain harness failures.
 
 [codeblock, $code("toml"):
     [backends.html]
@@ -419,6 +432,25 @@ Choose the narrowest field that owns the behaviour:
     rendered_output_not_contains = ["imported-root"]
     rendered_output_contains_in_order = ["before-loop", "after-loop"]
     rendered_output_contains_exactly_once = ["active-root", "mounted"]
+]
+
+Use a runtime-error contract when the case's intended result is a terminating runtime failure:
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    runtime_error_contains = ["Int operation overflowed"]
+]
+
+Use a separate Wasm trap contract for an emitted checked stop. A different engine trap, such as
+an out-of-bounds memory access, does not satisfy this `unreachable` expectation:
+
+[codeblock, $code("toml"):
+    [backends.html_wasm]
+    mode = "success"
+    warnings = "forbid"
+    runtime_trap_contains = ["unreachable"]
 ]
 
 Use exact output for small deterministic behaviours such as loop or map operation results. Use
@@ -432,16 +464,13 @@ difference, so a whitespace-only difference does not print as two identical line
 
 The harness parses the emitted page for a supported script shape and rejects everything else rather
 than guessing:
-
 - a classic inline script is executed
-- `type="module"` is rejected as unsupported. The harness materializes no emitted glue, provider or
-  runtime module and no import map, so it cannot run the module graph the HTML backend emits when a
-  bundle import preamble is present. Executing it as a classic script would report a failure that
-  did not happen
+- exactly one inline `type="module"` script is executed as a native ES module with
+  its validated relative JS graph staged; mixed classic+module pages, multiple module
+  scripts and any import map are rejected by name
 - an external `src`, an unknown `type`, `nomodule`, `async`, and a malformed or unterminated tag are
   each rejected by name
 - the page script include must appear exactly once inside the body
-
 #### Harness failure classes
 
 A harness problem is never reported as a case failure. `RenderHarnessError` names which boundary
@@ -556,6 +585,7 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 
 [codeblock, $code("toml"):
     entry = "."
+    numeric_profile = "Int32/Float64"
 
     [backends.html]
     mode = "success"
@@ -572,6 +602,24 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
     validate_wasm = true
     must_export = ["memory", "moth_str_ptr", "moth_str_len", "moth_release"]
 ]
+
+The optional top-level `numeric_profile` selects the compiler-boundary `Int` width and `Float`
+precision reported by the case's builder for every backend block. Its exact accepted values are
+`Int32/Float32`, `Int32/Float64`, `Int64/Float32` and `Int64/Float64`; omitting the key selects the
+default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
+
+The paired `html_wasm` profile matrix covers supported scalar paths in all four numeric profiles:
+values, comparisons, checked integer and Float/F32/F64 trap-mode arithmetic, F16 scalar
+conversion and supported infallible numeric expression casts, including `Byte -> U8` and
+`U8 -> Byte`. A paired `NumericToString` expression-cast case covers profile `Int` and
+fixed signed/unsigned integers in the `Int32/Float32` profile only; generated-Wasm UTF-8
+helper tests cover signed and unsigned output. Separate paired cases exercise trap-mode
+`Float`/`F16`/`F32`/`F64` text at the default and `Int32/Float32` profiles.
+Recoverable numeric `Error!` paths and reachable `ReturnError` `FormatFloat` and
+`ValidateFloat` remain target-gated, as do fallible conversions, other defined
+conversions involving `Bool`, `Char`, `Error` or `String` (including `Char -> Int` and
+String-to-numeric parsing), and statement-form casts. Fixed-scalar aggregates and
+source-level external finite-value validation retain separate target gates.
 
 - Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`
@@ -605,6 +653,11 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 - Avoid exact block IDs or vector offsets unless exact layout is the invariant.
 - Do not make temporary lowering order part of the public test contract.
 - For HIR validation, distinguish malformed-HIR invariant tests from user-facing source diagnostic tests.
+
+Compact scalar-memory coverage lives in the Wasm emitter tests. It instantiates the normal
+emitter's module in Node and inspects stored bytes, adjacent scalar slots, signed and unsigned
+narrow reloads, and floating-point signed zero. This is evidence for the LIR memory-access
+contract, not source-level aggregate layout, allocation or field/index support.
 
 ### Feature and platform lanes
 

@@ -1,0 +1,10 @@
+increment_when_safe |small U8| -> U8:
+    if small < 255:
+        total U8 = small + 1
+        return total
+    else
+        return small
+    ;
+;
+
+[:[increment_when_safe(1)]]

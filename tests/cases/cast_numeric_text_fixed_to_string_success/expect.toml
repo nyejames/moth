@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " fixed text: 200 -128 18446744073709551615 0.1 0.1"

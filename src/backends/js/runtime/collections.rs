@@ -29,7 +29,10 @@
 //! [`collection_javascript_helpers`].
 
 use crate::backends::js::JsEmitter;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 /// One emitted JavaScript helper implementing the compiler-owned `@core/collections` package.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,18 +45,54 @@ fn error_result_source(error: BuiltinErrorCode) -> String {
     format!(
         "__moth_error_result(\"{}\", {})",
         error.default_message(),
-        error.as_i32()
+        error.as_u32()
     )
 }
 
-/// Returns the complete `@core/collections` JavaScript source consumed by both emission and
-/// first-party dependency validation.
-pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
+/// Returns the complete `@core/collections` JavaScript source for the selected Int carrier.
+/// First-party dependency validation inventories the standard-profile source.
+pub(crate) fn collection_javascript_helpers(profile: NumericProfile) -> Vec<CollectionJsHelper> {
+    let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, profile)
+        .expect("Int always has a JavaScript numeric carrier");
+    let (int_min, int_max) = carrier
+        .integer_bounds_js()
+        .expect("Int carrier always has integer bounds");
+    let zero = JsNumericCarrier::int_literal(0, profile)
+        .expect("zero always fits the Int numeric profile");
+
     let invalid_collection_error =
         error_result_source(BuiltinErrorCode::CollectionExpectedOrderedCollection);
     let out_of_bounds_error = error_result_source(BuiltinErrorCode::CollectionIndexOutOfBounds);
     let capacity_exceeded_error =
         error_result_source(BuiltinErrorCode::CollectionFixedCapacityExceeded);
+
+    let (capacity_validation, index_validation, index_access, capacity_full, length_value) =
+        match carrier {
+            JsNumericCarrier::ExactInteger { .. } => (
+                "Number.isInteger(collection.fixedCapacity)\n        && collection.fixedCapacity > 0\n        && collection.items.length <= collection.fixedCapacity".to_owned(),
+                "Number.isInteger(index) && index >= 0 && index < items.length".to_owned(),
+                "index",
+                "items.length >= collection.fixedCapacity",
+                "items.length",
+            ),
+            JsNumericCarrier::BigInteger { .. } => (
+                format!(
+                    "typeof collection.fixedCapacity === \"bigint\"\n        && collection.fixedCapacity >= {int_min}\n        && collection.fixedCapacity <= {int_max}\n        && collection.fixedCapacity > {zero}\n        && BigInt(collection.items.length) <= collection.fixedCapacity"
+                ),
+                format!(
+                    "typeof index === \"bigint\" && index >= {int_min} && index <= {int_max} && index >= {zero} && index < BigInt(items.length)"
+                ),
+                "Number(index)",
+                "BigInt(items.length) >= collection.fixedCapacity",
+                "BigInt(items.length)",
+            ),
+            JsNumericCarrier::BinaryFloat { .. } => {
+                unreachable!("Int carrier cannot be a binary float")
+            }
+            JsNumericCarrier::ScaledInteger { .. } => {
+                unreachable!("Int carrier cannot be a Number")
+            }
+        };
 
     vec![
         CollectionJsHelper {
@@ -79,34 +118,34 @@ pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
         },
         CollectionJsHelper {
             name: "__moth_collection_is_valid",
-            source: r#"function __moth_collection_is_valid(collection) {
-    if (Array.isArray(collection)) {
+            source: format!(
+                r#"function __moth_collection_is_valid(collection) {{
+    if (Array.isArray(collection)) {{
         return true;
-    }
-    if (collection === null || typeof collection !== "object") {
+    }}
+    if (collection === null || typeof collection !== "object") {{
         return false;
-    }
-    if (collection.__moth_kind !== "fixed_collection") {
+    }}
+    if (collection.__moth_kind !== "fixed_collection") {{
         return false;
-    }
-    if (!Array.isArray(collection.items)) {
+    }}
+    if (!Array.isArray(collection.items)) {{
         return false;
-    }
+    }}
     return (
-        Number.isInteger(collection.fixedCapacity)
-        && collection.fixedCapacity > 0
-        && collection.items.length <= collection.fixedCapacity
+        {capacity_validation}
     );
-}"#
-            .to_owned(),
+}}"#
+            ),
         },
         CollectionJsHelper {
             name: "__moth_collection_index_is_valid",
-            source: r#"function __moth_collection_index_is_valid(collection, index) {
+            source: format!(
+                r#"function __moth_collection_index_is_valid(collection, index) {{
     const items = __moth_collection_items(collection);
-    return Number.isInteger(index) && index >= 0 && index < items.length;
-}"#
-            .to_owned(),
+    return {index_validation};
+}}"#
+            ),
         },
         CollectionJsHelper {
             name: "__moth_collection_get",
@@ -119,10 +158,8 @@ pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
         return {out_of_bounds_error};
     }}
     const items = __moth_collection_items(collection);
-    return {{ tag: "ok", value: items[index] }};
+    return {{ tag: "ok", value: items[{index_access}] }};
 }}"#,
-                invalid_collection_error = invalid_collection_error,
-                out_of_bounds_error = out_of_bounds_error,
             ),
         },
         CollectionJsHelper {
@@ -136,11 +173,9 @@ pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
         return {out_of_bounds_error};
     }}
     const items = __moth_collection_items(collection);
-    items[index] = value;
+    items[{index_access}] = value;
     return {{ tag: "ok", value: null }};
 }}"#,
-                invalid_collection_error = invalid_collection_error,
-                out_of_bounds_error = out_of_bounds_error,
             ),
         },
         CollectionJsHelper {
@@ -158,14 +193,12 @@ pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
         return {invalid_collection_error};
     }}
     const items = __moth_collection_items(collection);
-    if (items.length >= collection.fixedCapacity) {{
+    if ({capacity_full}) {{
         return {capacity_exceeded_error};
     }}
     items.push(value);
     return {{ tag: "ok", value: null }};
 }}"#,
-                invalid_collection_error = invalid_collection_error,
-                capacity_exceeded_error = capacity_exceeded_error,
             ),
         },
         CollectionJsHelper {
@@ -179,27 +212,26 @@ pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
         return {out_of_bounds_error};
     }}
     const items = __moth_collection_items(collection);
-    const removed = items.splice(index, 1)[0];
+    const removed = items.splice({index_access}, 1)[0];
     return {{ tag: "ok", value: removed }};
 }}"#,
-                invalid_collection_error = invalid_collection_error,
-                out_of_bounds_error = out_of_bounds_error,
             ),
         },
         CollectionJsHelper {
             name: "__moth_collection_length",
-            source: r#"function __moth_collection_length(collection) {
+            source: format!(
+                r#"function __moth_collection_length(collection) {{
     const items = __moth_collection_items(collection);
-    return items.length;
-}"#
-            .to_owned(),
+    return {length_value};
+}}"#
+            ),
         },
     ]
 }
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_runtime_collection_helpers(&mut self) {
-        for helper in collection_javascript_helpers() {
+        for helper in collection_javascript_helpers(self.config.numeric_profile) {
             self.emit_javascript_source(&helper.source);
             self.emit_line("");
         }

@@ -6,28 +6,45 @@
 //! structured source diagnostic instead of a backend-internal lowering error.
 
 use crate::backends::external_package_validation::BackendTarget;
+use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, UnsupportedBackendFeatureReason,
 };
-use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceVariantPayloadDefinition, TypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
-use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::hir::hir_side_table::HirLocation;
+use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
+use crate::compiler_frontend::hir::patterns::HirPattern;
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
-    HirReachability, ReachableAssertionMessageUse, ReachableFloatStatementKind,
-    ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind, ReachableNumericOpUse,
-    ReachableReactiveSinkKind, ReachableReactiveSinkUse, ReachableReactiveTemplateUse,
-    ReachableRuntimeCastUse,
+    HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
+    ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
+    ReachableNumericOpUse, ReachableReactiveSinkKind, ReachableReactiveSinkUse,
+    ReachableReactiveTemplateUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Failure mode for backend feature validation.
 ///
@@ -40,22 +57,24 @@ pub enum BackendFeatureValidationError {
 
 /// Explicit build-owned selection consumed by backend feature validation.
 ///
-/// WHAT: backend-neutral validation receives the exact reachable union, active target and optional
-/// module type environment needed for typed feature checks.
+/// WHAT: backend-neutral validation receives the exact reachable union, active target, selected
+///       numeric profile, and optional module type environment.
 #[derive(Clone, Debug)]
 pub struct BackendFeatureValidationInput<'a> {
     pub hir: &'a HirModule,
     pub reachability: &'a HirReachability,
     pub target: BackendTarget,
     pub type_environment: Option<&'a TypeEnvironment>,
+    pub numeric_profile: NumericProfile,
 }
 
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
 ///
 /// WHAT: hashmap construction/use, reactive runtime features, runtime casts, checked numeric
-///       operations, and generic runtime values are legal HIR, but only the JS backend lowers them
-///       for Alpha. HTML-Wasm must reject reachable unsupported operations; unused functions stay
-///       type checked but do not block the experimental Wasm build path.
+///       operations, generic runtime values, Moth `Error` values and fallible control flow are
+///       legal HIR, but this validator reports Wasm features that the target cannot lower. Its
+///       bounded scalar step accepts direct integer/Byte and F16/F32/F64 values while retaining
+///       gates for aggregates.
 /// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
@@ -66,6 +85,27 @@ pub fn validate_hir_backend_feature_support(
 
     match input.target {
         BackendTarget::Wasm => {
+            // Keep the fixed-value type-shape check first so its diagnostic retains priority over
+            // later Wasm operation gates.
+            validate_fixed_width_scalar_values(
+                input.hir,
+                input.type_environment,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+
+            // Dec has no Wasm runtime value or ABI carrier. This reachable type-shape gate
+            // runs before operation gates so Dec literals/casts report their unsupported
+            // representation, including Dec nested inside a selected nominal or generic type.
+            validate_wasm_number_values(
+                input.hir,
+                input.type_environment,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+
             // Wasm has no failure-edge message presentation yet. Default and fully folded
             // optional values remain target-neutral and are accepted.
             validate_runtime_assertion_messages(
@@ -74,8 +114,10 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm does not yet lower hashmaps, reactive runtime features, runtime casts, checked
-            // numeric operations, or generic runtime values.
+            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
+            // statement casts, unsupported formatting, generic values and later Error-value/
+            // fallible-control-flow checks. Trap-mode Float formatting and finite validation run
+            // natively.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -85,11 +127,13 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_runtime_casts(
                 &reachability.reachable_runtime_casts,
                 input.target,
+                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_checked_numeric_ops(
                 &reachability.reachable_numeric_ops,
                 input.target,
+                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_float_statements(
@@ -101,6 +145,27 @@ pub fn validate_hir_backend_feature_support(
                 input.hir,
                 input.type_environment,
                 reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
+            // Keep every pre-existing Wasm feature diagnostic ahead of the Error-value and
+            // fallible-control-flow checks so narrower type and operation reasons retain priority.
+            validate_wasm_error_values(
+                input.hir,
+                input.type_environment,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_fallible_control_flow(
+                input.hir,
+                reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_mutable_function_parameters(
+                input.hir,
+                reachability.backend_selection(),
                 input.target,
                 string_table,
             )?;
@@ -118,6 +183,136 @@ pub fn validate_hir_backend_feature_support(
     }
 
     Ok(())
+}
+
+/// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
+///
+/// WHAT: direct fixed scalars, including F16, are accepted, but aggregate types containing any
+///       fixed scalar remain unsupported. The canonical builtin Error is exempt: its internal
+///       field shapes are its own runtime representation, reported by the Error-value gate.
+/// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
+fn validate_fixed_width_scalar_values(
+    hir: &HirModule,
+    type_environment: Option<&TypeEnvironment>,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let type_environment = require_type_environment(
+        type_environment,
+        target,
+        "fixed-width numeric and Byte values",
+    )?;
+    // Designate the canonical builtin Error so its internal field shapes (the `code` scalar)
+    // stay out of this aggregate classification: the specific Error-value gate keeps priority
+    // for the Error representation it already owns.
+    let canonical_error_type_id = type_environment.type_id_for_canonical_identity(
+        &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+    );
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, canonical_error_type_id);
+
+    // Reachable block occurrences take source precedence over return signatures. Within each pass,
+    // a source-mapped occurrence wins over earlier generated HIR that has no source provenance.
+    let module_occurrences =
+        first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
+            match type_environment.fixed_scalar(type_id) {
+                Some(_) => false,
+                None => backend_type_facts.contains_fixed_scalar(type_id),
+            }
+        });
+    let occurrence = if let Some(authored) = module_occurrences.authored {
+        Some(authored)
+    } else {
+        let signature_occurrences =
+            first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
+                match type_environment.fixed_scalar(type_id) {
+                    Some(_) => false,
+                    None => backend_type_facts.contains_fixed_scalar(type_id),
+                }
+            });
+        signature_occurrences
+            .authored
+            .or(module_occurrences.spanless_fallback)
+            .or(signature_occurrences.spanless_fallback)
+    };
+
+    let Some(occurrence) = occurrence else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports a reachable arbitrary-precision Dec value that Wasm cannot represent.
+///
+/// WHAT: the existing cycle-safe type-fact walk covers direct values, selected function
+///       signatures, and Dec nested through nominal, constructed or generic types.
+/// WHY: Wasm has no Dec runtime, ABI or LIR carrier, so reachable values must fail with a
+///      source diagnostic instead of reaching an unsupported lowering arm. Unselected and
+///      unreachable HIR is intentionally outside this scan.
+fn validate_wasm_number_values(
+    hir: &HirModule,
+    type_environment: Option<&TypeEnvironment>,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let type_environment = require_type_environment(type_environment, target, "Dec values")?;
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, None);
+
+    let module_occurrences =
+        first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
+            backend_type_facts.contains_number(type_id)
+        });
+    let occurrence = if let Some(authored) = module_occurrences.authored {
+        Some(authored)
+    } else {
+        let signature_occurrences =
+            first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
+                backend_type_facts.contains_number(type_id)
+            });
+        signature_occurrences
+            .authored
+            .or(module_occurrences.spanless_fallback)
+            .or(signature_occurrences.spanless_fallback)
+    };
+
+    let Some(occurrence) = occurrence else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::NumberValues,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Resolves the semantic type environment every type-shape gate classifies reachable types with.
+///
+/// WHY: a missing environment means the gate cannot classify anything, so it is an internal
+///      invariant failure rather than a reason to silently accept unsupported values.
+fn require_type_environment<'environment>(
+    type_environment: Option<&'environment TypeEnvironment>,
+    target: BackendTarget,
+    feature: &str,
+) -> Result<&'environment TypeEnvironment, BackendFeatureValidationError> {
+    type_environment.ok_or_else(|| {
+        BackendFeatureValidationError::Infrastructure(Box::new(CompilerError::compiler_error(
+            format!(
+                "Backend feature validation for {} requires a TypeEnvironment to detect {feature}",
+                target.as_str()
+            ),
+        )))
+    })
 }
 
 fn validate_runtime_assertion_messages(
@@ -244,18 +439,23 @@ fn validate_wasm_reactive_features(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable runtime cast for the Wasm target.
+/// Reports the first reachable runtime cast outside Wasm's supported expression conversions.
 ///
-/// WHAT: compiler-owned builtin runtime casts are valid HIR, but HTML-Wasm does not yet lower
-///       them.
-/// WHY: reject early with a structured diagnostic carrying the source span instead of a
-///      backend-internal lowering failure.
+/// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 numeric conversions,
+///       integer and fixed-binary-float-to-String casts, plus Byte/U8; fallible pairs, profile
+///       `Float` expression casts and statement casts remain gated.
+/// WHY: target validation consumes retained cast evidence before lowering, preserving authored
+///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
     runtime_casts: &[ReachableRuntimeCastUse],
     target: BackendTarget,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(runtime_cast) = runtime_casts.first() else {
+    let Some(runtime_cast) = runtime_casts
+        .iter()
+        .find(|runtime_cast| !wasm_supports_runtime_cast(runtime_cast, numeric_profile))
+    else {
         return Ok(());
     };
 
@@ -268,18 +468,105 @@ fn validate_wasm_runtime_casts(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable checked numeric operation for the Wasm target.
+fn wasm_supports_runtime_cast(
+    runtime_cast: &ReachableRuntimeCastUse,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if runtime_cast.form != ReachableRuntimeCastForm::Expression {
+        return false;
+    }
+
+    match runtime_cast.policy {
+        BuiltinCastPolicyId::NumericConversion { source, target } => {
+            wasm_supports_numeric_conversion(source, target, numeric_profile)
+        }
+        BuiltinCastPolicyId::NumericToString(source) => {
+            source.is_integer()
+                || (source != NumericScalar::Float
+                    && matches!(
+                        source.binary_float_precision(numeric_profile),
+                        Some(
+                            BinaryFloatPrecision::Binary16
+                                | BinaryFloatPrecision::Binary32
+                                | BinaryFloatPrecision::Binary64
+                        )
+                    ))
+        }
+        BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => true,
+        _ => false,
+    }
+}
+
+fn wasm_supports_numeric_conversion(
+    source: NumericScalar,
+    target: NumericScalar,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if source == target
+        || numeric_conversion_fallibility(source, target, numeric_profile)
+            != BuiltinCastFallibility::Infallible
+    {
+        return false;
+    }
+
+    if source.is_integer() && target.is_integer() {
+        return true;
+    }
+
+    if source.is_integer() && wasm_has_float_carrier(target, numeric_profile) {
+        return true;
+    }
+
+    match (
+        source.binary_float_precision(numeric_profile),
+        target.binary_float_precision(numeric_profile),
+    ) {
+        (Some(source_precision), Some(target_precision)) => {
+            target_precision >= source_precision
+                && matches!(
+                    (source_precision, target_precision),
+                    (
+                        BinaryFloatPrecision::Binary16
+                            | BinaryFloatPrecision::Binary32
+                            | BinaryFloatPrecision::Binary64,
+                        BinaryFloatPrecision::Binary16
+                            | BinaryFloatPrecision::Binary32
+                            | BinaryFloatPrecision::Binary64
+                    )
+                )
+        }
+        _ => false,
+    }
+}
+
+fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile) -> bool {
+    matches!(
+        domain.binary_float_precision(numeric_profile),
+        Some(
+            BinaryFloatPrecision::Binary16
+                | BinaryFloatPrecision::Binary32
+                | BinaryFloatPrecision::Binary64
+        )
+    )
+}
+
+/// Reports the first reachable checked numeric operation outside Wasm's trap-mode integer and
+/// binary32/binary64 paths.
 ///
-/// WHAT: checked arithmetic is valid HIR, but HTML-Wasm does not yet implement the helper and
-///       trap/recoverability contract for `HirStatementKind::NumericOp`.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of letting Wasm LIR
-///      lowering report an infrastructure failure.
+/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError and F16-domain
+///       operations remain target-gated independently of direct F16 values.
+/// WHY: lowerers receive only operations whose exact failure mode and semantic precision they
+///      implement, using the operation/domain facts retained by HIR reachability.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(numeric_op) = numeric_ops.first() else {
+    let Some(numeric_op) = numeric_ops
+        .iter()
+        .find(|numeric_op| !wasm_supports_checked_numeric_op(numeric_op, numeric_profile))
+    else {
         return Ok(());
     };
 
@@ -292,19 +579,39 @@ fn validate_wasm_checked_numeric_ops(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// Reports the first reachable Float formatting or validation statement for the Wasm target.
+fn wasm_supports_checked_numeric_op(
+    numeric_op: &ReachableNumericOpUse,
+    numeric_profile: NumericProfile,
+) -> bool {
+    if numeric_op.failure_mode != NumericFailureMode::Trap {
+        return false;
+    }
+
+    if numeric_op.op.domain.is_integer() {
+        return true;
+    }
+
+    matches!(
+        numeric_op.op.domain.binary_float_precision(numeric_profile),
+        Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
+    ) && numeric_op.op.operator != NumericOperator::IntegerDivide
+}
+
+/// Reports the first reachable Float formatting or unsupported validation statement for Wasm.
 ///
-/// WHAT: Moth Float formatting and external-Float boundary validation are valid HIR, but
-///       HTML-Wasm does not yet implement the helper and trap/recoverability contract for
-///       `HirStatementKind::FormatFloat` or `HirStatementKind::ValidateFloat`.
-/// WHY: reject early with a structured unsupported-backend diagnostic instead of letting Wasm LIR
-///      lowering report an infrastructure failure.
+/// WHAT: trap-mode Float formatting and boundary validation are supported, while recoverable
+///       validation and formatting remain target-gated.
+/// WHY: target validation consumes the exact failure mode retained by HIR reachability so Wasm
+///      never substitutes a trap for a recoverable `ReturnError` contract.
 fn validate_wasm_float_statements(
     float_statements: &[ReachableFloatStatementUse],
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(float_statement) = float_statements.first() else {
+    let Some(float_statement) = float_statements
+        .iter()
+        .find(|statement| statement.failure_mode != NumericFailureMode::Trap)
+    else {
         return Ok(());
     };
 
@@ -339,19 +646,17 @@ fn validate_wasm_generic_runtime_values(
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(type_environment) = type_environment else {
-        // Generic runtime value detection requires semantic type information. Without it we
-        // cannot safely classify expressions, so we treat the absence as an internal invariant
-        // failure rather than silently allowing unsupported values through.
-        return Err(BackendFeatureValidationError::Infrastructure(Box::new(
-            CompilerError::compiler_error(
-                "Backend feature validation for Wasm requires a TypeEnvironment to detect generic runtime values",
-            ),
-        )));
-    };
+    let type_environment =
+        require_type_environment(type_environment, target, "generic runtime values")?;
 
     let Some(occurrence) =
-        first_generic_runtime_module_occurrence(hir, type_environment, reachable_blocks)
+        first_unsupported_module_occurrence(hir, reachable_blocks, &mut |type_id| {
+            matches!(
+                type_environment.get(type_id),
+                Some(TypeDefinition::GenericInstance(_))
+            )
+        })
+        .preferred()
     else {
         return Ok(());
     };
@@ -365,139 +670,599 @@ fn validate_wasm_generic_runtime_values(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-/// A reachable unsupported generic value, with optional source provenance.
+/// Reports a reachable value whose type directly or structurally contains the builtin `Error`.
+///
+/// WHAT: Wasm does not yet have a runtime representation for compiler-owned Error values.
+/// WHY: canonical identity distinguishes the builtin type from user nominals with similar
+///      spelling or shape, while the shared occurrence traversal retains reachable source sites.
+fn validate_wasm_error_values(
+    hir: &HirModule,
+    type_environment: Option<&TypeEnvironment>,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let type_environment = require_type_environment(type_environment, target, "Error values")?;
+    let error_type_id = type_environment.type_id_for_canonical_identity(
+        &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+    );
+    let Some(error_type_id) = error_type_id else {
+        return Ok(());
+    };
+    let mut backend_type_facts = BackendTypeFacts::new(type_environment, Some(error_type_id));
+
+    let module_occurrences =
+        first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
+            backend_type_facts.contains_error(type_id)
+        });
+    let occurrence = if let Some(authored) = module_occurrences.authored {
+        Some(authored)
+    } else {
+        let signature_occurrences =
+            first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
+                backend_type_facts.contains_error(type_id)
+            });
+        signature_occurrences
+            .authored
+            .or(module_occurrences.spanless_fallback)
+            .or(signature_occurrences.spanless_fallback)
+    };
+
+    let Some(occurrence) = occurrence else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::ErrorValues,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports reachable fallible terminators, which Wasm lowering cannot yet represent.
+///
+/// WHAT: rejects `FallibleBranch`, `ReturnSuccess` and `ReturnError` only in selected blocks.
+/// WHY: exact terminator spans are the authored control-flow site; synthetic HIR remains spanless
+///      instead of inheriting provenance from a neighboring construct.
+fn validate_wasm_fallible_control_flow(
+    hir: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let mut spanless_fallback = None;
+    let mut authored_occurrence = None;
+
+    for block in &hir.blocks {
+        if !reachable_blocks.contains(&block.id)
+            || !matches!(
+                &block.terminator,
+                HirTerminator::FallibleBranch { .. }
+                    | HirTerminator::ReturnSuccess(_)
+                    | HirTerminator::ReturnError(_)
+            )
+        {
+            continue;
+        }
+
+        let occurrence = ReachableTypeOccurrence {
+            span: hir.side_table.terminator_span(block.id).copied(),
+        };
+        if occurrence.span.is_some() {
+            authored_occurrence = Some(occurrence);
+            break;
+        }
+        spanless_fallback.get_or_insert(occurrence);
+    }
+
+    let Some(occurrence) = authored_occurrence.or(spanless_fallback) else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::FallibleControlFlow,
+        occurrence.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Reports a selected mutable parameter that Wasm cannot lower with write-through semantics.
+///
+/// WHAT: examines only declared parameters of selected functions; mutable locals remain supported.
+/// WHY: Wasm call lowering currently passes parameter values instead of writable locations, so
+///      accepting `~` parameters would silently lose mutations when a callee returns.
+fn validate_wasm_mutable_function_parameters(
+    hir: &HirModule,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let mut block_by_id = None;
+    let mut has_spanless_mutable_parameter = false;
+
+    for function in &hir.functions {
+        if !selection.contains_function(function.id) {
+            continue;
+        }
+        if function.params.is_empty() {
+            continue;
+        }
+
+        let entry_block = block_by_id
+            .get_or_insert_with(|| {
+                let mut block_by_id = FxHashMap::default();
+                for block in &hir.blocks {
+                    block_by_id.entry(block.id).or_insert(block);
+                }
+                block_by_id
+            })
+            .get(&function.entry)
+            .copied();
+        let Some(entry_block) = entry_block else {
+            return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                CompilerError::compiler_error(format!(
+                    "Backend feature validation could not resolve entry block {:?} \
+                     for selected function {:?}",
+                    function.entry, function.id,
+                )),
+            )));
+        };
+
+        for parameter_id in &function.params {
+            let Some(parameter) = entry_block
+                .locals
+                .iter()
+                .find(|local| local.id == *parameter_id)
+            else {
+                return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                    CompilerError::compiler_error(format!(
+                        "Backend feature validation could not resolve parameter {parameter_id:?} \
+                         in selected function {:?}",
+                        function.id,
+                    )),
+                )));
+            };
+
+            if !parameter.mutable {
+                continue;
+            }
+
+            if let Some(span) = parameter.span {
+                let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+                    string_table.intern(target.as_str()),
+                    UnsupportedBackendFeatureReason::MutableFunctionParameters,
+                    Some(span),
+                );
+                return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+            }
+
+            has_spanless_mutable_parameter = true;
+        }
+    }
+
+    if has_spanless_mutable_parameter {
+        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::MutableFunctionParameters,
+            None,
+        );
+        return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+    }
+
+    Ok(())
+}
+
+/// A reachable unsupported value, with optional source provenance.
 ///
 /// WHAT: keeps semantic detection separate from diagnostic placement so a spanless value still
 ///       produces the unsupported-feature diagnostic.
 /// WHY: generated or synthetic HIR may legitimately omit source spans.
 #[derive(Clone, Copy, Debug)]
-struct GenericRuntimeValueOccurrence {
+struct ReachableTypeOccurrence {
     span: Option<SourceSpan>,
 }
 
-/// Finds the first reachable expression whose type is a generic instance.
+/// The preferred and fallback reachable occurrences found by a type-shape traversal.
 ///
-/// WHAT: scans only reachable blocks so dead helper bodies do not fail backend validation.
-/// WHY: generic runtime value detection needs the module TypeEnvironment, which is not available
-///      in backend-neutral HIR reachability collection.
-fn first_generic_runtime_module_occurrence(
+/// WHAT: retains the first spanless occurrence for synthetic-only rejection while preferring the
+///       first source-mapped occurrence found later in the same traversal.
+#[derive(Clone, Copy, Debug, Default)]
+struct ReachableTypeOccurrences {
+    authored: Option<ReachableTypeOccurrence>,
+    spanless_fallback: Option<ReachableTypeOccurrence>,
+}
+
+impl ReachableTypeOccurrences {
+    fn preferred(self) -> Option<ReachableTypeOccurrence> {
+        self.authored.or(self.spanless_fallback)
+    }
+}
+
+struct TypeOccurrenceSearch<'predicate, IsUnsupported> {
+    is_unsupported: &'predicate mut IsUnsupported,
+    spanless_fallback: Option<ReachableTypeOccurrence>,
+    unsupported_count: usize,
+}
+
+impl<'predicate, IsUnsupported> TypeOccurrenceSearch<'predicate, IsUnsupported>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    fn new(is_unsupported: &'predicate mut IsUnsupported) -> Self {
+        TypeOccurrenceSearch {
+            is_unsupported,
+            spanless_fallback: None,
+            unsupported_count: 0,
+        }
+    }
+
+    fn check(
+        &mut self,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+    ) -> Option<ReachableTypeOccurrence> {
+        if !(self.is_unsupported)(type_id) {
+            return None;
+        }
+
+        self.record(span)
+    }
+
+    fn record(&mut self, span: Option<SourceSpan>) -> Option<ReachableTypeOccurrence> {
+        self.unsupported_count += 1;
+        let occurrence = ReachableTypeOccurrence { span };
+        if span.is_some() {
+            Some(occurrence)
+        } else {
+            if self.spanless_fallback.is_none() {
+                self.spanless_fallback = Some(occurrence);
+            }
+            None
+        }
+    }
+
+    fn finish(self, authored: Option<ReachableTypeOccurrence>) -> ReachableTypeOccurrences {
+        ReachableTypeOccurrences {
+            authored,
+            spanless_fallback: self.spanless_fallback,
+        }
+    }
+}
+
+/// Finds reachable unsupported locals, expressions or terminator operands.
+///
+/// WHAT: one traversal is shared by every type-shape gate; a gate supplies only its type
+///       predicate, so reachable-HIR coverage cannot drift between checks.
+/// WHY: type-shape gates need the module `TypeEnvironment`, which is not available to
+///      backend-neutral HIR reachability collection.
+fn first_unsupported_module_occurrence<IsUnsupported>(
     module: &HirModule,
-    type_environment: &TypeEnvironment,
     reachable_blocks: &FxHashSet<BlockId>,
-) -> Option<GenericRuntimeValueOccurrence> {
-    for block in &module.blocks {
+    is_unsupported: &mut IsUnsupported,
+) -> ReachableTypeOccurrences
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    let mut authored = None;
+
+    'blocks: for block in &module.blocks {
         if !reachable_blocks.contains(&block.id) {
             continue;
         }
 
+        // A declared local carries its own authored span, so an unsupported local type is reported
+        // on the binding rather than on a later use.
+        for local in &block.locals {
+            if let Some(occurrence) = search.check(local.ty, local.span) {
+                authored = Some(occurrence);
+                break 'blocks;
+            }
+        }
+
         for statement in &block.statements {
             if let Some(occurrence) =
-                first_generic_runtime_statement_occurrence(statement, type_environment)
+                first_unsupported_statement_occurrence(statement, &block.locals, &mut search)
             {
-                return Some(occurrence);
+                authored = Some(occurrence);
+                break 'blocks;
             }
         }
 
         if let Some(occurrence) =
-            first_generic_runtime_terminator_occurrence(&block.terminator, type_environment)
+            first_unsupported_terminator_occurrence(&block.terminator, &mut search)
         {
-            return Some(occurrence);
+            authored = Some(occurrence);
+            break 'blocks;
         }
     }
 
-    None
+    search.finish(authored)
 }
 
-fn first_generic_runtime_statement_occurrence(
+/// Finds a reachable function whose return type a type-shape gate rejects.
+///
+/// WHAT: scans reachable functions in module order after block occurrences.
+/// WHY: parameters are entry-block locals, so the block pass already reports them on their
+///      bindings. A return type has no local or expression of its own, so use its recorded
+///      declaration span when available; generated or synthetic HIR can still be spanless.
+fn first_unsupported_function_signature_occurrence<IsUnsupported>(
+    module: &HirModule,
+    selection: &HirBackendSelection,
+    is_unsupported: &mut IsUnsupported,
+) -> ReachableTypeOccurrences
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    let mut authored = None;
+
+    for function in &module.functions {
+        if !selection.contains_function(function.id)
+            || !(search.is_unsupported)(function.return_type)
+        {
+            continue;
+        }
+
+        let span = module
+            .side_table
+            .hir_source_span_for_hir(HirLocation::Function(function.id));
+        if let Some(occurrence) = search.record(span) {
+            authored = Some(occurrence);
+            break;
+        }
+    }
+
+    search.finish(authored)
+}
+
+fn first_unsupported_statement_occurrence<IsUnsupported>(
     statement: &HirStatement,
-    type_environment: &TypeEnvironment,
-) -> Option<GenericRuntimeValueOccurrence> {
+    locals: &[HirLocal],
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match &statement.kind {
-        HirStatementKind::Assign { value, .. }
-        | HirStatementKind::Expr(value)
-        | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            first_generic_runtime_expression_occurrence(value, type_environment)
+        HirStatementKind::Assign { target, value } => {
+            first_unsupported_place_occurrence(target, search)
+                .or_else(|| first_unsupported_expression_occurrence(value, search))
         }
         HirStatementKind::Call { args, .. } => args
             .iter()
-            .find_map(|arg| first_generic_runtime_expression_occurrence(arg, type_environment)),
-        HirStatementKind::CastOp { source, .. } => {
-            first_generic_runtime_expression_occurrence(source, type_environment)
+            .find_map(|arg| first_unsupported_expression_occurrence(arg, search)),
+        HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
+            first_unsupported_expression_occurrence(value, search)
         }
+        HirStatementKind::CastOp { source, result, .. } => result
+            .as_ref()
+            .and_then(|result_local| {
+                first_unsupported_result_local_occurrence(
+                    locals,
+                    *result_local,
+                    statement.span,
+                    search,
+                )
+            })
+            .or_else(|| first_unsupported_expression_occurrence(source, search)),
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            first_generic_runtime_expression_occurrence(source, type_environment)
+            first_unsupported_expression_occurrence(source, search)
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            first_generic_runtime_expression_occurrence(receiver, type_environment).or_else(|| {
-                args.iter().find_map(|arg| {
-                    first_generic_runtime_expression_occurrence(arg, type_environment)
-                })
+            first_unsupported_expression_occurrence(receiver, search).or_else(|| {
+                args.iter()
+                    .find_map(|arg| first_unsupported_expression_occurrence(arg, search))
             })
         }
-        HirStatementKind::NumericOp { operands, .. } => match operands {
-            HirNumericOperands::Unary { operand } => {
-                first_generic_runtime_expression_occurrence(operand, type_environment)
+        HirStatementKind::NumericOp {
+            operands, result, ..
+        } => {
+            if let Some(occurrence) =
+                first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
+            {
+                return Some(occurrence);
             }
-            HirNumericOperands::Binary { left, right } => {
-                first_generic_runtime_expression_occurrence(left, type_environment).or_else(|| {
-                    first_generic_runtime_expression_occurrence(right, type_environment)
-                })
+
+            let unsupported_before = search.unsupported_count;
+            let occurrence = match operands {
+                HirNumericOperands::Unary { operand } => {
+                    first_unsupported_expression_occurrence(operand, search)
+                }
+                HirNumericOperands::Binary { left, right } => {
+                    first_unsupported_expression_occurrence(left, search)
+                        .or_else(|| first_unsupported_expression_occurrence(right, search))
+                }
+            };
+
+            if let Some(occurrence) = occurrence {
+                // NumericOp's source span is the lowering's source anchor for this authored
+                // operation, and is more precise than either source operand.
+                return Some(ReachableTypeOccurrence {
+                    span: statement.span.or(occurrence.span),
+                });
             }
-        },
+
+            if search.unsupported_count > unsupported_before {
+                // Even when an operand is synthetic and spanless, an authored NumericOp span
+                // identifies the operation that consumes that unsupported value.
+                return statement
+                    .span
+                    .map(|span| ReachableTypeOccurrence { span: Some(span) });
+            }
+
+            None
+        }
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            candidate_result,
+            in_range_result,
+            ..
+        } => {
+            if let Some(occurrence) = first_unsupported_result_local_occurrence(
+                locals,
+                *candidate_result,
+                statement.span,
+                search,
+            )
+            .or_else(|| {
+                first_unsupported_result_local_occurrence(
+                    locals,
+                    *in_range_result,
+                    statement.span,
+                    search,
+                )
+            }) {
+                return Some(occurrence);
+            }
+
+            let unsupported_before = search.unsupported_count;
+            let occurrence = first_unsupported_expression_occurrence(current, search)
+                .or_else(|| first_unsupported_expression_occurrence(step, search))
+                .or_else(|| first_unsupported_expression_occurrence(end, search))
+                .or_else(|| first_unsupported_expression_occurrence(ascending, search));
+            if let Some(occurrence) = occurrence {
+                return Some(ReachableTypeOccurrence {
+                    span: statement.span.or(occurrence.span),
+                });
+            }
+
+            if search.unsupported_count > unsupported_before {
+                return statement
+                    .span
+                    .map(|span| ReachableTypeOccurrence { span: Some(span) });
+            }
+
+            None
+        }
         HirStatementKind::Drop(_) => None,
     }
 }
 
-fn first_generic_runtime_terminator_occurrence(
+fn first_unsupported_result_local_occurrence<IsUnsupported>(
+    locals: &[HirLocal],
+    result_local: LocalId,
+    statement_span: Option<SourceSpan>,
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    // Result types were already checked with the block locals. Only a rejected, spanless
+    // value needs this producer lookup; successful validation must not rescan locals per operation.
+    search.spanless_fallback?;
+    let local = locals.iter().find(|local| local.id == result_local)?;
+    // The statement span is the source of this local's produced value; never borrow a span from
+    // an unrelated local declaration or neighboring HIR node.
+    search.check(local.ty, statement_span)
+}
+
+fn first_unsupported_terminator_occurrence<IsUnsupported>(
     terminator: &HirTerminator,
-    type_environment: &TypeEnvironment,
-) -> Option<GenericRuntimeValueOccurrence> {
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
     match terminator {
         HirTerminator::If { condition, .. } => {
-            first_generic_runtime_expression_occurrence(condition, type_environment)
+            first_unsupported_expression_occurrence(condition, search)
         }
         HirTerminator::FallibleBranch { result, .. }
         | HirTerminator::Return(result)
         | HirTerminator::ReturnSuccess(result)
         | HirTerminator::ReturnError(result) => {
-            first_generic_runtime_expression_occurrence(result, type_environment)
+            first_unsupported_expression_occurrence(result, search)
         }
         HirTerminator::Match { scrutinee, arms } => {
-            first_generic_runtime_expression_occurrence(scrutinee, type_environment).or_else(|| {
+            first_unsupported_expression_occurrence(scrutinee, search).or_else(|| {
                 arms.iter().find_map(|arm| {
-                    arm.guard.as_ref().and_then(|guard| {
-                        first_generic_runtime_expression_occurrence(guard, type_environment)
+                    first_unsupported_pattern_occurrence(&arm.pattern, search).or_else(|| {
+                        arm.guard.as_ref().and_then(|guard| {
+                            first_unsupported_expression_occurrence(guard, search)
+                        })
                     })
                 })
             })
+        }
+        HirTerminator::AssertFailure { message, .. } => {
+            first_unsupported_expression_occurrence(message, search)
         }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. }
         | HirTerminator::Uninitialized
-        | HirTerminator::RuntimeFailure { .. }
-        | HirTerminator::AssertFailure { .. } => None,
+        | HirTerminator::RuntimeFailure { .. } => None,
     }
 }
 
-fn first_generic_runtime_expression_occurrence(
+/// Finds the first unsupported pattern value in a match arm.
+///
+/// WHY: a pattern's literal, option payload or relational value is a lowered expression with its
+///      own semantic type, so it is scanned with the same predicate as an arm guard.
+fn first_unsupported_pattern_occurrence<IsUnsupported>(
+    pattern: &HirPattern,
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    match pattern {
+        HirPattern::Literal(value)
+        | HirPattern::OptionValue { value }
+        | HirPattern::OptionRelational { value, .. }
+        | HirPattern::Relational { value, .. } => {
+            first_unsupported_expression_occurrence(value, search)
+        }
+        HirPattern::OptionNone
+        | HirPattern::OptionPresent
+        | HirPattern::Wildcard
+        | HirPattern::ChoiceVariant { .. } => None,
+    }
+}
+
+/// Finds an unsupported index expression inside a place projection.
+///
+/// WHY: a projected place is not a value, but its index operand has a semantic type and is scanned
+///      like every other reachable expression.
+fn first_unsupported_place_occurrence<IsUnsupported>(
+    place: &HirPlace,
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    match place {
+        HirPlace::Local(_) => None,
+        HirPlace::Field { base, .. } => first_unsupported_place_occurrence(base, search),
+        HirPlace::Index { base, index } => first_unsupported_place_occurrence(base, search)
+            .or_else(|| first_unsupported_expression_occurrence(index, search)),
+    }
+}
+
+fn first_unsupported_expression_occurrence<IsUnsupported>(
     expression: &HirExpression,
-    type_environment: &TypeEnvironment,
-) -> Option<GenericRuntimeValueOccurrence> {
-    if matches!(
-        type_environment.get(expression.ty),
-        Some(TypeDefinition::GenericInstance(_))
-    ) {
-        return Some(GenericRuntimeValueOccurrence {
-            span: expression.span,
-        });
+    search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
+) -> Option<ReachableTypeOccurrence>
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    if let Some(occurrence) = search.check(expression.ty, expression.span) {
+        return Some(occurrence);
     }
 
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            first_generic_runtime_expression_occurrence(left, type_environment)
-                .or_else(|| first_generic_runtime_expression_occurrence(right, type_environment))
+            first_unsupported_expression_occurrence(left, search)
+                .or_else(|| first_unsupported_expression_occurrence(right, search))
         }
         HirExpressionKind::UnaryOp { operand, .. }
         | HirExpressionKind::TupleGet { tuple: operand, .. }
@@ -508,36 +1273,194 @@ fn first_generic_runtime_expression_occurrence(
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
-        } => first_generic_runtime_expression_occurrence(operand, type_environment),
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            fields.iter().find_map(|(_, value)| {
-                first_generic_runtime_expression_occurrence(value, type_environment)
-            })
+        } => first_unsupported_expression_occurrence(operand, search),
+        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+            first_unsupported_place_occurrence(place, search)
         }
+        HirExpressionKind::StructConstruct { fields, .. } => fields
+            .iter()
+            .find_map(|(_, value)| first_unsupported_expression_occurrence(value, search)),
         HirExpressionKind::Collection(items)
         | HirExpressionKind::TupleConstruct { elements: items } => items
             .iter()
-            .find_map(|item| first_generic_runtime_expression_occurrence(item, type_environment)),
+            .find_map(|item| first_unsupported_expression_occurrence(item, search)),
         HirExpressionKind::MapLiteral(entries) => entries.iter().find_map(|entry| {
-            first_generic_runtime_expression_occurrence(&entry.key, type_environment).or_else(
-                || first_generic_runtime_expression_occurrence(&entry.value, type_environment),
-            )
+            first_unsupported_expression_occurrence(&entry.key, search)
+                .or_else(|| first_unsupported_expression_occurrence(&entry.value, search))
         }),
         HirExpressionKind::Range { start, end } => {
-            first_generic_runtime_expression_occurrence(start, type_environment)
-                .or_else(|| first_generic_runtime_expression_occurrence(end, type_environment))
+            first_unsupported_expression_occurrence(start, search)
+                .or_else(|| first_unsupported_expression_occurrence(end, search))
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => fields.iter().find_map(|field| {
-            first_generic_runtime_expression_occurrence(&field.value, type_environment)
-        }),
-        HirExpressionKind::Int(_)
+        HirExpressionKind::VariantConstruct { fields, .. } => fields
+            .iter()
+            .find_map(|field| first_unsupported_expression_occurrence(&field.value, search)),
+        HirExpressionKind::Number(_)
+        | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. }
-        | HirExpressionKind::Load(_)
-        | HirExpressionKind::Copy(_) => None,
+        | HirExpressionKind::StructuralString { .. } => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+//  Backend type structure
+// -----------------------------------------------------------------------------
+
+/// Memoised semantic type facts used by backend feature gates.
+///
+/// WHAT: records Number values, Error values and fixed-width scalars through constructed and
+///       nominal type structure. The designated canonical Error counts as an Error leaf, so its
+///       own field shapes contribute no further facts.
+/// WHY: backend gates classify overlapping reachable types, so one cycle-safe walk owns the
+///      structural traversal and memoises facts per `TypeId`.
+struct BackendTypeFacts<'environment> {
+    type_environment: &'environment TypeEnvironment,
+    error_type_id: Option<TypeId>,
+    memo: FxHashMap<TypeId, BackendTypeVisit>,
+    visiting: FxHashSet<TypeId>,
+}
+
+impl<'environment> BackendTypeFacts<'environment> {
+    fn new(type_environment: &'environment TypeEnvironment, error_type_id: Option<TypeId>) -> Self {
+        Self {
+            type_environment,
+            error_type_id,
+            memo: FxHashMap::default(),
+            visiting: FxHashSet::default(),
+        }
+    }
+
+    fn contains_fixed_scalar(&mut self, type_id: TypeId) -> bool {
+        self.visit(type_id).contains_fixed_scalar
+    }
+
+    fn contains_number(&mut self, type_id: TypeId) -> bool {
+        self.visit(type_id).contains_number
+    }
+
+    fn contains_error(&mut self, type_id: TypeId) -> bool {
+        self.visit(type_id).contains_error
+    }
+
+    /// A recursive nominal cycle is provisional until its outer walk completes.
+    fn visit(&mut self, type_id: TypeId) -> BackendTypeVisit {
+        if let Some(visit) = self.memo.get(&type_id) {
+            return *visit;
+        }
+
+        if !self.visiting.insert(type_id) {
+            return BackendTypeVisit {
+                open_cycle: true,
+                ..BackendTypeVisit::EMPTY
+            };
+        }
+
+        let visit = self.walk(type_id);
+        self.visiting.remove(&type_id);
+
+        if !visit.open_cycle {
+            self.memo.insert(type_id, visit);
+        }
+
+        visit
+    }
+
+    fn walk(&mut self, type_id: TypeId) -> BackendTypeVisit {
+        let type_environment = self.type_environment;
+        let Some(definition) = type_environment.get(type_id) else {
+            return BackendTypeVisit::EMPTY;
+        };
+
+        let mut visit = BackendTypeVisit {
+            contains_error: self.error_type_id == Some(type_id),
+            contains_number: type_environment.number_scale(type_id).is_some(),
+            ..BackendTypeVisit::EMPTY
+        };
+        match definition {
+            TypeDefinition::Builtin(builtin) => {
+                if let BuiltinTypeKey::FixedScalar(_) = builtin.key {
+                    visit.contains_fixed_scalar = true
+                }
+            }
+            TypeDefinition::Struct(struct_definition) => {
+                // The designated canonical Error classifies as an Error leaf: its runtime
+                // representation belongs to the specific Error-value gate, so its own field
+                // shapes (such as the `code` scalar) contribute no fixed-scalar or Number facts
+                // to outer aggregate classification.
+                if self.error_type_id != Some(type_id) {
+                    for field in struct_definition.fields.iter() {
+                        visit.merge(self.visit(field.type_id));
+                    }
+                }
+            }
+            TypeDefinition::Choice(choice_definition) => {
+                for variant in choice_definition.variants.iter() {
+                    let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
+                        continue;
+                    };
+                    for field in fields.iter() {
+                        visit.merge(self.visit(field.type_id));
+                    }
+                }
+            }
+            TypeDefinition::Constructed(constructed) => {
+                for argument in constructed.arguments.iter() {
+                    visit.merge(self.visit(*argument));
+                }
+            }
+            TypeDefinition::Function(function) => {
+                for parameter in function.parameters.iter() {
+                    visit.merge(self.visit(parameter.type_id));
+                }
+                for returned in function.returns.iter() {
+                    visit.merge(self.visit(*returned));
+                }
+                if let Some(error_return) = function.error_return {
+                    visit.merge(self.visit(error_return));
+                }
+            }
+            TypeDefinition::GenericInstance(instance) => {
+                for argument in instance.arguments.iter() {
+                    visit.merge(self.visit(*argument));
+                }
+                if let Some(base_type_id) = type_environment.type_id_for_nominal_id(instance.base) {
+                    visit.merge(self.visit(base_type_id));
+                }
+            }
+            TypeDefinition::External(_)
+            | TypeDefinition::GenericParameter(_)
+            | TypeDefinition::AnonymousConstRecordMarker => {}
+        }
+
+        visit
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BackendTypeVisit {
+    contains_error: bool,
+    contains_fixed_scalar: bool,
+    contains_number: bool,
+    open_cycle: bool,
+}
+
+impl BackendTypeVisit {
+    const EMPTY: Self = Self {
+        contains_error: false,
+        contains_fixed_scalar: false,
+        contains_number: false,
+        open_cycle: false,
+    };
+
+    fn merge(&mut self, other: Self) {
+        self.contains_error |= other.contains_error;
+        self.contains_fixed_scalar |= other.contains_fixed_scalar;
+        self.contains_number |= other.contains_number;
+        self.open_cycle |= other.open_cycle;
     }
 }
 

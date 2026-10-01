@@ -1,0 +1,4 @@
+cannot_receive_number |received Dec0| -> Int:
+    value Int = received
+    return value
+;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
 fn discover_modules_uses_reachable_files_only() {
@@ -1083,6 +1084,10 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
 
 #[test]
 fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
+    // Sept 2026 4-thread validation regression: the timing collector is process-global, and an
+    // unguarded compile inherits the active session's boundary/module ids. Hold the shared
+    // instrumentation lock so this compile cannot pollute an exact-snapshot timing test.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = fs::canonicalize(_tmp_root.path()).expect("test root should canonicalize");
     let child = root.join("child");
@@ -1114,6 +1119,7 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     let frontend = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
+        NumericProfile::STANDARD,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),

@@ -414,6 +414,25 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let target = self.local_place(*result, &source)?;
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                candidate_result,
+                in_range_result,
+                ..
+            } => {
+                self.lower_expression(current, &source, event_ids)?;
+                self.lower_expression(step, &source, event_ids)?;
+                self.lower_expression(end, &source, event_ids)?;
+                self.lower_expression(ascending, &source, event_ids)?;
+
+                let candidate_target = self.local_place(*candidate_result, &source)?;
+                self.emit_fresh_write(candidate_target, &source, event_ids)?;
+                let in_range_target = self.local_place(*in_range_result, &source)?;
+                self.emit_fresh_write(in_range_target, &source, event_ids)?;
+            }
         }
         Ok(())
     }
@@ -691,8 +710,10 @@ impl<'a> FunctionProblemBuilder<'a> {
                 }
             }
             HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {}
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Number(_)
+            | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -734,8 +755,10 @@ impl<'a> FunctionProblemBuilder<'a> {
                     place: Some(destination),
                 })
             }
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Number(_)
+            | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -1441,10 +1464,16 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirPlace::Index { base, index } => {
                 let base = self.lower_place(base, source, event_ids)?;
                 let projection = match index.kind {
-                    HirExpressionKind::Int(value) if value >= 0 => {
-                        ProjectionElem::FixedIndex(value as u32)
+                    HirExpressionKind::Int(value) => {
+                        // Fixed projections need a 32-bit table id, so only values that
+                        // fit `u32` stay fixed; negatives and oversized values use the
+                        // dynamic path.
+                        match u32::try_from(value) {
+                            Ok(fixed) => ProjectionElem::FixedIndex(fixed),
+
+                            Err(_) => ProjectionElem::DynamicIndex,
+                        }
                     }
-                    HirExpressionKind::Int(_) => ProjectionElem::DynamicIndex,
                     _ => {
                         self.lower_expression(index, source, event_ids)?;
                         ProjectionElem::DynamicIndex

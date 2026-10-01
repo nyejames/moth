@@ -541,6 +541,8 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs:
+                crate::compiler_frontend::analysis::numeric_proofs::NumericProofs::default(),
             path_table: Arc::new(
                 crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
                     .freeze(),

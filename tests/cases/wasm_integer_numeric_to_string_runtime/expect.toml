@@ -1,0 +1,18 @@
+entry = "."
+numeric_profile = "Int32/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "-128|255|-32768|65535|-2147483648|4294967295|-9223372036854775808|18446744073709551615|-2147483648|-128;127|0|32767|0|2147483647|0|9223372036854775807|9223372036854775808|2147483647|127"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "-128|255|-32768|65535|-2147483648|4294967295|-9223372036854775808|18446744073709551615|-2147483648|-128;127|0|32767|0|2147483647|0|9223372036854775807|9223372036854775808|2147483647|127"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true
+must_export = ["moth_start"]

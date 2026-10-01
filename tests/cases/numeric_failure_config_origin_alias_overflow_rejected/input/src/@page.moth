@@ -1,0 +1,5 @@
+@facade maximum
+
+overflow || -> Int, Error!:
+    return maximum + 1
+;

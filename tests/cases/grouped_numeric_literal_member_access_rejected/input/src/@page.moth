@@ -1,0 +1,5 @@
+hidden ||:
+    x = (5).to_string()
+;
+
+[:unreachable]

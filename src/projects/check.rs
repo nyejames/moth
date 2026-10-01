@@ -26,7 +26,6 @@ use crate::finish_command_timing;
 use crate::projects::command_status::{
     CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
 };
-use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use saying::say;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -58,10 +57,20 @@ fn attach_source_database_if_missing(
     }
 }
 
-pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
+/// Run one `check` command with the builder the command arm selected.
+///
+/// WHAT: executes frontend-only validation with the explicit inputs the command materialised,
+///       captures the single command duration, then renders the classified outcome.
+/// WHY:  the selected builder owns the numeric profile those inputs were materialised under, so
+///       the command arm hands it in rather than the check lane constructing a second builder.
+pub(crate) fn run_check(
+    path: &str,
+    options: CheckOptions,
+    project_builder: &ProjectBuilder,
+) -> CommandStatus {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Check);
     let start = Instant::now();
-    let outcome = execute_check(path, &options.inputs);
+    let outcome = execute_check(path, &options.inputs, project_builder);
     let error_count = outcome.messages.error_count();
     let warning_count = outcome.messages.warning_count();
     let benchmark_counts = benchmark_diagnostic_counts(&outcome.messages);
@@ -139,7 +148,11 @@ fn run_check_for_tests(
     (status, benchmark_counts)
 }
 
-fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> CheckOutcome {
+fn execute_check(
+    path: &str,
+    build_config_inputs: &BuildConfigInputSet,
+    project_builder: &ProjectBuilder,
+) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
     let valid_path = match check_if_valid_path(normalized_path) {
@@ -152,7 +165,6 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
         }
     };
 
-    let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let BuildBootstrap {
         mut config,
         style_directives,
@@ -161,7 +173,8 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-    } = match bootstrap_project_build(&project_builder, valid_path, build_config_inputs) {
+        numeric_profile,
+    } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
             return CheckOutcome {
@@ -174,6 +187,7 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
     let messages = match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
+        numeric_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

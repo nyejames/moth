@@ -5,6 +5,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use std::cell::RefCell;
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
@@ -171,6 +172,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let type_id = self.intern_imported_canonical_type(&constant.type_identity)?;
         let mut value =
             self.project_imported_folded_value(&constant.folded_value, type_id, string_table)?;
+        // Imported constants are explicit compile-time values. Restore nominal record status
+        // here without changing ordinary folded/default materialisation into const records.
+        if matches!(&value.kind, ExpressionKind::StructInstance(_)) {
+            value.const_record_state = ConstRecordState::ConstRecord;
+        }
         value.synthetic_interface_provenance = value
             .synthetic_interface_provenance
             .union(declaration_provenance);
@@ -270,7 +276,21 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
 ) -> Result<Expression, CompilerError> {
     let kind = match folded {
         PublicFoldedValue::Int(value) => ExpressionKind::Int(*value),
+        PublicFoldedValue::Number(value) => {
+            if materialiser
+                .type_environment()
+                .number_scale(expected_type_id)
+                != Some(value.scale())
+            {
+                return Err(CompilerError::compiler_error(format!(
+                    "Imported folded Dec value at scale {} disagrees with its consumer-local canonical type",
+                    value.scale()
+                )));
+            }
+            ExpressionKind::Number(value.clone())
+        }
         PublicFoldedValue::Float(value) => ExpressionKind::Float(value.value()),
+        PublicFoldedValue::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
         PublicFoldedValue::Bool(value) => ExpressionKind::Bool(*value),
         PublicFoldedValue::Char(value) => ExpressionKind::Char(*value),
         PublicFoldedValue::String(value) => {

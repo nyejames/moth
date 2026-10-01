@@ -293,6 +293,55 @@ contract = "language.builtins.error_reserved_symbol_rejected"
 role = "primary"
 
 [[case]]
+id = "error_code_u32_runtime"
+path = "error_code_u32_runtime"
+tags = ["integration", "errors", "results", "external"]
+contract = "language.builtins.error_code_u32_dynamic_recovery"
+role = "primary"
+
+[[case]]
+id = "error_code_u32_runtime_int64_float64"
+path = "error_code_u32_runtime_int64_float64"
+tags = ["integration", "errors", "results", "external", "int64"]
+contract = "language.builtins.error_code_u32_dynamic_recovery"
+role = "adversarial"
+
+[[case]]
+id = "error_code_u32_int_widen_runtime"
+path = "error_code_u32_int_widen_runtime"
+tags = ["integration", "errors", "casts"]
+contract = "language.builtins.error_code_u32_int_widen_recovery"
+role = "primary"
+
+[[case]]
+id = "error_code_u32_negative_literal_rejected"
+path = "error_code_u32_negative_literal_rejected"
+tags = ["integration", "errors", "diagnostics"]
+contract = "language.builtins.error_code_u32_negative_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "error_code_u32_literal_out_of_u32_range_rejected"
+path = "error_code_u32_literal_out_of_u32_range_rejected"
+tags = ["integration", "errors", "diagnostics"]
+contract = "language.builtins.error_code_u32_literal_out_of_u32_range_rejected"
+role = "primary"
+
+[[case]]
+id = "error_code_u32_int_variable_requires_cast_rejected"
+path = "error_code_u32_int_variable_requires_cast_rejected"
+tags = ["integration", "errors", "diagnostics"]
+contract = "language.builtins.error_code_u32_int_variable_requires_cast"
+role = "primary"
+
+[[case]]
+id = "error_code_u32_max_error_wasm_rejected"
+path = "error_code_u32_max_error_wasm_rejected"
+tags = ["integration", "errors", "diagnostics", "html-wasm"]
+contract = "backend.html_wasm.error_values_wide_code_rejected"
+role = "backend"
+
+[[case]]
 id = "error_constructor_default_code"
 path = "error_constructor_default_code"
 tags = ["integration","results","structs"]
@@ -312,6 +361,20 @@ path = "error_kind_name_user_available"
 tags = ["integration","results","structs"]
 contract = "language.builtins.error_kind_name_user_available"
 role = "primary"
+
+[[case]]
+id = "error_values_html_wasm_unsupported"
+path = "error_values_html_wasm_unsupported"
+tags = ["integration", "errors", "diagnostics", "html-wasm"]
+contract = "backend.html_wasm.error_values_unsupported"
+role = "backend"
+
+[[case]]
+id = "custom_error_fallible_control_flow_html_wasm_unsupported"
+path = "custom_error_fallible_control_flow_html_wasm_unsupported"
+tags = ["integration", "errors", "diagnostics", "html-wasm"]
+contract = "backend.html_wasm.fallible_control_flow_unsupported"
+role = "backend"
 
 [[case]]
 id = "choice_basic_declaration_and_use"
@@ -1354,6 +1417,20 @@ id = "trait_bound_missing_evidence_rejected"
 path = "trait_bound_missing_evidence_rejected"
 tags = ["integration","generics","traits","functions","diagnostics"]
 contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "primary"
+
+[[case]]
+id = "number_nonmatching_generic_cast_bound_rejected"
+path = "number_nonmatching_generic_cast_bound_rejected"
+tags = ["integration","numeric","number","generics","traits","casts","diagnostics"]
+contract = "language.generics.number_nonmatching_core_cast_bound_rejected"
+role = "primary"
+
+[[case]]
+id = "number_fallible_generic_cast_bound_rejected"
+path = "number_fallible_generic_cast_bound_rejected"
+tags = ["integration","numeric","number","generics","traits","casts","diagnostics"]
+contract = "language.generics.number_infallible_pair_does_not_prove_fallible_bound"
 role = "primary"
 
 [[case]]
@@ -3786,11 +3863,81 @@ contract = "language.maps.duplicate_key_rejected"
 role = "primary"
 
 [[case]]
+id = "hashmap_duplicate_fixed_i8_rejected"
+path = "hashmap_duplicate_fixed_i8_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_i64_rejected"
+path = "hashmap_duplicate_fixed_i64_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_u64_rejected"
+path = "hashmap_duplicate_fixed_u64_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_duplicate_fixed_byte_rejected"
+path = "hashmap_duplicate_fixed_byte_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.duplicate_fixed_scalar_key_rejected"
+role = "boundary"
+
+[[case]]
 id = "hashmap_unsupported_key_rejected"
 path = "hashmap_unsupported_key_rejected"
 tags = ["integration", "diagnostics", "hashmaps"]
 contract = "language.maps.unsupported_key_type_rejected"
 role = "primary"
+
+[[case]]
+id = "hashmap_unsupported_f16_key_rejected"
+path = "hashmap_unsupported_f16_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_unsupported_f32_key_rejected"
+path = "hashmap_unsupported_f32_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_unsupported_f64_key_rejected"
+path = "hashmap_unsupported_f64_key_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.unsupported_fixed_float_key_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_i8_i16_key_mismatch_rejected"
+path = "hashmap_i8_i16_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_byte_u8_key_mismatch_rejected"
+path = "hashmap_byte_u8_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
+
+[[case]]
+id = "hashmap_u64_i64_key_mismatch_rejected"
+path = "hashmap_u64_i64_key_mismatch_rejected"
+tags = ["integration", "diagnostics", "hashmaps", "numeric"]
+contract = "language.maps.typed_fixed_key_identity_rejected"
+role = "boundary"
 
 [[case]]
 id = "hashmap_mixed_entries_rejected"
@@ -4304,6 +4451,62 @@ contract = "language.loops.range_direction_and_step_acceptance"
 role = "primary"
 
 [[case]]
+id = "fixed_numeric_range_runtime"
+path = "fixed_numeric_range_runtime"
+tags = ["integration", "control-flow", "numeric", "runtime", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "primary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int32_float32"
+path = "fixed_numeric_range_runtime_int32_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int64_float32"
+path = "fixed_numeric_range_runtime_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_runtime_int64_float64"
+path = "fixed_numeric_range_runtime_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_float_range_rounded_endpoint_runtime"
+path = "fixed_float_range_rounded_endpoint_runtime"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_float_range_stall_runtime_trap"
+path = "fixed_float_range_stall_runtime_trap"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "language.loops.fixed_numeric_range_runtime"
+role = "boundary"
+
+[[case]]
+id = "fixed_numeric_range_source_order_html"
+path = "fixed_numeric_range_source_order_html"
+tags = ["integration", "control-flow", "numeric", "runtime", "html"]
+contract = "language.loops.fixed_numeric_range_source_order"
+role = "boundary"
+
+[[case]]
+id = "int_range_runtime_alias_updates"
+path = "int_range_runtime_alias_updates"
+tags = ["integration", "control-flow", "numeric", "runtime", "html-wasm"]
+contract = "backend.html_wasm.int_range_runtime_numericop_alias_updates"
+role = "backend"
+
+[[case]]
 id = "loop_zero_step"
 path = "loop_zero_step"
 tags = ["integration", "control-flow", "diagnostics"]
@@ -4505,6 +4708,13 @@ path = "mutable_marker_on_field_assignment_target_rejected"
 tags = ["integration", "language", "diagnostics", "mutability"]
 contract = "language.bindings.mutable_marker_on_assignment_target_rejected"
 role = "boundary"
+
+[[case]]
+id = "mutable_parameter_wasm_rejected"
+path = "mutable_parameter_wasm_rejected"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_function_parameters_rejected"
+role = "backend"
 
 [[case]]
 id = "mutable_reassignment_print"
@@ -5535,6 +5745,34 @@ path = "template_const_range_inclusive_exclusive_edges"
 tags = ["integration","templates"]
 contract = "language.templates.const_range_inclusive_exclusive_edges"
 role = "primary"
+
+[[case]]
+id = "template_const_range_int64_endpoints"
+path = "template_const_range_int64_endpoints"
+tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_int64_endpoints"
+role = "boundary"
+
+[[case]]
+id = "template_const_range_fixed_initializer_success"
+path = "template_const_range_fixed_initializer_success"
+tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_fixed_initializer_success"
+role = "primary"
+
+[[case]]
+id = "template_const_range_runtime_reference_rejected"
+path = "template_const_range_runtime_reference_rejected"
+tags = ["integration", "templates", "diagnostics", "numeric", "numeric-profile", "int64"]
+contract = "language.templates.const_range_runtime_reference_rejected"
+role = "primary"
+
+[[case]]
+id = "template_const_fixed_range_unrepresentable_step_rejected"
+path = "template_const_fixed_range_unrepresentable_step_rejected"
+tags = ["integration", "templates", "diagnostics", "numeric", "int64"]
+contract = "language.loops.fixed_range_unrepresentable_step_rejected"
+role = "boundary"
 
 [[case]]
 id = "template_const_loop_limit_string_rejected"
@@ -7007,6 +7245,118 @@ contract = "language.casts.no_evidence_rejected"
 role = "primary"
 
 [[case]]
+id = "cast_numeric_fixed_chain_success"
+path = "cast_numeric_fixed_chain_success"
+tags = ["integration","language","cast","numeric"]
+contract = "language.casts.numeric_fixed_chain_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_fixed_const_catch_success"
+path = "cast_numeric_fixed_const_catch_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_fixed_const_catch_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_const_fold_failure_rejected"
+path = "cast_numeric_const_fold_failure_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_const_fold_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_plain_fallible_rejected"
+path = "cast_numeric_plain_fallible_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_plain_fallible_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_infallible_bang_rejected"
+path = "cast_numeric_infallible_bang_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_infallible_with_bang_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_byte_no_evidence_rejected"
+path = "cast_numeric_byte_no_evidence_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_byte_no_evidence_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_byte_render_rejected"
+path = "cast_numeric_text_byte_render_rejected"
+tags = ["integration","diagnostics","cast","numeric","templates"]
+contract = "language.casts.numeric_byte_not_template_renderable"
+role = "boundary"
+
+[[case]]
+id = "cast_numeric_text_optional_u8_render_rejected"
+path = "cast_numeric_text_optional_u8_render_rejected"
+tags = ["integration", "diagnostics", "cast", "numeric", "templates", "optionals"]
+contract = "language.casts.optional_fixed_numeric_not_template_renderable"
+role = "boundary"
+
+[[case]]
+id = "cast_numeric_text_fixed_render_success"
+path = "cast_numeric_text_fixed_render_success"
+tags = ["integration","diagnostics","cast","numeric","templates"]
+contract = "backend.fixed_width.html_js_template_render_html_wasm_gate"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_fixed_to_string_success"
+path = "cast_numeric_text_fixed_to_string_success"
+tags = ["integration","language","cast","numeric"]
+contract = "language.casts.numeric_fixed_text_cast_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_string_parse_success"
+path = "cast_numeric_text_string_parse_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_string_parse_catch_success"
+path = "cast_numeric_text_string_parse_catch_success"
+tags = ["integration","language","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_catch_acceptance"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_const_fold_failure_rejected"
+path = "cast_numeric_text_const_fold_failure_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_text_const_fold_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_plain_fallible_rejected"
+path = "cast_numeric_text_plain_fallible_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_plain_fallible_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_infallible_bang_rejected"
+path = "cast_numeric_text_infallible_bang_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_infallible_with_bang_rejected"
+role = "primary"
+
+[[case]]
+id = "cast_numeric_text_byte_no_evidence_rejected"
+path = "cast_numeric_text_byte_no_evidence_rejected"
+tags = ["integration","diagnostics","cast","numeric"]
+contract = "language.casts.numeric_text_byte_no_evidence_rejected"
+role = "primary"
+
+[[case]]
 id = "cast_condition_target_rejected"
 path = "cast_condition_target_rejected"
 tags = ["integration","diagnostics","cast"]
@@ -7210,10 +7560,38 @@ contract = "language.arithmetic.compound_assignment_division_acceptance"
 role = "primary"
 
 [[case]]
-id = "compound_assignment_int_divide_assign_rejected"
-path = "compound_assignment_int_divide_assign_rejected"
-tags = ["integration", "diagnostics"]
-contract = "language.arithmetic.compound_assignment_real_divide_to_int_rejected"
+id = "compound_assignment_int_divide_assign_success"
+path = "compound_assignment_int_divide_assign_success"
+tags = ["integration", "language", "mutation"]
+contract = "language.arithmetic.compound_real_division_to_int_store_conversion"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_runtime_conversion_failure_caught"
+path = "compound_assignment_runtime_conversion_failure_caught"
+tags = ["integration", "language", "mutation", "error-handling"]
+contract = "language.arithmetic.compound_store_conversion_error_and_success_only_write"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_atomicity_runtime"
+path = "compound_assignment_atomicity_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
+contract = "language.numbers.compound_assignment_runtime_atomicity"
+role = "primary"
+
+[[case]]
+id = "compound_assignment_store_conversion_trap"
+path = "compound_assignment_store_conversion_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
+contract = "backend.html.compound_store_conversion_runtime_trap"
+role = "backend"
+
+[[case]]
+id = "compound_assignment_u8_literal_range_rejected"
+path = "compound_assignment_u8_literal_range_rejected"
+tags = ["integration", "language", "diagnostics", "mutation"]
+contract = "language.arithmetic.compound_rhs_literal_uses_peer_fixed_scalar_range"
 role = "primary"
 
 [[case]]
@@ -7676,6 +8054,13 @@ id = "assert_false_terminal_function"
 path = "assert_false_terminal_function"
 tags = ["integration", "language", "assert", "control-flow"]
 contract = "language.assert.false_terminal_satisfies_non_unit_return_acceptance"
+role = "primary"
+
+[[case]]
+id = "assert_dynamic_runtime_trap"
+path = "assert_dynamic_runtime_trap"
+tags = ["integration", "language", "assert", "control-flow", "html-wasm", "runtime"]
+contract = "backend.html_wasm.assert_dynamic_runtime_trap"
 role = "primary"
 
 [[case]]
@@ -9525,6 +9910,20 @@ path = "core_random_functions"
 tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "diagnostics"]
 contract = "language.dependencies.core_random_functions_acceptance"
 role = "primary"
+
+[[case]]
+id = "core_random_float_int32_float32_boundary"
+path = "core_random_float_int32_float32_boundary"
+tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float32"]
+contract = "language.numeric.core_random_float32_random_float_half_open_range"
+role = "boundary"
+
+[[case]]
+id = "core_random_float_int32_float64_boundary"
+path = "core_random_float_int32_float64_boundary"
+tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float64"]
+contract = "language.numeric.core_random_float64_random_float_half_open_range"
+role = "boundary"
 
 [[case]]
 id = "core_random_int_edge_cases"
@@ -11404,24 +11803,17 @@ contract = "language.dependencies.markdown_source_entry_rejected"
 role = "primary"
 
 [[case]]
-id = "cast_int_to_float_no_helper_emission"
-path = "cast_int_to_float_no_helper_emission"
-tags = ["integration", "language", "cast", "runtime", "on-demand-helpers"]
-contract = "backend.html.cast_helper_elision_int_to_float"
-role = "backend"
+id = "cast_int_to_float_runtime"
+path = "cast_int_to_float_runtime"
+tags = ["integration", "language", "cast", "runtime"]
+contract = "language.casts.int_to_float_runtime"
+role = "primary"
 
 [[case]]
 id = "cast_string_to_int_demand_helpers"
 path = "cast_string_to_int_demand_helpers"
 tags = ["integration", "language", "cast", "runtime", "on-demand-helpers"]
 contract = "backend.html.cast_helper_demand_string_to_int"
-role = "backend"
-
-[[case]]
-id = "cast_string_to_float_demand_helpers"
-path = "cast_string_to_float_demand_helpers"
-tags = ["integration", "language", "cast", "runtime", "on-demand-helpers"]
-contract = "backend.html.cast_helper_demand_string_to_float"
 role = "backend"
 
 [[case]]
@@ -11775,10 +12167,10 @@ contract = "language.numeric.builtin_error_recovery_acceptance"
 role = "primary"
 
 [[case]]
-id = "checked_numeric_trap_mode"
-path = "checked_numeric_trap_mode"
-tags = ["integration", "language", "numeric", "js-backend"]
-contract = "backend.html.numeric_trap_helper_emission"
+id = "custom_numeric_failure_trap"
+path = "custom_numeric_failure_trap"
+tags = ["integration", "numeric", "runtime", "js-backend", "error-handling"]
+contract = "backend.html.custom_error_channel_numeric_trap"
 role = "backend"
 
 [[case]]
@@ -11787,6 +12179,104 @@ path = "checked_numeric_unreachable_helper_ignored"
 tags = ["integration", "language", "numeric", "html-wasm"]
 contract = "backend.html_wasm.unreachable_numeric_helper_ignored"
 role = "backend"
+
+[[case]]
+id = "numeric_failure_static_overflow_in_error_fn_rejected"
+path = "numeric_failure_static_overflow_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_overflow_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_static_division_by_zero_in_error_fn_rejected"
+path = "numeric_failure_static_division_by_zero_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_division_by_zero_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_static_remainder_by_zero_in_error_fn_rejected"
+path = "numeric_failure_static_remainder_by_zero_in_error_fn_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.static_remainder_by_zero_in_error_fn_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_runtime_error_fn_recovered"
+path = "numeric_failure_runtime_error_fn_recovered"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numeric.runtime_error_fn_recovered"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_known_int32_overflow_rejected"
+path = "numeric_failure_known_int32_overflow_rejected"
+tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_failure_known_int64_overflow_boundary"
+path = "numeric_failure_known_int64_overflow_boundary"
+tags = ["integration", "language", "numeric", "diagnostics", "numeric-profile", "int64"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_failure_known_int_max_runtime_recovered"
+path = "numeric_failure_known_int_max_runtime_recovered"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_failure_config_origin_alias_overflow_rejected"
+path = "numeric_failure_config_origin_alias_overflow_rejected"
+tags = ["integration", "language", "numeric", "config", "diagnostics"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_failure_config_origin_record_overflow_rejected"
+path = "numeric_failure_config_origin_record_overflow_rejected"
+tags = ["integration", "language", "numeric", "config", "diagnostics"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_failure_known_int64_runtime_recovered"
+path = "numeric_failure_known_int64_runtime_recovered"
+tags = ["integration", "language", "numeric", "runtime", "js-backend", "numeric-profile", "int64"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_failure_bootstrap_config_origin_overflow_rejected"
+path = "numeric_failure_bootstrap_config_origin_overflow_rejected"
+tags = ["integration", "language", "numeric", "config", "diagnostics"]
+contract = "language.numeric.known_constant_int_overflow_rejected"
+role = "boundary"
+
+[[case]]
+id = "numeric_range_proof_does_not_widen_validity_rejected"
+path = "numeric_range_proof_does_not_widen_validity_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numeric.range_proof_does_not_widen_validity"
+role = "primary"
+
+[[case]]
+id = "numeric_range_proof_runtime_narrowing_rejected"
+path = "numeric_range_proof_runtime_narrowing_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numeric.runtime_range_proof_does_not_widen_validity"
+role = "primary"
+
+[[case]]
+id = "int_remainder_signed_minimum_by_negative_one_runtime"
+path = "int_remainder_signed_minimum_by_negative_one_runtime"
+tags = ["integration", "language", "numeric", "runtime", "html-wasm"]
+contract = "language.numeric.signed_minimum_remainder_by_negative_one_acceptance"
+role = "primary"
 
 [[case]]
 id = "float_formatting_unreachable_helper_ignored"
@@ -11800,6 +12290,13 @@ id = "float_format_contract"
 path = "float_format_contract"
 tags = ["integration", "language", "cast", "runtime", "float", "formatting", "backend-contract"]
 contract = "language.numeric.float_formatting_edge_case_contract"
+role = "primary"
+
+[[case]]
+id = "float_format_profile_float32"
+path = "float_format_profile_float32"
+tags = ["integration", "numeric", "runtime", "float", "formatting", "html-wasm"]
+contract = "language.numeric.float32_profile_float_formatting"
 role = "primary"
 
 [[case]]
@@ -12689,4 +13186,822 @@ id = "project_globals_public_reexport_rejected"
 path = "project_globals_public_reexport_rejected"
 tags = ["integration", "configuration", "dependencies", "facade"]
 contract = "language.configuration.project_globals_public_reexport_rejected"
+role = "boundary"
+
+[[case]]
+id = "fixed_width_collection_return_js_runs_wasm_gated"
+path = "fixed_width_collection_return_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.fixed_width.collection_return_html_js_success_html_wasm_gate"
+role = "backend"
+[[case]]
+id = "fixed_width_option_none_js_runs_wasm_gated"
+path = "fixed_width_option_none_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.fixed_width.option_none_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "fixed_width_struct_field_js_runs_wasm_gated"
+path = "fixed_width_struct_field_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.fixed_width.struct_field_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "fixed_width_choice_payload_js_runs_wasm_gated"
+path = "fixed_width_choice_payload_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "reachability"]
+contract = "backend.fixed_width.choice_payload_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "fixed_width_generic_instance_js_runs_wasm_gated"
+path = "fixed_width_generic_instance_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "generics"]
+contract = "backend.fixed_width.generic_instance_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "fixed_width_cross_module_return_js_runs_wasm_gated"
+path = "fixed_width_cross_module_return_js_runs_wasm_gated"
+tags = ["integration", "numeric", "html-wasm", "diagnostics", "dependencies"]
+contract = "backend.fixed_width.cross_module_return_html_js_success_html_wasm_gate"
+role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_value"
+path = "html_wasm_unreachable_fixed_width_value"
+tags = ["integration", "numeric", "html-wasm", "reachability"]
+contract = "backend.target_gate.unreachable_fixed_width_value_ignored"
+role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_literal_contexts"
+path = "html_wasm_unreachable_fixed_width_literal_contexts"
+tags = ["integration", "numeric", "html-wasm", "reachability"]
+contract = "backend.target_gate.unreachable_fixed_width_literal_contexts_ignored"
+role = "backend"
+
+[[case]]
+id = "html_wasm_unreachable_fixed_width_cross_module_constant"
+path = "html_wasm_unreachable_fixed_width_cross_module_constant"
+tags = ["integration", "numeric", "html-wasm", "reachability", "dependencies"]
+contract = "backend.target_gate.unreachable_fixed_width_cross_module_constant_ignored"
+role = "backend"
+
+[[case]]
+id = "fixed_width_reachable_value_runtime"
+path = "fixed_width_reachable_value_runtime"
+tags = ["integration", "numeric", "html-wasm", "runtime", "reachability"]
+contract = "backend.fixed_width.reachable_value_runtime"
+role = "backend"
+
+[[case]]
+id = "fixed_width_literal_out_of_range_u8"
+path = "fixed_width_literal_out_of_range_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_out_of_range_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_negative_byte"
+path = "fixed_width_literal_negative_byte"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_negative_byte_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_nonfinite_f16"
+path = "fixed_width_literal_nonfinite_f16"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_nonfinite_f16_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_decimal_into_u8"
+path = "fixed_width_literal_decimal_into_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_decimal_into_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_operator_result_u8"
+path = "fixed_width_literal_operator_result_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_operator_result_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_int_range_u64"
+path = "fixed_width_literal_int_range_u64"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_int_range_u64_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_grouped_operand_u8"
+path = "fixed_width_literal_grouped_operand_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_grouped_operand_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_option_default_wrong_type"
+path = "fixed_width_option_default_wrong_type"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_option_default_wrong_type_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_imported_constant_runtime"
+path = "fixed_width_imported_constant_runtime"
+tags = ["integration", "numeric", "html-wasm", "runtime", "reachability", "dependencies"]
+contract = "backend.fixed_width.imported_constant_runtime"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_runtime_arithmetic"
+path = "fixed_width_integer_runtime_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_width_integer_runtime_arithmetic"
+role = "primary"
+
+[[case]]
+id = "fixed_width_integer_checked_boundaries"
+path = "fixed_width_integer_checked_boundaries"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_width_integer_checked_boundaries"
+role = "primary"
+
+[[case]]
+id = "fixed_width_integer_overflow_trap"
+path = "fixed_width_integer_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u64_add_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_trap_arithmetic"
+path = "fixed_width_integer_trap_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_trap_arithmetic"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_profile_int64_trap_arithmetic"
+path = "fixed_width_integer_profile_int64_trap_arithmetic"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_profile_int64_trap_arithmetic"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_subtraction_trap"
+path = "fixed_width_integer_subtraction_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u32_subtraction_underflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_u32_multiplication_trap"
+path = "fixed_width_integer_u32_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_u32_multiplication_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_i64_multiplication_trap"
+path = "fixed_width_integer_i64_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_multiplication_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_minimum_multiplication_trap"
+path = "fixed_width_integer_minimum_multiplication_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_minimum_times_negative_one_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_minimum_division_trap"
+path = "fixed_width_integer_minimum_division_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_min_division_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_division_zero_trap"
+path = "fixed_width_integer_division_zero_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_division_by_zero_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_remainder_zero_trap"
+path = "fixed_width_integer_remainder_zero_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_remainder_by_zero_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_negative_exponent_trap"
+path = "fixed_width_integer_negative_exponent_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_negative_exponent_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_power_overflow_trap"
+path = "fixed_width_integer_power_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_power_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_negation_trap"
+path = "fixed_width_integer_negation_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
+contract = "backend.html_wasm.fixed_width_integer_i64_negation_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_int32_overflow_trap"
+path = "fixed_width_integer_int32_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_int32_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_int64_overflow_trap"
+path = "fixed_width_integer_int64_overflow_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_int64_overflow_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_binary_float_checked_boundaries"
+path = "fixed_width_binary_float_checked_boundaries"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float"]
+contract = "language.numbers.fixed_binary_float_checked_boundaries"
+role = "primary"
+
+[[case]]
+id = "fixed_binary_float_nonfinite_trap"
+path = "fixed_binary_float_nonfinite_trap"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "trap"]
+contract = "backend.html.fixed_binary_float_nonfinite_runtime_trap"
+role = "backend"
+
+[[case]]
+id = "fixed_width_binary_float_runtime_rounding"
+path = "fixed_width_binary_float_runtime_rounding"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_binary_float_runtime_rounding"
+role = "primary"
+
+[[case]]
+id = "fixed_width_cast_runtime_recovery"
+path = "fixed_width_cast_runtime_recovery"
+tags = ["integration", "numeric", "casts", "runtime", "fixed-width"]
+contract = "language.casts.fixed_numeric_runtime_failure_recovery"
+role = "primary"
+
+[[case]]
+id = "fixed_width_aggregate_byte_runtime"
+path = "fixed_width_aggregate_byte_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "aggregates"]
+contract = "language.numbers.fixed_width_aggregate_and_byte_runtime"
+role = "primary"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime"
+path = "wasm_scalar_profile_comparison_runtime"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_integer_numeric_to_string_runtime"
+path = "wasm_integer_numeric_to_string_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "casts", "html-wasm"]
+contract = "backend.html_wasm.infallible_integer_to_string_casts"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_compound_parity"
+path = "wasm_scalar_compound_parity"
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.scalar_compound_assignment_and_integer_widening_parity"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int32_float64"
+path = "wasm_scalar_profile_comparison_runtime_int32_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int64_float32"
+path = "wasm_scalar_profile_comparison_runtime_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_scalar_profile_comparison_runtime_int64_float64"
+path = "wasm_scalar_profile_comparison_runtime_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_runtime"
+path = "wasm_checked_float_runtime"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "cast", "html-wasm"]
+contract = "backend.html_wasm.checked_float_operations_and_infallible_numeric_casts"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_zero_division_trap"
+path = "wasm_checked_float_zero_division_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_zero_division_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_zero_remainder_trap"
+path = "wasm_checked_float_zero_remainder_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_zero_remainder_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_nonfinite_trap"
+path = "wasm_checked_float_nonfinite_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_nonfinite_arithmetic_trap"
+role = "backend"
+
+[[case]]
+id = "wasm_checked_float_power_domain_trap"
+path = "wasm_checked_float_power_domain_trap"
+tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
+contract = "backend.html_wasm.checked_float_power_domain_trap"
+role = "backend"
+
+[[case]]
+id = "numeric_profile_int64_float32_fixed_width_mix"
+path = "numeric_profile_int64_float32_fixed_width_mix"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "fixed-width"]
+contract = "language.numbers.numeric_profile_fixed_width_carriers"
+role = "primary"
+
+[[case]]
+id = "grouped_numeric_literal_member_access_rejected"
+path = "grouped_numeric_literal_member_access_rejected"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.grouped_literal_member_access_keeps_default_type"
+role = "primary"
+
+[[case]]
+id = "match_u8_literal_out_of_range_rejected"
+path = "match_u8_literal_out_of_range_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.fixed_u8_out_of_range_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "match_i32_decimal_literal_rejected"
+path = "match_i32_decimal_literal_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.decimal_literal_rejected_for_i32"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_no_common_integer"
+path = "fixed_width_operator_no_common_integer"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_integer_operator_without_common_type_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_unsigned_negation"
+path = "fixed_width_operator_unsigned_negation"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.unsigned_unary_minus_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_mixed_int"
+path = "fixed_width_operator_mixed_int"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_int_mixing_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_byte_arithmetic"
+path = "fixed_width_operator_byte_arithmetic"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.byte_arithmetic_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_peer_literal_out_of_range"
+path = "fixed_width_operator_peer_literal_out_of_range"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.peer_literal_out_of_range_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_operator_const_fold_success"
+path = "fixed_width_operator_const_fold_success"
+tags = ["integration", "language", "numeric"]
+contract = "language.numbers.fixed_operator_promotion_const_fold"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_arithmetic_rejected"
+path = "optional_fixed_width_arithmetic_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_arithmetic_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_negation_rejected"
+path = "optional_fixed_width_negation_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_negation_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_fixed_width_ordering_rejected"
+path = "optional_fixed_width_ordering_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.optional_fixed_width_ordering_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_option_equality_mismatch_rejected"
+path = "fixed_width_option_equality_mismatch_rejected"
+tags = ["integration", "numeric", "diagnostics", "options"]
+contract = "language.numbers.fixed_width_option_equality_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_choice_payload_equality_success"
+path = "fixed_width_choice_payload_equality_success"
+tags = ["integration", "numeric", "choices", "reachability"]
+contract = "language.choices.fixed_width_payload_equality"
+role = "primary"
+
+[[case]]
+id = "byte_option_equality_success"
+path = "byte_option_equality_success"
+tags = ["integration", "numeric", "options", "reachability"]
+contract = "language.options.byte_option_equality"
+role = "primary"
+
+[[case]]
+id = "match_i32_integral_pattern_kinds_rejected"
+path = "match_i32_integral_pattern_kinds_rejected"
+tags = ["integration", "diagnostics", "pattern-matching", "numeric"]
+contract = "language.patterns.integral_exponent_literal_rejected_for_i32"
+role = "primary"
+
+[[case]]
+id = "match_optional_u8_literal_pattern_success"
+path = "match_optional_u8_literal_pattern_success"
+tags = ["integration", "pattern-matching", "numeric", "options", "reachability"]
+contract = "language.patterns.optional_fixed_literal_pattern"
+role = "primary"
+
+[[case]]
+id = "generic_fixed_literal_argument_success"
+path = "generic_fixed_literal_argument_success"
+tags = ["integration", "language", "numeric"]
+contract = "language.numbers.generic_literal_receiving_boundary"
+role = "primary"
+
+[[case]]
+id = "generic_fixed_literal_argument_out_of_range_rejected"
+path = "generic_fixed_literal_argument_out_of_range_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numbers.generic_literal_receiving_boundary"
+role = "boundary"
+
+[[case]]
+id = "numeric_profile_int64_arithmetic"
+path = "numeric_profile_int64_arithmetic"
+tags = ["integration", "numeric", "runtime", "int64", "float32"]
+contract = "language.numeric.int64_profile_runtime_arithmetic"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_float32_runtime"
+path = "numeric_profile_float32_runtime"
+tags = ["integration", "numeric", "runtime", "float32"]
+contract = "language.numeric.float32_profile_runtime_arithmetic_and_formatting"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int64_float32_conversion"
+path = "numeric_profile_int64_float32_conversion"
+tags = ["integration", "numeric", "runtime", "casts", "int64", "float32"]
+contract = "language.numeric.int64_to_float32_direct_rounding"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_mixed_float_comparison"
+path = "numeric_profile_mixed_float_comparison"
+tags = ["integration", "numeric", "runtime", "comparison", "float32"]
+contract = "language.numeric.float32_mixed_int_comparison_rounding"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int64_runtime_surfaces"
+path = "numeric_profile_int64_runtime_surfaces"
+tags = ["integration", "numeric", "runtime", "int64", "collections", "casts", "maps"]
+contract = "language.numeric.int64_profile_runtime_surfaces"
+role = "primary"
+
+[[case]]
+id = "numeric_profile_int32_float32_runtime"
+path = "numeric_profile_int32_float32_runtime"
+tags = ["integration", "numeric", "runtime", "casts", "int32", "float32"]
+contract = "language.numeric.int32_float32_profile_runtime_and_tie_formatting"
+role = "primary"
+
+[[case]]
+id = "external_numeric_profile_int_boundary"
+path = "external_numeric_profile_int_boundary"
+tags = ["integration", "numeric", "external", "runtime", "int64"]
+contract = "backend.html.external_numeric_profile_int64_safe_number_bridge"
+role = "backend"
+
+[[case]]
+id = "external_numeric_profile_error_code"
+path = "external_numeric_profile_error_code"
+tags = ["integration", "numeric", "external", "runtime", "int64"]
+contract = "language.builtins.error_code_u32_dynamic_recovery"
+role = "backend"
+
+[[case]]
+id = "external_numeric_profile_float32_overflow"
+path = "external_numeric_profile_float32_overflow"
+tags = ["integration", "numeric", "external", "runtime", "float32", "int64"]
+contract = "backend.html.external_numeric_profile_float32_overflow_error"
+role = "backend"
+
+[[case]]
+id = "numeric_float_whole_literal_int32_float32"
+path = "numeric_float_whole_literal_int32_float32"
+tags = ["integration", "numeric", "numeric-profile", "float32"]
+contract = "language.numeric.whole_float_literal_destination_int32_float32"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int32_float64"
+path = "numeric_float_whole_literal_int32_float64"
+tags = ["integration", "numeric", "numeric-profile", "float64"]
+contract = "language.numeric.whole_float_literal_destination_int32_float64"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int64_float32"
+path = "numeric_float_whole_literal_int64_float32"
+tags = ["integration", "numeric", "numeric-profile", "float32"]
+contract = "language.numeric.whole_float_literal_destination_int64_float32"
+role = "primary"
+
+[[case]]
+id = "numeric_float_whole_literal_int64_float64"
+path = "numeric_float_whole_literal_int64_float64"
+tags = ["integration", "numeric", "numeric-profile", "float64"]
+contract = "language.numeric.whole_float_literal_destination_int64_float64"
+role = "primary"
+
+[[case]]
+id = "core_math_profile_int64_float32"
+path = "core_math_profile_int64_float32"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int64", "float32"]
+contract = "language.numeric.core_math_native_float_int64_float32_profile"
+role = "boundary"
+
+[[case]]
+id = "core_math_profile_int32_float64"
+path = "core_math_profile_int32_float64"
+tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int32", "float64"]
+contract = "language.numeric.core_math_native_float_int32_float64_profile"
+role = "boundary"
+
+[[case]]
+id = "number_value_transport_render_success"
+path = "number_value_transport_render_success"
+tags = ["integration", "language", "numeric", "number", "runtime", "templates", "generics", "dependencies"]
+contract = "language.numbers.number_value_transport_runtime_rendering"
+role = "primary"
+
+[[case]]
+id = "number_comparison_consumers_render_success"
+path = "number_comparison_consumers_render_success"
+tags = ["integration", "numeric", "number", "pattern-matching", "options", "choices", "runtime"]
+contract = "language.numbers.number_comparison_consumers"
+role = "primary"
+
+[[case]]
+id = "number_inexact_scale_literals_rejected"
+path = "number_inexact_scale_literals_rejected"
+tags = ["integration", "numeric", "number", "diagnostics"]
+contract = "language.numbers.inexact_scale_literals_rejected"
+role = "primary"
+
+[[case]]
+id = "number_invalid_scale_type_names_rejected"
+path = "number_invalid_scale_type_names_rejected"
+tags = ["integration", "numeric", "number", "diagnostics", "name-resolution"]
+contract = "language.numbers.invalid_scale_type_names_rejected"
+role = "primary"
+
+[[case]]
+id = "number_wasm_reachable_number_rejected"
+path = "number_wasm_reachable_number_rejected"
+tags = ["integration", "numeric", "number", "html-wasm", "diagnostics"]
+contract = "backend.html_wasm.reachable_number_values_rejected"
+role = "backend"
+
+[[case]]
+id = "number_wasm_unreachable_number_ignored"
+path = "number_wasm_unreachable_number_ignored"
+tags = ["integration", "numeric", "number", "html-wasm"]
+contract = "backend.html_wasm.unreachable_number_helpers_ignored"
+role = "backend"
+
+[[case]]
+id = "number_scale_zero_fractional_literal_rejected"
+path = "number_scale_zero_fractional_literal_rejected"
+tags = ["integration", "numeric", "number", "diagnostics"]
+contract = "language.numbers.inexact_scale_literals_rejected"
+role = "boundary"
+
+[[case]]
+id = "number_above_maximum_scale_type_rejected"
+path = "number_above_maximum_scale_type_rejected"
+tags = ["integration", "numeric", "number", "diagnostics", "name-resolution"]
+contract = "language.numbers.invalid_scale_type_names_rejected"
+role = "boundary"
+
+[[case]]
+id = "number_wasm_generated_body_number_rejected"
+path = "number_wasm_generated_body_number_rejected"
+tags = ["integration", "numeric", "number", "html-wasm", "generics", "diagnostics"]
+contract = "backend.html_wasm.generated_body_number_values_rejected"
+role = "backend"
+
+[[case]]
+id = "number_dynamic_arithmetic_runtime"
+path = "number_dynamic_arithmetic_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "arithmetic", "html-wasm", "numeric-profile", "int32", "float64"]
+contract = "language.numbers.dynamic_arithmetic_rounding_and_power"
+role = "primary"
+
+[[case]]
+id = "number_mixed_integer_runtime"
+path = "number_mixed_integer_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "mixed-integer", "comparisons", "numeric-profile", "int32", "float32"]
+contract = "language.numbers.mixed_integer_arithmetic_and_comparison"
+role = "primary"
+
+[[case]]
+id = "number_cast_exactness_runtime"
+path = "number_cast_exactness_runtime"
+tags = ["integration", "language", "numeric", "number", "casts", "runtime", "numeric-profile", "int64", "float64"]
+contract = "language.numbers.exact_integer_and_scale_casts"
+role = "primary"
+
+[[case]]
+id = "number_string_parsing_runtime"
+path = "number_string_parsing_runtime"
+tags = ["integration", "language", "numeric", "number", "casts", "text", "runtime"]
+contract = "language.numbers.string_parse_exact_scale_and_grammar"
+role = "primary"
+
+[[case]]
+id = "number_compound_writeback_runtime"
+path = "number_compound_writeback_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "assignment", "errors"]
+contract = "language.numbers.compound_mixed_integer_writeback_is_atomic"
+role = "primary"
+
+[[case]]
+id = "number_numeric_failure_recovery_runtime"
+path = "number_numeric_failure_recovery_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "errors"]
+contract = "language.numbers.recoverable_checked_failures"
+role = "primary"
+
+[[case]]
+id = "number_numeric_failure_trap_runtime"
+path = "number_numeric_failure_trap_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "errors", "traps"]
+contract = "language.numbers.uncaught_checked_failure_traps"
+role = "primary"
+
+[[case]]
+id = "number_int64_power_fastpaths_runtime"
+path = "number_int64_power_fastpaths_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "numeric-profile", "int64", "float32"]
+contract = "language.numbers.int64_exponents_preserve_unity_fastpaths"
+role = "primary"
+
+[[case]]
+id = "number_invalid_operator_domains_rejected"
+path = "number_invalid_operator_domains_rejected"
+tags = ["integration", "language", "numeric", "number", "operators", "diagnostics"]
+contract = "language.numbers.unsupported_operator_domains_rejected"
+role = "primary"
+
+[[case]]
+id = "number_same_type_cast_rejected"
+path = "number_same_type_cast_rejected"
+tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
+contract = "language.casts.number_same_type_alias_cast_rejected"
+role = "primary"
+
+[[case]]
+id = "number_integer_receiving_requires_cast_rejected"
+path = "number_integer_receiving_requires_cast_rejected"
+tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
+contract = "language.numbers.number_to_int_requires_explicit_cast"
+role = "primary"
+
+[[case]]
+id = "number_unsupported_cast_targets_rejected"
+path = "number_unsupported_cast_targets_rejected"
+tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
+contract = "language.casts.number_float_byte_targets_rejected"
+role = "primary"
+
+[[case]]
+id = "number_try_castable_to_int_generic_success"
+path = "number_try_castable_to_int_generic_success"
+tags = ["integration", "language", "numeric", "number", "generics", "traits", "casts", "runtime"]
+contract = "language.generics.number_try_castable_to_int"
+role = "primary"
+
+[[case]]
+id = "number_fallible_cast_requires_handling_rejected"
+path = "number_fallible_cast_requires_handling_rejected"
+tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
+contract = "language.casts.number_fallibility_requires_handling"
+role = "primary"
+
+[[case]]
+id = "dec_keyword_reclaim_and_value_flow_success"
+path = "dec_keyword_reclaim_and_value_flow_success"
+tags = ["integration", "language", "numeric", "number", "runtime"]
+contract = "language.numbers.dec_type_spelling_and_reclaimed_number_names"
+role = "primary"
+
+[[case]]
+id = "dec_reserved_identifier_declaration_rejected"
+path = "dec_reserved_identifier_declaration_rejected"
+tags = ["integration", "numeric", "number", "diagnostics"]
+contract = "language.numbers.dec_type_spelling_and_reclaimed_number_names"
+role = "boundary"
+
+[[case]]
+id = "dec_underscore_identifier_declaration_rejected"
+path = "dec_underscore_identifier_declaration_rejected"
+tags = ["integration", "numeric", "number", "diagnostics"]
+contract = "language.numbers.dec_type_spelling_and_reclaimed_number_names"
+role = "boundary"
+
+[[case]]
+id = "legacy_number_type_annotation_unknown_rejected"
+path = "legacy_number_type_annotation_unknown_rejected"
+tags = ["integration", "numeric", "number", "diagnostics", "name-resolution"]
+contract = "language.numbers.dec_type_spelling_and_reclaimed_number_names"
+role = "boundary"
+
+[[case]]
+id = "numeric_bounded_proofs_narrow_domain_runtime"
+path = "numeric_bounded_proofs_narrow_domain_runtime"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
+role = "primary"
+
+[[case]]
+id = "numeric_bounded_proofs_retained_trap_runtime"
+path = "numeric_bounded_proofs_retained_trap_runtime"
+tags = ["integration", "numeric", "runtime", "trap", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
+role = "boundary"
+
+[[case]]
+id = "numeric_bounded_proofs_error_recovery_runtime"
+path = "numeric_bounded_proofs_error_recovery_runtime"
+tags = ["integration", "numeric", "runtime", "errors", "casts", "html-wasm"]
+contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "boundary"

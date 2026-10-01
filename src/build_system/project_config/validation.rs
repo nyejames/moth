@@ -508,7 +508,7 @@ struct ValueDiagnosticContext<'a> {
 #[derive(Debug, PartialEq, Eq)]
 enum ValidatedConfigValue {
     String(String),
-    Int(i32),
+    Int(i64),
     Float(crate::compiler_frontend::folded_value::FiniteFloat),
     Bool(bool),
     Char(char),
@@ -931,7 +931,10 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
             }
             Some(PublicFoldedValue::Record(converted))
         }
-        PublicFoldedValue::Choice { .. } | PublicFoldedValue::Range { .. } => None,
+        PublicFoldedValue::FixedScalar(_)
+        | PublicFoldedValue::Number(_)
+        | PublicFoldedValue::Choice { .. }
+        | PublicFoldedValue::Range { .. } => None,
     }
 }
 
@@ -984,7 +987,7 @@ fn format_closed_string_set_expected(allowed: &[&str]) -> String {
 /// WHY: numeric config keys must not accept floats, bools, or strings through coercion or
 /// stringification. The folded declaration boundary already resolved coercions to their
 /// inner value.
-fn extract_int_value(value: &PublicFoldedValue) -> Option<i32> {
+fn extract_int_value(value: &PublicFoldedValue) -> Option<i64> {
     match value {
         PublicFoldedValue::Int(value) => Some(*value),
         _ => None,
@@ -1020,7 +1023,7 @@ fn extract_bool_value(value: &PublicFoldedValue) -> Option<bool> {
 }
 
 fn validate_template_const_loop_iteration_limit(
-    value: i32,
+    value: i64,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<usize, Vec<CompilerDiagnostic>> {
@@ -1035,7 +1038,11 @@ fn validate_template_const_loop_iteration_limit(
         )]);
     }
 
-    if value > MAX_TEMPLATE_CONST_LOOP_ITERATIONS as i32 {
+    // The setting is a positive `Int` and the loop budget is a `usize` count. A configured value
+    // wider than this platform's `usize` is past the documented maximum rather than a distinct
+    // failure, so it reports the same oversized-setting diagnostic.
+    let limit = usize::try_from(value).unwrap_or(usize::MAX);
+    if limit > MAX_TEMPLATE_CONST_LOOP_ITERATIONS {
         return Err(vec![config_diagnostic(
             Some(string_table.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
             InvalidConfigReason::InvalidProjectSettingValue {
@@ -1046,7 +1053,7 @@ fn validate_template_const_loop_iteration_limit(
         )]);
     }
 
-    Ok(value as usize)
+    Ok(limit)
 }
 
 fn config_diagnostic(

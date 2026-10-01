@@ -6,10 +6,15 @@
 //!      frontend produces the right AST shapes for later analysis.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticOperator, DiagnosticPayload, InvalidAssignmentTargetReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
@@ -60,8 +65,43 @@ fn allows_int_to_float_assignment_via_contextual_coercion() {
 }
 
 #[test]
-fn rejects_int_divide_assign_when_regular_division_returns_float() {
-    assert_assignment_type_mismatch("value ~Int = 10\nvalue /= 4\n");
+fn allows_int_divide_assign_with_checked_store_conversion() {
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Int = 10\nvalue /= 4\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
+
+    let NodeKind::Assignment { value, .. } = &body[1].kind else {
+        panic!("expected second statement to be an assignment");
+    };
+    let ExpressionKind::Cast(cast) = &value.kind else {
+        panic!("expected the promoted Float result to convert at the Int store");
+    };
+
+    assert_eq!(cast.source.diagnostic_type, DataType::Float);
+    assert!(matches!(&cast.handling, CastHandling::StoreConversion));
+    assert_eq!(value.diagnostic_type, DataType::Int);
+}
+
+#[test]
+fn allows_u8_add_assign_with_promoted_checked_store_conversion() {
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~U8 = 1\nvalue += 1\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
+
+    let NodeKind::Assignment { value, .. } = &body[1].kind else {
+        panic!("expected compound assignment");
+    };
+    let ExpressionKind::Cast(cast) = &value.kind else {
+        panic!("expected the promoted U32 result to convert at the U8 store");
+    };
+
+    assert_eq!(
+        cast.source.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U32)
+    );
+    assert!(matches!(&cast.handling, CastHandling::StoreConversion));
+    assert_eq!(
+        value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U8)
+    );
 }
 
 #[test]
@@ -123,6 +163,58 @@ fn allows_int_exponent_assign() {
     };
 
     assert_eq!(value.diagnostic_type, DataType::Int);
+}
+
+#[test]
+fn allows_number_exponent_assign_with_profile_int_rhs() {
+    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Dec2 = 2.5\nvalue ^= 2\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
+
+    let NodeKind::Assignment { target, value } = &body[1].kind else {
+        panic!("expected Dec exponent compound assignment");
+    };
+
+    assert_eq!(value.type_id, target.type_id);
+    assert!(matches!(
+        &value.diagnostic_type,
+        DataType::Number(scale) if scale.get() == 2
+    ));
+    let ExpressionKind::Runtime(rpn) = &value.kind else {
+        panic!("mutable Dec power stays a runtime expression");
+    };
+    assert!(rpn.items.iter().any(|item| matches!(
+        item,
+        ExpressionRpnItem::Operand(operand)
+            if operand.type_id == builtin_type_ids::INT
+                && matches!(&operand.kind, ExpressionKind::Int(_))
+    )));
+    assert!(!rpn.items.iter().any(|item| matches!(
+        item,
+        ExpressionRpnItem::Operand(operand)
+            if matches!(&operand.kind, ExpressionKind::Number(_))
+    )));
+}
+
+#[test]
+fn rejects_number_exponent_assign_with_non_int_rhs() {
+    for (right_type, right_value) in [
+        ("Dec2", "2.5"),
+        ("I64", "2"),
+        ("Float", "2.5"),
+        ("Byte", "2"),
+    ] {
+        let source =
+            format!("value ~Dec2 = 2.5\nright {right_type} = {right_value}\nvalue ^= right\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::UnsupportedOperatorTypes {
+                operator: DiagnosticOperator::Exponent,
+                ..
+            }
+        ));
+    }
 }
 
 fn assert_assignment_type_mismatch(source: &str) {

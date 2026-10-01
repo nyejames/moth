@@ -441,7 +441,8 @@ macro_rules! define_reasoned_diagnostic_registry {
                 payload: CompileTimeEvaluationError;
                 fields: {
                     reason: CompileTimeEvaluationErrorReason,
-                    operation: Option<StringId>
+                    operation: Option<StringId>,
+                    numeric_profile: Option<NumericProfile>
                 }
                 bindings: { operation }
                 remap: {
@@ -836,12 +837,18 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::FloatFormatting => "unsupported_backend_feature.float_formatting",
     &UnsupportedBackendFeatureReason::FloatBoundaryValidation => "unsupported_backend_feature.float_boundary_validation",
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",
+    &UnsupportedBackendFeatureReason::FixedWidthScalarValues => "unsupported_backend_feature.fixed_width_scalar_values",
     &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",
+    &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
+    &UnsupportedBackendFeatureReason::FallibleControlFlow => "unsupported_backend_feature.fallible_control_flow",
+    &UnsupportedBackendFeatureReason::MutableFunctionParameters => "unsupported_backend_feature.mutable_function_parameters",
+    &UnsupportedBackendFeatureReason::NumberValues => "unsupported_backend_feature.number_values",
     },
 
     NumberLiteralErrorReason => {
+    @delegate(&NumberLiteralErrorReason::NonFiniteFixedFloat(_) => "invalid_number_literal.non_finite_float");
     &NumberLiteralErrorReason::SeparatorNotBetweenDigits => "invalid_number_literal.separator_not_between_digits",
     &NumberLiteralErrorReason::MultipleDecimalPoints => "invalid_number_literal.multiple_decimal_points",
     &NumberLiteralErrorReason::DecimalPointNotAfterDigit => "invalid_number_literal.decimal_point_not_after_digit",
@@ -852,10 +859,12 @@ define_stable_reason_keys! {
     &NumberLiteralErrorReason::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
     &NumberLiteralErrorReason::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
     &NumberLiteralErrorReason::OutsideIntRange => "invalid_number_literal.outside_int_range",
+    &NumberLiteralErrorReason::OutsideFixedScalarRange(_) => "invalid_number_literal.outside_fixed_scalar_range",
+    &NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => "invalid_number_literal.negative_unsigned_literal",
     &NumberLiteralErrorReason::NonFiniteFloat => "invalid_number_literal.non_finite_float",
+    &NumberLiteralErrorReason::InexactNumberScale(_) => "invalid_number_literal.inexact_number_scale",
     &NumberLiteralErrorReason::ParseOverflow => "invalid_number_literal.parse_overflow",
     },
-
     InvalidStringEscapeReason => {
     &InvalidStringEscapeReason::UnsupportedEscape { .. } => "invalid_string_escape.unsupported_escape",
     &InvalidStringEscapeReason::PhysicalNewline => "invalid_string_escape.physical_newline",

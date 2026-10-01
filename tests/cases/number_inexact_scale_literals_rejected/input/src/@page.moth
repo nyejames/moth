@@ -1,0 +1,5 @@
+reject_inexact ||:
+    positive Dec2 = (1.239)
+;
+
+[: inexact Dec scale literals rejected]

@@ -8,15 +8,18 @@
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
@@ -369,12 +372,11 @@ pub(crate) enum ReachableMapUseKind {
 
 /// A reachable external call at the HIR statement that invokes it.
 ///
-/// WHY: backend validation needs the stable function ID for support checks and the exact
-/// statement location for user-facing unsupported-backend diagnostics.
+/// WHY: backend validation needs the stable function ID and exact diagnostic location without
+///       rescanning HIR after reachability has been selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableExternalCall {
     pub(crate) function_id: ExternalFunctionId,
-    pub(crate) statement_id: HirNodeId,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -405,14 +407,22 @@ pub(crate) enum ReachableReactiveSinkKind {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReachableRuntimeCastForm {
+    Expression,
+    Statement,
+}
+
 /// A reachable compiler-owned builtin runtime cast expression or statement.
 ///
-/// WHY: some backends (currently HTML-Wasm) cannot lower runtime casts yet. Recording the cast
-///      site in reachability lets backend feature validation report the first reachable unsupported
-///      cast without re-scanning HIR expressions locally.
+/// WHY: some backends (currently HTML-Wasm) cannot lower most runtime casts. Recording the cast
+///      site, policy, and HIR form lets backend feature validation reject unsupported casts without
+///      re-scanning HIR expressions locally.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableRuntimeCastUse {
     pub(crate) span: Option<SourceSpan>,
+    pub(crate) policy: BuiltinCastPolicyId,
+    pub(crate) form: ReachableRuntimeCastForm,
 }
 
 /// A reachable compiler-owned checked numeric operation.
@@ -421,17 +431,19 @@ pub(crate) struct ReachableRuntimeCastUse {
 ///      operation before lowering instead of failing with a backend-internal error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableNumericOpUse {
+    pub(crate) op: HirNumericOp,
+    pub(crate) failure_mode: NumericFailureMode,
     pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable compiler-owned Float formatting or validation statement.
 ///
-/// WHY: backends that do not yet implement Moth Float formatting or external-Float boundary
-///      validation must reject the reachable HIR operation before lowering instead of failing with a
-///      backend-internal error.
+/// WHY: backend feature validation needs the statement's exact failure mode and source span to
+///      distinguish supported trap-mode boundary checks from unsupported formatting/recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableFloatStatementUse {
     pub(crate) kind: ReachableFloatStatementKind,
+    pub(crate) failure_mode: NumericFailureMode,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -740,7 +752,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             let HirStatementKind::Call { target, .. } = &statement.kind else {
                 continue;
             };
-
             match target {
                 CallTarget::Local(function_id) => {
                     if self.seen_user_calls.insert(*function_id) {
@@ -780,7 +791,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         .reachable_external_calls
                         .push(ReachableExternalCall {
                             function_id: *function_id,
-                            statement_id: statement.id,
                             span: statement.span,
                         });
                 }
@@ -836,12 +846,33 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.collect_runtime_feature_uses_from_expression(current, span);
+                self.collect_runtime_feature_uses_from_expression(step, span);
+                self.collect_runtime_feature_uses_from_expression(end, span);
+                self.collect_runtime_feature_uses_from_expression(ascending, span);
+            }
             HirStatementKind::Drop(_) => {}
 
-            HirStatementKind::NumericOp { operands, .. } => {
+            HirStatementKind::NumericOp {
+                op,
+                failure_mode,
+                operands,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_numeric_ops
-                    .push(ReachableNumericOpUse { span });
+                    .push(ReachableNumericOpUse {
+                        op: *op,
+                        failure_mode: *failure_mode,
+                        span,
+                    });
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
@@ -854,28 +885,42 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 }
             }
 
-            HirStatementKind::CastOp { source, .. } => {
+            HirStatementKind::CastOp { policy, source, .. } => {
                 self.direct_facts
                     .reachable_runtime_casts
-                    .push(ReachableRuntimeCastUse { span });
+                    .push(ReachableRuntimeCastUse {
+                        span,
+                        policy: *policy,
+                        form: ReachableRuntimeCastForm::Statement,
+                    });
                 self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
-            HirStatementKind::FormatFloat { source, .. } => {
+            HirStatementKind::FormatFloat {
+                source,
+                failure_mode,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
+                        failure_mode: *failure_mode,
                         span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
-            HirStatementKind::ValidateFloat { source, .. } => {
+            HirStatementKind::ValidateFloat {
+                source,
+                failure_mode,
+                ..
+            } => {
                 self.direct_facts
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
+                        failure_mode: *failure_mode,
                         span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, span);
@@ -990,12 +1035,15 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             }
 
             HirExpressionKind::Cast {
-                source: operand, ..
+                source: operand,
+                policy,
             } => {
                 self.direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         span: expression_span,
+                        policy: *policy,
+                        form: ReachableRuntimeCastForm::Expression,
                     });
                 self.collect_runtime_feature_uses_from_expression(operand, expression_span);
             }
@@ -1067,9 +1115,11 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             // Leaf values: nothing to record.
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::Number(_)
             | HirExpressionKind::Load(_)
             | HirExpressionKind::Copy(_) => {}
         }

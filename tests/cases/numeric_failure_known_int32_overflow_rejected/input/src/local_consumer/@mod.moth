@@ -1,0 +1,4 @@
+consume || -> Int:
+    maximum #Int = 2147483647
+    return maximum + 1
+;

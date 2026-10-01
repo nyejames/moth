@@ -14,9 +14,13 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
+use crate::compiler_frontend::symbols::identifier_policy::{
+    reserved_dec_family_spelling, strip_leading_underscores,
+};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -184,10 +188,15 @@ pub(super) fn resolve_conformance_target(
 }
 
 fn is_builtin_scalar_target(name: StringId, string_table: &StringTable) -> bool {
-    matches!(
-        string_table.resolve(name),
-        "Int" | "Float" | "Bool" | "String" | "Char"
-    )
+    let resolved = string_table.resolve(name);
+    matches!(resolved, "Int" | "Float" | "Bool" | "String" | "Char")
+        // Explicit-width spellings and `Byte` are builtin scalar targets too, so user-authored
+        // conformance on them is rejected through the same builtin-target diagnostic.
+        || FixedScalar::from_name(resolved).is_some()
+        // The reserved `Dec` family is builtin type territory as well, so user-authored
+        // conformance on its spellings is rejected through the shared family predicate
+        // instead of falling through to the unknown-type path.
+        || reserved_dec_family_spelling(strip_leading_underscores(resolved))
 }
 
 pub(super) fn resolve_trait_reference(

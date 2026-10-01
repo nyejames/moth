@@ -15,6 +15,7 @@ use crate::builder_surface::external_import_providers::provider::RuntimeAssetIde
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
 };
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -26,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
@@ -224,6 +226,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis,
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(path_table),
         },
         link_facts,
@@ -311,6 +314,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
@@ -371,7 +375,7 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         "artefact interface survives the handoff"
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
         .expect("one active project module assembles one entry");
     assert_eq!(compilation.module_count(), 1, "one base module");
     let retained = compilation
@@ -421,7 +425,7 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
         "source-package root activity is retained, not cleared"
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
         .expect("project and package artefacts should assemble");
     assert_eq!(compilation.module_count(), 2, "both base modules retained");
     assert_eq!(
@@ -807,7 +811,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
             .ends_with("packages/b/@mod.moth")
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
         .expect("overlapping package module ids should assemble");
     assert_eq!(compilation.module_count(), 3);
     let module_paths = compilation
@@ -911,7 +915,7 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     );
 
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
         .expect("generated sidecar boundaries should assemble");
     let compilation_codes = compilation
         .modules()
@@ -999,7 +1003,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
     )
     .expect("equal generated identities across boundaries should validate");
 
-    let compilation = ProjectCompilation::from_frontend(frontend)
+    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
         .expect("equal generated identities across project and package boundaries must assemble");
     let entries = compilation.entries();
     assert_eq!(entries.len(), 1, "one project root becomes one entry");
@@ -1119,7 +1123,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
     )
     .expect("frontend boundaries should validate");
 
-    let error = match ProjectCompilation::from_frontend(frontend) {
+    let error = match ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD) {
         Ok(_) => panic!("a package must not resolve another package's sidecar"),
         Err(ProjectAssemblyError::Infrastructure(error)) => error,
         Err(ProjectAssemblyError::Diagnostic { .. }) => {
@@ -1218,7 +1222,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
     let second = frontend_for(["b", "a"]);
 
     let symbols_by_prefix = |frontend: ProjectFrontendCompilation| {
-        let compilation = ProjectCompilation::from_frontend(frontend)
+        let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
             .expect("two packages may publish equal generated identities in either order");
         assert_eq!(
             compilation.module_count(),
@@ -1304,7 +1308,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             ResourceInputRegistry::new(),
         )
         .expect("single-package frontend should validate");
-        let compilation = ProjectCompilation::from_frontend(frontend)
+        let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
             .expect("one package alone must stay coherent");
         assert_eq!(compilation.module_count(), 3);
     }
@@ -1359,6 +1363,7 @@ fn lane_module_with_generated_and_cross_module_calls(
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
@@ -1524,7 +1529,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
     .expect("mixed outcomes are a valid retained frontend result for check");
     assert!(frontend.has_diagnosed_or_blocked());
 
-    let error = match ProjectCompilation::from_frontend(frontend) {
+    let error = match ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD) {
         Ok(_) => panic!("diagnosed or blocked modules must reject success-only compilation"),
         Err(ProjectAssemblyError::Infrastructure(error)) => error,
         Err(ProjectAssemblyError::Diagnostic { .. }) => {
@@ -1663,6 +1668,7 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {
@@ -2155,6 +2161,7 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
                 ResourceInputRegistry::new(),
             )
             .expect("frontend should validate"),
+            NumericProfile::STANDARD,
         )
         .expect("sidecar boundaries should assemble")
     };

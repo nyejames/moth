@@ -1,0 +1,6 @@
+accept_try_string type T is TRY_CASTABLE_TO_STRING |value T| -> T:
+    return value
+;
+
+decimal_value Dec2 = 1.23
+result = accept_try_string(decimal_value)

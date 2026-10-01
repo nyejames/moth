@@ -1,0 +1,3 @@
+text_to_number |text String| -> Dec2:
+    return cast text
+;

@@ -1,0 +1,16 @@
+small_unsigned #U8 = 200
+small_unsigned_text #String = cast small_unsigned
+
+minimum_signed #I8 = -128
+minimum_signed_text #String = cast minimum_signed
+
+maximum_unsigned #U64 = 18446744073709551615
+maximum_unsigned_text #String = cast maximum_unsigned
+
+single_precision #F32 = 0.1
+single_precision_text #String = cast single_precision
+
+half_precision #F16 = 0.1
+half_precision_text #String = cast half_precision
+
+[: fixed text: [small_unsigned_text] [minimum_signed_text] [maximum_unsigned_text] [single_precision_text] [half_precision_text]]

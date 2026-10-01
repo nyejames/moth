@@ -22,7 +22,7 @@ Required capabilities:
 - ordinary nominal identity, resolved field types and field lookup in `TypeEnvironment`
 - ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
 - public-surface rejection of hidden runtime identities
-- canonical Int/Float identities with the compilation-wide NumericProfile, fixed I*/U*/F* types, non-numeric Byte and the Number family
+- canonical Int/Float identities with the compilation-wide NumericProfile, fixed I*/U*/F* types, non-numeric Byte and the Dec family
 
 Use the activation tree's current APIs. Reuse delivered MON parsing rather than reconstructing a predecessor record parser.
 
@@ -64,7 +64,7 @@ Use ordinary field lookup without repeated shape scans. Diagnostics identify the
 
 Borrow validation and lifetime topology apply to the actual retained graph. Inline nesting creates no escape exemption, copy-on-construction rule, new region or backend-specific legality. Explicit deep copy preserves internal alias topology under the existing copy contract. Backend lowering consumes validated ordinary struct facts.
 
-Scalar size/alignment/stride facts come from the numeric and physical-layout owners. This plan does not define a hidden-record ABI, duplicate numeric checks or implement Number on Wasm. A supported scalar inside an unsupported aggregate still needs the normal target diagnostic. Number-containing runtime records retain Number's Wasm restriction until its separate runtime exists.
+Scalar size/alignment/stride facts come from the numeric and physical-layout owners. This plan does not define a hidden-record ABI, duplicate numeric checks or implement Dec on Wasm. A supported scalar inside an unsupported aggregate still needs the normal target diagnostic. Dec-containing runtime records retain Dec's Wasm restriction until its separate runtime exists.
 
 ## Implementation phases
 
@@ -76,7 +76,7 @@ Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review.
 2. Read the shared MON owner and existing const-record deferral boundary, ordinary nominal registration, HIR struct paths and recursive escape validators.
 3. Read the published runtime reference and confirm the current owner map. Identify remaining architecture, cheatsheet and status edits without rewriting the source contract or claiming runtime support.
 4. Select the existing source-site/body identities that implement the key above, including nested sites and concrete materialisations. Record the mapping locally. Inventory every prohibited boundary and its current recursive validation owner.
-5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR. Include fixed-width, Byte, profile-selected and Number leaves in that inventory.
+5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR. Include fixed-width, Byte, profile-selected and Dec leaves in that inventory.
 
 Exit: one identity rule, one shared parse path and explicit recursive boundary coverage.
 
@@ -125,9 +125,9 @@ Tests should prove:
 - prohibited wrappers do not hide an anonymous identity from escape checks
 - ordinary extracted leaves retain their normal permitted uses
 - fixed integer/float and Byte field identity survives construction, projection and mutation without carrier-based retyping or implicit narrowing
-- Int/Float examples still work under their selected profile and Number leaves keep exact scale semantics
+- Int/Float examples still work under their selected profile and Dec leaves keep exact scale semantics
 - compile-time records remain compile-time-only and named nominal construction stays explicit
-- supported backend execution agrees with ordinary struct semantics, while unsupported aggregate or Number targets reject explicitly
+- supported backend execution agrees with ordinary struct semantics, while unsupported aggregate or Dec targets reject explicitly
 
 Use one primary owner per contract, structured diagnostic reasons/spans and observable results. Unit coverage is reserved for hidden identity, type-graph and handoff invariants that output cannot expose. Keep tests out of production implementation files.
 

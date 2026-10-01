@@ -4,12 +4,15 @@
 //! WHY: JS is the stable near-term backend and needs deterministic lowering output.
 
 use crate::backends::js::JsModule;
+use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -29,6 +32,7 @@ use std::collections::{HashMap, HashSet};
 pub fn lower_hir_to_js(
     hir: &HirModule,
     borrow_analysis: &BorrowCheckReport,
+    numeric_proofs: &NumericProofs,
     string_table: &StringTable,
     config: JsLoweringConfig,
     type_environment: &TypeEnvironment,
@@ -37,6 +41,7 @@ pub fn lower_hir_to_js(
     let emitter = JsEmitter::new(
         hir,
         borrow_analysis,
+        numeric_proofs,
         string_table,
         path_table,
         config,
@@ -48,6 +53,9 @@ pub fn lower_hir_to_js(
 pub(crate) struct JsEmitter<'hir> {
     pub(crate) hir: &'hir HirModule,
     pub(crate) borrow_analysis: &'hir BorrowCheckReport,
+    /// Proven integer operation/narrowing facts paired with this immutable HIR. An empty table
+    /// retains every checked numeric statement unchanged.
+    pub(crate) numeric_proofs: &'hir NumericProofs,
     pub(crate) string_table: &'hir StringTable,
     pub(crate) path_table: &'hir PathTable,
     pub(crate) config: JsLoweringConfig,
@@ -82,6 +90,7 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn new(
         hir: &'hir HirModule,
         borrow_analysis: &'hir BorrowCheckReport,
+        numeric_proofs: &'hir NumericProofs,
         string_table: &'hir StringTable,
         path_table: &'hir PathTable,
         config: JsLoweringConfig,
@@ -97,6 +106,7 @@ impl<'hir> JsEmitter<'hir> {
             out: String::new(),
             hir,
             borrow_analysis,
+            numeric_proofs,
             string_table,
             path_table,
             config,
@@ -130,11 +140,12 @@ impl<'hir> JsEmitter<'hir> {
             self.emitted_functions_use_numeric_helpers(&functions)?;
         self.emitted_functions_use_reactivity(&functions)?;
         self.collect_used_cast_policies(&functions)?;
-        if self
-            .used_cast_policies
-            .contains(&BuiltinCastPolicyId::FloatToString)
-        {
-            emitted_code_uses_numeric_helpers.format_float = true;
+        for policy in &self.used_cast_policies {
+            if let BuiltinCastPolicyId::NumericToString(scalar) = *policy
+                && let Some(precision) = scalar.binary_float_precision(self.config.numeric_profile)
+            {
+                emitted_code_uses_numeric_helpers.require_float_formatter(precision);
+            }
         }
         self.emit_runtime_prelude(
             emitted_code_uses_maps,
@@ -194,13 +205,12 @@ impl<'hir> JsEmitter<'hir> {
         functions
     }
 
-    /// Records which checked numeric helper families are needed by emitted reachable JS bodies.
+    /// Records the carrier families needed by reachable numeric statements.
     ///
-    /// WHAT: scans the same function/block subset that JS lowering will emit and records whether
-    ///      it contains `NumericOp`, `FormatFloat`, or `ValidateFloat` statements.
-    /// WHY: the arithmetic helpers and Float formatting/validation helpers share a trap wrapper
-    ///      but are otherwise independent. Splitting demand keeps existing arithmetic-only bundles
-    ///      from growing unrelated Float helpers.
+    /// WHAT: scans the emitted function/block subset and selects each checked operation family
+    ///       through the same profile-aware carrier owner used by expression and cast lowering.
+    /// WHY: a BigInt operator must not inherit a Number helper merely because both domains are
+    ///      semantically integers.
     fn emitted_functions_use_numeric_helpers(
         &self,
         functions: &[&'hir HirFunction],
@@ -212,21 +222,69 @@ impl<'hir> JsEmitter<'hir> {
             for block_id in reachable_blocks {
                 let block = self.block_by_id(block_id)?;
                 for statement in &block.statements {
-                    match statement.kind {
-                        HirStatementKind::NumericOp { .. } => {
-                            usage.numeric_ops = true;
+                    match &statement.kind {
+                        HirStatementKind::NumericOp { op, .. } => {
+                            let carrier = JsNumericCarrier::for_scalar(
+                                op.domain,
+                                self.config.numeric_profile,
+                            )
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(format!(
+                                    "JS backend has no numeric carrier for {:?}",
+                                    op.domain
+                                ))
+                            })?;
+                            let helper_family = carrier.helper_family();
+                            // WHAT: proven-safe integer operations lower to exact native carrier
+                            //       arithmetic without any checked helper call — Trap mode as a
+                            //       raw scalar, ReturnError mode inside the existing
+                            //       `{tag, value}` success carrier its HIR consumers branch on.
+                            // WHY: their helper family is needed only by retained operations, so
+                            //       families used exclusively by proven statements stay out of
+                            //       the prelude while genuinely unsafe sibling uses keep their
+                            //       demand.
+                            let proven_safe = matches!(
+                                op.operator,
+                                NumericOperator::Add
+                                    | NumericOperator::Subtract
+                                    | NumericOperator::Multiply
+                                    | NumericOperator::IntegerDivide
+                                    | NumericOperator::Remainder
+                                    | NumericOperator::Negate
+                            ) && matches!(
+                                carrier,
+                                JsNumericCarrier::ExactInteger { .. }
+                                    | JsNumericCarrier::BigInteger { .. }
+                            ) && self.numeric_proofs.integer_operation_is_safe(
+                                statement.id,
+                                self.config.numeric_profile,
+                            );
+                            if !proven_safe {
+                                match helper_family {
+                                    Some("int") => usage.number_integer_ops = true,
+                                    Some("number") => usage.number_decimal_ops = true,
+                                    Some("bigint") => usage.big_integer_ops = true,
+                                    Some("float32") => usage.binary32_ops = true,
+                                    Some("float") => usage.binary64_ops = true,
+                                    _ => {
+                                        return Err(CompilerError::compiler_error(format!(
+                                            "JS backend received an unreachable numeric operation domain {:?}",
+                                            op.domain
+                                        )));
+                                    }
+                                }
+                            }
+                            if op.operator == NumericOperator::Power
+                                && matches!(helper_family, Some("float32") | Some("float"))
+                            {
+                                usage.binary_float_power = true;
+                            }
                         }
-                        HirStatementKind::FormatFloat { .. } => {
-                            usage.format_float = true;
-                        }
-                        HirStatementKind::ValidateFloat { .. } => {
-                            usage.validate_float = true;
-                        }
+                        HirStatementKind::FormatFloat { .. } => usage.require_float_formatter(
+                            self.config.numeric_profile.float_precision.into(),
+                        ),
+                        HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
                         _ => {}
-                    }
-
-                    if usage.numeric_ops && usage.format_float && usage.validate_float {
-                        return Ok(usage);
                     }
                 }
             }
@@ -297,6 +355,18 @@ impl<'hir> JsEmitter<'hir> {
                 self.numeric_operands_use_maps(operands)
             }
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.expression_uses_maps(current)
+                    || self.expression_uses_maps(step)
+                    || self.expression_uses_maps(end)
+                    || self.expression_uses_maps(ascending)
+            }
             HirStatementKind::Drop(_) => false,
         }
     }
@@ -442,6 +512,18 @@ impl<'hir> JsEmitter<'hir> {
                 }
             },
 
+            HirStatementKind::FloatRangeCandidate {
+                current,
+                step,
+                end,
+                ascending,
+                ..
+            } => {
+                self.record_expression_reactivity(current)?;
+                self.record_expression_reactivity(step)?;
+                self.record_expression_reactivity(end)?;
+                self.record_expression_reactivity(ascending)?;
+            }
             HirStatementKind::Drop(_) => {}
         }
 
@@ -579,6 +661,8 @@ impl<'hir> JsEmitter<'hir> {
             | HirExpressionKind::Copy(_)
             | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -623,7 +707,21 @@ impl<'hir> JsEmitter<'hir> {
                 let block = self.block_by_id(block_id)?;
 
                 for statement in &block.statements {
-                    collect_statement_cast_policies(&statement.kind, &mut self.used_cast_policies);
+                    match &statement.kind {
+                        // WHAT: a proven-safe fallible integer narrowing lowers to a direct
+                        //       carrier conversion without helper calls, so only the source
+                        //       expression's own cast demands remain.
+                        // WHY: any retained use of the same policy elsewhere still inserts it
+                        //       through the ordinary walk, so its helpers stay demanded.
+                        HirStatementKind::CastOp { policy, source, .. }
+                            if self.integer_narrowing_is_proven(statement.id, *policy) =>
+                        {
+                            collect_expression_cast_policies(source, &mut self.used_cast_policies);
+                        }
+                        kind => {
+                            collect_statement_cast_policies(kind, &mut self.used_cast_policies);
+                        }
+                    }
                 }
 
                 collect_terminator_cast_policies(&block.terminator, &mut self.used_cast_policies);
@@ -725,6 +823,8 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -779,6 +879,18 @@ fn collect_statement_cast_policies(
             }
         },
 
+        HirStatementKind::FloatRangeCandidate {
+            current,
+            step,
+            end,
+            ascending,
+            ..
+        } => {
+            collect_expression_cast_policies(current, policies);
+            collect_expression_cast_policies(step, policies);
+            collect_expression_cast_policies(end, policies);
+            collect_expression_cast_policies(ascending, policies);
+        }
         HirStatementKind::Drop(_) => {}
     }
 }
@@ -904,6 +1016,8 @@ fn collect_expression_cast_policies(
 
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
+        | HirExpressionKind::FixedScalar(_)
+        | HirExpressionKind::Number(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)

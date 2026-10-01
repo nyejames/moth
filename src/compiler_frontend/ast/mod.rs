@@ -155,7 +155,9 @@ use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironmentBuilder,
 };
-use crate::compiler_frontend::ast::module_ast::finalization::AstFinalizer;
+use crate::compiler_frontend::ast::module_ast::finalization::{
+    AstFinalizer, MaterialisationContextRetention,
+};
 use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
 use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLevelFragment;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -286,7 +288,10 @@ pub struct AstBuildResult {
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
 
     /// Construction-only declaring-module context frozen before successful publication.
-    pub(crate) materialisation_context: ModuleMaterialisationPreparationBuilder,
+    ///
+    /// Module builds always retain it. A generated sidecar retains it only when its body deferred
+    /// nested generic requests, because the context is then their requester.
+    pub(crate) materialisation_context: Option<ModuleMaterialisationPreparationBuilder>,
     /// The same module-local resource table used while resolving file-valued expressions.
     ///
     /// Public projection borrows this handle to translate local `ResourceId`s into portable
@@ -394,6 +399,7 @@ impl Ast {
             AstFinalizer::new(&phase_context, environment, path_fork).finalize(
                 emitted,
                 &top_level_const_fragments,
+                MaterialisationContextRetention::Always,
                 string_table,
             )?
         };

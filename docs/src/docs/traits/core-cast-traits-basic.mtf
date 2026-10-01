@@ -31,7 +31,7 @@ The compiler owns a fixed set of traits that let user types work with `cast`.
 
     Label must TRY_CASTABLE_TO_INT
 
-    number Int = cast Label("42") catch |err|:
+    parsed_count Int = cast Label("42") catch |err|:
         then 0
     ;
 ]

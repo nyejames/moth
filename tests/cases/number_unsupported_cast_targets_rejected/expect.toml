@@ -1,0 +1,16 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083", "MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+path = "input/byte_target/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 2
+path = "input/float_target/@mod.moth"
+line = 2

@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -33,7 +34,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
@@ -44,8 +45,8 @@ use std::path::Path;
 fn start_reachability_ignores_unreachable_function_external_calls() {
     let reachable_external_function = ExternalFunctionId::Synthetic(99);
     let unreachable_external_function = ExternalFunctionId::Synthetic(100);
-    let reachable_location = synthetic_span(10, 4);
-    let unreachable_location = synthetic_span(20, 8);
+    let reachable_location = call_site_span(10, 4);
+    let unreachable_location = call_site_span(20, 8);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -85,20 +86,17 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
     assert_reachability(&reachability, &[0], &[0], &[reachable_external_function]);
     assert_reachable_external_calls(
         &reachability,
-        &[(
-            reachable_external_function,
-            HirNodeId(0),
-            reachable_location,
-        )],
+        &[(reachable_external_function, reachable_location)],
     );
 }
 
 #[test]
-fn reachable_collection_push_ids_remain_distinct() {
+fn reachable_collection_push_call_sites_preserve_ids_and_duplicates() {
     let growable_push = ExternalFunctionId::CollectionPushGrowable;
     let fixed_push = ExternalFunctionId::CollectionPushFixed;
-    let growable_location = synthetic_span(10, 4);
-    let fixed_location = synthetic_span(10, 8);
+    let growable_location = call_site_span(10, 4);
+    let fixed_location = call_site_span(10, 8);
+    let repeated_growable_location = call_site_span(10, 12);
     let module = hir_module(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
@@ -107,6 +105,11 @@ fn reachable_collection_push_ids_remain_distinct() {
             vec![
                 call_statement_at(0, CallTarget::External(growable_push), growable_location),
                 call_statement_at(1, CallTarget::External(fixed_push), fixed_location),
+                call_statement_at(
+                    2,
+                    CallTarget::External(growable_push),
+                    repeated_growable_location,
+                ),
             ],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -118,14 +121,15 @@ fn reachable_collection_push_ids_remain_distinct() {
             .start_function
             .expect("normal test module should have start")],
     )
-    .expect("reachability should collect both collection push identities");
+    .expect("reachability should collect duplicate selected collection push calls");
 
     assert_reachability(&reachability, &[0], &[0], &[growable_push, fixed_push]);
     assert_reachable_external_calls(
         &reachability,
         &[
-            (growable_push, HirNodeId(0), growable_location),
-            (fixed_push, HirNodeId(1), fixed_location),
+            (growable_push, growable_location),
+            (fixed_push, fixed_location),
+            (growable_push, repeated_growable_location),
         ],
     );
 }
@@ -401,8 +405,8 @@ fn function_link_facts_reject_missing_function_provenance() {
 fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order() {
     let external_from_first_callee = ExternalFunctionId::Synthetic(220);
     let external_from_second_callee = ExternalFunctionId::Synthetic(221);
-    let second_callee_location = synthetic_span(30, 2);
-    let first_callee_successor_location = synthetic_span(40, 2);
+    let second_callee_location = call_site_span(30, 2);
+    let first_callee_successor_location = call_site_span(40, 2);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -465,16 +469,8 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
     assert_reachable_external_calls(
         &reachability,
         &[
-            (
-                external_from_second_callee,
-                HirNodeId(2),
-                second_callee_location,
-            ),
-            (
-                external_from_first_callee,
-                HirNodeId(3),
-                first_callee_successor_location,
-            ),
+            (external_from_second_callee, second_callee_location),
+            (external_from_first_callee, first_callee_successor_location),
         ],
     );
     assert_eq!(
@@ -666,6 +662,7 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
 #[test]
 fn custom_roots_are_supported_without_using_module_start() {
     let external_function = ExternalFunctionId::Synthetic(300);
+    let call_site_location = call_site_span(60, 2);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -680,7 +677,11 @@ fn custom_roots_are_supported_without_using_module_start() {
             ),
             block(
                 BlockId(1),
-                vec![call_statement(0, CallTarget::External(external_function))],
+                vec![call_statement_at(
+                    0,
+                    CallTarget::External(external_function),
+                    call_site_location,
+                )],
                 HirTerminator::Return(unit_expression(1)),
             ),
         ],
@@ -690,13 +691,13 @@ fn custom_roots_are_supported_without_using_module_start() {
         .expect("reachability should collect from explicit roots");
 
     assert_reachability(&reachability, &[1], &[1], &[external_function]);
-    assert_reachable_external_calls(&reachability, &[(external_function, HirNodeId(0), None)]);
+    assert_reachable_external_calls(&reachability, &[(external_function, call_site_location)]);
 }
 
 #[test]
 fn reachability_records_reachable_map_uses_only() {
-    let operation_location = synthetic_span(41, 4);
-    let unreachable_location = synthetic_span(50, 6);
+    let operation_location = call_site_span(41, 4);
+    let unreachable_location = call_site_span(50, 6);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -741,7 +742,10 @@ fn reachability_records_reachable_map_uses_only() {
 
     assert_eq!(
         reachable_map_use_summaries(&reachability),
-        vec![("literal".to_owned(), None), ("contains".to_owned(), None)],
+        vec![
+            ("literal".to_owned(), None),
+            ("contains".to_owned(), operation_location),
+        ],
         "only map uses in reachable blocks should be reported"
     );
 }
@@ -761,9 +765,9 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
         ),
         None,
     );
-    let first_location = synthetic_span(40, 2);
-    let second_location = synthetic_span(41, 4);
-    let unreachable_location = synthetic_span(50, 6);
+    let first_location = call_site_span(40, 2);
+    let second_location = call_site_span(41, 4);
+    let unreachable_location = call_site_span(50, 6);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -852,10 +856,10 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
         ),
         None,
     );
-    let outer_location = synthetic_span(40, 2);
-    let nested_branch_location = synthetic_span(41, 4);
-    let sibling_branch_location = synthetic_span(42, 6);
-    let after_branch_location = synthetic_span(43, 8);
+    let outer_location = call_site_span(40, 2);
+    let nested_branch_location = call_site_span(41, 4);
+    let sibling_branch_location = call_site_span(42, 6);
+    let after_branch_location = call_site_span(43, 8);
     let module = hir_module(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
@@ -1202,7 +1206,7 @@ fn cast_expression(id: u32) -> HirExpression {
         id: HirValueId(id),
         kind: HirExpressionKind::Cast {
             source: Box::new(int_expression(id + 1)),
-            policy: BuiltinCastPolicyId::IntToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         ty: builtin_type_ids::STRING,
         value_kind: ValueKind::RValue,
@@ -1258,8 +1262,8 @@ fn reachability_records_reachable_runtime_casts_only() {
 
 #[test]
 fn reachability_records_reachable_float_statements_only() {
-    let reachable_location = synthetic_span(30, 2);
-    let unreachable_location = synthetic_span(50, 4);
+    let reachable_location = call_site_span(30, 2);
+    let unreachable_location = call_site_span(50, 4);
     let module = hir_module(
         FunctionId(0),
         vec![
@@ -1346,25 +1350,17 @@ fn assert_reachability(
 
 fn assert_reachable_external_calls(
     reachability: &HirReachability,
-    expected_calls: &[(ExternalFunctionId, HirNodeId, Option<SourceSpan>)],
+    expected_calls: &[(ExternalFunctionId, Option<SourceSpan>)],
 ) {
     let actual_calls = reachability
         .reachable_external_calls
         .iter()
-        .map(|call| {
-            (
-                external_id_sort_key(&call.function_id),
-                call.statement_id.0,
-                call.span,
-            )
-        })
+        .map(|call| (external_id_sort_key(&call.function_id), call.span))
         .collect::<Vec<_>>();
 
     let expected_calls = expected_calls
         .iter()
-        .map(|(function_id, statement_id, span)| {
-            (external_id_sort_key(function_id), statement_id.0, *span)
-        })
+        .map(|(function_id, span)| (external_id_sort_key(function_id), *span))
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -1391,8 +1387,11 @@ fn reachable_map_use_summaries(
         .collect()
 }
 
-fn synthetic_span(_fixture_index: i32, _fixture_offset: i32) -> Option<SourceSpan> {
-    None
+fn call_site_span(start: u32, length: u32) -> Option<SourceSpan> {
+    let mut extended_spans = ExtendedSpanBuilder::default();
+    let local_span = LocalSpan::exact(start, length, &mut extended_spans)
+        .expect("small call-site fixture spans should fit inline");
+    Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local_span))
 }
 
 fn sorted_function_ids(reachability: &HirReachability) -> Vec<u32> {

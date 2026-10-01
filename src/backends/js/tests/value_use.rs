@@ -89,6 +89,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -222,6 +223,7 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -361,6 +363,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -453,6 +456,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -533,6 +537,7 @@ fn load_in_return_reads_value_without_cloning() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -615,6 +620,7 @@ fn copy_in_return_value_emits_clone_value() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -710,6 +716,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

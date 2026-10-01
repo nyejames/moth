@@ -3,7 +3,7 @@
 
 ## Design contract
 
-Different targets and profiles may receive different allocation, region, counted, handle and ownership representations. The compiler-owned memory planner selects them per physical variant, backend lowering encodes the result, and no target may receive different language semantics.
+Different targets and build profiles may receive different allocation, region, counted, handle and ownership representations. The compiler-owned memory planner selects them per physical variant, backend lowering encodes the result, and no target may receive different language semantics.
 
 Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, reactive liveness and identical observable results.
 
@@ -30,6 +30,38 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
 - A missing physical strategy after successful topology validation is `CompilerError`.
+- Numeric semantics are language-defined and target-independent. The compilation boundary's `NumericProfile` fixes `Int` width and `Float` precision before command inputs and config; lowerers realise that profile and never choose another.
+- Scalar storage size, alignment and computation carriers are separate from semantic type (`Scalar storage and carriers`) and move no memory-plan ownership. Scalar width may change concrete layout values inside a `ValidatedMemoryPlan`, but it does not change lifetime-topology legality or let a backend select its own memory strategy.
+
+## Scalar storage and carriers
+
+Semantic type, ordinary linear-memory storage and computation carrier are three
+separate facts. For the ordinary Wasm scalar layout:
+
+[codeblock, $code("text"):
+    I8/U8/Byte   1 byte   i32
+    I16/U16      2 bytes  i32
+    I32/U32      4 bytes  i32
+    I64/U64      8 bytes  i64
+    F16          2 bytes  f32
+    F32          4 bytes  f32
+    F64          8 bytes  f64
+    Int, Float   the boundary profile's scalar size   matching carrier
+]
+
+Natural alignment equals scalar byte size, and a scalar collection's stride is
+its scalar size. Narrow integer storage uses signed or unsigned narrow loads and
+narrow stores. `F16` storage converts binary16 bits to `F32` on load and rounds
+to binary16 bits on store; an `F32` arithmetic result carried in `f32` is not
+labelled `F16` before the specified narrowing boundary. Compact storage does not
+create a buffer source type, does not give `Byte` arithmetic, and keeps `Byte`
+nominally distinct from `U8`.
+
+These are target scalar facts derived from canonical numeric identity under the
+boundary `NumericProfile`. They create no allocation family and move no layout
+ownership: aggregate layout, allocation and every cleanup, count, ownership and
+coalescing decision remain with the `ValidatedMemoryPlan`. Other targets provide
+their own physical layout policy.
 
 ## Planning order
 
@@ -48,7 +80,7 @@ Physical memory strategy is chosen after target assignment, not before it.
         -> target-contract validation
         -> per-physical-variant family/layout refinement
         -> revalidate affected refined family-edge facts
-        -> target/profile-aware compiler-owned memory planning
+        -> target/build-profile-aware compiler-owned memory planning
         -> ValidatedMemoryPlan
         -> backend lowering
         -> collector-free artefact verification where required
@@ -58,7 +90,7 @@ Physical memory strategy is chosen after target assignment, not before it.
 
 Final physical ownership decisions and count transitions come only from the `ValidatedMemoryPlan`. Lowering starts after that plan has been validated.
 
-- A `ValidatedMemoryPlan` is scoped to one target/profile physical variant, never to the whole project.
+- A `ValidatedMemoryPlan` is scoped to one target/build-profile physical variant, never to the whole project.
 - Host GC versus affine, inferred-region, declared-region or REC representation is chosen by the compiler-owned planner, and only after target and build-profile information exists.
 - Lowerers receive the already selected plan for their variant.
 - Lowerers do not choose REC, GC, inferred-region or declared-region representation, and do not reconsider the plan.
@@ -67,7 +99,7 @@ Final physical ownership decisions and count transitions come only from the `Val
 
 ## ValidatedMemoryPlan contract
 
-A `ValidatedMemoryPlan` belongs to one target/profile physical-variant scope. It is not:
+A `ValidatedMemoryPlan` belongs to one target/build-profile physical-variant scope. It is not:
 
 - one plan per source module
 - one project-global physical plan
@@ -161,7 +193,13 @@ The representation can use host garbage collection, Wasm GC or a runtime tracing
 
 ## Profiles and backend capability
 
-Profiles differ only in analysis effort and physical representation, never in source legality.
+Build profiles differ only in analysis effort and physical representation, never
+in access or lifetime source legality. Numeric width and precision are not a
+build-profile choice: they come from the compiler-owned `NumericProfile`, fixed
+once per compilation boundary before command inputs and config, and lowerers
+consume it rather than selecting it. Different numeric profiles may change `Int`
+overflow limits, `Float` rounding and folded results, and the same profile must
+preserve behaviour across JS and Wasm.
 
 - Debug and development profiles may deliberately use a garbage-collected representation even where collector-free lowering is available, because debuggability, instrumentation, faster compilation and predictable runtime behaviour take priority.
 - GC-native backends may use their host collector on any profile.
@@ -208,6 +246,11 @@ The component may use any private allocation or garbage-collection strategy. Tha
 - variants whose payloads are supported values
 - options of supported values
 - recursively supported lists
+
+Foreign numeric widths project to explicit Moth widths rather than `Int` or
+`Float` (`docs/compiler-design-overview.md` > `Stable semantic identities` >
+`Compiler-owned and binding-backed symbols`); that mapping changes no lifetime or
+ownership fact on this page.
 
 ### Rejected V1 WIT surfaces
 
@@ -344,6 +387,7 @@ Backends may consume:
 - region/exit information
 - reactive invalidation and liveness metadata
 - external boundary classifications
+- the compilation boundary's `NumericProfile`, consumed rather than selected
 
 Advisory drop sites never form final backend input. The current Wasm path that consumes them remains explicitly labelled implementation debt above.
 

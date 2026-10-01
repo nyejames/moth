@@ -27,6 +27,14 @@ return path.
 A recovery handler must produce the success value required by the receiving
 site or leave explicitly with `return` or `return!`.
 
+### Conversion failure is separate
+
+A cast failure is a conversion failure. An operand's own numeric failure stays a
+checked numeric failure and follows the enclosing function's failure mode. It is
+not caught by `cast ... catch`, which recovers only from the conversion.
+
+A compound assignment converts at its store site under the same separation.
+
 ### Rules
 
 - `cast! expression catch:` is invalid.
@@ -35,6 +43,8 @@ site or leave explicitly with `return` or `return!`.
 - If the operand itself produces `Error!`, handle or propagate that operand before applying the cast.
 - Optional receiving contexts recover inner `T`, then wrap the successful or recovered value into `T?`.
 - `then none` is invalid in a cast recovery handler targeting `T?`.
+- Evidence is static. A compiler proof that a value is safe can fold a cast or remove its runtime check, but it never makes plain `cast` legal for a fallible type pair.
 
 Plain `cast` is not a promise that every source-target pair is infallible. It
-requires infallible evidence for the selected pair.
+requires infallible evidence for the selected pair. See @./#cast-evidence (Cast
+evidence) and @../numbers/#checked-arithmetic (Checked arithmetic).

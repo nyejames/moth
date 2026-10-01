@@ -241,6 +241,13 @@ impl<'a> BorrowChecker<'a> {
                         result: result_local,
                         ..
                     } if *result_local == local => Some(FunctionReturnAliasSummary::Fresh),
+                    HirStatementKind::FloatRangeCandidate {
+                        candidate_result,
+                        in_range_result,
+                        ..
+                    } if *candidate_result == local || *in_range_result == local => {
+                        Some(FunctionReturnAliasSummary::Fresh)
+                    }
                     _ => None,
                 };
 
@@ -380,6 +387,13 @@ impl<'a> BorrowChecker<'a> {
                         result: operation_result,
                         ..
                     } if *operation_result == result_local => {
+                        Some(FunctionReturnAliasSummary::Fresh)
+                    }
+                    HirStatementKind::FloatRangeCandidate {
+                        candidate_result,
+                        in_range_result,
+                        ..
+                    } if *candidate_result == result_local || *in_range_result == result_local => {
                         Some(FunctionReturnAliasSummary::Fresh)
                     }
                     _ => None,

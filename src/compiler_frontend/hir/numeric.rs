@@ -1,11 +1,18 @@
 //! HIR checked numeric operations.
 //!
 //! WHAT: defines the statement-level numeric operation surface used by HIR to expose checked
-//!       arithmetic, division/modulo-by-zero handling, and recoverable vs trapping failure modes.
+//!       arithmetic, division/modulo-by-zero handling, and recoverable vs trapping failure modes
+//!       as a backend-neutral operator plus a canonical numeric domain.
 //! WHY: numeric failures are semantic effects that belong in HIR, not in source expression trees,
 //!      so backends receive an explicit operation with a known failure mode instead of rediscovering
-//!      source operator fallibility.
+//!      source operator fallibility. Recording the operator and the domain separately keeps one
+//!      small operator vocabulary while later slices add fixed-width domains without multiplying
+//!      variants.
 
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 
 /// How a checked numeric operation should behave on failure.
@@ -34,53 +41,27 @@ pub enum NumericFailureMode {
     Trap,
 }
 
-/// A checked numeric operation kind used in HIR.
+/// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.
 ///
-/// WHAT: identifies the specific scalar arithmetic operation and its scalar kind.
-/// WHY: backends must know both the operation (add, div, pow, ...) and whether the operands are
-///      `Int` or `Float` so they can apply the correct checked runtime helper.
+/// WHAT: identifies scalar arithmetic and its result domain (`Int`, `Float`, a fixed scalar, or
+///       one exact `Dec` scale).
+/// WHY: backends consume one operator/domain fact rather than a target-specific operation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HirNumericOp {
-    IntAdd,
-    IntSub,
-    IntMul,
-    IntDiv,
-    IntMod,
-    IntPow,
-    IntNeg,
-    FloatAdd,
-    FloatSub,
-    FloatMul,
-    FloatDiv,
-    FloatMod,
-    FloatPow,
-    FloatNeg,
+pub struct HirNumericOp {
+    pub operator: NumericOperator,
+    pub domain: NumericScalar,
 }
 
 impl HirNumericOp {
-    /// Human-readable source-style name for debugging and HIR display.
-    pub(crate) fn source_name(self) -> &'static str {
-        match self {
-            HirNumericOp::IntAdd => "int_add",
-            HirNumericOp::IntSub => "int_sub",
-            HirNumericOp::IntMul => "int_mul",
-            HirNumericOp::IntDiv => "int_div",
-            HirNumericOp::IntMod => "int_mod",
-            HirNumericOp::IntPow => "int_pow",
-            HirNumericOp::IntNeg => "int_neg",
-            HirNumericOp::FloatAdd => "float_add",
-            HirNumericOp::FloatSub => "float_sub",
-            HirNumericOp::FloatMul => "float_mul",
-            HirNumericOp::FloatDiv => "float_div",
-            HirNumericOp::FloatMod => "float_mod",
-            HirNumericOp::FloatPow => "float_pow",
-            HirNumericOp::FloatNeg => "float_neg",
-        }
-    }
-
     /// Whether the operation takes one operand.
     pub(crate) fn is_unary(self) -> bool {
-        matches!(self, HirNumericOp::IntNeg | HirNumericOp::FloatNeg)
+        self.operator.is_unary()
+    }
+}
+
+impl Display for HirNumericOp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}.{}", self.domain, self.operator.name())
     }
 }
 
@@ -88,7 +69,8 @@ impl HirNumericOp {
 ///
 /// WHAT: represents either a unary or binary numeric operation in one HIR-local shape.
 /// WHY: keeps `HirStatementKind::NumericOp` a single variant while still distinguishing unary
-///      negation from binary arithmetic for validation and backend lowering.
+///      negation from binary arithmetic. Lowering converts operands to the domain except for the
+///      profile-`Int` exponent of a Dec power operation.
 #[derive(Debug, Clone)]
 pub enum HirNumericOperands {
     Unary {

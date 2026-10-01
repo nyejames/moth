@@ -73,7 +73,7 @@ pub(crate) fn parse_curly_literal_expression(
             }
         }
 
-        ExpectedType::Infer => ExpectedCurlyLiteralContext::Infer,
+        ExpectedType::DirectLiteral(_) | ExpectedType::Infer => ExpectedCurlyLiteralContext::Infer,
     };
     expression.push(ExpressionRpnItem::Operand(new_curly_literal(
         token_stream,

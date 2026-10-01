@@ -1,0 +1,3 @@
+number_to_float |value Dec0| -> Float:
+    return cast value
+;

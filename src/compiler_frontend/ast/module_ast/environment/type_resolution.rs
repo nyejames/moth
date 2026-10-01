@@ -839,6 +839,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validation_context.trait_evidence_environment,
             validation_context.visibility,
             &self.resolved_type_aliases_by_path,
+            self.context.numeric_profile,
         );
 
         let instance_name = self
@@ -1097,6 +1098,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
+            numeric_profile: self.context.numeric_profile,
             source_token_owners: self.source_token_owners.clone(),
         });
 

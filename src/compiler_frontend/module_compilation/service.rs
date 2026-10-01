@@ -11,6 +11,7 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -534,13 +535,18 @@ fn run_semantic_stages(
         ast: mut module_ast,
         public_interface_projection_input,
         module_resources,
-        materialisation_context: mut materialisation_context_builder,
+        materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
     } = module_ast_build;
 
     let module_resources = module_resources.ok_or_else(|| {
         CompilerError::compiler_error(
             "module AST finalization did not retain its module resource table",
+        )
+    })?;
+    let mut materialisation_context_builder = materialisation_context_builder.ok_or_else(|| {
+        CompilerError::compiler_error(
+            "module AST finalization did not retain its materialisation context",
         )
     })?;
     // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
@@ -806,6 +812,15 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
+    // Conservative bounded-integer proofs are computed once per executable from the validated
+    // HIR under the boundary profile, before publication pairs them immutably. Convergence only
+    // touched call summaries and the borrow report, so statement ids are final here.
+    let numeric_proofs = analyse_numeric_proofs(
+        &hir_module,
+        &type_environment,
+        context.options.numeric_profile,
+    );
+
     Ok(SemanticStageOutput::Complete(Box::new(
         CompleteSemanticStage {
             module: Module {
@@ -814,6 +829,7 @@ fn run_semantic_stages(
                     resource_table,
                     type_environment,
                     borrow_analysis,
+                    numeric_proofs,
                     path_table: Arc::new(
                         crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new(
                         )

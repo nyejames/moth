@@ -9,12 +9,8 @@ rendered_output_contains = ["core_random value=", " count="]
 path = "index.html"
 kind = "html"
 must_contain = [
-    "Math.random()",
     "function __moth_random_int(",
     "__moth_random_int(1, 3)",
-]
-must_not_contain = [
-    "function __moth_random_float(",
 ]
 
 [backends.html_wasm]

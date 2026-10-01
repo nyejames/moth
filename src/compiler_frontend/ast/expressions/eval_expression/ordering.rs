@@ -39,7 +39,11 @@ pub(super) fn order_expression_nodes(
     for node in nodes {
         eval_log!("Evaluating node in expression: ", Pretty node);
         match &node {
-            ExpressionRpnItem::Operand(..) => output_queue.push(node),
+            ExpressionRpnItem::Operand(..) | ExpressionRpnItem::PendingNumericLiteral { .. } => {
+                // Pending literals are typed immediately after ordering, before operator typing or
+                // folding can observe the RPN.
+                output_queue.push(node);
+            }
 
             ExpressionRpnItem::Operator { operator, .. } => {
                 let current_precedence = operator.precedence();
@@ -117,7 +121,10 @@ pub(super) fn extract_expression_span(
 
     // Skip operator nodes and return the span of the first expression node.
     for node in nodes {
-        if matches!(node, ExpressionRpnItem::Operand(_)) {
+        if matches!(
+            node,
+            ExpressionRpnItem::Operand(_) | ExpressionRpnItem::PendingNumericLiteral { .. }
+        ) {
             return Ok(node.source_span());
         }
     }

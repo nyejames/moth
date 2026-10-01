@@ -27,6 +27,7 @@ fn all_functions_is_default_for_direct_js_lowering() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -70,10 +71,12 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
         JsFunctionEmissionPolicy::Selected(reachability.backend_selection().clone());
 
     let borrow_analysis = BorrowCheckReport::default();
+    let numeric_proofs = NumericProofs::default();
     let path_table = path_fork.snapshot_table();
     let mut emitter = crate::backends::js::JsEmitter::new(
         &module,
         &borrow_analysis,
+        &numeric_proofs,
         &string_table,
         &path_table,
         config.clone(),
@@ -88,6 +91,7 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         config,
         &type_environment,

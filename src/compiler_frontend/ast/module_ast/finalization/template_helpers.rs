@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -80,6 +81,7 @@ pub(super) fn finalize_template_value(
     let mut fold_context = make_fold_context(
         fold_inputs.string_table,
         fold_inputs.template_const_loop_iteration_limit,
+        fold_inputs.numeric_profile,
     );
     let result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
     let provenance = result.provenance;
@@ -116,6 +118,7 @@ pub(super) struct TemplateValueFinalizationInputs<'store, 'strings> {
     pub(super) string_table: &'strings mut StringTable,
     pub(super) template_const_loop_iteration_limit: usize,
     pub(super) template_ir_store: &'store Rc<RefCell<TemplateIrStore>>,
+    pub(super) numeric_profile: NumericProfile,
 }
 
 /// Creates a narrow TIR fold context from finalization parameters.
@@ -123,10 +126,13 @@ pub(super) struct TemplateValueFinalizationInputs<'store, 'strings> {
 pub(super) fn make_fold_context<'a>(
     string_table: &'a mut StringTable,
     template_const_loop_iteration_limit: usize,
+    numeric_profile: NumericProfile,
 ) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit,
+        numeric_profile,
         bindings: Vec::new(),
+        source_scope: None,
     }
 }

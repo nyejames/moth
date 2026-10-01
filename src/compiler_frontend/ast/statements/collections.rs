@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -221,6 +222,7 @@ fn parse_collection_literal(
                     parsed_item,
                     *expected_item_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -302,7 +304,8 @@ fn parse_collection_literal(
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum KnownMapKey {
     String(StringId),
-    Int(i32),
+    Int(i64),
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
 }
@@ -332,6 +335,7 @@ fn try_extract_known_map_key(
             KnownMapKey::String(id)
         }
         ExpressionKind::Int(v) => KnownMapKey::Int(*v),
+        ExpressionKind::FixedScalar(v) => KnownMapKey::FixedScalar(*v),
         ExpressionKind::Bool(v) => KnownMapKey::Bool(*v),
         ExpressionKind::Char(v) => KnownMapKey::Char(*v),
         _ => return Ok(None),
@@ -593,6 +597,7 @@ fn parse_map_literal(
                     parsed_key,
                     key_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -600,6 +605,7 @@ fn parse_map_literal(
                     parsed_value,
                     value_type_id,
                     type_interner.environment(),
+                    context.numeric_profile.float_precision,
                     TypeMismatchContext::CollectionElement,
                 )?;
 
@@ -722,6 +728,7 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 key_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -729,6 +736,7 @@ fn parse_inferred_curly_literal(
                 first_value,
                 value_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -829,6 +837,7 @@ fn parse_inferred_curly_literal(
                             parsed_key,
                             key_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -836,6 +845,7 @@ fn parse_inferred_curly_literal(
                             parsed_value,
                             value_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 
@@ -889,6 +899,7 @@ fn parse_inferred_curly_literal(
                 first_expr,
                 element_type_id,
                 type_interner.environment(),
+                context.numeric_profile.float_precision,
                 TypeMismatchContext::CollectionElement,
             )?;
 
@@ -955,6 +966,7 @@ fn parse_inferred_curly_literal(
                             parsed_item,
                             element_type_id,
                             type_interner.environment(),
+                            context.numeric_profile.float_precision,
                             TypeMismatchContext::CollectionElement,
                         )?;
 

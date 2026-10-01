@@ -1,0 +1,27 @@
+Box type T = |
+    value T,
+|
+
+Pair type L, R = |
+    numeric_value L,
+    label R,
+|
+
+Maybe type T ::
+    Some | value T |,
+;
+
+boxed_positional #Box of U8 = Box(200)
+boxed_named #Box of U8 = Box(value = 255)
+boxed_float #Box of F32 = Box(1.5)
+pair #Pair of U8, String = Pair(7, "x")
+selected #Maybe of U8 = Maybe::Some(9)
+small #U8 = 7
+widened #Box of U16 = Box(cast small)
+
+boxed_positional_text #String = cast boxed_positional.value
+boxed_named_text #String = cast boxed_named.value
+boxed_float_text #String = cast boxed_float.value
+pair_number_text #String = cast pair.numeric_value
+widened_text #String = cast widened.value
+[: generic literals: [boxed_positional_text] [boxed_named_text] [boxed_float_text] [pair_number_text] [pair.label] [widened_text]]

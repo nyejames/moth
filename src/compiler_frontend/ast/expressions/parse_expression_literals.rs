@@ -23,7 +23,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
+use crate::compiler_frontend::numeric_text::parse::{
+    materialize_float, materialize_int, materialize_number,
+};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,9 +64,10 @@ pub(super) struct LiteralParseState<'a> {
 /// WHY: literals are self-contained tokens that do not need identifier resolution or
 /// postfix chaining, so they can be validated and emitted in one step.
 ///
-/// Signed numeric tokens are materialized directly from their token metadata. The
+/// Numeric literals without a typed suffix are retained as pending items for
+/// destination-aware materialisation in `evaluate_expression`. The
 /// `next_number_negative` fallback keeps parser-owned unary negation and hand-built test streams
-/// on the same signed-i32 boundary policy as tokenizer-signed literals.
+/// on the same boundary-width policy as tokenizer-signed literals.
 pub(super) fn parse_literal_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -75,56 +78,103 @@ pub(super) fn parse_literal_expression(
 ) -> Result<(), ExpressionParseError> {
     match token_stream.current_tag() {
         TokenTag::NUMERIC_LITERAL => {
-            let token = token_stream
+            let mut token = token_stream
                 .current_numeric_literal_in(string_table)?
                 .ok_or_else(|| {
                     CompilerError::compiler_error("numeric literal token had no payload")
                 })?;
             let span = Some(token_stream.current_span());
 
-            let expression = if token.kind == NumericLiteralKind::WholeNumber {
-                let effective_sign =
-                    if *state.next_number_negative && token.sign == NumericLiteralSign::Positive {
-                        NumericLiteralSign::Negative
-                    } else {
-                        token.sign
-                    };
-                *state.next_number_negative = false;
+            // Fold parser-owned unary negation into the token sign now, so the retained
+            // literal carries one effective sign exactly like tokenizer-signed literals.
+            if *state.next_number_negative && token.sign == NumericLiteralSign::Positive {
+                token.sign = NumericLiteralSign::Negative;
+            }
+            *state.next_number_negative = false;
 
-                let value_i32 = materialize_i32_with_sign(&token, effective_sign, string_table)
+            if typed_suffix_follows(token_stream, 1) {
+                // Member access, fallible handling and option propagation need a typed
+                // operand, so this path materialises using any exact receiving Dec identity.
+                let number_destination = state
+                    .expected_type
+                    .literal_destination_type_id()
+                    .map(|type_id| {
+                        type_interner
+                            .environment()
+                            .option_inner_type(type_id)
+                            .unwrap_or(type_id)
+                    })
+                    .and_then(|type_id| {
+                        type_interner
+                            .environment()
+                            .number_scale(type_id)
+                            .map(|scale| (scale, type_id))
+                    });
+                let expression = if let Some((scale, type_id)) = number_destination {
+                    let value = materialize_number(&token, token.sign, scale, string_table)
+                        .map_err(|reason| {
+                            CompilerDiagnostic::invalid_number_literal(
+                                token.source_text,
+                                reason,
+                                span,
+                            )
+                        })?;
+                    Expression::number(value, type_id, span, state.value_mode.to_owned())
+                } else if token.kind == NumericLiteralKind::WholeNumber {
+                    let value = materialize_int(
+                        &token,
+                        token.sign,
+                        context.numeric_profile.int_width,
+                        string_table,
+                    )
                     .map_err(|reason| {
                         // Use authored source text so diagnostics report the original literal.
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                Expression::int(value_i32, span, state.value_mode.to_owned())
-            } else {
-                let mut value = materialize_f64(&token, string_table).map_err(|reason| {
-                    // Use authored source text so diagnostics report the original literal.
-                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
-                })?;
+                    Expression::int(value, span, state.value_mode.to_owned())
+                } else {
+                    // The sign was already folded above, so materialising the signed
+                    // token rounds once at the boundary precision; negation is exact.
+                    let value = materialize_float(
+                        &token,
+                        context.numeric_profile.float_precision,
+                        string_table,
+                    )
+                    .map_err(|reason| {
+                        // Use authored source text so diagnostics report the original literal.
+                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
+                    })?;
 
-                if *state.next_number_negative {
-                    *state.next_number_negative = false;
-                    if token.sign == NumericLiteralSign::Positive {
-                        value = -value;
-                    }
-                }
+                    Expression::float(value, span, state.value_mode.to_owned())
+                };
 
-                Expression::float(value, span, state.value_mode.to_owned())
-            };
+                token_stream.advance();
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    state.expression,
+                    state.allow_boundary_catch,
+                    expression,
+                    path_fork,
+                )?;
+                return Ok(());
+            }
 
+            // No typed suffix follows: retain the literal for destination-aware
+            // materialisation once `evaluate_expression` knows the receiving type.
+            // Adjacency was already rejected by dispatch, and the suffix checks above
+            // ruled out postfix/fallible/option handling, so a direct push is exact.
             token_stream.advance();
-            push_expression_operand(
-                token_stream,
-                context,
-                type_interner,
-                string_table,
-                state.expression,
-                state.allow_boundary_catch,
-                expression,
-                path_fork,
-            )?;
+            state
+                .expression
+                .push(ExpressionRpnItem::PendingNumericLiteral {
+                    token,
+                    span,
+                    value_mode: state.value_mode.to_owned(),
+                });
             Ok(())
         }
 
@@ -207,7 +257,8 @@ pub(super) fn parse_literal_expression(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
                         span,
-                    )
+                                        None,
+)
                     .into());
                     };
 
@@ -224,6 +275,7 @@ pub(super) fn parse_literal_expression(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
                         span,
+                        None,
                     )
                     .into());
                 };
@@ -250,6 +302,37 @@ pub(super) fn parse_literal_expression(
         }
 
         _ => Ok(()),
+    }
+}
+
+/// True when the token at `offset` (skipping newlines) needs a typed operand before it.
+///
+/// WHAT: peeks the unconsumed stream for member access (`.`), fallible handling (`!`,
+///       `catch`, a `name!` suffix) and option propagation (`?`). A literal passes offset 1
+///       (the token after itself); a closed group passes offset 0.
+/// WHY: those suffixes resolve through `push_expression_operand`, which needs a typed
+///      `Expression`, so a literal (or a group of one literal) followed by one keeps the
+///      eager default path instead of deferring for destination-aware materialisation.
+pub(super) fn typed_suffix_follows(token_stream: &AstCursor, mut offset: usize) -> bool {
+    while token_stream
+        .token_ref_at_offset(offset)
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
+        offset = offset.saturating_add(1);
+    }
+
+    let Some(next) = token_stream.token_ref_at_offset(offset) else {
+        return false;
+    };
+
+    match next.tag() {
+        TokenTag::DOT | TokenTag::BANG | TokenTag::CATCH | TokenTag::QUESTION_MARK => true,
+
+        TokenTag::SYMBOL => token_stream
+            .token_ref_at_offset(offset.saturating_add(1))
+            .is_some_and(|following| following.tag() == TokenTag::BANG),
+
+        _ => false,
     }
 }
 

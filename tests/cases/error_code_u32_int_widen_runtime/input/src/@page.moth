@@ -1,0 +1,23 @@
+-- Explicit Int -> U32 casts re-enter ordinary Error! recovery: a fitting
+-- source widens at runtime, a negative source fails with the existing cast
+-- failure which callers recover from like any other error.
+widen_code |value Int| -> U32, Error!:
+    return cast! value
+;
+
+positive_wide_code ~U32 = 0
+positive_wide = widen_code(41) catch |positive_err|:
+    positive_wide_code = positive_err.code
+    then 0
+;
+
+negative_code ~U32 = 0
+negative_wide = widen_code(-1) catch |negative_err|:
+    negative_code = negative_err.code
+    then 0
+;
+
+positive_bound = positive_wide is 41
+negative_is_cast_failure = negative_code is 242
+
+[:int widen runtime code=[positive_wide]/[positive_wide_code] negative-code=[negative_wide]/[negative_code] positive-bound=[positive_bound] negative-is-cast-failure=[negative_is_cast_failure]]

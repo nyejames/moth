@@ -65,6 +65,14 @@ impl GenericTypeBindings {
     pub(crate) fn get(&self, parameter_id: GenericParameterId) -> Option<TypeId> {
         self.replacements.get(&parameter_id).copied()
     }
+    /// Borrow the substitutions for consumers that materialise partially-bound types.
+    ///
+    /// WHAT: exposes the canonical replacement map without transferring or duplicating it.
+    /// WHY: constructor parsing applies contextual generic bindings to field expectations
+    ///      while retaining the same bindings for the later inference stage.
+    pub(crate) fn replacement_map(&self) -> &FxHashMap<GenericParameterId, TypeId> {
+        &self.replacements
+    }
 
     pub(crate) fn concrete_arguments_for(
         &self,

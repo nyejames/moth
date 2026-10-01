@@ -2,7 +2,7 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
+    ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionLowerings, ExternalFunctionSpec,
@@ -20,8 +20,8 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
         .register_package("@core/math", crate::builder_surface::PackageOrigin::Core)
         .expect("builtin package registration should not collide");
 
-    let math_f64_param = || ExternalParameter {
-        language_type: ExternalSignatureType::Abi(ExternalAbiType::F64),
+    let math_float_param = || ExternalParameter {
+        language_type: ExternalSignatureType::NativeFloat,
         access_kind: ExternalAccessKind::Shared,
     };
 
@@ -185,7 +185,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
 
     for function in math_functions {
         let parameters: Vec<ExternalParameter> = (0..function.parameter_count)
-            .map(|_| math_f64_param())
+            .map(|_| math_float_param())
             .collect();
 
         registry
@@ -195,7 +195,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                     name: function.name.to_owned(),
                     parameters,
                     returns: external_success_returns(
-                        ExternalAbiType::F64,
+                        ExternalSignatureType::NativeFloat,
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
@@ -231,7 +231,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                 package_id,
                 ExternalConstantDef {
                     name: name.to_owned(),
-                    data_type: ExternalAbiType::F64,
+                    data_type: ExternalSignatureType::NativeFloat,
                     value,
                 },
             )

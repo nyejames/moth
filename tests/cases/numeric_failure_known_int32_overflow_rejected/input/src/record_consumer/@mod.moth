@@ -1,0 +1,5 @@
+@provider counts
+
+overflow || -> Int:
+    return counts.top + 1
+;

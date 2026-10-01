@@ -15,7 +15,7 @@ use crate::compiler_frontend::datatypes::ids::{
     NominalTypeId, TypeConstructor, TypeId,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -61,6 +61,24 @@ fn register_empty_generic_struct(
     nominal_id
 }
 
+fn single_generic_parameter_list(
+    name: &str,
+    string_table: &mut StringTable,
+) -> (GenericParameterList, StringId) {
+    let parameter_name = string_table.intern(name);
+    (
+        GenericParameterList {
+            parameters: vec![GenericParameter {
+                id: TypeParameterId(0),
+                name: parameter_name,
+                span: None,
+                trait_bounds: Vec::new(),
+            }],
+        },
+        parameter_name,
+    )
+}
+
 /// Owns the hidden `GenericParameterScope` membership algorithm, not source acceptance.
 ///
 /// WHAT: valid names build a scope whose `contains_name` lookup resolves every interned
@@ -68,6 +86,7 @@ fn register_empty_generic_struct(
 /// WHY: source acceptance of valid parameter names is integration-owned. This unit stays
 ///      because the interned-name to scope-membership mapping is a hidden data-structure
 ///      fact that integration output cannot inspect.
+
 #[test]
 fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
     let mut string_table = StringTable::new();
@@ -108,6 +127,76 @@ fn generic_scope_accepts_pascal_case_and_single_uppercase_names() {
     assert!(scope.contains_name(item_name));
     assert!(scope.contains_name(t_name));
     assert!(scope.contains_name(error_kind_name));
+}
+
+#[test]
+fn generic_parameters_reserve_dec_family_and_reclaim_number_names() {
+    use crate::compiler_frontend::compiler_messages::{
+        DiagnosticPayload, InvalidDeclarationReason,
+    };
+
+    for name in [
+        "Dec", "dec", "DEC", "_Dec", "__dec0", "Dec2", "DEC256", "Dec01", "Dec257",
+    ] {
+        let mut string_table = StringTable::new();
+        let (list, _) = single_generic_parameter_list(name, &mut string_table);
+        let Err(diagnostic) = GenericParameterScope::from_parameter_list(
+            &list,
+            None,
+            &FxHashSet::default(),
+            &string_table,
+        ) else {
+            panic!("{name} must be reserved as a generic parameter");
+        };
+        assert!(
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidDeclaration {
+                    reason: InvalidDeclarationReason::ReservedGenericParameterName { .. },
+                    ..
+                }
+            ),
+            "{name} must fail through the reserved generic-name diagnostic"
+        );
+    }
+
+    for name in ["DecBox", "Decimal", "Number", "Number2", "Number256"] {
+        let mut string_table = StringTable::new();
+        let (list, parameter_name) = single_generic_parameter_list(name, &mut string_table);
+        let scope = GenericParameterScope::from_parameter_list(
+            &list,
+            None,
+            &FxHashSet::default(),
+            &string_table,
+        )
+        .unwrap_or_else(|diagnostic| {
+            panic!("{name} should be available as a generic parameter: {diagnostic:?}")
+        });
+        assert!(scope.contains_name(parameter_name));
+    }
+
+    for name in ["number", "dec2extra"] {
+        let mut string_table = StringTable::new();
+        let (list, _) = single_generic_parameter_list(name, &mut string_table);
+        let Err(diagnostic) = GenericParameterScope::from_parameter_list(
+            &list,
+            None,
+            &FxHashSet::default(),
+            &string_table,
+        ) else {
+            panic!("{name} should fail the generic-name shape rule");
+        };
+        assert!(
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidDeclaration {
+                    reason: InvalidDeclarationReason::InvalidGenericParameterName { .. },
+                    ..
+                }
+            ),
+            "{name} must fail the generic-name shape rule, not reservation"
+        );
+    }
 }
 
 #[test]

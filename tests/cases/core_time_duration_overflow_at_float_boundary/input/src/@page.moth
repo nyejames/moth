@@ -45,8 +45,10 @@ read_absolute_not_a_number || -> Float, Error!:
 ;
 
 opaque = survive_scale()
-overflow = read_overflow() catch |err|:
-    then err.code
+overflow_code ~U32 = 0
+overflow_value = read_overflow() catch |err|:
+    overflow_code = err.code
+    then 0
 ;
 
 recovered = recover_by_clamp() catch |recover_err|:
@@ -54,11 +56,15 @@ recovered = recover_by_clamp() catch |recover_err|:
 ;
 
 not_a_number_negative = clamp_not_a_number()
-clamped_not_a_number = read_clamped_not_a_number() catch |clamped_err|:
-    then clamped_err.code
+clamped_code ~U32 = 0
+clamped_value = read_clamped_not_a_number() catch |clamped_err|:
+    clamped_code = clamped_err.code
+    then 0
 ;
-absolute_not_a_number = read_absolute_not_a_number() catch |absolute_err|:
-    then absolute_err.code
+absolute_code ~U32 = 0
+absolute_value = read_absolute_not_a_number() catch |absolute_err|:
+    absolute_code = absolute_err.code
+    then 0
 ;
 
-[:duration_overflow opaque=[opaque] code=[overflow] recovered=[recovered] nan_negative=[not_a_number_negative] nan_clamp_code=[clamped_not_a_number] nan_abs_code=[absolute_not_a_number]]
+[:duration_overflow opaque=[opaque] code=[overflow_code] recovered=[recovered] nan_negative=[not_a_number_negative] nan_clamp_code=[clamped_code] nan_abs_code=[absolute_code]]

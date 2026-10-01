@@ -15,6 +15,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticPayload, InvalidConfigReason, PremergeFailure,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -84,6 +85,7 @@ fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("different source contracts should produce a conflict");
     assert!(matches!(
@@ -146,6 +148,7 @@ fn mapped_unknown_build_config_input_preserves_spanlessness_and_argument_index()
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("an input without a selected contract should be unknown");
     assert!(matches!(
@@ -212,6 +215,7 @@ fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index(
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("a String should not satisfy an Int contract");
     assert!(matches!(
@@ -267,6 +271,7 @@ fn mapped_missing_source_contract_publishes_exact_primary_span() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("a required source contract without a value should fail");
     assert!(matches!(

@@ -6,6 +6,8 @@
 
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstantDef,
     ExternalConstantId, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionId,
@@ -370,9 +372,80 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
 fn scalar_int_constant(name: &str, value: i32) -> ExternalConstantDef {
     ExternalConstantDef {
         name: name.to_owned(),
-        data_type: ExternalAbiType::I32,
+        data_type: ExternalAbiType::I32.into(),
         value: ExternalConstantValue::Int(value),
     }
+}
+
+#[test]
+fn constant_registration_rejects_mismatched_numeric_payload_types_without_publishing() {
+    let mut registry = ExternalPackageRegistry::default();
+    let package_id = registry
+        .register_package(
+            "@test/constant_types",
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("test package should register");
+    let mismatches = [
+        (
+            "F64_WITH_INT",
+            ExternalSignatureType::Abi(ExternalAbiType::F64),
+            ExternalConstantValue::Int(7),
+        ),
+        (
+            "I32_WITH_FLOAT",
+            ExternalSignatureType::Abi(ExternalAbiType::I32),
+            ExternalConstantValue::Float(1.5),
+        ),
+    ];
+
+    for (index, (name, data_type, value)) in mismatches.iter().enumerate() {
+        let name = *name;
+        let data_type = (*data_type).clone();
+        let value = *value;
+        let path = ExternalSymbolPath::from_single(name);
+        registry
+            .register_constant_at_path(
+                package_id,
+                path.clone(),
+                ExternalConstantId(702 + index as u32),
+                ExternalConstantDef {
+                    name: name.to_owned(),
+                    data_type: data_type.clone(),
+                    value,
+                },
+            )
+            .expect_err("a numeric payload must match its declared semantic type");
+
+        assert!(
+            registry
+                .resolve_package_constant_by_path("@test/constant_types", &path)
+                .is_none(),
+            "a mismatched constant must not be published"
+        );
+    }
+
+    let valid_path = ExternalSymbolPath::from_single("VALID_F64");
+    registry
+        .register_constant_at_path(
+            package_id,
+            valid_path.clone(),
+            ExternalConstantId(704),
+            ExternalConstantDef {
+                name: "VALID_F64".to_owned(),
+                data_type: ExternalSignatureType::Abi(ExternalAbiType::F64),
+                value: ExternalConstantValue::Float(3.25),
+            },
+        )
+        .expect("a matching F64 constant should register");
+    let (_, valid_constant) = registry
+        .resolve_package_constant_by_path("@test/constant_types", &valid_path)
+        .expect("the matching F64 constant should resolve");
+    assert_eq!(
+        valid_constant.data_type,
+        ExternalSignatureType::Abi(ExternalAbiType::F64)
+    );
+    assert_eq!(valid_constant.value, ExternalConstantValue::Float(3.25));
 }
 
 #[test]
@@ -718,7 +791,7 @@ fn function_constant_collision_at_same_path_rejected() {
         ExternalConstantId(41),
         ExternalConstantDef {
             name: "foo".to_owned(),
-            data_type: ExternalAbiType::F64,
+            data_type: ExternalAbiType::F64.into(),
             value: ExternalConstantValue::Float(1.0),
         },
     );
@@ -819,6 +892,146 @@ fn string_content_resolves_to_string_datatype() {
     assert_eq!(
         ExternalSignatureType::StringContent.to_datatype(),
         Some(DataType::StringSlice)
+    );
+}
+
+#[test]
+fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
+    let mut type_environment = TypeEnvironment::new();
+    let native_int_id = type_environment.builtins().int;
+    let native_float_id = type_environment.builtins().float;
+    let builtin_error_type_id = type_environment.builtins().none;
+    let fixed_i32_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let fixed_f64_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
+
+    let native_int = ExternalSignatureType::NativeInt;
+    let native_float = ExternalSignatureType::NativeFloat;
+    let abi_i32 = ExternalSignatureType::Abi(ExternalAbiType::I32);
+    let abi_f64 = ExternalSignatureType::Abi(ExternalAbiType::F64);
+
+    assert_eq!(native_int.to_datatype(), Some(DataType::Int));
+    assert_eq!(native_float.to_datatype(), Some(DataType::Float));
+    assert_eq!(
+        native_int.to_parameter_type_id(&mut type_environment),
+        Some(native_int_id),
+    );
+    assert_eq!(
+        native_float.to_parameter_type_id(&mut type_environment),
+        Some(native_float_id),
+    );
+    assert_eq!(
+        native_int.to_type_id(&mut type_environment, builtin_error_type_id),
+        Some(native_int_id),
+    );
+    assert_eq!(
+        native_float.to_type_id(&mut type_environment, builtin_error_type_id),
+        Some(native_float_id),
+    );
+
+    assert_eq!(
+        abi_i32.to_datatype(),
+        Some(DataType::FixedScalar(FixedScalar::I32)),
+    );
+    assert_eq!(
+        abi_f64.to_datatype(),
+        Some(DataType::FixedScalar(FixedScalar::F64)),
+    );
+    assert_eq!(
+        abi_i32.to_type_id(&mut type_environment, builtin_error_type_id),
+        Some(fixed_i32_id),
+    );
+    assert_eq!(
+        abi_f64.to_type_id(&mut type_environment, builtin_error_type_id),
+        Some(fixed_f64_id),
+    );
+    assert_eq!(
+        abi_i32.to_parameter_type_id(&mut type_environment),
+        Some(fixed_i32_id),
+    );
+    assert_eq!(
+        abi_f64.to_parameter_type_id(&mut type_environment),
+        Some(fixed_f64_id),
+    );
+    assert_ne!(native_int_id, fixed_i32_id);
+    assert_ne!(native_float_id, fixed_f64_id);
+
+    let native_returns = external_success_returns(native_float, ExternalReturnAlias::Fresh);
+    assert_eq!(native_returns.len(), 1);
+    assert_eq!(
+        native_returns[0].value_type,
+        ExternalSignatureType::NativeFloat
+    );
+    assert!(
+        external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh).is_empty(),
+        "Void must continue to produce no success-return slot",
+    );
+}
+
+#[test]
+fn core_numeric_package_signatures_remain_native_language_types() {
+    let mut registry = ExternalPackageRegistry::new();
+    crate::builder_surface::core_packages::register_core_math_package(&mut registry);
+    crate::builder_surface::core_packages::register_core_random_package(&mut registry);
+    crate::builder_surface::core_packages::register_core_text_package(&mut registry);
+    crate::builder_surface::core_packages::register_core_time_package(&mut registry);
+
+    let (_, sin) = registry
+        .resolve_package_function("@core/math", "sin")
+        .expect("core math function should be registered");
+    assert_eq!(
+        sin.parameters[0].language_type,
+        ExternalSignatureType::NativeFloat
+    );
+    assert_eq!(
+        sin.returns[0].value_type,
+        ExternalSignatureType::NativeFloat
+    );
+    let (_, pi) = registry
+        .resolve_package_constant("@core/math", "PI")
+        .expect("core math constant should be registered");
+    assert_eq!(pi.data_type, ExternalSignatureType::NativeFloat);
+
+    let (_, random_int) = registry
+        .resolve_package_function("@core/random", "random_int")
+        .expect("core random function should be registered");
+    assert!(
+        random_int
+            .parameters
+            .iter()
+            .all(|parameter| parameter.language_type == ExternalSignatureType::NativeInt)
+    );
+    assert_eq!(
+        random_int.returns[0].value_type,
+        ExternalSignatureType::NativeInt,
+    );
+
+    let (_, text_length) = registry
+        .resolve_package_function("@core/text", "length")
+        .expect("core text length function should be registered");
+    assert_eq!(
+        text_length.returns[0].value_type,
+        ExternalSignatureType::NativeInt,
+    );
+    let collection_length = registry
+        .get_function_by_id(ExternalFunctionId::CollectionLength)
+        .expect("core collection length function should be registered");
+    assert_eq!(
+        collection_length.returns[0].value_type,
+        ExternalSignatureType::NativeInt,
+    );
+    let pointer_x = registry
+        .get_function_by_id(ExternalFunctionId::IoInputPointerX)
+        .expect("core pointer_x function should be registered");
+    assert_eq!(
+        pointer_x.returns[0].value_type,
+        ExternalSignatureType::NativeFloat,
+    );
+    let (_, as_seconds) = registry
+        .resolve_package_function("@core/time", "as_seconds")
+        .expect("core time function should be registered");
+    assert_eq!(
+        as_seconds.returns[0].value_type,
+        ExternalSignatureType::NativeFloat,
     );
 }
 

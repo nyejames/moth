@@ -1,0 +1,4 @@
+calls ~Int = 0
+calls += 41
+
+rejected = Error(code = calls, message = "int variable without cast")

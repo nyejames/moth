@@ -37,6 +37,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
@@ -159,11 +160,22 @@ impl<'a> HirBuilder<'a> {
                 expr.type_id,
                 HirExpressionKind::Int(*value),
             ),
+            ExpressionKind::Number(value) => self.lower_literal_expression(
+                &expr.span,
+                expr.type_id,
+                HirExpressionKind::Number(value.clone()),
+            ),
 
             ExpressionKind::Float(value) => self.lower_literal_expression(
                 &expr.span,
                 expr.type_id,
                 HirExpressionKind::Float(*value),
+            ),
+
+            ExpressionKind::FixedScalar(value) => self.lower_literal_expression(
+                &expr.span,
+                expr.type_id,
+                HirExpressionKind::FixedScalar(*value),
             ),
 
             ExpressionKind::Bool(value) => self.lower_literal_expression(
@@ -768,6 +780,8 @@ impl<'a> HirBuilder<'a> {
                     self.expression_needs_current_block_lowering(expression)
                 }
                 ExpressionRpnItem::Operator { .. } => false,
+                // Resolution removes pending literals before this stage.
+                ExpressionRpnItem::PendingNumericLiteral { .. } => false,
             }),
             ExpressionKind::Template(_) => true,
             ExpressionKind::RuntimeTemplateHandoff(_)
@@ -776,6 +790,8 @@ impl<'a> HirBuilder<'a> {
 
             ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::FixedScalar(_)
+            | ExpressionKind::Number(_)
             | ExpressionKind::Bool(_)
             | ExpressionKind::Char(_)
             | ExpressionKind::StringSlice(_)
@@ -956,6 +972,9 @@ impl<'a> HirBuilder<'a> {
                 CastHandling::Propagate | CastHandling::Recover => {
                     self.lower_fallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
                 }
+                CastHandling::StoreConversion => {
+                    self.lower_store_conversion_cast_expression(cast, *policy, expr_type_id, span)
+                }
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => {
                 self.lower_user_defined_cast_expression(cast, method_path, expr_type_id, span)
@@ -981,8 +1000,9 @@ impl<'a> HirBuilder<'a> {
 
         // `Float -> String` is infallible at the source level because valid Moth `Float` is
         // finite, but it must still lower through the shared `FormatFloat` statement so casts and
-        // templates use the same Moth-owned formatter.
-        if policy == BuiltinCastPolicyId::FloatToString {
+        // templates use the same Moth-owned formatter. Fixed binary floats take the ordinary cast
+        // path: their string conversion is a numeric text policy the backends lower or reject.
+        if policy == BuiltinCastPolicyId::NumericToString(NumericScalar::Float) {
             for prelude_statement in prelude.drain(..) {
                 self.emit_statement_to_current_block(prelude_statement, span)?;
             }
@@ -1012,7 +1032,7 @@ impl<'a> HirBuilder<'a> {
         Ok(LoweredExpression { prelude, value })
     }
 
-    /// Emits the fallible builtin-cast carrier used by propagation and catch recovery.
+    /// Emits the fallible builtin-cast carrier used by propagation, recovery, and store conversion.
     fn emit_builtin_cast_carrier(
         &mut self,
         cast: &ResolvedCastExpression,
@@ -1052,6 +1072,35 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
+    /// Lowers a compiler-inserted numeric conversion at a compound-assignment store.
+    ///
+    /// WHAT: emits the checked builtin cast carrier and selects the enclosing function's numeric
+    ///       failure edge before returning the success payload.
+    /// WHY: this conversion is part of the store contract, not source `cast!` propagation; the
+    ///      assignment statement that consumes it must only be reached on success.
+    fn lower_store_conversion_cast_expression(
+        &mut self,
+        cast: &ResolvedCastExpression,
+        policy: BuiltinCastPolicyId,
+        expr_type_id: FrontendTypeId,
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredExpression, CompilerError> {
+        let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let success_value = self.lower_fallible_carrier_to_success_value_with_runtime_failure(
+            carrier,
+            failure_mode,
+            "Compound assignment conversion failed",
+            span,
+        )?;
+        let value = self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
+
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
+    }
+
     /// Lowers a fallible builtin cast through an explicit carrier statement and branches.
     fn lower_fallible_builtin_cast_expression(
         &mut self,
@@ -1074,6 +1123,10 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering builtin cast reached HIR outside a value catch block",
+                self.hir_error_location(span)
+            ),
+            CastHandling::StoreConversion => return_hir_transformation_error!(
+                "Store conversion cast bypassed compound-assignment lowering",
                 self.hir_error_location(span)
             ),
             CastHandling::Infallible => Err(CompilerError::new(
@@ -1125,6 +1178,11 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering user-defined cast reached HIR outside a value catch block",
+                self.hir_error_location(span)
+            ),
+
+            CastHandling::StoreConversion => return_hir_transformation_error!(
+                "Store conversion cast reached HIR with non-builtin evidence",
                 self.hir_error_location(span)
             ),
         }

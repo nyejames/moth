@@ -1,0 +1,9 @@
+configured_maximum #Config of Int = 2147483647
+
+overflow #Int = configured_maximum + 1
+
+project #= (
+    name = "numeric_failure_bootstrap_config_origin_overflow_rejected",
+    entry_root = "src",
+)
+html #= ()

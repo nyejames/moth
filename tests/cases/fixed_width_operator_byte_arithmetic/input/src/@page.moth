@@ -1,0 +1,7 @@
+hidden ||:
+    left Byte = 1
+    right Byte = 2
+    value = left + right
+;
+
+[:unreachable]

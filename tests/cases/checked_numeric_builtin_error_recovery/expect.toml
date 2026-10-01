@@ -8,4 +8,10 @@ rendered_output_contains = ["numeric recovery codes=301/303"]
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0058"]
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.checked_numeric_operations"
+path = "input/@page.moth"
+line = 3

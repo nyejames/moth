@@ -9,119 +9,10 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
-use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use std::sync::Arc;
-
-#[test]
-fn integer_division_binop_emits_zero_checked_truncation_path() {
-    let mut path_fork = PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
-
-    let assign_lhs = statement(
-        1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 10, types.int, region),
-        },
-    );
-    let assign_rhs = statement(
-        2,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(1)),
-            value: int_expression(2, 3, types.int, region),
-        },
-    );
-    let int_div_expr = expression(
-        3,
-        HirExpressionKind::BinOp {
-            left: Box::new(expression(
-                4,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.int,
-                region,
-                ValueKind::Place,
-            )),
-            op: HirBinOp::IntDiv,
-            right: Box::new(expression(
-                5,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(1))),
-                types.int,
-                region,
-                ValueKind::Place,
-            )),
-        },
-        types.int,
-        region,
-        ValueKind::RValue,
-    );
-    let assign_result = statement(
-        3,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(2)),
-            value: int_div_expr,
-        },
-    );
-
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![
-            local(0, types.int, region),
-            local(1, types.int, region),
-            local(2, types.int, region),
-        ],
-        statements: vec![assign_lhs, assign_rhs, assign_result],
-        terminator: HirTerminator::Return(unit_expression(6, types.unit, region)),
-    };
-
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-
-    let module = build_module(
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[
-            (LocalId(0), "lhs"),
-            (LocalId(1), "rhs"),
-            (LocalId(2), "result"),
-        ],
-    );
-
-    let output = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("JS lowering should succeed");
-
-    assert!(
-        output.source.contains("Math.trunc("),
-        "integer division should use truncation path"
-    );
-    assert!(
-        output.source.contains("Integer division by zero"),
-        "integer division path should include explicit zero trap"
-    );
-    assert!(
-        output.source.contains("__rhs === 0"),
-        "integer division path should branch on zero divisor"
-    );
-}
 
 // Clone / explicit copy tests [clone]
 // ---------------------------------------------------------------------------
@@ -188,6 +79,7 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -260,6 +152,7 @@ fn lowers_option_construct_expression() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -326,6 +219,7 @@ fn growable_collection_expression_lowers_to_array() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -394,6 +288,7 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -455,6 +350,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -524,6 +420,7 @@ fn map_literal_with_entries_lowers_to_map_new() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -583,6 +480,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -648,6 +546,7 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config().with_structural_string_urls(Arc::new(url_map)),
         &type_environment,

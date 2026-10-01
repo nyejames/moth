@@ -7,6 +7,7 @@ use crate::build_system::resource_unions::{
     append_public_folded_value, append_reachable_resource_uses,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -55,6 +56,7 @@ fn module_with_resource_table(resources: ModuleResourceTable) -> Module {
             resource_table: resources,
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(PathInternerFork::empty().snapshot_table()),
         },
         link_facts: ModuleLinkFacts {

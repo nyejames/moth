@@ -216,6 +216,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -298,6 +299,7 @@ fn explicit_error_return_terminator_emits_err_carrier() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -359,6 +361,7 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -444,6 +447,7 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -564,6 +568,7 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

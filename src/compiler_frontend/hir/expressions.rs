@@ -13,7 +13,9 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -128,6 +130,8 @@ impl HirExpression {
             }
             HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => {}
@@ -202,8 +206,15 @@ pub enum HirExpressionKind {
     // -------------------------
     //  Literals
     // -------------------------
-    Int(i32),
+    Int(i64),
     Float(f64),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    ///
+    /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`, while HTML-Wasm
+    ///      rejects reachable fixed values until Phase 5.
+    FixedScalar(FixedScalarValue),
+    /// One exact arbitrary-precision decimal literal with its canonical scale.
+    Number(NumberValue),
     Bool(bool),
     Char(char),
     StringLiteral(String),

@@ -1,0 +1,8 @@
+divide || -> Int, Error!:
+    return 10 // 0
+;
+
+recovered = divide() catch:
+    then 0
+;
+[: [recovered]]

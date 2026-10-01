@@ -14,12 +14,16 @@ render_fractional_edge || -> Int, Error!:
     return 0
 ;
 
-past_code = render_past_window() catch |past_err|:
-    then past_err.code
+past_code ~U32 = 0
+past_value = render_past_window() catch |past_err|:
+    past_code = past_err.code
+    then 0
 ;
 
-edge_code = render_fractional_edge() catch |edge_err|:
-    then edge_err.code
+edge_code ~U32 = 0
+edge_value = render_fractional_edge() catch |edge_err|:
+    edge_code = edge_err.code
+    then 0
 ;
 
 [: to_iso_string_out_of_range code=[past_code] edge_code=[edge_code]]

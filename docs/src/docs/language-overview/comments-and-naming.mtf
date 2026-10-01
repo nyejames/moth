@@ -45,6 +45,25 @@ The complete no-shadowing contract is documented by
 @../bindings/#shadowing (Values and bindings). Dependency aliases and module API
 names have additional collision rules in the Packages documentation.
 
+### Reserved numeric type spellings
+
+`Dec` is a reserved numeric type spelling. The family covers bare `Dec`, the
+`Dec0` spelling alias of the same scale-zero identity and `Dec1` through `Dec256`
+with a declared decimal scale. These spellings follow the usual
+keyword-shadow policy: they reserve case-insensitive variants with leading
+underscores, so `dec`, `DEC`, `_Dec` and `__dec` cannot be declared either, and
+digit-suffixed shadows such as `dec01` or `DEC257` stay reserved while remaining
+invalid type spellings. A trailing letter keeps an ordinary name, so `DecBox` is
+a valid `PascalCase` user name. The type spelling itself stays exact
+`PascalCase`: only `Dec` and the `Dec0` through `Dec256` forms name the type,
+and `Dec257`, `Dec01` and lowercase spellings report unknown-type diagnostics.
+
+The former `Number` spellings are not reserved. `Number`, `number`, `Number2`
+and `NumberBox` are ordinary user names again, and `Number`-family spellings no
+longer name builtin types. Without a matching user declaration, `Number` or
+`Number2` in a type position reports an unknown-type diagnostic. There is no
+legacy `Number` type alias.
+
 ### Configuration names
 
 The accepted queued project and page directives use the `$` marker: `$config`,

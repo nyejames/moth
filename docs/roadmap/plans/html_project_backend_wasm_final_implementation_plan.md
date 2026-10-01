@@ -25,7 +25,7 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 - `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - canonical package/module references for the graph contract
-- canonical numeric and cast references for profile, fixed-width, Byte and Number semantics
+- canonical numeric and cast references for profile, fixed-width, Byte and Dec semantics
 
 ## Activation snapshot to refresh
 
@@ -52,7 +52,7 @@ Legacy Wasm mode:
 Legacy Wasm LIR:
 
 - `WasmLirFunction` contains a flat `Vec<WasmLirBlock>` with `Jump` and `Branch` terminators
-- an unconditional Int-as-I64 ABI bridge and bridge-like `StringFromI64` instruction predate the numeric profile
+- Int now uses its profile-selected i32/i64 carrier; `StringFromI64` formats signed Int values through a real decimal helper, with sign extension for an i32 input
 - user functions are emitted through a dispatcher-loop strategy using an artificial program counter
 - the emitter defines memory inside each emitted module
 
@@ -97,10 +97,10 @@ layout and variant identity. Preserve deliberate Core/Builder Int/Float language
 signatures separately from foreign fixed-width ABI types. Error.code is U32 in
 both targets, including values above I32::MAX.
 
-Number/NumberN have frontend and HTML-JS support but no Wasm arbitrary-precision
+Dec/DecN have frontend and HTML-JS support but no Wasm arbitrary-precision
 runtime from that checkpoint. Retain precise reachable target rejection until a
 separate runtime delivery exists. This plan does not add that runtime or weaken
-Number's exact scale and per-operation rounding rules.
+Dec's exact scale and per-operation rounding rules.
 
 ## Mixed-target sequence
 
@@ -167,7 +167,7 @@ The final design removes (deleted rather than retained through compatibility ada
 - no standalone Wasm output pipeline design beyond the HTML builder orchestration
 - no WIT component import or export implementation beyond preserving its foreign-binding boundary
 - no conversion of Moth-source package interfaces to WIT
-- no second scalar numeric implementation, per-partition NumericProfile or Wasm Number runtime
+- no second scalar numeric implementation, per-partition NumericProfile or Wasm Dec runtime
 
 ## Risks and blockers
 
@@ -218,7 +218,7 @@ See `docs/build-system-design.md` "Mixed-target planning and validation" for par
 - Validate every function against its assigned target.
 - Validate permitted cross-target edges, including fixed-width and profile-selected scalar conversions at the wrapper boundary.
 - `check` runs the same sequence and stops before lowering.
-- Preserve Number's target restriction until a real Wasm runtime supports it.
+- Preserve Dec's target restriction until a real Wasm runtime supports it.
 - Carry assertion-message capability facts through the selected-function partition: JavaScript-owned
   functions retain lazy runtime message evaluation, while enabling dynamic messages in Wasm requires an
   explicit selected-target representation and failure-presentation path (including the HTML handoff) before
@@ -269,7 +269,7 @@ See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 Context: consume the delivered scalar ABI and complete aggregate/runtime lowering.
 
 - Remove any remaining unconditional Int-as-I64 bridge. Int uses i32 or i64 according to NumericProfile. Keep I64/U64 and legitimate 64-bit formatting support.
-- Remove the legacy `StringFromI64` bridge instruction where it still exists. Reuse semantic numeric formatting rather than replacing every 64-bit formatter with `StringFromI32`.
+- Consolidate the profile-Int `StringFromI64` instruction into semantic numeric formatting when general scalar formatting lands. Preserve its complete signed-64-bit decimal helper and direct profile-Int32 input adaptation rather than replacing every 64-bit formatter with `StringFromI32`.
 - Remove `Void` as a real ABI type. Represent no result as `results: []`.
 - Consume scalar ABI mappings and complete mappings for handles, strings, collections, structs, choices, options and errors.
 - Consume compiler-owned physical struct layouts: field offsets, alignment, scalar widths/strides and representation constraints. Lower construction, field access, mutation and ownership hooks from those facts.
@@ -318,7 +318,7 @@ Context: the refactor is not complete while old whole-module modes, dispatcher l
 - Delete `Flag::HtmlWasm` whole-module mode selection.
 - Delete `moth_start` export and bootstrap path.
 - Delete dispatcher-loop emission code and `WasmCfgLoweringStrategy::DispatcherLoop`.
-- Delete any remaining `StringFromI64` legacy bridge instruction, preserving current 64-bit numeric formatters.
+- Delete redundant numeric formatting bridge instructions after consolidation, preserving the current signed-64-bit decimal formatter and profile-selected Int behavior.
 - Delete per-module memory section emission for user modules.
 - Delete per-module Wasm emission from the final HTML entry path once entry bundling is in place.
 - Delete `WasmFunctionEmissionPolicy::AllFunctions` and `ReachableFromExports` from the final module path.
@@ -346,7 +346,7 @@ Context: documentation, tests and progress matrix must reflect the final backend
 - `Flag::HtmlWasm` whole-module mode selection
 - `moth_start` export and bootstrap path
 - dispatcher-loop emission code
-- the legacy `StringFromI64` bridge instruction, not legitimate 64-bit formatting
+- redundant numeric formatting bridge instructions after consolidation, not legitimate signed-64-bit formatting
 - per-module memory section emission for user modules
 - `WasmLirBlock` flat block model with `Jump` and `Branch` terminators
 - unconditional Int-as-I64 ABI assumptions
@@ -377,7 +377,7 @@ Cover:
 - fixed integer/float and Byte wrapper parity, including I64/U64 extremes, F16 rounding and every numeric profile
 - compact scalar fields and collection strides consumed from validated layouts
 - Error.code above I32::MAX through source, backend and wrapper paths
-- preserved Number Wasm target rejection without a separate runtime delivery
+- preserved Dec Wasm target rejection without a separate runtime delivery
 - central output writing
 - legacy dispatcher-loop, `moth_start`, per-module memory and unconditional numeric bridge paths are gone
 - no old bootstrap path remains
@@ -422,6 +422,6 @@ Before marking this plan complete, verify:
 - WIT is not used as the semantic interface for Moth-source modules or packages
 - numeric semantics/profile are shared across partitions and scalar storage remains compact
 - U32 Error.code and valid I64/U64/Int64 paths survive removal of legacy bridges
-- `moth_start`, the legacy `StringFromI64` bridge and helper-export booleans are gone
+- `moth_start`, redundant numeric formatting bridges and helper-export booleans are gone
 - no compatibility adapter remains
 - `check` runs the same planning and validation as `build`

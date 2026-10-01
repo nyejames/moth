@@ -1,7 +1,7 @@
 //! Compiler-owned builtin error codes.
 //!
 //! WHAT: gives backend/generated errors stable integer codes and fallback messages.
-//! WHY: the public `Error` surface stores `code Int`, so generated errors need one
+//! WHY: the public `Error` surface stores `code U32`, so generated errors need one
 //! canonical Rust-side mapping rather than scattered string codes or implicit enum values.
 
 #[allow(dead_code)] // Some codes are reserved for planned surfaces and must keep stable values.
@@ -22,7 +22,13 @@ pub(crate) enum BuiltinErrorCode {
     StringParseCharInvalidFormat = 230,
     FloatCastToIntInvalidValue = 240,
     FloatCastToIntOutOfRange = 241,
+    IntCastOutOfRange = 242,
+    FloatCastNonFinite = 243,
     IntCastToCharInvalidCodepoint = 250,
+    NumberParseInvalidFormat = 260,
+    NumberParseInexactScale = 261,
+    NumberCastInexact = 262,
+    NumberParseCapacity = 263,
     /// Checked numeric operations use this when division or modulo receives a zero divisor.
     DivideByZero = 300,
     /// Checked integer operations use this when an operation leaves the signed i32 range.
@@ -42,8 +48,9 @@ pub(crate) enum BuiltinErrorCode {
 }
 
 impl BuiltinErrorCode {
-    pub(crate) fn as_i32(self) -> i32 {
-        self as i32
+    /// The canonical unsigned runtime value this code carries in `Error.code`.
+    pub(crate) fn as_u32(self) -> u32 {
+        self as u32
     }
 
     pub(crate) fn default_message(self) -> &'static str {
@@ -67,8 +74,20 @@ impl BuiltinErrorCode {
             BuiltinErrorCode::StringParseCharInvalidFormat => "Cannot parse Char from text",
             BuiltinErrorCode::FloatCastToIntInvalidValue => "Float value cannot be cast to Int",
             BuiltinErrorCode::FloatCastToIntOutOfRange => "Float value is out of Int range",
+            BuiltinErrorCode::IntCastOutOfRange => "Integer value is out of the target range",
+            BuiltinErrorCode::FloatCastNonFinite => "Float conversion produced a non-finite value",
             BuiltinErrorCode::IntCastToCharInvalidCodepoint => {
                 "Int value is not a valid Unicode scalar"
+            }
+            BuiltinErrorCode::NumberParseInvalidFormat => "Cannot parse Dec from text",
+            BuiltinErrorCode::NumberParseInexactScale => {
+                "Dec value is not exactly representable at the target scale"
+            }
+            BuiltinErrorCode::NumberCastInexact => {
+                "Dec value is not exactly representable as the target type"
+            }
+            BuiltinErrorCode::NumberParseCapacity => {
+                "the Dec value exceeds host representation capacity"
             }
             BuiltinErrorCode::IntOverflow => "Int operation overflowed",
             BuiltinErrorCode::DivideByZero => "Division by zero",

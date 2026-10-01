@@ -1,6 +1,6 @@
 //! Literal pattern parsing.
 //!
-//! WHAT: parses int, float, bool, char, string, and negative-numeric literals
+//! WHAT: parses numeric, bool, char, string and negative-numeric literals
 //! and dispatches to relational pattern parsing when the lead token is a comparator.
 //! WHY: separating literal parsing from relational and choice parsing keeps each
 //! submodule focused on one pattern category.
@@ -14,7 +14,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use crate::compiler_frontend::numeric_text::parse::{
+    literal_kind_initialises, materialize_fixed_scalar, materialize_float, materialize_int,
+    materialize_number,
+};
 use crate::compiler_frontend::numeric_text::token::{
     NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
@@ -31,57 +35,48 @@ use super::types::MatchPattern;
 /// retained payloads stay on the infrastructure lane.
 type LiteralPatternResult<T> = Result<T, ExpressionParseError>;
 
-/// Materialize a `NumericLiteralToken` into an `Expression` with an explicit sign and location.
+/// Materialize a `NumericLiteralToken` into an `Expression` with its resolved sign and location.
 ///
-/// WHAT: handles both whole-number (`i32`) and decimal/exponent (`f64`) materialization
-/// from a single token, applying the provided sign for range checks (whole numbers)
-/// and float-value negation (decimal/exponent literals).
-/// WHY: the positive and negative numeric arms in `parse_literal_pattern` share identical
-/// materialization logic; this helper avoids duplicating the branch on `NumericLiteralKind`
-/// and the two error-construction paths.
+/// WHAT: naturally materialises whole-number patterns as `Int`, except Float subjects use profile
+///       `Float` for every numeric spelling; decimal/exponent patterns are always profile `Float`.
+/// WHY: receiver-specific materialisation runs first, so both pattern arms share this natural
+///      literal fallback.
 fn materialize_numeric_literal(
     token: &NumericLiteralToken,
-    sign: NumericLiteralSign,
     span: Option<SourceSpan>,
     string_table: &StringTable,
+    numeric_profile: NumericProfile,
+    float_subject: bool,
 ) -> LiteralPatternResult<Expression> {
-    if token.kind == NumericLiteralKind::WholeNumber {
-        let value_i32 = materialize_i32_with_sign(token, sign, string_table).map_err(|reason| {
-            ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
-                token.source_text,
-                reason,
-                span,
-            ))
-        })?;
+    if token.kind == NumericLiteralKind::WholeNumber && !float_subject {
+        let value = materialize_int(token, token.sign, numeric_profile.int_width, string_table)
+            .map_err(|reason| {
+                ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                    token.source_text,
+                    reason,
+                    span,
+                ))
+            })?;
 
-        Ok(Expression::int(value_i32, span, ValueMode::ImmutableOwned))
+        Ok(Expression::int(value, span, ValueMode::ImmutableOwned))
     } else {
-        let value = materialize_f64(token, string_table).map_err(|reason| {
-            ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
-                token.source_text,
-                reason,
-                span,
-            ))
-        })?;
+        let value = materialize_float(token, numeric_profile.float_precision, string_table)
+            .map_err(|reason| {
+                ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                    token.source_text,
+                    reason,
+                    span,
+                ))
+            })?;
 
-        // Negate the float when the sign is negative; the normalised text is unsigned
-        // and always carries the positive magnitude.
-        let float_value = match sign {
-            NumericLiteralSign::Negative => -value,
-            NumericLiteralSign::Positive => value,
-        };
-
-        Ok(Expression::float(
-            float_value,
-            span,
-            ValueMode::ImmutableOwned,
-        ))
+        Ok(Expression::float(value, span, ValueMode::ImmutableOwned))
     }
 }
 
 pub fn parse_non_choice_pattern(
     token_stream: &mut AstCursor,
     subject_type_id: TypeId,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<MatchPattern> {
@@ -92,6 +87,7 @@ pub fn parse_non_choice_pattern(
         | TokenTag::GREATER_THAN_OR_EQUAL => parse_relational_pattern(
             token_stream,
             subject_type_id,
+            numeric_profile,
             string_table,
             type_environment,
         ),
@@ -100,6 +96,7 @@ pub fn parse_non_choice_pattern(
             let literal = parse_literal_pattern(
                 token_stream,
                 subject_type_id,
+                numeric_profile,
                 string_table,
                 type_environment,
             )?;
@@ -120,10 +117,59 @@ fn materialize_current_numeric_literal(
     sign_override: Option<NumericLiteralSign>,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
+    numeric_profile: NumericProfile,
+    subject_type_id: TypeId,
+    type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<Expression> {
-    if let Some(token) = token_stream.current_numeric_literal_in(string_table)? {
+    if let Some(mut token) = token_stream.current_numeric_literal_in(string_table)? {
         let sign = sign_override.unwrap_or(token.sign);
-        return materialize_numeric_literal(&token, sign, span, string_table);
+        token.sign = sign;
+
+        if let Some(scale) = type_environment.number_scale(subject_type_id) {
+            let value =
+                materialize_number(&token, sign, scale, string_table).map_err(|reason| {
+                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                        token.source_text,
+                        reason,
+                        span,
+                    ))
+                })?;
+            return Ok(Expression::number(
+                value,
+                subject_type_id,
+                span,
+                ValueMode::ImmutableOwned,
+            ));
+        }
+
+        let float_subject = subject_type_id == type_environment.builtins().float;
+        if !float_subject
+            && let Some(scalar) = type_environment.fixed_scalar(subject_type_id)
+            && literal_kind_initialises(token.kind, scalar)
+        {
+            let value =
+                materialize_fixed_scalar(&token, sign, scalar, string_table).map_err(|reason| {
+                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                        token.source_text,
+                        reason,
+                        span,
+                    ))
+                })?;
+
+            return Ok(Expression::fixed_scalar(
+                value,
+                span,
+                ValueMode::ImmutableOwned,
+            ));
+        }
+
+        return materialize_numeric_literal(
+            &token,
+            span,
+            string_table,
+            numeric_profile,
+            float_subject,
+        );
     }
 
     Err(malformed_literal_payload(token_stream).into())
@@ -156,6 +202,7 @@ fn current_string_literal(
 pub(super) fn parse_literal_pattern(
     token_stream: &mut AstCursor,
     subject_type_id: TypeId,
+    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<Expression> {
@@ -168,8 +215,15 @@ pub(super) fn parse_literal_pattern(
         TokenTag::NUMERIC_LITERAL => {
             let span = Some(token_stream.current_span());
             let sign = None;
-            let expression =
-                materialize_current_numeric_literal(token_stream, sign, span, string_table)?;
+            let expression = materialize_current_numeric_literal(
+                token_stream,
+                sign,
+                span,
+                string_table,
+                numeric_profile,
+                subject_type_id,
+                type_environment,
+            )?;
             token_stream.advance();
             expression
         }
@@ -218,11 +272,13 @@ pub(super) fn parse_literal_pattern(
                 Some(NumericLiteralSign::Negative),
                 minus_sign_span,
                 string_table,
+                numeric_profile,
+                subject_type_id,
+                type_environment,
             )?;
             token_stream.advance();
             expression
         }
-
         // Patterns that are never valid as literal matches.
         TokenTag::NONE_LITERAL => {
             return Err(CompilerDiagnostic::invalid_match_pattern(

@@ -10,8 +10,10 @@ load_code || -> Int, Error!:
     return 0
 ;
 
-code = load_code() catch |err|:
-    then err.code
+code ~U32 = 0
+ignored = load_code() catch |err|:
+    code = err.code
+    then 0
 ;
 
 io.line([: external float boundary code=[code]])

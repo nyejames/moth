@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -82,6 +83,7 @@ fn collect_and_strip_comment_templates_for_tests_with_store(
         ast_nodes,
         string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        NumericProfile::STANDARD,
         template_ir_store,
     )
 }

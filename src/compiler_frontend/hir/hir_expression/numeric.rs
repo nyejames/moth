@@ -11,6 +11,10 @@ use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_tar
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericOperator, binary_operation_domain, negation_domain,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
@@ -19,6 +23,7 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::return_hir_transformation_error;
 
 use super::fallible::EmittedFallibleCarrier;
 
@@ -211,8 +216,8 @@ impl<'a> HirBuilder<'a> {
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
     ///       unwrapped finite `Float`. In `Trap` mode the result local receives the scalar `Float`
     ///       success value and a local load is returned.
-    /// WHY: external functions and backend boundaries may return non-finite `f64` values; Moth
-    ///      `Float` is finite `f64`, so every entering Float must be checked explicitly.
+    /// WHY: incoming `Float` values must be rounded at the selected profile precision and
+    ///      validated as finite before ordinary Moth code observes them.
     pub(crate) fn emit_validated_float_value(
         &mut self,
         source: HirExpression,
@@ -339,7 +344,7 @@ impl<'a> HirBuilder<'a> {
         right: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right)?;
+        let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
         let operands = HirNumericOperands::Binary { left, right };
         let failure_mode = self.select_numeric_failure_mode(span)?;
         let no_span = None;
@@ -348,37 +353,24 @@ impl<'a> HirBuilder<'a> {
             return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, span)?;
+        let success_type = self.checked_numeric_result_type(op, &no_span)?;
         let success_value =
             self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
         self.emit_assign_local_statement(target, success_value, span)
     }
 
     /// Returns the scalar success type for a checked numeric operation.
-    pub(crate) fn checked_numeric_result_type(
+    ///
+    /// WHAT: derives the result type from the operation domain instead of matching every
+    ///       operator/variant pair.
+    /// WHY: the domain already owns the canonical type for every numeric scalar.
+    fn checked_numeric_result_type(
         &mut self,
         op: HirNumericOp,
         span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
-        let int_type = self.lower_type_id(self.type_environment.builtins().int, span)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
-        Ok(match op {
-            HirNumericOp::IntAdd
-            | HirNumericOp::IntSub
-            | HirNumericOp::IntMul
-            | HirNumericOp::IntDiv
-            | HirNumericOp::IntMod
-            | HirNumericOp::IntPow
-            | HirNumericOp::IntNeg => int_type,
-
-            HirNumericOp::FloatAdd
-            | HirNumericOp::FloatSub
-            | HirNumericOp::FloatMul
-            | HirNumericOp::FloatDiv
-            | HirNumericOp::FloatMod
-            | HirNumericOp::FloatPow
-            | HirNumericOp::FloatNeg => float_type,
-        })
+        let domain_type = op.domain.type_id(&self.type_environment);
+        self.lower_type_id(domain_type, span)
     }
 
     /// Selects the numeric failure mode for the current function context.
@@ -388,7 +380,7 @@ impl<'a> HirBuilder<'a> {
     ///       and custom error channels all use `Trap`.
     /// WHY: only builtin `Error!` can represent numeric failures as user-recoverable values; other
     ///      contexts have no channel for the failure.
-    fn select_numeric_failure_mode(
+    pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {
@@ -434,130 +426,103 @@ impl<'a> HirBuilder<'a> {
 
     /// Classifies a runtime binary operator and its operand types as a checked numeric operation.
     ///
-    /// WHAT: returns the `HirNumericOp` and the scalar result type when the operator is numeric
-    ///       arithmetic. Non-numeric operators return `None` so callers can
-    ///       fall back to plain `BinOp`.
-    /// WHY: keeps the tree-lowering branch focused on control flow while numeric policy lives here.
+    /// WHAT: derives the shared numeric computation domain from the source operator and operand
+    ///       types. Non-numeric operators or unsupported operand pairs return `None`.
+    /// WHY: HIR consumes the same promotion policy as AST typing and constant folding, so every
+    ///      stage selects one shared numeric operation domain.
     pub(crate) fn classify_checked_numeric_binop(
         &mut self,
         op: &Operator,
         left: &HirExpression,
         right: &HirExpression,
     ) -> Option<(HirNumericOp, TypeId)> {
-        let int_type = self.type_environment.builtins().int;
-        let float_type = self.type_environment.builtins().float;
+        let operator = op.numeric_operator()?;
+        let left = NumericScalar::from_type_id(left.ty, &self.type_environment)?;
+        let right = NumericScalar::from_type_id(right.ty, &self.type_environment)?;
+        let domain = binary_operation_domain(operator, left, right)?;
 
-        let left_is_int = left.ty == int_type;
-        let left_is_float = left.ty == float_type;
-        let right_is_int = right.ty == int_type;
-        let right_is_float = right.ty == float_type;
-        let operands_are_numeric =
-            (left_is_int || left_is_float) && (right_is_int || right_is_float);
-
-        if !operands_are_numeric {
-            return None;
-        }
-
-        match op {
-            Operator::Add if left_is_int && right_is_int => Some((HirNumericOp::IntAdd, int_type)),
-            Operator::Subtract if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntSub, int_type))
-            }
-            Operator::Multiply if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntMul, int_type))
-            }
-            Operator::IntDivide if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntDiv, int_type))
-            }
-            Operator::Modulus if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntMod, int_type))
-            }
-            Operator::Exponent if left_is_int && right_is_int => {
-                Some((HirNumericOp::IntPow, int_type))
-            }
-
-            // Real division always lowers to FloatDiv; operands are converted below.
-            Operator::Divide => Some((HirNumericOp::FloatDiv, float_type)),
-
-            // Mixed or pure Float arithmetic for the remaining binary operators.
-            Operator::Add => Some((HirNumericOp::FloatAdd, float_type)),
-            Operator::Subtract => Some((HirNumericOp::FloatSub, float_type)),
-            Operator::Multiply => Some((HirNumericOp::FloatMul, float_type)),
-            Operator::Modulus => Some((HirNumericOp::FloatMod, float_type)),
-            Operator::Exponent => Some((HirNumericOp::FloatPow, float_type)),
-
-            _ => None,
-        }
+        Some((
+            HirNumericOp { operator, domain },
+            domain.type_id(&self.type_environment),
+        ))
     }
 
-    /// Converts `Int` operands to `Float` for mixed arithmetic and real division.
+    /// Converts binary operands to the selected checked-operation domain.
     ///
-    /// WHAT: given a classified float-family `HirNumericOp`, any `Int` operand is wrapped in an
-    ///       infallible `Int -> Float` cast. Pure `Float` operands pass through unchanged.
-    /// WHY: the backend expects uniform `Float*` checked operations and `Int / Int` is real
-    ///      division.
+    /// WHAT: makes operation-domain promotions explicit, except that Dec power keeps its Int
+    ///       exponent in the canonical profile type.
+    /// WHY: backends consume typed operations without reconstructing source promotions, while the
+    ///      exponent is semantically distinct from the Dec base and must never be rescaled.
     pub(crate) fn lower_checked_numeric_binary_operands(
         &mut self,
         op: HirNumericOp,
         left: HirExpression,
         right: HirExpression,
+        span: &Option<SourceSpan>,
     ) -> Result<(HirExpression, HirExpression), CompilerError> {
-        let float_type = self.type_environment.builtins().float;
+        let left = self.convert_numeric_operand_to_domain(left, op.domain, span)?;
 
-        let needs_float = matches!(
-            op,
-            HirNumericOp::FloatAdd
-                | HirNumericOp::FloatSub
-                | HirNumericOp::FloatMul
-                | HirNumericOp::FloatDiv
-                | HirNumericOp::FloatMod
-                | HirNumericOp::FloatPow
-        );
+        if op.operator == NumericOperator::Power && matches!(op.domain, NumericScalar::Number(_)) {
+            let int_type = self.type_environment.builtins().int;
+            if right.ty != int_type {
+                return_hir_transformation_error!(
+                    "Dec power exponent must remain the canonical Int type",
+                    self.hir_error_location(span)
+                );
+            }
 
-        if !needs_float {
             return Ok((left, right));
         }
 
-        let left = self.convert_int_to_float_if_needed(left, float_type)?;
-        let right = self.convert_int_to_float_if_needed(right, float_type)?;
+        let right = self.convert_numeric_operand_to_domain(right, op.domain, span)?;
         Ok((left, right))
     }
 
-    /// Classifies unary numeric negation as a checked numeric operation.
+    /// Classifies unary numeric negation through the shared domain policy.
     ///
-    /// WHAT: returns the `HirNumericOp` and result type when the operand is `Int` or `Float`.
-    ///       Non-numeric negation returns `None` so callers fall back to plain `UnaryOp`.
+    /// WHAT: returns the checked operation and promoted result type for a numeric operand; callers
+    ///       treat unsupported negation as an internal lowering invariant failure.
+    /// WHY: signed narrow integers and F16 promote before negation, while unsigned scalars remain
+    ///      unsupported.
     pub(crate) fn classify_checked_numeric_negation(
         &self,
         operand: &HirExpression,
     ) -> Option<(HirNumericOp, TypeId)> {
-        let int_type = self.type_environment.builtins().int;
-        let float_type = self.type_environment.builtins().float;
+        let operand = NumericScalar::from_type_id(operand.ty, &self.type_environment)?;
+        let domain = negation_domain(operand)?;
 
-        if operand.ty == int_type {
-            Some((HirNumericOp::IntNeg, int_type))
-        } else if operand.ty == float_type {
-            Some((HirNumericOp::FloatNeg, float_type))
-        } else {
-            None
-        }
+        Some((
+            HirNumericOp {
+                operator: NumericOperator::Negate,
+                domain,
+            },
+            domain.type_id(&self.type_environment),
+        ))
     }
 
-    /// Wraps an `Int` operand in an infallible `Int -> Float` cast when needed.
+    /// Converts an operand to a checked numeric operation's domain when required.
     ///
-    /// WHAT: mixed `Int`/`Float` arithmetic and `Int / Int` real division convert `Int` operands to
-    ///       `Float` explicitly so the backend sees a uniform `Float*` checked operation.
-    /// WHY: HIR already owns the `IntToFloat` cast policy and JS lowering treats it as identity,
-    ///      so reusing it avoids inventing a new conversion expression shape.
-    fn convert_int_to_float_if_needed(
+    /// WHAT: emits the standard `NumericConversion` expression for a source scalar whose
+    ///       canonical type differs from `domain`, leaving already-matching operands unchanged.
+    /// WHY: shared operator policy determines promotions; HIR makes each required conversion
+    ///      explicit. Dec power keeps its exponent in the canonical profile Int type.
+    pub(crate) fn convert_numeric_operand_to_domain(
         &mut self,
         value: HirExpression,
-        float_type: TypeId,
+        domain: NumericScalar,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let int_type = self.type_environment.builtins().int;
-        if value.ty != int_type {
+        let target_type = domain.type_id(&self.type_environment);
+        if value.ty == target_type {
             return Ok(value);
         }
+
+        let Some(source) = NumericScalar::from_type_id(value.ty, &self.type_environment) else {
+            return_hir_transformation_error!(
+                "Numeric operation operand has no numeric conversion domain",
+                self.hir_error_location(span)
+            );
+        };
 
         let region = value.region;
         let no_span = None;
@@ -565,9 +530,12 @@ impl<'a> HirBuilder<'a> {
             &no_span,
             HirExpressionKind::Cast {
                 source: Box::new(value),
-                policy: BuiltinCastPolicyId::IntToFloat,
+                policy: BuiltinCastPolicyId::NumericConversion {
+                    source,
+                    target: domain,
+                },
             },
-            float_type,
+            target_type,
             ValueKind::RValue,
             region,
         ))

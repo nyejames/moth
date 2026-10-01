@@ -1,11 +1,24 @@
 Runtime numeric operations are checked.
 
+### Checked results
+
+Runtime checks enforce an operation's semantic result type, not the operands' storage
+widths. A `U8` and `U8` sum is a `U32` value and needs no 8-bit mask. An integer
+overflow check can be omitted only when the compiler proves that specific operation
+stays within its result type; a wider backend carrier does not make an unproven
+operation safe. A narrow store needs a source-level range proof, a compiler proof or
+a check.
+
+### Failures
+
 Failures include:
 
 - integer overflow
-- division or modulo by zero
+- division or remainder by zero
 - invalid integer exponents
-- non-finite `Float` results
+- non-finite binary float results
+- a `Dec` operation with a zero divisor
+- a compound assignment whose promoted result cannot convert back to the left-hand type
 
 ### Failure mode
 
@@ -23,11 +36,19 @@ checked numeric failures use that error channel.
 ]
 
 Custom fallible channels, non-fallible functions and entry-selected top-level
-runtime code use trap mode for checked numeric failure.
+runtime code use trap mode for checked numeric failure. Custom error channels
+gain no implicit adapter.
 
 Numeric operators remain ordinary source expressions. The compiler lowers
 their failure path. They are not source-visible `Error!` values that can be
 handled in the middle of an arbitrary expression.
+
+### Conversion failure is separate
+
+A cast failure is a conversion failure, not an operand's numeric failure.
+`cast`, `cast!` and `cast ... catch` handle conversion failure only and never
+catch an operand's numeric failure. See @../casts/#fallible-casts (Fallible
+casts).
 
 ### Compile-time failures
 
@@ -35,9 +56,30 @@ A statically known numeric failure is a compile-time diagnostic.
 
 This remains true inside a function with builtin `Error!`.
 
+Statically rejected numeric forms are also diagnostics. They include unary minus
+on a typed `U*` value, a fixed integer operation with no common type, `//` on a
+binary float or a positive-scale `Dec`, and a literal that cannot materialise
+at its receiving type. See @./#operators (Operators) and @./#numeric-literals
+(Numeric literals).
+
+### Optimisation
+
+A compiler proof can remove a runtime check only when it proves that a bounded
+integer operation or narrowing cannot fail. This does not change which source
+programs are valid, evaluation or failure order, or `Dec` rounding; effectful
+operands still evaluate once in source order. `Power`, `Byte`, float and `Dec`
+checks remain.
+
+Constant folding follows these same operator results and failure rules, so a
+folded program observes the same value or the same diagnostic as the runtime
+path.
+
 ### Related behaviour
 
 Range-loop counter updates use the same checked numeric operations.
 
 Conversions that may lose information, such as `Float -> Int`, belong to the
-Casts documentation rather than implicit arithmetic coercion.
+Casts documentation rather than implicit arithmetic coercion. Compound
+assignment is the one receiving-context exception: it converts its promoted
+result back to the left-hand type through the same checked conversion. See
+@./#operators (Operators).

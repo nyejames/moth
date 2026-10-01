@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCon
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     build_input_type_from_parsed, parsed_type_span,
@@ -124,6 +125,7 @@ pub(super) fn resolve_config_declaration(
                 origin,
                 qualifier.qualifier_span,
                 value_location,
+                scope_context.numeric_profile,
             ));
         } else {
             match authored_default {
@@ -148,6 +150,7 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         None,
+                        scope_context.numeric_profile,
                     ));
                 }
                 AuthoredConfigDefault::None { span } => {
@@ -165,6 +168,7 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         span.map(BuildConfigValueLocation::Source),
+                        scope_context.numeric_profile,
                     ));
                 }
                 AuthoredConfigDefault::Value {
@@ -195,6 +199,7 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         span.map(BuildConfigValueLocation::Source),
+                        scope_context.numeric_profile,
                     ));
                 }
             }
@@ -319,8 +324,10 @@ fn config_resolution_record(
     origin: BuildConfigValueOrigin,
     qualifier_span: Option<SourceSpan>,
     value_location: Option<BuildConfigValueLocation>,
+    numeric_profile: NumericProfile,
 ) -> ConfigResolutionRecord {
-    let fingerprint = build_config_fingerprint(field_text, contract, value.as_ref());
+    let fingerprint =
+        build_config_fingerprint(field_text, contract, value.as_ref(), numeric_profile);
     ConfigResolutionRecord {
         field_name,
         input_name,

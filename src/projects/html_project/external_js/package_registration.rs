@@ -192,8 +192,8 @@ fn parsed_type_to_signature_type(
     >,
 ) -> Result<ExternalSignatureType, CompilerError> {
     match type_name {
-        "Int" => Ok(ExternalSignatureType::Abi(ExternalAbiType::I32)),
-        "Float" => Ok(ExternalSignatureType::Abi(ExternalAbiType::F64)),
+        "Int" => Ok(ExternalSignatureType::NativeInt),
+        "Float" => Ok(ExternalSignatureType::NativeFloat),
         "Bool" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
         "String" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
         "Char" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Char)),
@@ -207,5 +207,26 @@ fn parsed_type_to_signature_type(
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn js_numeric_annotations_remain_native_moth_signatures() {
+        let opaque_types = HashMap::new();
+
+        assert_eq!(
+            parsed_type_to_signature_type("Int", &opaque_types)
+                .expect("Int annotation should resolve"),
+            ExternalSignatureType::NativeInt,
+        );
+        assert_eq!(
+            parsed_type_to_signature_type("Float", &opaque_types)
+                .expect("Float annotation should resolve"),
+            ExternalSignatureType::NativeFloat,
+        );
     }
 }

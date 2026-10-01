@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
     DiagnosticLabelStyle, DiagnosticPayload, SyntaxDiagnosticKind,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -306,6 +307,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
+            numeric_profile: NumericProfile::STANDARD,
             root_role: ModuleRootRole::Normal,
             external_package_registry: Arc::clone(&external_package_registry),
             style_directives: &style_directives,
@@ -538,6 +540,7 @@ impl MothTemplateScopeFixture {
                 source_build_config_contract_names: Arc::new(Default::default()),
             },
             AstBuildContext {
+                numeric_profile: NumericProfile::STANDARD,
                 root_role: ModuleRootRole::Normal,
                 external_package_registry: Arc::clone(&external_package_registry),
                 style_directives: &style_directives,
@@ -1942,6 +1945,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
+            numeric_profile: NumericProfile::STANDARD,
             root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &StyleDirectiveRegistry::built_ins(),

@@ -1,0 +1,233 @@
+**Development note.** This advanced reference records accepted design. The
+implicit-failure and entry-error changes are not yet implemented. Check the
+@../progress (progress matrix) for current support. This catalogue may miss
+cases while Moth is changing rapidly. Update it when operations, runtime limits
+or backend contracts change.
+
+### Recoverable failure and termination
+
+Moth separates a computation that cannot produce its normal result from an
+execution environment that can no longer support the program.
+
+Checked arithmetic produces an implicit built-in failure. Private functions may
+propagate that failure within a module. An explicit `Error!` return channel
+converts escaping built-in failures into the corresponding built-in `Error`.
+A custom error channel requires explicit handling or conversion. Exported
+functions expose their failures through a declared error channel or handle them
+before returning. An unrepresented failure cannot cross that boundary.
+
+Expression-wide `catch` handles the whole selected expression, including
+argument evaluation. Implicit failures and built-in `Error!` outcomes may share
+one catch. The same rule applies to `cast expression catch`, so its handler may
+receive an arithmetic failure from the operand as well as a conversion error.
+Custom error types do not gain automatic conversion. Split an expression when
+its failure sources need different handling.
+
+The implicit `start` has a built-in `Error!` channel. Its generated caller
+reports an unsuccessful entry invocation. Returning that error is not a panic
+and does not publish successful runtime fragments. Handling an error does not
+undo earlier mutations or IO. Compile-time-known invalid numeric operations
+remain source diagnostics rather than runtime recovery opportunities.
+
+`assert` is the only way to author a deliberate panic. A failed assertion is
+unrecoverable in Moth and remains checked in release builds. `catch` handles
+Moth failure channels, not arbitrary JavaScript exceptions or Wasm traps.
+
+### Termination outside assert
+
+The following cases remain outside the recoverable failure system. An
+infallible source operation promises no recoverable error result, not unlimited
+memory, stack space or execution time.
+
+[table:
+    [th:
+        [: Where it can happen]
+        [: What can stop execution]
+        [: Why it is not an ordinary failure]
+    ]
+    [td:
+        [: Growable collection push, map growth, runtime strings and templates, independent copies or allocating Dec operations]
+        [: Allocation exhaustion or refusal by the runtime allocator]
+        [: Recovery is not a language guarantee. Propagation, cleanup and reporting may themselves need resources. Growable push keeps its no-error-channel contract and traps on allocation exhaustion.]
+    ]
+    [td:
+        [: Backing-store growth and runtime storage bookkeeping]
+        [: An allocation-size, address-space, representable-capacity or runtime limit is exceeded]
+        [: These are physical storage limits, not permission to wrap an address or corrupt memory. They remain fatal unless the particular API explicitly defines a recoverable limit error.]
+    ]
+    [td:
+        [: Recursion, deep call chains and calls into host code]
+        [: Stack or host call-depth exhaustion]
+        [: The host may stop execution before enough stack remains for normal Moth error propagation or cleanup. There is no recoverable stack-budget effect.]
+    ]
+    [td:
+        [: Foreign bindings, generated code or runtime internals]
+        [: An unexpected host exception, invalid generated memory access or broken runtime invariant]
+        [: A fault is not a declared API outcome. The host or tooling may report it, but Moth does not turn arbitrary faults into Error values or promise safe continuation.]
+    ]
+    [td:
+        [: The process, browser tab or embedding host]
+        [: External termination, an execution limit or a host failure]
+        [: The program cannot require an environment that has stopped executing it to run a handler. Even a final diagnostic is not guaranteed.]
+    ]
+]
+
+A full fixed-capacity collection is different from allocation exhaustion. Fixed
+`push` returns `Error!` when it has no free slot. Invalid collection indices and
+missing map keys also retain their documented typed error paths. Expected IO
+errors follow the called API's declared contract. Resource failure does not
+silently replace these ordinary errors.
+
+Fatal resource handling still requires runtime checks that protect memory and
+storage invariants. Excluding recoverable allocation errors does not authorise
+unchecked address arithmetic or treating a refused allocation as valid storage.
+No assertion, fatal runtime fault or external termination guarantees rollback
+or completion of cleanup.
+
+A Wasm trap ends the current invocation. It need not end the embedding process.
+In a JavaScript host it can surface as a `WebAssembly.RuntimeError`. Conversely,
+out-of-memory behaviour may include host termination rather than a catchable
+exception. Tooling that reports an unexpected startup fault is observing that
+fault, not adding a Moth recovery channel or proving a compiler bug.
+See the error-condition mappings and resource limits in the
+@https://webassembly.github.io/spec/js-api/ (Wasm JavaScript embedding specification).
+
+### Checked operations and bare backend behaviour
+
+The table compares **Moth's required result** with selected bare backend
+operations **without Moth's semantic checks**. It is not an unchecked Moth mode
+or a catalogue of exact generated instructions. Helpers and representations may
+differ. A backend must preserve Moth semantics wherever it supports the feature.
+
+Arithmetic checks the promoted result domain, not an operand's storage width.
+For example, `U8 + U8` produces `U32`, so crossing 255 is not itself overflow.
+Narrowing that result back into `U8` is a separate checked boundary. Moth `/`
+produces a binary floating-point result for integer operands, while `//` is
+integer division.
+
+JavaScript's `Number` below means its binary64 primitive, not Moth's
+arbitrary-precision `Dec` family. A bare JavaScript `Number` operation does
+not enforce an `I32` or `U32` range. Bare `BigInt` operations have no fixed-width
+overflow limit, but still depend on host resources.
+
+[table:
+    [th:
+        [: Operation or invalid condition]
+        [: Moth outcome]
+        [: Bare Wasm behaviour]
+        [: Bare JavaScript behaviour]
+    ]
+    [td:
+        [: Integer addition, subtraction, multiplication or negation exceeds the result domain]
+        [: Built-in overflow failure]
+        [: Integer add, subtract and multiply wrap modulo the carrier width. Negation via subtraction wraps too.]
+        [: Number may exceed the Moth range or round. BigInt keeps the mathematical integer rather than fixed-width wrapping.]
+    ]
+    [td:
+        [: Integer // has a zero divisor or the signed result-domain minimum divided by -1]
+        [: Built-in division or overflow failure]
+        [: Integer division traps on zero. Signed division also traps on that overflow pair.]
+        [: BigInt division throws RangeError on zero but has no signed-width overflow. Number division can produce infinity or NaN.]
+    ]
+    [td:
+        [: Integer % has a zero divisor]
+        [: Built-in division failure. Signed minimum % -1 is valid and equals zero.]
+        [: Integer remainder traps on zero. Signed minimum remainder -1 returns zero.]
+        [: Number remainder produces NaN on zero. BigInt remainder throws RangeError.]
+    ]
+    [td:
+        [: Binary floating-point / has a zero divisor]
+        [: Built-in division failure]
+        [: Floating-point division produces infinity or NaN rather than trapping.]
+        [: Number division produces infinity or NaN.]
+    ]
+    [td:
+        [: Binary floating-point arithmetic produces a non-finite result]
+        [: Built-in invalid-result failure]
+        [: Floating-point operations admit infinity and NaN.]
+        [: Number operations admit infinity and NaN.]
+    ]
+    [td:
+        [: Integer exponent is invalid or exponentiation exceeds a bounded result domain]
+        [: Built-in exponent or overflow failure]
+        [: No scalar exponentiation instruction. A helper's unchecked integer multiplies can wrap.]
+        [: Number exponentiation can produce fractional or non-finite results. BigInt rejects negative exponents with RangeError.]
+    ]
+    [td:
+        [: Integer narrowing cannot represent the value, including compound-assignment write-back]
+        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing. The target is written only on success.]
+        [: Integer wrapping conversions and narrow stores discard high bits rather than range-checking the value.]
+        [: Ordinary assignment does not narrow. Integer coercions and integer typed-array stores can wrap to their selected widths.]
+    ]
+    [td:
+        [: Float-to-integer conversion has an out-of-range truncated result]
+        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing]
+        [: Trapping truncation traps on an invalid conversion. Saturating conversion clamps instead.]
+        [: Math.trunc does not enforce the destination range. Subsequent fixed-width coercion can wrap.]
+    ]
+    [td:
+        [: Binary float narrowing rounds to a non-finite value]
+        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing]
+        [: f32.demote_f64 can produce infinity. F16 needs its separate representation contract.]
+        [: Math.fround can produce infinity when rounding to binary32.]
+    ]
+    [td:
+        [: Runtime numeric text parsing is invalid, or an exact Dec conversion loses required information]
+        [: Explicit fallible cast error]
+        [: No general text or decimal-scale conversion instruction. Language helpers define the checks.]
+        [: Number accepts some spellings Moth rejects. parseInt and parseFloat can accept a prefix. Decimal-scale exactness needs helpers.]
+    ]
+    [td:
+        [: Dec-family division or remainder has a zero divisor]
+        [: Built-in division failure. Arbitrary precision removes fixed-width overflow, not invalid operands.]
+        [: No scalar arbitrary-precision decimal operation. Runtime helpers supply it.]
+        [: No native Moth decimal-scale operation. A helper using BigInt division must handle its zero-divisor RangeError.]
+    ]
+    [td:
+        [: A runtime range step is invalid or a required counter update overflows]
+        [: Built-in failure under the range contract. Finishing at the last endpoint does not require an overflowing sentinel.]
+        [: Branches and arithmetic have no Moth range-loop contract.]
+        [: Loops and arithmetic have no Moth range-loop contract.]
+    ]
+    [td:
+        [: Invalid collection index, missing map key or full fixed collection]
+        [: The operation's declared Error! result]
+        [: Linear-memory bounds are not logical collection bounds. Collection helpers enforce the API contract.]
+        [: Arrays and maps do not implement Moth's typed error contract. Collection helpers enforce it.]
+    ]
+]
+
+Finite floating-point rounding is permitted. Underflow to a finite subnormal or
+zero is not an overflow failure. Float-to-integer conversion truncates before
+checking the integer range. Dec scale narrowing instead requires exactness.
+The @../numbers/ (numeric reference) and @../casts/ (cast reference) own the
+complete operator, promotion and conversion rules.
+
+The raw comparisons use the
+@https://webassembly.github.io/spec/core/exec/numerics.html (Wasm numeric semantics),
+@https://webassembly.github.io/spec/core/exec/instructions.html (Wasm instruction semantics),
+@https://tc39.es/ecma262/multipage/ecmascript-data-types-and-values.html (ECMAScript Number and BigInt semantics),
+@https://tc39.es/ecma262/multipage/abstract-operations.html (ECMAScript numeric conversions),
+@https://tc39.es/ecma262/multipage/numbers-and-dates.html (ECMAScript Math operations)
+and @https://tc39.es/ecma262/multipage/global-object.html (ECMAScript numeric parsing).
+These specifications describe the backend primitives, not an alternative Moth
+language contract.
+
+### What checks and optimisations promise
+
+A backend may remove a check when it proves that the failing case cannot occur.
+More expensive release analysis may remove more checks, but source acceptance,
+exported contracts and observable failure order stay the same. Programmer
+confidence is not an unchecked assumption available to the optimiser.
+
+Handling a checked failure with `assert(false, ...)` makes termination explicit.
+It does not automatically remove the original check. Wasm integer addition
+wraps rather than traps, so panic-on-overflow still needs detection. A future
+lowerer may use a native trap only when it preserves the full observable
+assertion contract, including required message work.
+
+Explicit wrapping operations and any other wrap-or-trap controls remain
+unsettled future design. This reference introduces no such syntax or guarantee
+that they will be added. It can later document accepted controls and their
+backend costs. Recoverable resource exhaustion is outside Moth's design scope,
+not another pending failure effect.

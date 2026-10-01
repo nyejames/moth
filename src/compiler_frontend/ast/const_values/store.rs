@@ -25,7 +25,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -176,8 +178,12 @@ pub(crate) enum ConstStringPiece {
 /// Payload variants stored in the module-local value graph.
 #[derive(Clone, Debug)]
 pub(crate) enum ConstValuePayload {
-    Int(i32),
+    Int(i64),
     Float(f64),
+    /// One exact arbitrary-precision decimal value, retaining its canonical scale.
+    Number(NumberValue),
+    /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     String(ConstStringValue),
@@ -213,8 +219,11 @@ pub(crate) struct ConstValue {
 /// The store owns recursion.  Consumers only map this already traversed shape to their own
 /// boundary vocabulary, so they cannot independently walk and reinterpret AST expressions.
 pub(crate) enum ConstValueVisit<'a, T> {
-    Int(i32),
+    Int(i64),
     Float(f64),
+    /// Borrowed exact decimal leaf; visitors clone only when ownership crosses their boundary.
+    Number(&'a NumberValue),
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     String(&'a ConstStringValue),
@@ -455,6 +464,27 @@ impl ConstValueStore {
             ),
             ExpressionKind::Float(value) => (
                 ConstValuePayload::Float(*value),
+                ConstValueKind::Literal,
+                true,
+                None,
+            ),
+            ExpressionKind::Number(value) => {
+                if type_environment.number_scale(expression.type_id) != Some(value.scale()) {
+                    return Err(CompilerError::compiler_error(format!(
+                        "ConstValueStore Dec value at scale {} disagrees with its resolved semantic type",
+                        value.scale()
+                    ))
+                    .into());
+                }
+                (
+                    ConstValuePayload::Number(value.clone()),
+                    ConstValueKind::Literal,
+                    true,
+                    None,
+                )
+            }
+            ExpressionKind::FixedScalar(value) => (
+                ConstValuePayload::FixedScalar(*value),
                 ConstValueKind::Literal,
                 true,
                 None,
@@ -750,6 +780,12 @@ impl ConstValueStore {
             ConstValuePayload::Float(scalar) => {
                 visitor(&value.metadata, ConstValueVisit::Float(*scalar))
             }
+            ConstValuePayload::Number(scalar) => {
+                visitor(&value.metadata, ConstValueVisit::Number(scalar))
+            }
+            ConstValuePayload::FixedScalar(scalar) => {
+                visitor(&value.metadata, ConstValueVisit::FixedScalar(*scalar))
+            }
             ConstValuePayload::Bool(scalar) => {
                 visitor(&value.metadata, ConstValueVisit::Bool(*scalar))
             }
@@ -882,6 +918,8 @@ impl ConstValueStore {
         let kind = match &value.payload {
             ConstValuePayload::Int(value) => ExpressionKind::Int(*value),
             ConstValuePayload::Float(value) => ExpressionKind::Float(*value),
+            ConstValuePayload::Number(number) => ExpressionKind::Number(number.clone()),
+            ConstValuePayload::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
             ConstValuePayload::Bool(value) => ExpressionKind::Bool(*value),
             ConstValuePayload::Char(value) => ExpressionKind::Char(*value),
             ConstValuePayload::String(string) => match string {

@@ -8,12 +8,20 @@
 //! - `ids.rs` — compact type identifiers and canonical keys.
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
+//! - `fixed_scalar.rs` — the explicit-width builtin scalar identities (`I8`..`F64`, `Byte`).
+//! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (`Int`, `Float`, fixed).
+//! - `number.rs` — the canonical `Dec` scale primitive and the allocation-free exact
+//!   decimal effective-scale policy shared by MON receiving paths.
 //! - `parsed.rs` — parsed type syntax before resolution (no semantic identity).
 //! - `display.rs` — type name rendering through `StringTable`.
 //! - `queries.rs` — semantic fact queries over `TypeId + TypeEnvironment`.
 //! - `generic_parameters.rs` — parsed generic parameter declarations and scopes.
 //! - `generic_bindings.rs` — TypeId-native generic parameter bindings.
 //! - `generic_identity_bridge.rs` — HIR/diagnostic bridge keys only.
+//! - `numeric_profile.rs` — the compiler-owned `NumericProfile` fixing `Int` width and
+//!   `Float` precision for one compilation boundary.
+//! - `numeric_power.rs` — portable binary64 power for compiler-owned constant folding; JS and
+//!   Wasm emit matching target-local implementations of the same algorithm.
 //!
 //! Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! Type compatibility POLICY does NOT belong here (see `type_coercion`).
@@ -23,10 +31,16 @@ pub mod definitions;
 pub mod display;
 pub mod environment;
 pub mod fallible_carrier;
+pub(crate) mod fixed_scalar;
 pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;
 pub mod ids;
+pub(crate) mod number;
+pub(crate) mod numeric_operators;
+pub(crate) mod numeric_power;
+pub mod numeric_profile;
+pub(crate) mod numeric_scalar;
 pub mod parsed;
 pub mod queries;
 

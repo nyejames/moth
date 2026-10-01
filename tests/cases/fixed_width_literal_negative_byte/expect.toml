@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0008"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+reason = "invalid_number_literal.negative_unsigned_literal"
+path = "input/@page.moth"
+line = 2
+column = 14

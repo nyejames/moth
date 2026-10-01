@@ -26,6 +26,7 @@
 //! - `first-party-deps`     - Check first-party package roots for third-party runtime dependencies
 //! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
 //! - `span-census`          - Measure LocalSpan bit-split candidates over the corpus
+//! - `cache-maintain`       - Prune old timing reports and report the target size budget
 
 mod architecture_boundary;
 mod bench;
@@ -47,6 +48,7 @@ mod benchmark_run;
 mod benchmark_status;
 mod benchmark_suite;
 mod benchmark_workspace;
+mod cache;
 mod compiler_binary;
 mod feature_matrix;
 mod first_party_deps;
@@ -149,6 +151,9 @@ fn main() {
         }
         BenchmarkMode::BenchScaling => {
             exit_with_result(bench_scaling::run_scaling_benchmarks());
+        }
+        BenchmarkMode::CacheMaintain => {
+            exit_with_result(cache::run_cache_maintenance());
         }
         BenchmarkMode::Stress { repeats } => {
             exit_with_result(run_stress_matrix(repeats));

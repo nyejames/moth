@@ -8,7 +8,7 @@ use wasm_encoder::{ConstExpr, DataSection};
 
 pub(crate) fn build_data_section(
     module: &WasmLirModule,
-    plan: &WasmEmitPlan,
+    plan: &mut WasmEmitPlan,
 ) -> Result<DataSection, CompilerError> {
     let mut section = DataSection::new();
 
@@ -30,6 +30,13 @@ pub(crate) fn build_data_section(
             &ConstExpr::i32_const(offset as i32),
             segment.bytes.to_owned(),
         );
+    }
+    if let Some(offset) = plan.float_format_tables_offset {
+        let bytes = plan.float_format_tables.take().ok_or_else(|| {
+            CompilerError::compiler_error("Wasm emission lost its planned Ryu table bytes")
+                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        })?;
+        section.active(0, &ConstExpr::i32_const(offset as i32), bytes);
     }
 
     Ok(section)

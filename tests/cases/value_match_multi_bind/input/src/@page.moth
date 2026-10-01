@@ -1,12 +1,12 @@
 values_for |flag Bool| -> Int, String:
-    number, label = if flag is:
+    numeric_value, label = if flag is:
         true => then 1, "yes"
         else => then 0, "no"
     ;
 
-    return number, label
+    return numeric_value, label
 ;
 
-number, label = values_for(true)
-io.line([: [number]])
+numeric_value, label = values_for(true)
+io.line([: [numeric_value]])
 io.line([: [label]])

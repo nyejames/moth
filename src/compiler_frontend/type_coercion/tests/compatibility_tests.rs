@@ -1,7 +1,9 @@
 //! Compatibility check tests for `type_coercion::compatibility`.
 
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -54,6 +56,34 @@ fn bool_to_float_is_never_compatible() {
         env.builtins().bool,
         &env
     ));
+}
+
+#[test]
+fn fixed_scalars_accept_no_implicit_conversion() {
+    let mut env = TypeEnvironment::new();
+    let u8 = env.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U8), None);
+    let byte = env.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::Byte), None);
+
+    // `Int` never implicitly narrows into a fixed width, and no fixed width widens into `Int`,
+    // even when the active profile width matches. Operators and casts own that bridge (Phase 3).
+    for target in [FixedScalar::I32, FixedScalar::I64, FixedScalar::U8] {
+        let target_id = builtin_type_ids::fixed_scalar(target);
+        assert!(
+            !is_declaration_compatible(target_id, env.builtins().int, &env),
+            "Int must not initialise {}",
+            target.name()
+        );
+        assert!(
+            !is_declaration_compatible(env.builtins().int, target_id, &env),
+            "{} must not initialise Int",
+            target.name()
+        );
+    }
+
+    // Different element scalars make different collection types, so `{U8}` is not accepted
+    // where `{Byte}` is expected.
+    assert!(!is_type_compatible(byte, u8, &env));
+    assert!(!is_declaration_compatible(byte, u8, &env));
 }
 
 #[test]

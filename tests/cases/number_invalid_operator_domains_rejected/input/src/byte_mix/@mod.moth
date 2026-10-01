@@ -1,0 +1,3 @@
+bad_byte_mix |left Dec2, right Byte| -> Dec2:
+    return left + right
+;

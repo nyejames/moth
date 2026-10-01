@@ -53,4 +53,7 @@ pub(crate) mod utils;
 mod validation;
 
 #[cfg(test)]
+pub(crate) use validation::validate_hir_module;
+
+#[cfg(test)]
 mod tests;

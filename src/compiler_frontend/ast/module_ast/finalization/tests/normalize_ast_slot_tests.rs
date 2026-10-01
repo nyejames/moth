@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 
 // ------------------------------
 //  Slot-bearing template classification uses effective view
@@ -77,6 +78,7 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
         &registry.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        NumericProfile::STANDARD,
         None,
     )
     .expect("slot template should project as a const template value");
@@ -168,6 +170,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
         &producer_store,
         &mut producer_strings,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        NumericProfile::STANDARD,
         Some(&producer_resources),
     )
     .expect("structural const-template projection should succeed");

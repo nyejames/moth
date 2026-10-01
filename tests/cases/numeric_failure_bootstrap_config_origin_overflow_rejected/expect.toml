@@ -1,0 +1,19 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/config.moth"
+line = 3
+column = 36
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/config.moth"
+line = 1

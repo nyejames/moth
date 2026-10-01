@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "number casts targets=42/42/42/42/42/42/42/42/42 int-source=42 U64max=18446744073709551615/18446744073709551615 scale=12.3/12.34/262 scale256=true integer-failures=242/262/262 int64=9223372036854775807/-9223372036854775808/242/242 float64=16777217"

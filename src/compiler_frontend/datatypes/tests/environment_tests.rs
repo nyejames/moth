@@ -8,10 +8,11 @@ use crate::compiler_frontend::datatypes::display::display_type;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericInstanceKey, GenericParameterId, NominalTypeId,
-    TypeConstructor, TypeId,
+    TypeConstructor, TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::datatypes::{
     BuiltinScalarReceiver, DataType, ReceiverKey, diagnostic_type_spelling,
@@ -55,10 +56,6 @@ fn builtin_seeding_creates_all_expected_ids() {
     );
     assert_eq!(
         env.type_kind(builtins.float),
-        Some(super::super::queries::TypeKind::Builtin)
-    );
-    assert_eq!(
-        env.type_kind(builtins.decimal),
         Some(super::super::queries::TypeKind::Builtin)
     );
     assert_eq!(
@@ -1257,6 +1254,14 @@ fn runtime_equality_query_accepts_supported_scalar_types() {
     assert!(env.supports_runtime_equality(env.builtins().bool));
     assert!(env.supports_runtime_equality(env.builtins().char));
     assert!(env.supports_runtime_equality(env.builtins().string));
+
+    for scalar in FixedScalar::ALL {
+        assert!(
+            env.supports_runtime_equality(builtin_type_ids::fixed_scalar(scalar)),
+            "{} supports runtime equality",
+            scalar.name()
+        );
+    }
 }
 
 #[test]

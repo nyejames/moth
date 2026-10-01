@@ -122,9 +122,9 @@ This produces a growable collection containing `item.value` for the iterations w
 Range loops use the same form:
 
 ```moth
-squares = loop 1 to 100 |number|:
-    if number % 2 is 0:
-        then number * number
+squares = loop 1 to 100 |value|:
+    if value % 2 is 0:
+        then value * value
     ;
 ;
 ```
@@ -193,8 +193,8 @@ values = loop items |item|:
 ```
 
 ```moth
-values {Int} = loop 0 to 10 |number|:
-    then number
+values {Int} = loop 0 to 10 |value|:
+    then value
 ;
 ```
 

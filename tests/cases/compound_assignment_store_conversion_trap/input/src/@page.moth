@@ -1,0 +1,7 @@
+store_u8 |target ~U8, increment U8|:
+    target += increment
+;
+
+target ~U8 = 255
+one U8 = 1
+store_u8(~target, one)

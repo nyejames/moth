@@ -142,6 +142,18 @@ impl<'a> HirValidator<'a> {
             }
 
             self.require_type_id(module_constant.ty, None)?;
+            if let HirConstValue::Number(value) = &module_constant.value
+                && self.type_environment.number_scale(module_constant.ty) != Some(value.scale())
+            {
+                return Err(self.error_with_hir(
+                    format!(
+                        "HIR Dec constant scale {} does not match module constant type {:?}",
+                        value.scale(),
+                        module_constant.ty
+                    ),
+                    None,
+                ));
+            }
             self.validate_module_const_value(&module_constant.value)?;
         }
 
@@ -194,6 +206,8 @@ impl<'a> HirValidator<'a> {
             // text and pieces must not be flattened to provide one.
             HirConstValue::Int(_)
             | HirConstValue::Float(_)
+            | HirConstValue::FixedScalar(_)
+            | HirConstValue::Number(_)
             | HirConstValue::Bool(_)
             | HirConstValue::Char(_)
             | HirConstValue::String(_)

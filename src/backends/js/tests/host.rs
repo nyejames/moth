@@ -73,9 +73,11 @@ fn host_io_reads_the_underlying_value_before_logging() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         JsLoweringConfig {
             pretty: true,
+            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -140,9 +142,11 @@ fn auto_invokes_start_function_when_enabled() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         JsLoweringConfig {
             pretty: true,
+            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),

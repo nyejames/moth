@@ -25,6 +25,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+/// The builder every check test compiles under; its numeric profile is the standard
+/// `Int32`/`Float64` one these fixtures were authored against.
+fn test_project_builder() -> ProjectBuilder {
+    ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
+}
+
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -38,6 +44,7 @@ fn check_compiles_single_file_without_writing_artifacts() {
             .to_str()
             .expect("temp file path should be valid UTF-8 for this test"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     assert!(
         !outcome.messages.has_errors(),
@@ -82,6 +89,7 @@ fn check_rejects_config_filename_namesake_source_contract() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
 
     assert!(outcome.messages.has_errors());
@@ -119,6 +127,7 @@ fn check_reports_missing_config_input_from_unselected_source() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
 
     assert!(outcome.messages.has_errors());
@@ -152,6 +161,7 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
 
     assert!(
@@ -189,6 +199,7 @@ fn check_compiles_unselected_same_module_source_closure() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
 
     assert!(
@@ -214,6 +225,7 @@ fn successful_check_finishes_bootstrap_before_frontend() {
             .to_str()
             .expect("temporary path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     let snapshot = timing_session.finish();
 
@@ -247,6 +259,7 @@ fn config_ast_timers_use_dedicated_identities() {
     let outcome = execute_check(
         root.to_str().expect("temporary path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     let snapshot = timing_session.finish();
 
@@ -307,6 +320,7 @@ fn check_retains_source_package_warning() {
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     assert!(
         !outcome.messages.has_errors(),
@@ -360,6 +374,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             root.to_str()
                 .expect("temporary project path should be valid UTF-8"),
             &BuildConfigInputSet::new(),
+            &test_project_builder(),
         );
         assert!(outcome.messages.has_errors());
         assert!(outcome.messages.error_diagnostics().any(|diagnostic| {
@@ -504,6 +519,7 @@ if value is:
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     assert!(
         !check_warning_outcome.messages.has_errors(),
@@ -588,6 +604,7 @@ increment(count)
             .to_str()
             .expect("temp project path should be valid UTF-8 for this test"),
         &BuildConfigInputSet::new(),
+        &test_project_builder(),
     );
     assert!(
         check_error_outcome.messages.has_errors(),
@@ -666,6 +683,7 @@ fn run_check_records_command_check_total() {
             .to_str()
             .expect("temporary path should be valid UTF-8"),
         super::CheckOptions::default(),
+        &test_project_builder(),
     );
     let snapshot = timing_session.finish();
 

@@ -9,8 +9,10 @@ use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmImportId, WasmLirFunctionId, WasmLirSignature, WasmStaticDataId,
 };
 use crate::backends::wasm::request::WasmBackendRequest;
+use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use rustc_hash::FxHashMap;
 use std::fmt::Write as _;
 
@@ -42,9 +44,15 @@ pub(crate) struct WasmEmitPlan {
     pub data_offsets: FxHashMap<WasmStaticDataId, u32>,
     /// Static-data segment lengths cached for literal helper calls.
     pub data_lengths: FxHashMap<WasmStaticDataId, u32>,
+    /// Ryu power-table segment offset and byte length when Float formatting is used.
+    pub float_format_tables_offset: Option<u32>,
+    pub float_format_tables_len: Option<u32>,
+    pub float_format_tables: Option<Vec<u8>>,
+    /// Initial memory size adjusted so every emitted active data segment is in bounds.
+    pub initial_memory_pages: u32,
     /// First aligned address available for dynamic heap allocation.
     pub heap_base: u32,
-    /// `heap_top` mutable global index when runtime helpers are emitted.
+    /// `heap_top` mutable global index when memory runtime helpers are emitted.
     pub heap_top_global_index: Option<u32>,
 }
 
@@ -94,28 +102,64 @@ pub(crate) fn build_emit_plan(
         next_function_index += 1;
     }
 
-    let should_emit_helpers =
-        module_uses_runtime_helpers(module) || helper_exports_requested(request);
-    if should_emit_helpers {
-        // WHAT: helper ordering is fixed and independent of usage count.
-        // WHY: stable helper indices simplify wrapper exports and future host glue assumptions.
-        for helper in helper_emit_order() {
-            let signature = helper_signature(helper);
-            let type_index =
-                intern_signature(&signature, &mut type_entries, &mut type_index_by_signature);
-            helper_indices.insert(helper, next_function_index);
-            defined_function_order.push(DefinedFunctionKey::Helper(helper));
-            defined_function_type_indices.push(type_index);
-            next_function_index += 1;
+    let helper_requirements =
+        runtime_helper_requirements(module, helper_exports_requested(request));
+    let memory_helpers_needed = helper_requirements.memory;
+    let float_power_needed = helper_requirements.float_power;
+    let float_remainder_needed = helper_requirements.float_remainder;
+    let f32_to_f16_bits_needed = helper_requirements.f32_to_f16_bits;
+    let f16_bits_to_f32_needed = helper_requirements.f16_bits_to_f32;
+    // WHAT: helper ordering is fixed and independent of usage count.
+    // WHY: stable helper function indices simplify exports and debug output.
+    let float_format_needed = helper_requirements.float_format;
+    for helper in helper_emit_order() {
+        let helper_is_needed = match helper {
+            WasmRuntimeHelper::FloatPower => float_power_needed,
+            WasmRuntimeHelper::FloatRemainder => float_remainder_needed,
+            WasmRuntimeHelper::F32ToF16Bits => f32_to_f16_bits_needed,
+            WasmRuntimeHelper::F16BitsToF32 => f16_bits_to_f32_needed,
+            WasmRuntimeHelper::FloatToDecimal | WasmRuntimeHelper::StringFromFloat => {
+                float_format_needed
+            }
+            _ => memory_helpers_needed,
+        };
+        if !helper_is_needed {
+            continue;
         }
+
+        let signature = helper_signature(helper);
+        let type_index =
+            intern_signature(&signature, &mut type_entries, &mut type_index_by_signature);
+        helper_indices.insert(helper, next_function_index);
+        defined_function_order.push(DefinedFunctionKey::Helper(helper));
+        defined_function_type_indices.push(type_index);
+        next_function_index += 1;
     }
 
     let StaticDataLayoutResult {
         data_offsets,
         data_lengths,
+        float_format_tables_offset,
+        float_format_tables,
+        float_format_tables_len,
         heap_base,
-    } = plan_static_data_layout(module)?;
-    let heap_top_global_index = should_emit_helpers.then_some(0);
+    } = plan_static_data_layout(module, float_format_needed)?;
+    let heap_top_global_index = memory_helpers_needed.then_some(0);
+    let initial_memory_pages = if float_format_needed {
+        let required_pages = heap_base / 65_536 + (heap_base % 65_536 != 0) as u32;
+        module.memory_plan.initial_pages.max(required_pages)
+    } else {
+        module.memory_plan.initial_pages
+    };
+    if float_format_needed
+        && let Some(max_pages) = module.memory_plan.max_pages
+        && initial_memory_pages > max_pages
+    {
+        return Err(CompilerError::compiler_error(
+            "Wasm Float formatting tables exceed the configured maximum memory",
+        )
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
+    }
 
     Ok(WasmEmitPlan {
         type_entries,
@@ -127,12 +171,16 @@ pub(crate) fn build_emit_plan(
         defined_function_type_indices,
         data_offsets,
         data_lengths,
+        float_format_tables_offset,
+        float_format_tables_len,
+        float_format_tables,
+        initial_memory_pages,
         heap_base,
         heap_top_global_index,
     })
 }
 
-pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 15] {
+pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 22] {
     // WHAT: canonical helper declaration order.
     // WHY: helper function indices must be deterministic for stable exports/debug output.
     [
@@ -145,19 +193,38 @@ pub(crate) fn helper_emit_order() -> [WasmRuntimeHelper; 15] {
         WasmRuntimeHelper::StringLen,
         WasmRuntimeHelper::StringEqual,
         WasmRuntimeHelper::StringFromI64,
+        WasmRuntimeHelper::StringFromU64,
         WasmRuntimeHelper::VecNew,
         WasmRuntimeHelper::VecPushHandle,
         WasmRuntimeHelper::VecLen,
         WasmRuntimeHelper::VecGet,
         WasmRuntimeHelper::Release,
         WasmRuntimeHelper::DropIfOwned,
+        WasmRuntimeHelper::FloatPower,
+        WasmRuntimeHelper::FloatRemainder,
+        WasmRuntimeHelper::F32ToF16Bits,
+        WasmRuntimeHelper::F16BitsToF32,
+        WasmRuntimeHelper::FloatToDecimal,
+        WasmRuntimeHelper::StringFromFloat,
     ]
 }
 
 pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
-    use WasmAbiType::{Handle, I32, I64};
+    use WasmAbiType::{F32, F64, Handle, I32, I64};
 
     match helper {
+        WasmRuntimeHelper::FloatPower | WasmRuntimeHelper::FloatRemainder => WasmLirSignature {
+            params: vec![F64, F64],
+            results: vec![F64],
+        },
+        WasmRuntimeHelper::F32ToF16Bits => WasmLirSignature {
+            params: vec![F32],
+            results: vec![I32],
+        },
+        WasmRuntimeHelper::F16BitsToF32 => WasmLirSignature {
+            params: vec![I32],
+            results: vec![F32],
+        },
         WasmRuntimeHelper::Alloc => WasmLirSignature {
             params: vec![I32],
             results: vec![I32],
@@ -190,8 +257,16 @@ pub(crate) fn helper_signature(helper: WasmRuntimeHelper) -> WasmLirSignature {
             params: vec![Handle, Handle],
             results: vec![I32],
         },
-        WasmRuntimeHelper::StringFromI64 => WasmLirSignature {
+        WasmRuntimeHelper::StringFromI64 | WasmRuntimeHelper::StringFromU64 => WasmLirSignature {
             params: vec![I64],
+            results: vec![Handle],
+        },
+        WasmRuntimeHelper::FloatToDecimal => WasmLirSignature {
+            params: vec![F64, I32],
+            results: vec![I64, I32],
+        },
+        WasmRuntimeHelper::StringFromFloat => WasmLirSignature {
+            params: vec![F64, I32],
             results: vec![Handle],
         },
         WasmRuntimeHelper::VecNew => WasmLirSignature {
@@ -244,12 +319,19 @@ pub(crate) fn helper_name(helper: WasmRuntimeHelper) -> &'static str {
         WasmRuntimeHelper::StringLen => "rt_string_len",
         WasmRuntimeHelper::StringEqual => "rt_string_equal",
         WasmRuntimeHelper::StringFromI64 => "rt_string_from_i64",
+        WasmRuntimeHelper::StringFromU64 => "rt_string_from_u64",
         WasmRuntimeHelper::VecNew => "rt_vec_new",
         WasmRuntimeHelper::VecPushHandle => "rt_vec_push_handle",
         WasmRuntimeHelper::VecLen => "rt_vec_len",
         WasmRuntimeHelper::VecGet => "rt_vec_get",
         WasmRuntimeHelper::Release => "rt_release",
         WasmRuntimeHelper::DropIfOwned => "rt_drop_if_owned",
+        WasmRuntimeHelper::FloatPower => "rt_float_power",
+        WasmRuntimeHelper::FloatRemainder => "rt_float_remainder",
+        WasmRuntimeHelper::F32ToF16Bits => "rt_f32_to_f16_bits",
+        WasmRuntimeHelper::F16BitsToF32 => "rt_f16_bits_to_f32",
+        WasmRuntimeHelper::FloatToDecimal => "rt_float_to_decimal",
+        WasmRuntimeHelper::StringFromFloat => "rt_string_from_float",
     }
 }
 
@@ -268,7 +350,9 @@ pub(crate) fn plan_sections_text(module: &WasmLirModule, plan: &WasmEmitPlan) ->
     // Includes only LIR-declared exports. Helper exports are controlled by request policy.
     let _ = writeln!(out, "  export: {}", module.exports.len());
     let _ = writeln!(out, "  code: {}", plan.defined_function_order.len());
-    let _ = writeln!(out, "  data: {}", module.static_data.len());
+    let emitted_data_count =
+        module.static_data.len() + usize::from(plan.float_format_tables_offset.is_some());
+    let _ = writeln!(out, "  data: {emitted_data_count}");
     out
 }
 
@@ -355,50 +439,101 @@ pub(crate) fn plan_data_layout_text(module: &WasmLirModule, plan: &WasmEmitPlan)
             );
         }
     }
+    if let (Some(offset), Some(len)) = (
+        plan.float_format_tables_offset,
+        plan.float_format_tables_len,
+    ) {
+        let _ = writeln!(out, "  float_format_tables offset={offset} len={len}");
+    }
     let _ = writeln!(out, "  heap_base={}", plan.heap_base);
     out
 }
 
-fn module_uses_runtime_helpers(module: &WasmLirModule) -> bool {
-    // WHAT: scan for statements that require synthesized runtime helper bodies.
-    // WHY: helper emission should be demand-driven so modules without helper operations stay lean.
+struct RuntimeHelperRequirements {
+    memory: bool,
+    float_power: bool,
+    float_remainder: bool,
+    f32_to_f16_bits: bool,
+    f16_bits_to_f32: bool,
+    float_format: bool,
+}
+
+fn runtime_helper_requirements(
+    module: &WasmLirModule,
+    memory_helpers_exported: bool,
+) -> RuntimeHelperRequirements {
+    let mut requirements = RuntimeHelperRequirements {
+        memory: memory_helpers_exported,
+        float_power: false,
+        float_remainder: false,
+        f32_to_f16_bits: false,
+        f16_bits_to_f32: false,
+        float_format: false,
+    };
+
     for function in &module.functions {
         for block in &function.blocks {
             for statement in &block.statements {
-                if matches!(
-                    statement,
+                match statement {
+                    WasmLirStmt::RoundF16 { .. } => {
+                        requirements.f32_to_f16_bits = true;
+                        requirements.f16_bits_to_f32 = true;
+                    }
+                    WasmLirStmt::LoadScalar {
+                        kind: WasmScalarStorageKind::F16,
+                        ..
+                    } => requirements.f16_bits_to_f32 = true,
+                    WasmLirStmt::StoreScalar {
+                        kind: WasmScalarStorageKind::F16,
+                        ..
+                    } => requirements.f32_to_f16_bits = true,
                     WasmLirStmt::StringNewBuffer { .. }
-                        | WasmLirStmt::StringPushLiteral { .. }
-                        | WasmLirStmt::StringPushHandle { .. }
-                        | WasmLirStmt::StringFromI64 { .. }
-                        | WasmLirStmt::StringFinish { .. }
-                        | WasmLirStmt::StringEq { .. }
-                        | WasmLirStmt::StringNe { .. }
-                        | WasmLirStmt::VecNew { .. }
-                        | WasmLirStmt::VecPushHandle { .. }
-                        | WasmLirStmt::DropIfOwned { .. }
-                ) {
-                    return true;
+                    | WasmLirStmt::StringPushLiteral { .. }
+                    | WasmLirStmt::StringPushHandle { .. }
+                    | WasmLirStmt::StringFromI64 { .. }
+                    | WasmLirStmt::StringFromU64 { .. }
+                    | WasmLirStmt::StringFinish { .. }
+                    | WasmLirStmt::StringEq { .. }
+                    | WasmLirStmt::StringNe { .. }
+                    | WasmLirStmt::VecNew { .. }
+                    | WasmLirStmt::VecPushHandle { .. }
+                    | WasmLirStmt::DropIfOwned { .. } => requirements.memory = true,
+                    WasmLirStmt::StringFromFloat { .. } => {
+                        requirements.memory = true;
+                        requirements.float_format = true;
+                    }
+                    WasmLirStmt::CheckedFloatOp {
+                        operator: NumericOperator::Power,
+                        ..
+                    } => requirements.float_power = true,
+                    WasmLirStmt::CheckedFloatOp {
+                        operator: NumericOperator::Remainder,
+                        ..
+                    } => requirements.float_remainder = true,
+                    _ => {}
                 }
             }
         }
     }
 
-    false
+    requirements
 }
 
 struct StaticDataLayoutResult {
     data_offsets: FxHashMap<WasmStaticDataId, u32>,
     data_lengths: FxHashMap<WasmStaticDataId, u32>,
+    float_format_tables_offset: Option<u32>,
+    float_format_tables: Option<Vec<u8>>,
+    float_format_tables_len: Option<u32>,
     heap_base: u32,
 }
 
 fn plan_static_data_layout(
     module: &WasmLirModule,
+    float_format_needed: bool,
 ) -> Result<StaticDataLayoutResult, CompilerError> {
-    // WHAT: place static segments by stable `WasmStaticDataId`, aligned to 8 bytes.
-    // WHY: deterministic layout keeps literal pointer tests reproducible and preserves
-    // handle/pointer alignment assumptions for runtime helpers.
+    // WHAT: place static segments by stable id, then append Ryu tables only for dynamic float
+    // formatting. All segments are aligned to 8 bytes for deterministic heap placement.
     let mut data_offsets = FxHashMap::default();
     let mut data_lengths = FxHashMap::default();
 
@@ -407,23 +542,46 @@ fn plan_static_data_layout(
 
     let mut cursor = module.memory_plan.static_data_base;
     for segment in static_data {
-        cursor = align_to(cursor, 8);
+        cursor = align_to(cursor, 8).ok_or_else(|| {
+            static_data_layout_error("Wasm static data layout overflowed while aligning a segment")
+        })?;
+        let len = u32::try_from(segment.bytes.len()).map_err(|_| {
+            static_data_layout_error("Wasm static data segment length exceeded u32 address space")
+        })?;
         data_offsets.insert(segment.id, cursor);
-        data_lengths.insert(segment.id, segment.bytes.len() as u32);
-        cursor = cursor
-            .checked_add(segment.bytes.len() as u32)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
+        data_lengths.insert(segment.id, len);
+        cursor = cursor.checked_add(len).ok_or_else(|| {
+            static_data_layout_error(
                 "Wasm static data layout overflowed u32 address space while planning data segments",
             )
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
-            })?;
+        })?;
     }
+
+    cursor = align_to(cursor, 8).ok_or_else(|| {
+        static_data_layout_error("Wasm static data layout overflowed while aligning Ryu tables")
+    })?;
+    let (float_format_tables_offset, float_format_tables, float_format_tables_len) =
+        if float_format_needed {
+            let tables = super::float_format::ryu_table_data();
+            let len = tables.len() as u32;
+            let offset = cursor;
+            cursor = cursor.checked_add(len).ok_or_else(|| {
+                static_data_layout_error("Wasm Ryu table layout overflowed u32 address space")
+            })?;
+            (Some(offset), Some(tables), Some(len))
+        } else {
+            (None, None, None)
+        };
 
     Ok(StaticDataLayoutResult {
         data_offsets,
         data_lengths,
-        heap_base: align_to(cursor, 8),
+        float_format_tables_offset,
+        float_format_tables,
+        float_format_tables_len,
+        heap_base: align_to(cursor, 8).ok_or_else(|| {
+            static_data_layout_error("Wasm static data layout overflowed while aligning heap base")
+        })?,
     })
 }
 
@@ -444,17 +602,20 @@ fn intern_signature(
     index
 }
 
-fn align_to(value: u32, alignment: u32) -> u32 {
-    // WHAT: round `value` up to the next `alignment` boundary.
-    // WHY: static data and heap base require predictable alignment guarantees.
+fn static_data_layout_error(message: &str) -> CompilerError {
+    CompilerError::compiler_error(message)
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+}
+
+fn align_to(value: u32, alignment: u32) -> Option<u32> {
     if alignment == 0 {
-        return value;
+        return Some(value);
     }
 
     let remainder = value % alignment;
     if remainder == 0 {
-        value
+        Some(value)
     } else {
-        value + (alignment - remainder)
+        value.checked_add(alignment - remainder)
     }
 }

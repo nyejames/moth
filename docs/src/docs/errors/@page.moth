@@ -22,6 +22,8 @@
 
 @assertions-basic content as assertions_basic
 
+@runtime-failures-and-termination content as runtime_failures_and_termination
+
 @styles navbar,
     section,
     language_theme_head,
@@ -104,6 +106,18 @@ page_head #= language_theme_head
         [$insert("advanced"):[assertions]]
 
         [assertions_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):runtime-failures-and-termination]
+        [$insert("title"):Runtime failures and termination]
+        [$insert("advanced"):[runtime_failures_and_termination]]
+
+        Checked operations and typed errors support recovery. Resource exhaustion
+        and host termination remain outside that contract. Choose Advanced for
+        the failure catalogue and the Wasm/JavaScript comparison.
     ]
 ]
 

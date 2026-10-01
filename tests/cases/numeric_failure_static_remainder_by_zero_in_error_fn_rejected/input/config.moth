@@ -1,0 +1,5 @@
+project #= (
+    name = "numeric_failure_static_remainder_by_zero_in_error_fn_rejected",
+    entry_root = "src",
+)
+html #= ()

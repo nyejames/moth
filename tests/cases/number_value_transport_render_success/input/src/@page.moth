@@ -1,0 +1,63 @@
+@shared huge_value, keep, text_of, private_number_text
+
+NumberBox type T = |
+    value T,
+|
+
+NumberRow = |
+    selected Dec3?,
+|
+
+alias_scale_zero |value Dec0| -> Dec:
+    return value
+;
+
+relay_row |values {Dec2}, row NumberRow| -> {Dec2}, Dec3?:
+    return values, row.selected
+;
+
+render_number4 |value Dec4| -> String:
+    return [value]
+;
+
+control #Dec2 = 2.50
+huge_alias = alias_scale_zero(huge_value)
+huge_text String = cast huge_alias
+
+copy_source ~Dec4 = -0.1200
+copy_snapshot Dec4 = copy copy_source
+copy_source = 0.34
+copy_current_text String = cast copy_source
+runtime_echo = keep(copy_snapshot)
+runtime_direct String = cast runtime_echo
+runtime_template = render_number4(runtime_echo)
+runtime_format_equal = runtime_direct is runtime_template
+same_scale_equal = copy_snapshot is copy_source
+same_scale_less = copy_snapshot < copy_source
+
+box NumberBox of Dec2 = NumberBox(9.75)
+box_value Dec2 = box.value
+box_text = text_of(box_value)
+
+values {Dec2} = {7.25, 8.50}
+selected Dec3? = 6.125
+row NumberRow = NumberRow(selected = selected)
+passed_values, passed_optional = relay_row(values, row)
+first Dec2 = passed_values.get(0) catch:
+    then 0
+;
+first_text String = cast first
+optional_text ~String = "none"
+if passed_optional is |optional_value|:
+    optional_text = cast optional_value
+;
+
+tiny Dec256 = 1e-256
+tiny_echo = keep(tiny)
+tiny_text = text_of(tiny_echo)
+private_text = private_number_text(0)
+
+signed_zero Dec256 = -0e-99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999
+signed_zero_text String = cast signed_zero
+
+[: number transport control=[control] huge=[huge_text] copy=[runtime_direct]/[copy_current_text] equal=[same_scale_equal] less=[same_scale_less] box=[box_text] collection=[first_text] option=[optional_text] scale256=[tiny_text] zero=[signed_zero_text] template-equal=[runtime_format_equal] generic-private=[private_text]]

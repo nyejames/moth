@@ -10,6 +10,9 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::project_globals::{
     ProjectGlobalsFieldInput, ProjectGlobalsInterface,
@@ -222,12 +225,20 @@ fn build_config_input_set_rejects_duplicate_names_deterministically() {
 // -------------------------
 
 fn infer(value: &str) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::from_command_text(value)
+    infer_with(value, NumericProfile::STANDARD)
+}
+
+fn infer_with(value: &str, numeric_profile: NumericProfile) -> PrimitiveBuildValue {
+    PrimitiveBuildValue::from_command_text(value, numeric_profile)
         .expect("value should infer without a command-input diagnostic")
 }
 
 fn infer_error(value: &str) -> BuildInputValueError {
-    PrimitiveBuildValue::from_command_text(value)
+    infer_error_with(value, NumericProfile::STANDARD)
+}
+
+fn infer_error_with(value: &str, numeric_profile: NumericProfile) -> BuildInputValueError {
+    PrimitiveBuildValue::from_command_text(value, numeric_profile)
         .expect_err("value should produce a command-input diagnostic")
 }
 
@@ -259,8 +270,14 @@ fn command_text_infers_complete_signed_whole_numbers_as_int() {
     assert_eq!(infer("4"), PrimitiveBuildValue::Int(4));
     assert_eq!(infer("-7"), PrimitiveBuildValue::Int(-7));
     assert_eq!(infer("-0"), PrimitiveBuildValue::Int(0));
-    assert_eq!(infer("2147483647"), PrimitiveBuildValue::Int(i32::MAX));
-    assert_eq!(infer("-2147483648"), PrimitiveBuildValue::Int(i32::MIN));
+    assert_eq!(
+        infer("2147483647"),
+        PrimitiveBuildValue::Int(i64::from(i32::MAX))
+    );
+    assert_eq!(
+        infer("-2147483648"),
+        PrimitiveBuildValue::Int(i64::from(i32::MIN))
+    );
     assert_eq!(infer("1_000"), PrimitiveBuildValue::Int(1_000));
     assert_eq!(infer("-1_0"), PrimitiveBuildValue::Int(-10));
 }
@@ -327,6 +344,156 @@ fn command_text_falls_back_to_string_for_every_other_value() {
     assert_eq!(infer("x"), PrimitiveBuildValue::String(String::from("x")));
     assert_eq!(infer("5"), PrimitiveBuildValue::Int(5));
     assert_eq!(infer("-"), PrimitiveBuildValue::String(String::from("-")));
+}
+
+#[test]
+fn command_text_inference_uses_the_profile_int_width() {
+    let wide = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+
+    // The same authored text is a typed Int under a 64-bit width and an out-of-range diagnostic
+    // under the standard 32-bit width, because command inference materialises at the profile.
+    assert_eq!(
+        infer_with("3000000000", wide),
+        PrimitiveBuildValue::Int(3_000_000_000)
+    );
+    let BuildInputValueError::IntOutOfRange { text } = infer_error("3000000000") else {
+        panic!("expected an out-of-range Int diagnostic under the standard width");
+    };
+    assert_eq!(text, "3000000000");
+}
+
+#[test]
+fn command_text_inference_rounds_floats_at_the_profile_precision() {
+    let narrow = NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits32,
+    };
+
+    // 0.1 is not exactly representable; the binary32 value is the rounded carrier, and it differs
+    // from the binary64 value the standard profile keeps.
+    assert_eq!(infer_with("0.1", narrow), float_value(f64::from(0.1f32)));
+    assert_ne!(
+        infer_with("0.1", narrow),
+        infer_with("0.1", NumericProfile::STANDARD)
+    );
+    // A value that overflows the narrow precision diagnoses instead of materialising.
+    let BuildInputValueError::NonFiniteFloat { text } = infer_error_with("1e39", narrow) else {
+        panic!("expected a non-finite Float diagnostic at the narrow precision");
+    };
+    assert_eq!(text, "1e39");
+    assert_eq!(infer("1e39"), float_value(1e39));
+}
+
+/// One field's fingerprint follows the profile dimension its contract's value depends on: the
+/// `Int` contract follows `Int` width and the `Float` contract follows `Float` precision,
+/// never a `String`.
+#[test]
+fn build_config_fingerprints_follow_the_numeric_profile_for_numeric_contracts() {
+    // Each pair differs from STANDARD in exactly the dimension under test, so a contract
+    // fingerprint that ignored its own dimension would collide with STANDARD and fail.
+    let int_wide = NumericProfile {
+        int_width: IntWidth::Bits64,
+        ..NumericProfile::STANDARD
+    };
+    let float_narrow = NumericProfile {
+        float_precision: FloatPrecision::Bits32,
+        ..NumericProfile::STANDARD
+    };
+    let int_value = PrimitiveBuildValue::Int(7);
+    let float_value =
+        PrimitiveBuildValue::Float(FiniteFloat::new(0.75).expect("test float should be finite"));
+    let string_value = PrimitiveBuildValue::String(String::from("7"));
+    let int_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Int);
+    let float_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Float);
+    let string_contract = BuildInputType::Primitive(PrimitiveBuildInputType::String);
+
+    assert_ne!(
+        build_config_fingerprint("field", int_contract, Some(&int_value), int_wide),
+        build_config_fingerprint(
+            "field",
+            int_contract,
+            Some(&int_value),
+            NumericProfile::STANDARD
+        ),
+        "an Int field must invalidate when the boundary Int width changes"
+    );
+    assert_ne!(
+        build_config_fingerprint("field", float_contract, Some(&float_value), float_narrow),
+        build_config_fingerprint(
+            "field",
+            float_contract,
+            Some(&float_value),
+            NumericProfile::STANDARD
+        ),
+        "a Float field must invalidate when the boundary Float precision changes"
+    );
+    assert_eq!(
+        build_config_fingerprint("field", string_contract, Some(&string_value), float_narrow),
+        build_config_fingerprint(
+            "field",
+            string_contract,
+            Some(&string_value),
+            NumericProfile::STANDARD
+        ),
+        "a String field fingerprint must not depend on the numeric profile"
+    );
+}
+
+/// The profile rule is applied where a value becomes resolved, so a default or retained carrier
+/// that predates the profile cannot silently resolve at a width the boundary does not have.
+#[test]
+fn resolution_rejects_a_value_outside_the_numeric_profile() {
+    let mut string_table = StringTable::new();
+    let facts = vec![contract_fact(
+        &mut string_table,
+        "count",
+        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        false,
+        Some(PrimitiveBuildValue::Int(3_000_000_000)),
+    )];
+
+    let error = resolve_build_config_values(
+        &facts,
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
+    )
+    .expect_err("a default outside the standard Int width must not resolve");
+
+    assert_eq!(error.name().as_str(), "count");
+    let BuildConfigResolutionError::NumericProfileViolation { text, reason, .. } = &error else {
+        panic!("expected a numeric-profile violation, got {error:?}");
+    };
+    assert_eq!(text, "3000000000");
+    assert_eq!(
+        *reason,
+        crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange
+    );
+
+    // The same value resolves under a profile whose Int width contains it.
+    let wide = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let resolved = resolve_build_config_values(
+        &facts,
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &BuilderConfigGlobalSet::new(),
+        wide,
+    )
+    .expect("the wider profile must accept the same default");
+    let name = BuildInputName::new("count").expect("test input name should validate");
+    assert_eq!(
+        resolved.get(&name).expect("count should resolve").value(),
+        Some(&PrimitiveBuildValue::Int(3_000_000_000))
+    );
 }
 
 #[test]
@@ -509,7 +676,7 @@ fn builder_surface_registers_platform_neutral_globals_only() {
 
 fn project_global_with_fingerprint(
     name: &str,
-    value: i32,
+    value: i64,
     fingerprint: BuildConfigFingerprint,
 ) -> ProjectGlobalsInterface {
     let member = SyntheticInterfaceMemberIdentity::new(
@@ -560,6 +727,7 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("explicit input should resolve");
     let defaulted = resolve_build_config_values(
@@ -568,6 +736,7 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("declaration default should resolve");
     let name = BuildInputName::new("same_value").expect("test input name should validate");
@@ -589,7 +758,12 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
     assert_eq!(explicit_value.fingerprint(), defaulted_value.fingerprint());
     assert_eq!(
         explicit_value.fingerprint(),
-        build_config_fingerprint("same_value", contract, Some(&value))
+        build_config_fingerprint(
+            "same_value",
+            contract,
+            Some(&value),
+            NumericProfile::STANDARD
+        )
     );
 
     // An @project consumer sees the same semantic member fingerprint even when the provider
@@ -680,7 +854,12 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         .with_resolved_provider(
             Some(direct_value.clone()),
             BuildConfigValueOrigin::ExplicitInput,
-            build_config_fingerprint("direct_value", direct_contract_type, Some(&direct_value)),
+            build_config_fingerprint(
+                "direct_value",
+                direct_contract_type,
+                Some(&direct_value),
+                NumericProfile::STANDARD,
+            ),
             Some(command_location(1)),
         ),
     ];
@@ -718,6 +897,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         &direct_project_facts,
         &explicit_inputs,
         &globals,
+        NumericProfile::STANDARD,
     )
     .expect("all test contracts should resolve");
 
@@ -818,6 +998,7 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("different primitive source contracts must conflict");
     assert!(matches!(
@@ -852,6 +1033,7 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("different source optionality must conflict");
     assert!(matches!(
@@ -886,6 +1068,7 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("different source required states must conflict");
     assert!(matches!(
@@ -920,6 +1103,7 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("different normalized source defaults must conflict");
     assert!(matches!(
@@ -955,6 +1139,7 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         )],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("direct project and source contracts must agree");
     assert!(matches!(
@@ -986,6 +1171,7 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("fixed project and source contracts must agree on type");
     assert!(matches!(
@@ -1043,6 +1229,7 @@ fn boundary_resolver_reports_project_source_conflicts_in_collected_source_order(
         &direct_project_facts,
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("the first collected project/source conflict should be reported");
 
@@ -1090,6 +1277,7 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("canonical facts should resolve");
     let index = crate::compiler_frontend::build_config::BuildConfigResolutionIndex::from_validated(
@@ -1104,6 +1292,7 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
             &first_check_only_facts,
             &BuildConfigInputSet::new(),
             &changed_globals,
+            NumericProfile::STANDARD,
         )
         .expect("the first check-only unit should resolve independently");
     let second_check_only = index
@@ -1111,6 +1300,7 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
             &second_check_only_facts,
             &BuildConfigInputSet::new(),
             &changed_globals,
+            NumericProfile::STANDARD,
         )
         .expect("the second check-only unit should resolve independently");
 
@@ -1172,6 +1362,7 @@ fn check_only_conflict_keeps_canonical_and_transient_spans() {
         &[],
         &BuildConfigInputSet::new(),
         &builder_globals(&[("shared_setting", PrimitiveBuildValue::Int(7))]),
+        NumericProfile::STANDARD,
     )
     .expect("canonical contract should resolve");
     let index = BuildConfigResolutionIndex::from_validated(
@@ -1186,6 +1377,7 @@ fn check_only_conflict_keeps_canonical_and_transient_spans() {
             std::slice::from_ref(&transient_fact),
             &BuildConfigInputSet::new(),
             &BuilderConfigGlobalSet::new(),
+            NumericProfile::STANDARD,
         )
         .expect_err("a transient contract differing from canonical state should conflict");
     let BuildConfigResolutionError::SourceContractConflict {
@@ -1223,6 +1415,7 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("a String must not satisfy an Int contract");
     assert_eq!(error.name().as_str(), "count");
@@ -1247,6 +1440,7 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
         &[],
         &BuildConfigInputSet::new(),
         &builder_globals(&[("enabled", PrimitiveBuildValue::Int(1))]),
+        NumericProfile::STANDARD,
     )
     .expect_err("a builder Int must not satisfy a Bool contract");
     assert!(matches!(
@@ -1290,6 +1484,7 @@ fn boundary_resolver_checks_unknown_inputs_after_all_contracts_are_known() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("unknown explicit names must be rejected after contract collection");
     assert_eq!(error.name().as_str(), "unknown_value");
@@ -1317,6 +1512,7 @@ fn boundary_resolver_distinguishes_optional_absence_from_required_missing() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("optional omission should resolve to absence");
     let optional_value = resolved
@@ -1342,6 +1538,7 @@ fn boundary_resolver_distinguishes_optional_absence_from_required_missing() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect_err("required omission must diagnose");
     assert!(matches!(
@@ -1376,6 +1573,7 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("first ordering should resolve");
 
@@ -1402,6 +1600,7 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
+        NumericProfile::STANDARD,
     )
     .expect("second ordering should resolve");
 

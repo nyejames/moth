@@ -1,0 +1,10 @@
+export:
+    Bounds = |
+        maximum Int,
+    |
+    Limits = |
+        inner Bounds,
+    |
+
+    limits #= Limits(inner = Bounds(maximum = 2147483647))
+;

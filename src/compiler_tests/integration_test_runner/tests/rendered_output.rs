@@ -9,19 +9,149 @@
 
 use super::super::assertions::{
     RenderHarnessErrorKind, RuntimeEvent, SlotOutput, execute_wasm_harness_for_test,
-    extract_executable_scripts, parse_harness_output, required_text_artifact_for_test,
-    run_node_script_within, run_script_with_executable_for_test,
-    validate_rendered_output_fragments, validate_success_result, with_harness_workspace,
+    extract_executable_scripts, parse_harness_output, parse_node_major_for_test,
+    probe_node_runtime_for_test, required_text_artifact_for_test, run_node_script_within,
+    run_script_with_executable_for_test, validate_rendered_output_fragments,
+    validate_success_result, with_harness_workspace,
 };
 use super::super::types::{ArtifactKind, GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, FailureKind, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::{
-    VALID_HTML, build_result_with_index_html, build_result_with_output_files, success_test_case,
+    VALID_HTML, VALID_HTML_WASM, build_result_with_index_html, build_result_with_output_files,
+    success_test_case,
 };
-use crate::build_system::build::FileKind;
+use crate::build_system::build::{DeferredResourceOutput, FileKind};
+use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 use crate::compiler_tests::test_fs::assert_path_missing;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use wasm_encoder::{
+    CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, MemArg,
+    MemorySection, MemoryType, Module, TypeSection, ValType,
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestWasmTrap {
+    Unreachable,
+    OutOfBoundsLoad,
+}
+
+fn wasm_module_with_trap(trap: TestWasmTrap) -> Vec<u8> {
+    let trap_result_types = match trap {
+        TestWasmTrap::Unreachable => Vec::new(),
+        TestWasmTrap::OutOfBoundsLoad => vec![ValType::I32],
+    };
+
+    let mut module = Module::new();
+    let mut types = TypeSection::new();
+    types.ty().function(Vec::new(), vec![ValType::I32]);
+    types.ty().function(Vec::new(), trap_result_types);
+    module.section(&types);
+
+    let mut functions = FunctionSection::new();
+    for _ in 0..4 {
+        functions.function(0);
+    }
+    functions.function(1);
+    module.section(&functions);
+
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: 1,
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+    module.section(&memories);
+
+    let mut exports = ExportSection::new();
+    exports.export("memory", ExportKind::Memory, 0);
+    for (index, name) in ["moth_start", "moth_str_ptr", "moth_str_len", "moth_release"]
+        .iter()
+        .enumerate()
+    {
+        exports.export(name, ExportKind::Func, index as u32);
+    }
+    exports.export("trap", ExportKind::Func, 4);
+    module.section(&exports);
+
+    let mut code = CodeSection::new();
+    for _ in 0..4 {
+        let mut function = Function::new(Vec::new());
+        function.instruction(&Instruction::I32Const(0));
+        function.instruction(&Instruction::End);
+        code.function(&function);
+    }
+
+    let mut trap_function = Function::new(Vec::new());
+    match trap {
+        TestWasmTrap::Unreachable => {
+            trap_function.instruction(&Instruction::Unreachable);
+        }
+        TestWasmTrap::OutOfBoundsLoad => {
+            trap_function.instruction(&Instruction::I32Const(65_536));
+            trap_function.instruction(&Instruction::I32Load(MemArg {
+                offset: 0,
+                align: 2,
+                memory_index: 0,
+            }));
+        }
+    }
+    trap_function.instruction(&Instruction::End);
+    code.function(&trap_function);
+    module.section(&code);
+
+    module.finish()
+}
+
+fn wasm_trap_page_script(wasm_bytes: &[u8], body: &str) -> String {
+    format!(
+        "const __moth_test_module = new WebAssembly.Module(new Uint8Array({wasm_bytes:?}));\n\
+         const __moth_test_instance = new WebAssembly.Instance(__moth_test_module, {{}});\n\
+         {body}\n"
+    )
+}
+
+fn wasm_bootstrap_script(body: &str) -> String {
+    format!(
+        "async function __moth_instantiate_wasm(wasm_url, imports) {{\n\
+         const bytes = await fetch(wasm_url).then((response) => response.arrayBuffer());\n\
+         return WebAssembly.instantiate(bytes, imports);\n\
+         }}\n\
+         (async () => {{\n\
+         const {{ instance }} = await __moth_instantiate_wasm(\"./page.wasm\", {{}});\n\
+         {body}\n\
+         }})();\n"
+    )
+}
+
+fn validate_wasm_page(
+    page_js: String,
+    wasm_bytes: Vec<u8>,
+    rendered_output: RenderedOutputExpectation,
+) -> (bool, Option<FailureKind>, Option<String>) {
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output,
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (
+            PathBuf::from("index.html"),
+            FileKind::Html(VALID_HTML_WASM.to_owned()),
+        ),
+        (PathBuf::from("page.js"), FileKind::Js(page_js)),
+        (PathBuf::from("page.wasm"), FileKind::Wasm(wasm_bytes)),
+    ]);
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    (result.passed, result.failure_kind, result.failure_reason)
+}
 
 // ─── Fragment expectation checks ────────────────────────────────────────────
 
@@ -137,7 +267,9 @@ fn rendered_output_exact_accepts_empty_captured_text_only() {
 
 #[track_caller]
 fn extracted_scripts(html: &str) -> Vec<String> {
-    extract_executable_scripts(html).expect("supported script shapes should be extracted")
+    extract_executable_scripts(html)
+        .expect("supported script shapes should be extracted")
+        .classic
 }
 
 #[track_caller]
@@ -282,22 +414,274 @@ fn script_extraction_ignores_elements_whose_name_merely_starts_with_script() {
 }
 
 #[test]
-fn script_extraction_rejects_module_scripts() {
-    // The harness concatenates inline sources into one classic script in a workspace holding no
-    // emitted glue, provider or runtime module and no import map. Accepting a module block would
-    // execute the page's real module graph under a different runtime model, which is the exact
-    // claim this owner exists to stop.
+fn script_extraction_retains_one_module_separately_from_classic_sources() {
+    let scripts = extract_executable_scripts(
+        r#"<script type="module">import { run } from "./run.js"; run();</script>"#,
+    )
+    .expect("one inline module script is supported");
+
+    assert!(scripts.classic.is_empty());
+    assert_eq!(
+        scripts.module.as_deref(),
+        Some(r#"import { run } from "./run.js"; run();"#)
+    );
+}
+
+#[test]
+fn script_extraction_rejects_mixed_and_multiple_module_scripts() {
     for html in [
-        r#"<script type="module">import { f } from "./_moth/js/glue/module-a.js"; f();</script>"#,
-        r#"<SCRIPT TYPE="Module">run()</SCRIPT>"#,
+        r#"<script>classic()</script><script type="module">module()</script>"#,
+        r#"<script type="module">first()</script><script type="text/javascript">classic()</script>"#,
+        r#"<script type="module">first()</script><script type="module">second()</script>"#,
     ] {
-        let message = rejected_script_shape(html, "a module script must be rejected, not executed");
-        assert!(message.contains("module"), "{message}");
+        let message = rejected_script_shape(
+            html,
+            "mixed executable modes and multiple modules are unsupported",
+        );
         assert!(
-            message.contains("import map") || message.contains("module semantics"),
-            "the rejection must say why the harness cannot run it: {message}"
+            message.contains("mixes classic") || message.contains("multiple inline module"),
+            "{message}"
         );
     }
+}
+
+#[test]
+fn script_extraction_rejects_import_maps_for_module_execution() {
+    let message = rejected_script_shape(
+        concat!(
+            r#"<script type="importmap">{ not: valid JSON }</script>"#,
+            r#"<script type="module">import "bare";</script>"#,
+        ),
+        "Node cannot reproduce browser import-map resolution",
+    );
+    assert!(message.contains("import map"), "{message}");
+    assert!(message.contains("Node's native ESM loader"), "{message}");
+}
+
+#[test]
+fn module_harness_stages_relative_imports_and_preserves_console_and_dom_events() {
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="application/json">{"ignored": true}</script>
+  <script type="module">
+import { state } from "./nested/dep.js";
+console.log("module", state);
+document.getElementById("slot").insertAdjacentHTML("beforeend", state);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("dependency\nmodule ready\nready".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::Html(html)),
+        (
+            PathBuf::from("nested/dep.js"),
+            FileKind::Js("console.log('dependency'); export const state = 'ready';".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "module imports should run in order through the rendered-output protocol: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn module_harness_stages_deferred_js_by_indexed_path_and_skips_other_resources() {
+    let javascript_source = tempfile::NamedTempFile::new()
+        .expect("the deferred JavaScript source should have a real temporary file");
+    std::fs::write(
+        javascript_source.path(),
+        "export const external_value = 'from deferred export';",
+    )
+    .expect("the deferred JavaScript source should be writable");
+
+    let image_source =
+        tempfile::NamedTempFile::new().expect("the deferred image source should have a file");
+    std::fs::write(image_source.path(), b"<svg></svg>")
+        .expect("the deferred image source should be writable");
+
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="module">
+import { external_value } from "./nested/providers/external_int.js";
+console.log(external_value);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("from deferred export".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let mut build_result = build_result_with_index_html(&html);
+    let javascript_source_id = build_result.project.resource_inputs.register_source(
+        javascript_source
+            .path()
+            .canonicalize()
+            .expect("the deferred JavaScript source should canonicalize"),
+    );
+    let image_source_id = build_result.project.resource_inputs.register_source(
+        image_source
+            .path()
+            .canonicalize()
+            .expect("the deferred image source should canonicalize"),
+    );
+    build_result.project.deferred_resources = vec![
+        DeferredResourceOutput {
+            relative_output_path: PathBuf::from("nested/providers/external_int.js"),
+            source_id: javascript_source_id,
+        },
+        DeferredResourceOutput {
+            relative_output_path: PathBuf::from("assets/logo.svg"),
+            source_id: image_source_id,
+        },
+    ];
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "the imported export should execute from its deferred source: {:?}",
+        result.failure_reason
+    );
+    let retained_build = result
+        .build_result
+        .expect("a successful rendered-output result should retain its build");
+    let resource_records = retained_build.project.resource_inputs.records();
+    assert!(
+        matches!(
+            resource_records[0].content(),
+            ResourceContentState::Read { .. }
+        ),
+        "the imported deferred JavaScript source should be read"
+    );
+    assert_eq!(
+        resource_records[1].content(),
+        ResourceContentState::Unhashed,
+        "rendering JavaScript should leave non-JavaScript resources unread"
+    );
+}
+
+#[test]
+fn module_harness_reports_a_missing_deferred_javascript_source_as_a_harness_failure() {
+    let javascript_source = tempfile::NamedTempFile::new()
+        .expect("the deferred JavaScript source should have a real temporary file");
+    std::fs::write(
+        javascript_source.path(),
+        "export const external_value = 'unused';",
+    )
+    .expect("the deferred JavaScript source should be writable");
+    let javascript_source_path = javascript_source
+        .path()
+        .canonicalize()
+        .expect("the deferred JavaScript source should canonicalize");
+
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="module">
+import { external_value } from "./nested/providers/external_int.js";
+console.log(external_value);
+</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("unused".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let mut build_result = build_result_with_index_html(&html);
+    let source_id = build_result
+        .project
+        .resource_inputs
+        .register_source(javascript_source_path);
+    build_result
+        .project
+        .deferred_resources
+        .push(DeferredResourceOutput {
+            relative_output_path: PathBuf::from("nested/providers/external_int.js"),
+            source_id,
+        });
+    drop(javascript_source);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        !result.passed,
+        "an unreadable resource must not pass rendering"
+    );
+    assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+    let reason = result
+        .failure_reason
+        .expect("the unreadable resource should have a harness failure reason");
+    assert!(
+        reason.contains("failed to read deferred JavaScript artifact"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn module_harness_reports_import_maps_as_harness_failures() {
+    let html = VALID_HTML.replace(
+        "  </body>",
+        r#"  <script type="importmap">{ not: valid JSON }</script>
+  <script type="module">import "bare"; console.log("must not run");</script>
+  </body>"#,
+    );
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("must not run".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let build_result =
+        build_result_with_output_files(vec![(PathBuf::from("index.html"), FileKind::Html(html))]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        !result.passed,
+        "an import map must not execute under native ESM"
+    );
+    assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+    let reason = result
+        .failure_reason
+        .expect("the unsupported import-map shape has a failure reason");
+    assert!(reason.contains("import map"), "{reason}");
+    assert!(reason.contains("Node's native ESM loader"), "{reason}");
 }
 
 #[test]
@@ -458,6 +842,58 @@ fn node_harness_reports_a_missing_interpreter_as_a_spawn_failure() {
 }
 
 #[test]
+fn node_harness_probe_reports_an_unstartable_runtime_by_name() {
+    // An unsupported runtime fails every produced page at the same lane, so the probe boundary
+    // must name the executable that failed rather than a generic process message.
+    let error = probe_node_runtime_for_test("moth_render_harness_interpreter_that_does_not_exist")
+        .expect_err("an interpreter that cannot start must fail the runtime probe");
+
+    assert!(
+        error.contains("moth_render_harness_interpreter_that_does_not_exist"),
+        "{error}"
+    );
+}
+
+#[test]
+fn node_harness_probe_reads_the_major_version_from_versioned_output() {
+    assert_eq!(parse_node_major_for_test("v25.5.0"), Some(25));
+    assert_eq!(parse_node_major_for_test("v24.0.0"), Some(24));
+    assert_eq!(parse_node_major_for_test("v21.6.1"), Some(21));
+    assert_eq!(parse_node_major_for_test(""), None);
+    assert_eq!(parse_node_major_for_test("garbage"), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn node_harness_probe_rejects_a_runtime_below_node_24_by_executable_and_version() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A stub interpreter stands in for a runtime whose version string is well-formed but too old,
+    // so the fatal message's executable and version interpolation is exercised end to end.
+    let error = with_harness_workspace(|workspace| {
+        let interpreter =
+            workspace.write("old_node_version.sh", "#!/bin/sh\necho \"v21.6.1\"\n")?;
+        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755))
+            .expect("test should be able to make the stub interpreter executable");
+        let error = probe_node_runtime_for_test(
+            interpreter
+                .to_str()
+                .expect("tempfile workspace paths are valid UTF-8"),
+        )
+        .expect_err("an interpreter below Node 24 must fail the runtime probe");
+        Ok(error)
+    })
+    .expect("the workspace should complete the below-24 probe");
+
+    assert!(
+        error.contains("v21.6.1")
+            && error.contains("Node 24")
+            && error.contains("old_node_version.sh"),
+        "{error}"
+    );
+}
+
+#[test]
 fn node_harness_reports_a_workspace_file_it_cannot_write() {
     // A workspace write that silently failed would run the harness against a stale or absent
     // file, so the collision has to surface as the workspace boundary.
@@ -475,6 +911,24 @@ fn node_harness_reports_a_workspace_file_it_cannot_write() {
         "a workspace write failure is a workspace failure: {error:?}"
     );
     assert!(error.message.contains("harness.js"), "{}", error.message);
+}
+
+#[test]
+fn node_harness_rejects_unsafe_workspace_paths() {
+    with_harness_workspace(|workspace| {
+        for unsafe_path in [
+            Path::new("../outside.js"),
+            Path::new("/absolute.js"),
+            Path::new("nested\\windows.js"),
+        ] {
+            let error = workspace
+                .write_relative(unsafe_path, "must not escape")
+                .expect_err("workspace writes must reject traversal, absolute and backslash paths");
+            assert_eq!(error.kind, RenderHarnessErrorKind::Workspace);
+        }
+        Ok(())
+    })
+    .expect("the workspace should clean up after rejecting unsafe paths");
 }
 
 // ─── Required artifacts ─────────────────────────────────────────────────────
@@ -535,6 +989,273 @@ fn html_wasm_rendered_output_waits_for_bootstrap_completion() {
 }
 
 #[test]
+fn html_wasm_rendered_output_keeps_plain_moth_errors_separate_from_traps() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    std::fs::write(
+        temp_dir.path().join("page.js"),
+        r#"console.log("before");
+throw new Error("wasm runtime error");
+"#,
+    )
+    .expect("runtime-error bootstrap fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("plain Error from HTML-Wasm page execution should remain runtime output");
+
+    assert_eq!(output.combined_output(), "before");
+    assert_eq!(output.runtime_error_message(), Some("wasm runtime error"));
+    assert!(
+        matches!(
+            output.events().last(),
+            Some(RuntimeEvent::RuntimeError { message }) if message == "wasm runtime error"
+        ),
+        "a plain Error must retain the Moth runtime-error event type"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before'); throw new Error('wasm runtime error');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["wasm runtime error".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(passed, "the Moth Error expectation should pass: {reason:?}");
+    assert_eq!(kind, None);
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before'); throw new Error('wasm runtime error');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["wasm runtime error".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "a Moth Error must not satisfy a Wasm trap expectation"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("Moth runtime Error occurred")),
+        "the mismatch should name the observed terminal type: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_instantiated_trap_is_terminal_and_requires_a_matching_expectation() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let page_js = wasm_trap_page_script(
+        &module,
+        concat!(
+            "console.log('before Wasm trap'); ",
+            "queueMicrotask(() => console.log('after Wasm trap')); ",
+            "__moth_test_instance.exports.trap();"
+        ),
+    );
+    std::fs::write(temp_dir.path().join("page.js"), page_js)
+        .expect("instantiated-Wasm bootstrap fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("an instantiated Wasm trap should be a terminal runtime event");
+
+    assert_eq!(output.combined_output(), "before Wasm trap");
+    assert_eq!(output.runtime_error_message(), None);
+    assert_eq!(
+        output.events(),
+        &[
+            RuntimeEvent::Console {
+                text: "before Wasm trap".to_owned(),
+            },
+            RuntimeEvent::WasmTrap {
+                message: "unreachable".to_owned(),
+            },
+        ]
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script(
+            "console.log('before Wasm trap'); instance.exports.trap(); console.log('after Wasm trap');",
+        ),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            contains: vec!["before Wasm trap".to_owned()],
+            not_contains: vec!["after Wasm trap".to_owned()],
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(passed, "the explicit matching trap should pass: {reason:?}");
+    assert_eq!(kind, None);
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            contains: vec!["before Wasm trap".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "an unexpected Wasm trap must fail a text-only contract"
+    );
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unexpected uncaught WebAssembly trap")),
+        "the unexpected trap should remain visible: {reason:?}"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["bounds".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(!passed, "a mismatched trap fragment must fail");
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unreachable")),
+        "the mismatch should retain the actual trap message: {reason:?}"
+    );
+
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before Wasm trap'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+    assert!(
+        !passed,
+        "a Wasm trap must not satisfy a Moth Error expectation"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("WebAssembly trap occurred")),
+        "the mismatch should name the observed terminal type: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_unhandled_rejection_captures_an_instantiated_trap() {
+    let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let page_js = wasm_trap_page_script(
+        &module,
+        concat!(
+            "console.log('before rejected Wasm trap'); ",
+            "void Promise.resolve().then(() => __moth_test_instance.exports.trap());"
+        ),
+    );
+    std::fs::write(temp_dir.path().join("page.js"), page_js)
+        .expect("unhandled-rejection Wasm fixture should be written");
+
+    let output = execute_wasm_harness_for_test(temp_dir.path())
+        .expect("the unhandled-rejection path should classify Wasm traps consistently");
+
+    assert_eq!(output.combined_output(), "before rejected Wasm trap");
+    assert!(matches!(
+        output.events().last(),
+        Some(RuntimeEvent::WasmTrap { message }) if message == "unreachable"
+    ));
+}
+
+#[test]
+fn html_wasm_success_without_a_trap_does_not_satisfy_a_trap_expectation() {
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('completed normally');"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("no WebAssembly trap occurred")),
+        "the mismatch should explain normal completion: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_bounds_trap_does_not_match_an_unreachable_expectation() {
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::OutOfBoundsLoad),
+        RenderedOutputExpectation {
+            runtime_trap_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        !passed,
+        "a bounds trap must not satisfy the 'unreachable' contract"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("out of bounds")),
+        "the mismatch should name the actual bounds trap: {reason:?}"
+    );
+}
+
+#[test]
+fn html_wasm_non_runtime_engine_errors_and_other_values_remain_harness_failures() {
+    for (page_js, thrown) in [
+        (
+            "throw new TypeError('invalid generated operation');",
+            "TypeError",
+        ),
+        (
+            "throw new WebAssembly.CompileError('invalid module');",
+            "CompileError",
+        ),
+        (
+            "throw new WebAssembly.LinkError('missing import');",
+            "LinkError",
+        ),
+        (
+            "class SpoofTrap extends WebAssembly.RuntimeError {} throw new SpoofTrap('subclass trap');",
+            "subclass trap",
+        ),
+        ("throw 'other thrown value';", "other thrown value"),
+    ] {
+        let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
+        std::fs::write(temp_dir.path().join("page.js"), page_js)
+            .expect("engine-error bootstrap fixture should be written");
+
+        let error = execute_wasm_harness_for_test(temp_dir.path())
+            .expect_err("non-trap engine failures must remain harness failures");
+
+        assert_eq!(error.kind, RenderHarnessErrorKind::ExitStatus, "{thrown}");
+        assert!(
+            error.message.contains(thrown),
+            "the harness failure should retain {thrown}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
 fn rendered_output_decodes_typed_runtime_events() {
     let output = parse_harness_output(
         r#"{"events":[{"type":"console","text":"hello"},{"type":"fragment_insert","id":"root","html":"<p>hi</p>"}]}"#,
@@ -552,6 +1273,31 @@ fn rendered_output_decodes_typed_runtime_events() {
                 html: "<p>hi</p>".to_owned(),
             },
         ]
+    );
+}
+
+#[test]
+fn rendered_output_decodes_one_runtime_error_after_captured_events() {
+    let output = parse_harness_output(
+        r#"{"events":[{"type":"console","text":"before trap"},{"type":"runtime_error","message":"Int operation overflowed"}]}"#,
+    )
+    .expect("one terminal runtime error should decode");
+
+    assert_eq!(
+        output.events(),
+        &[
+            RuntimeEvent::Console {
+                text: "before trap".to_owned(),
+            },
+            RuntimeEvent::RuntimeError {
+                message: "Int operation overflowed".to_owned(),
+            },
+        ]
+    );
+    assert_eq!(output.combined_output(), "before trap");
+    assert_eq!(
+        output.runtime_error_message(),
+        Some("Int operation overflowed")
     );
 }
 
@@ -628,6 +1374,22 @@ fn rendered_output_rejects_unknown_or_malformed_runtime_events() {
             r#"{"events":[{"type":"console","text":"value","extra":true}]}"#,
             "unknown field 'extra'",
         ),
+        (
+            r#"{"events":[{"type":"runtime_error","message":"first"},{"type":"runtime_error","message":"second"}]}"#,
+            "must be the final event",
+        ),
+        (
+            r#"{"events":[{"type":"wasm_trap","message":"unreachable"},{"type":"console","text":"after trap"}]}"#,
+            "must be the final event",
+        ),
+        (
+            r#"{"events":[{"type":"wasm_trap","message":"unreachable","extra":true}]}"#,
+            "unknown field 'extra'",
+        ),
+        (
+            r#"{"events":[{"type":"wasm_trap"}]}"#,
+            "missing string field 'message'",
+        ),
     ] {
         let error =
             parse_harness_output(json).expect_err("malformed runtime events must fail decoding");
@@ -646,6 +1408,239 @@ fn rendered_output_rejects_stdout_noise_around_the_event_payload() {
 }
 
 // ─── Harness wiring through success validation ──────────────────────────────
+
+fn validate_html_script(
+    script: &str,
+    rendered_output: RenderedOutputExpectation,
+) -> (bool, Option<FailureKind>, Option<String>) {
+    let script_block = format!("<script>{script}</script>\n  </body>");
+    let html = VALID_HTML.replace("  </body>", &script_block);
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output,
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let result = validate_success_result(&case, build_result_with_index_html(&html), &expectation);
+
+    (result.passed, result.failure_kind, result.failure_reason)
+}
+
+#[test]
+fn rendered_output_captures_output_before_a_runtime_error() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('before overflow'); throw new Error('Int operation overflowed');",
+        RenderedOutputExpectation {
+            exact: Some("before overflow".to_owned()),
+            runtime_error_contains: vec!["Int operation".to_owned(), "overflowed".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "expected runtime error should satisfy the contract: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_captures_plain_errors_rejected_by_page_promises() {
+    let (passed, kind, reason) = validate_html_script(
+        concat!(
+            "console.log('before promise rejection'); ",
+            "Promise.resolve().then(() => { throw new Error('async trap'); });",
+        ),
+        RenderedOutputExpectation {
+            contains: vec!["before promise rejection".to_owned()],
+            runtime_error_contains: vec!["async trap".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "unhandled page rejection should be captured: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_moth_error_ends_the_run_before_queued_page_work() {
+    // Reactive flushes are queued microtasks. They must not append output after the Moth Error,
+    // and a later throw from them must not replace the first error.
+    let (passed, kind, reason) = validate_html_script(
+        concat!(
+            "queueMicrotask(() => { console.log('after error'); throw new Error('second error'); }); ",
+            "console.log('before error'); ",
+            "throw new Error('first error');",
+        ),
+        RenderedOutputExpectation {
+            exact: Some("before error".to_owned()),
+            runtime_error_contains: vec!["first error".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        passed,
+        "the first runtime error should end the run: {reason:?}"
+    );
+    assert_eq!(kind, None);
+}
+
+#[test]
+fn rendered_output_does_not_treat_other_throws_as_a_moth_runtime_error() {
+    for (script, thrown) in [
+        (
+            "throw new TypeError('invalid generated operation');",
+            "TypeError",
+        ),
+        (
+            "class SpoofError extends Error {} throw new SpoofError('invalid generated operation');",
+            "SpoofError",
+        ),
+    ] {
+        let (passed, kind, reason) = validate_html_script(
+            script,
+            RenderedOutputExpectation {
+                runtime_error_contains: vec!["invalid generated operation".to_owned()],
+                ..Default::default()
+            },
+        );
+
+        assert!(!passed, "{thrown} must not satisfy runtime_error_contains");
+        assert_eq!(kind, Some(FailureKind::HarnessFailed), "{thrown}");
+        assert!(
+            reason
+                .as_deref()
+                .is_some_and(|message| message.contains("invalid generated operation")),
+            "harness failure should surface the thrown message: {reason:?}"
+        );
+    }
+}
+
+#[test]
+fn html_runtime_does_not_classify_an_instantiated_wasm_trap_as_a_moth_error() {
+    let module = wasm_module_with_trap(TestWasmTrap::Unreachable);
+    let script = wasm_trap_page_script(&module, "__moth_test_instance.exports.trap();");
+    let (passed, kind, reason) = validate_html_script(
+        &script,
+        RenderedOutputExpectation {
+            runtime_error_contains: vec!["unreachable".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        !passed,
+        "HTML must retain its engine-failure lane: {reason:?}"
+    );
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
+}
+
+#[test]
+fn rendered_output_random_sample_exhaustion_remains_a_harness_failure_when_caught() {
+    for (script, output, runtime_error) in [
+        (
+            "try { Math.random(); Math.random(); } catch {} console.log('caught sample exhaustion');",
+            "caught sample exhaustion",
+            None,
+        ),
+        (
+            concat!(
+                "console.log('before sample exhaustion'); ",
+                "try { Math.random(); Math.random(); } catch {} ",
+                "throw new Error('plain runtime error after sample exhaustion');",
+            ),
+            "before sample exhaustion",
+            Some("plain runtime error after sample exhaustion"),
+        ),
+    ] {
+        let (passed, kind, _reason) = validate_html_script(
+            script,
+            RenderedOutputExpectation {
+                contains: vec![output.to_owned()],
+                runtime_error_contains: runtime_error.into_iter().map(str::to_owned).collect(),
+                math_random_samples: Some(vec![0.25]),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            !passed,
+            "sample exhaustion must not satisfy rendered-output assertions"
+        );
+        assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    }
+}
+
+#[test]
+fn rendered_output_expected_runtime_error_requires_an_error_to_occur() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('completed normally');",
+        RenderedOutputExpectation {
+            contains: vec!["completed normally".to_owned()],
+            runtime_error_contains: vec!["overflow".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("no runtime error occurred")),
+        "mismatch should explain the missing runtime error: {reason:?}"
+    );
+}
+
+#[test]
+fn rendered_output_unexpected_moth_error_is_a_harness_failure() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('output before error'); throw new Error('unexpected runtime error'); console.log('output after error');",
+        RenderedOutputExpectation {
+            contains: vec!["output after error".to_owned()],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::HarnessFailed));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("unexpected runtime error")),
+        "failure should surface the uncaught runtime message: {reason:?}"
+    );
+}
+
+#[test]
+fn rendered_output_runtime_error_requires_every_expected_fragment() {
+    let (passed, kind, reason) = validate_html_script(
+        "throw new Error('first fragment present');",
+        RenderedOutputExpectation {
+            runtime_error_contains: vec![
+                "first fragment".to_owned(),
+                "missing fragment".to_owned(),
+            ],
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed);
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|message| message.contains("missing fragment")),
+        "mismatch should name the absent message fragment: {reason:?}"
+    );
+}
 
 #[test]
 fn rendered_output_validation_reports_harness_failure_without_script_blocks() {
@@ -692,9 +1687,46 @@ fn rendered_output_node_is_not_invoked_without_a_rendered_assertion() {
 }
 
 #[test]
-fn rendered_output_rejects_a_module_script_before_executing_the_page() {
-    // Extraction-level coverage is not enough: this proves the executing entry point refuses the
-    // page rather than concatenating a module body into the classic harness script.
+fn rendered_output_executes_a_module_page_whose_import_graph_is_staged() {
+    // Entry-point coverage beyond extraction: the executing entry point must import the page
+    // module natively with its staged JS graph rather than concatenating the module body
+    // into the classic harness script.
+    let expectation = SuccessExpectation {
+        warnings: WarningExpectation::Forbid,
+        success_contract: None,
+        artifact_assertions: Vec::new(),
+        golden: GoldenExpectation::default(),
+        rendered_output: RenderedOutputExpectation {
+            exact: Some("dependency\nmodule ready\nready".to_owned()),
+            ..Default::default()
+        },
+        artifacts_must_not_exist: Vec::new(),
+    };
+    let case = success_test_case(BackendId::Html, expectation.clone());
+    let module_page = VALID_HTML.replace(
+        "  </body>",
+        "  <script type=\"module\">\nimport { state } from \"./nested/dep.js\";\nconsole.log(\"module\", state);\ndocument.getElementById(\"slot\").insertAdjacentHTML(\"beforeend\", state);\n</script>\n  </body>",
+    );
+    let build_result = build_result_with_output_files(vec![
+        (PathBuf::from("index.html"), FileKind::Html(module_page)),
+        (
+            PathBuf::from("nested/dep.js"),
+            FileKind::Js("console.log('dependency'); export const state = 'ready';".to_owned()),
+        ),
+    ]);
+
+    let result = validate_success_result(&case, build_result, &expectation);
+
+    assert!(
+        result.passed,
+        "a module page with a staged import graph must execute natively: {:?}",
+        result.failure_reason
+    );
+}
+
+#[test]
+fn rendered_output_rejects_a_mixed_classic_and_module_page_before_execution() {
+    // Mixed classic+module pages remain unsupported even though module-only pages execute.
     let expectation = SuccessExpectation {
         warnings: WarningExpectation::Forbid,
         success_contract: None,
@@ -709,7 +1741,7 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
     let case = success_test_case(BackendId::Html, expectation.clone());
     let module_page = VALID_HTML.replace(
         "  </body>",
-        "<script type=\"module\">\nimport { render } from \"./_moth/js/glue/module-a.js\";\nrender();\n</script>\n  </body>",
+        "  <script>classic();</script>\n<script type=\"module\">\nimport { render } from \"./_moth/js/glue/module-a.js\";\nrender();\n</script>\n  </body>",
     );
 
     let result = validate_success_result(
@@ -720,7 +1752,7 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
 
     assert!(
         !result.passed,
-        "a module page cannot claim runtime evidence"
+        "a mixed classic/module page cannot claim runtime evidence"
     );
     assert_eq!(
         result.failure_kind,
@@ -731,8 +1763,8 @@ fn rendered_output_rejects_a_module_script_before_executing_the_page() {
         result
             .failure_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("module")),
-        "failure must name the unsupported module shape: {:?}",
+            .is_some_and(|reason| reason.contains("mixes classic")),
+        "failure must name the unsupported mixed shape: {:?}",
         result.failure_reason
     );
 }

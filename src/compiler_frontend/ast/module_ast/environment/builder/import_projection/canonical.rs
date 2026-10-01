@@ -15,16 +15,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         let type_id = match identity {
-            CanonicalTypeIdentity::Builtin(builtin) => match builtin {
-                CanonicalBuiltinType::Bool => builtin_type_ids::BOOL,
-                CanonicalBuiltinType::Int => builtin_type_ids::INT,
-                CanonicalBuiltinType::Float => builtin_type_ids::FLOAT,
-                CanonicalBuiltinType::Decimal => builtin_type_ids::DECIMAL,
-                CanonicalBuiltinType::String => builtin_type_ids::STRING,
-                CanonicalBuiltinType::Char => builtin_type_ids::CHAR,
-                CanonicalBuiltinType::Range => builtin_type_ids::RANGE,
-                CanonicalBuiltinType::None => builtin_type_ids::NONE,
-                CanonicalBuiltinType::Error => self
+            CanonicalTypeIdentity::Builtin(builtin) => match intern_canonical_builtin(
+                *builtin,
+                &mut self.type_environment,
+            ) {
+                Some(type_id) => type_id,
+                // `Error` is a source-declared nominal, so the consumer inherits the handle of
+                // its own declaration instead of the seeded builtin layout.
+                None => self
                     .type_environment
                     .type_id_for_canonical_identity(identity)
                     .ok_or_else(|| {
@@ -32,7 +30,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             "Imported canonical Error type has no consumer-local builtin declaration",
                         )
                     })?,
-            },
+            }
             CanonicalTypeIdentity::Option(inner) => {
                 let inner_id = self.intern_imported_canonical_type(inner)?;
                 self.type_environment.intern_option(inner_id)

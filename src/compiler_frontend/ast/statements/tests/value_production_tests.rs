@@ -38,14 +38,22 @@ fn then_value(_line: i32) -> AstNode {
 
 fn return_value(line: i32) -> AstNode {
     node(
-        NodeKind::Return(vec![Expression::int(line, None, ValueMode::ImmutableOwned)]),
+        NodeKind::Return(vec![Expression::int(
+            i64::from(line),
+            None,
+            ValueMode::ImmutableOwned,
+        )]),
         None,
     )
 }
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(line, None, ValueMode::ImmutableOwned)),
+        NodeKind::ExpressionStatement(Expression::int(
+            i64::from(line),
+            None,
+            ValueMode::ImmutableOwned,
+        )),
         None,
     )
 }
@@ -76,10 +84,10 @@ fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, _line: i32)
 fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i32) -> AstNode {
     node(
         NodeKind::Match {
-            scrutinee: Expression::int(line, None, ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(i64::from(line), None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
-                    line,
+                    i64::from(line),
                     None,
                     ValueMode::ImmutableOwned,
                 )),

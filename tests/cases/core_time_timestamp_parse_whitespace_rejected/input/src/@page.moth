@@ -6,8 +6,10 @@ parse || -> Int, Error!:
 ;
 
 -- Surrounding whitespace is rejected
-code = parse() catch |err|:
-    then err.code
+code ~U32 = 0
+ignored = parse() catch |err|:
+    code = err.code
+    then 0
 ;
 
 [: timestamp_parse_grammar_whitespace code=[code]]

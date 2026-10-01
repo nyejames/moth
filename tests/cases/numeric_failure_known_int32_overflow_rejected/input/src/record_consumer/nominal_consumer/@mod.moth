@@ -1,0 +1,5 @@
+@nominal_provider limits
+
+consume || -> Int:
+    return copy limits.inner.maximum + 1
+;

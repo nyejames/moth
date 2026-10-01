@@ -20,8 +20,8 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::generic_bounds::{
-    evidence_for_type, evidence_target_is_visible, generated_evidence_pair_is_selected,
-    generic_parameter_declares_bound,
+    BoundEvidenceSelection, evidence_for_type, evidence_target_is_visible,
+    generated_evidence_pair_is_selected, generic_parameter_declares_bound,
 };
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
@@ -163,6 +163,7 @@ fn parse_generic_function_call(
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
+            float_precision: context.numeric_profile.float_precision,
         },
     )
     .map_err(ExpressionParseError::from)?;
@@ -264,6 +265,7 @@ fn validate_generic_function_template_call(
         string_table,
         type_interner.environment(),
         path_fork,
+        context.numeric_profile.float_precision,
     )
     .map_err(ExpressionParseError::from)?;
 
@@ -519,7 +521,7 @@ pub(crate) fn validate_generic_function_bound_evidence(
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
     call_span: Option<SourceSpan>,
-) -> Result<Box<[crate::compiler_frontend::traits::ids::TraitEvidenceId]>, ExpressionParseError> {
+) -> Result<Box<[BoundEvidenceSelection]>, ExpressionParseError> {
     let Some(parameter_list) =
         type_environment.generic_parameters(template.generic_parameter_list_id)
     else {
@@ -568,19 +570,21 @@ pub(crate) fn validate_generic_function_bound_evidence(
                         .map(|visibility| &visibility.visible_namespace_records),
                     context.shared.resolved_type_aliases.as_deref(),
                 ));
-            let evidence_id = evidence_is_visible
+            let evidence_selection = evidence_is_visible
                 .then(|| {
                     evidence_for_type(
                         *concrete_type_id,
                         *trait_id,
                         type_environment,
+                        trait_environment,
                         evidence_environment,
+                        context.numeric_profile,
                     )
                 })
                 .flatten();
 
-            if let Some(evidence_id) = evidence_id {
-                selected_evidence.push(evidence_id);
+            if let Some(evidence_selection) = evidence_selection {
+                selected_evidence.push(evidence_selection);
                 continue;
             }
 

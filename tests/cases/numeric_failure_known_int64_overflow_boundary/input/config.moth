@@ -1,0 +1,5 @@
+project #= (
+    name = "numeric_failure_known_int64_overflow_boundary",
+    entry_root = "src",
+)
+html #= ()

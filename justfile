@@ -1,57 +1,84 @@
 set windows-shell := ["powershell", "-NoLogo", "-NoProfile", "-Command"]
 
+# Routine correctness gate. Cargo.toml, .cargo/config.toml and rust-toolchain.toml
+# also govern direct Cargo commands. No recipe selects another Rust version or profile.
 validate:
-    @echo "clippy"
-    just ci-clippy-native
-
+    just fmt-check
+    just clippy
     just validate-common
+    just cache-maintain
 
 validate-common:
     @echo "feature lane coverage"
     just feature-lane-check
-
     @echo "source audit"
     just source-audit
     @echo "first-party dependency audit"
     just first-party-deps
-
-    @echo "unit tests (memory-bounded)"
+    @echo "unit tests"
     just validate-unit-tests
-
     @echo "integration tests"
-    cargo run --quiet -- tests --terse
+    just ci-gate-integration
+    @echo "docs check"
+    just ci-gate-docs
 
-    @echo "docs build"
-    cargo run --quiet -- check docs --terse
+# Measurements stay non-recording and retain their existing workloads and budgets.
+validate-perf:
+    just bench-ci
+    just bench-scaling
+    just cache-maintain
 
-    @echo "benchmark sanity"
-    cargo run --package xtask --bin xtask -- bench-ci
-
-    @echo "complexity budgets"
-    cargo run --package xtask --bin xtask -- bench-scaling
-
-    @echo "timers erasure"
+# All standard validation families, including configurations absent from workspace tests.
+# Opt-in Boracle, stress and recording benchmarks remain separate.
+validate-full:
+    just validate
+    just fmt-workspace-check
+    just clippy-features
+    just test-feature-matrix
+    just test-honesty-audit
+    just validate-perf
     just timers-erasure-check
+    just cache-maintain
 
-# Keep the Rust unit suite from multiplying compiler and test-harness memory on developer hosts.
-# Integration and performance lanes stay on their existing commands so their critical behaviour is
-# still exercised under the normal validation configuration.
-[unix]
+fmt:
+    cargo fmt
+
+fmt-check:
+    cargo fmt --check
+
+fmt-workspace-check:
+    cargo fmt --all --check
+
+clippy:
+    cargo clippy
+
+# Broader coverage is named explicitly rather than hidden inside ordinary `cargo clippy`.
+# The manifest's shared warning policy applies here and to direct commands alike.
+clippy-features:
+    cargo clippy --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks
+
 validate-unit-tests:
-    CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 cargo test --workspace --quiet -- --format terse
+    cargo test --workspace --quiet -- --format terse
 
-[windows]
-validate-unit-tests:
-    $env:CARGO_BUILD_JOBS = "1"; $env:CARGO_INCREMENTAL = "0"; $env:CARGO_PROFILE_DEV_DEBUG = "0"; $env:CARGO_PROFILE_TEST_DEBUG = "0"; $env:RUST_TEST_THREADS = "1"; $env:RAYON_NUM_THREADS = "1"; cargo test --workspace --quiet -- --format terse
+# Automatic housekeeping keeps build reuse. It never evicts Cargo artifacts.
+cache-maintain:
+    cargo run --quiet --package xtask --bin xtask -- cache-maintain
 
+# Explicit maintenance only. Stop editors/agents running Cargo in this target directory first.
+# This discards current workspace artifacts too, and therefore costs a subsequent rebuild.
+cache-evict-preview:
+    cargo clean --profile dev --package moth --package xtask --dry-run --verbose
+
+cache-evict:
+    cargo clean --profile dev --package moth --package xtask
 
 ship:
-    cargo fmt
-    just validate
+    cargo fmt --all
+    just validate-full
     just bench
 
 release version:
-    just validate
+    just validate-full
     git tag -a v{{version}} -m "Moth v{{version}}"
     git push origin v{{version}}
 
@@ -86,90 +113,57 @@ bench-validate:
 bench-scaling:
     cargo run --package xtask --bin xtask -- bench-scaling
 
-# Build a no-timer release binary and prove no timer-only marker survives into its bytes.
-# The timer *source* rules are applied by `just source-audit`, which owns the single walk.
+# Preserve the exact no-timer release-artifact check. Source rules stay in source-audit.
 timers-erasure-check:
     cargo run --package xtask --bin xtask -- timers-erasure-check
 
-# The one broad-source architecture audit: timer source rules plus the removed-name tripwires.
 source-audit:
     cargo run --quiet --package xtask --bin xtask -- source-audit
 
-# Measure LocalSpan start/length bit-split candidates over the representative corpus.
 span-census:
     cargo run --quiet --package xtask --bin xtask -- span-census
 
-# Check first-party package implementation roots for manifests, vendored dependencies and
-# unapproved lexical JavaScript module-loading forms, with invalid runtime imports as a distinct
-# rule. Host-driven script loading is out of scope; see validation.mtf.
+# First-party dependency and runtime-import policy, not arbitrary host-driven loading.
 first-party-deps:
     cargo run --quiet --package xtask --bin xtask -- first-party-deps
 
-# Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
-# features across the resolve graph and always enables `timers` through xtask's dependency, so it
-# can never run the default configuration.
+# Package-scoped executing lanes. Workspace tests unify features through xtask's timers dependency.
 test-feature-matrix:
     cargo run --package xtask --bin xtask -- feature-matrix
 
-# Prove every declared Cargo feature has an executing lane, without running one.
+# Checks the declared coverage map without executing its lanes.
 feature-lane-check:
     cargo run --quiet --package xtask --bin xtask -- feature-lane-check
 
 boracle:
-    @echo "cargo fmt --check"
     cargo fmt --check
-
-    @echo "clippy: boracle"
-    cargo clippy --target-dir target/boracle-clippy -p moth --all-targets --features boracle -- -D warnings
-
-    @echo "boracle normalized-problem tests"
+    cargo clippy -p moth --all-targets --features boracle
     cargo test -p moth --quiet borrow_problem -- --format terse
-
-    @echo "boracle last-use tests"
     cargo test -p moth --quiet last_use -- --format terse
-
-    @echo "boracle solver, source-service and bounded operational oracle tests"
-    # One filter covers the static solver, the CLI source service and bounded oracle tests for
-    # execution, generation, reduction and metamorphic properties. The measured differential
-    # campaign runs separately in `just boracle-campaign`.
+    # Static solver, source service and bounded operational oracle. The measured campaign is separate.
     cargo test -p moth --quiet --features boracle boracle -- --format terse
 
 boracle-campaign:
-    @echo "clippy: boracle-campaign"
-    cargo clippy --target-dir target/boracle-campaign-clippy -p moth --all-targets --features boracle,boracle_campaign -- -D warnings
-
-    @echo "boracle generated differential campaign tests"
+    cargo clippy -p moth --all-targets --features boracle,boracle_campaign
     cargo test -p moth --quiet --features boracle,boracle_campaign boracle_generated_differential_campaign -- --format terse
 
-# The canonical test-honesty audit.
-#
-# The suite inventory runs first because the audit composes it: `xtask honesty-audit` runs the
-# source and feature-lane audits itself, but the integration suite inventory is written by the
-# compiler binary, and an audit that read a stale one would report counters no current run
-# measured. Every report lands under target/test-reports/.
+# Refresh integration inventory before the composed honesty audit reads it.
 test-honesty-audit:
-    @echo "integration suite inventory"
     cargo run --quiet -- tests --audit
-
-    @echo "honesty audit"
     cargo run --quiet --package xtask --bin xtask -- honesty-audit
 
-# Refresh the tracked durable inventory from the audit that measures it.
-#
-# Separate from `test-honesty-audit` because a CI gate must not modify the checkout, and because
-# the durable copy is a reviewed artifact: it changes when someone decides it should.
+# Deliberate evidence refresh, never part of a read-only validation gate.
 test-honesty-evidence:
     cargo run --quiet -- tests --audit
     cargo run --quiet --package xtask --bin xtask -- honesty-audit --update-evidence
 
-# Independently reported CI gates.
-#
-# CI runs each as its own job so one failed validation family never hides another; `just validate`
-# keeps the fail-fast local ordering. `ci-gate-unit-tests` uses the same memory-bounded workspace
-# test recipe as local validation, and `ci-gate-feature-matrix` is what actually covers the default
-# and per-feature configurations.
+# Independent CI results preserve coverage beyond the routine local gate.
+ci-gate-format:
+    just fmt-workspace-check
+
 ci-gate-clippy:
-    just ci-clippy-native
+    just clippy
+    just clippy-features
 
 ci-gate-unit-tests:
     just validate-unit-tests
@@ -201,7 +195,7 @@ ci-gate-first-party-deps:
 ci-gate-honesty-audit:
     just test-honesty-audit
 
-# Repeat the unit and integration suites at one, default and 16 threads.
+# Deliberate stress, not a safe first experiment on a memory-constrained host.
 stress repeats="3":
     cargo run --package xtask --bin xtask -- stress --repeats {{repeats}}
 
@@ -217,6 +211,7 @@ profile-symbolicated filter="terse":
 profile-case-symbolicated case filter="terse":
     cargo run --package xtask --bin xtask -- bench-profile --case {{case}} --filter {{filter}} --presymbolicate
 
+# Profiling intentionally needs symbols and frame pointers. It uses the same Rust toolchain.
 [unix]
 profile-build:
     RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
@@ -224,10 +219,3 @@ profile-build:
 [windows]
 profile-build:
     $env:RUSTFLAGS = "-C force-frame-pointers=yes"; cargo build --profile profiling --features detailed_timers --bin moth
-
-ci-clippy-native:
-    rustc -vV
-    cargo clippy -V
-
-    @echo "clippy: native host"
-    cargo clippy --target-dir target/ci-clippy-native --workspace --all-targets --features moth/timers,moth/detailed_timers,moth/benchmark_counters,moth/show_tokens,moth/show_headers,moth/show_ast,moth/show_eval,moth/show_hir,moth/show_codegen,moth/show_borrow_checker,moth/checked_blocks,moth/async_blocks -- -D warnings

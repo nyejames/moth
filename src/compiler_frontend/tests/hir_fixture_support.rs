@@ -130,7 +130,7 @@ pub(crate) fn unit_expression(id: u32, ty: TypeId, region: RegionId) -> HirExpre
     )
 }
 
-pub(crate) fn int_expression(id: u32, value: i32, ty: TypeId, region: RegionId) -> HirExpression {
+pub(crate) fn int_expression(id: u32, value: i64, ty: TypeId, region: RegionId) -> HirExpression {
     expression(
         id,
         HirExpressionKind::Int(value),

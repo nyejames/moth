@@ -1,0 +1,5 @@
+@limits max_value
+
+overflow || -> Int:
+    return max_value + 1
+;

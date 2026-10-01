@@ -18,3 +18,8 @@ Use `catch` when this part of the program has a sensible fallback:
 ]
 
 Choose one path. A cast cannot use `!` and `catch` at the same time.
+
+Converting to a narrower binary float is not automatically a failure. It fails
+only when the rounded result is not finite, so losing precision is not an error
+by itself. Converting a float to an integer is different: it truncates toward
+zero and then checks the integer's range, so a value outside that range fails.

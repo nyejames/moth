@@ -1,13 +1,5 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_exact = " count=2, ratio=2.5 "
 
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-  "\" count=\"",
-  "\", ratio=\"",
-  "__moth_int_div",
-  "Division by zero",
-]

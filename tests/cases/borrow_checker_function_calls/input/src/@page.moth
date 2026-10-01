@@ -12,8 +12,8 @@ echo_text |text String| -> String:
     return [text]
 ;
 
-number ~= 42
-incremented = increment(~number)
+numeric_value ~= 42
+incremented = increment(~numeric_value)
 
 message = "hello"
 echoed = echo_text(message)

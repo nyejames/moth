@@ -6,7 +6,6 @@
 //! non-reactive bundles stay unchanged and reactive bundles emit the expected helpers.
 
 use super::support::*;
-use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
 };
@@ -94,8 +93,9 @@ fn lower_minimal_reactive_source_module_with_report(
     lower_hir_to_js(
         &module,
         &borrow_report,
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -212,8 +212,9 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -286,8 +287,9 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        default_config(),
         &type_environment,
         &path_fork.snapshot_table(),
     )

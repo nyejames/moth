@@ -1,0 +1,5 @@
+positive ~Int = 10
+positive /= 4
+negative ~Int = -7
+negative /= 2
+[: compound integer division: [positive] / [negative] ]

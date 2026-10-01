@@ -7,12 +7,14 @@
 //!       type and evidence identities rather than donor-local handles. This is compiler semantics
 //!       over compiler state; the build system only ever sees the finished identity.
 
+use crate::compiler_frontend::ast::generic_bounds::BoundEvidenceSelection;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, GenericFunctionTemplate, ModuleMaterialisationPreparation,
     bootstrap_call_summary_from_signature, concrete_argument_mapping,
     substitute_function_signature,
 };
 use crate::compiler_frontend::ast::{Ast, AstImportedFunctionContract};
+use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTypeIdentity, CanonicalTypeProjectionContext,
     ExportedGenericParameterIdentity, GenericParameterOriginResolver, NominalOriginResolver,
@@ -270,23 +272,45 @@ fn canonicalize_generated_request_evidence(
         external_registry,
     );
     let mut canonical_evidence = Vec::with_capacity(request.evidence.len());
-    for evidence_id in request.evidence.iter().copied() {
-        let evidence = materialisation_context
-            .trait_evidence_environment()
-            .get(evidence_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Generated request retained a missing requester-local evidence selection",
-                )
-            })?;
+    for selection in request.evidence.iter().copied() {
+        let (target_type_id, trait_id) = match selection {
+            BoundEvidenceSelection::Registered(evidence_id) => {
+                let evidence = materialisation_context
+                    .trait_evidence_environment()
+                    .get(evidence_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Generated request retained a missing requester-local evidence selection",
+                        )
+                    })?;
+                (evidence.target_type_id, evidence.trait_id)
+            }
+            BoundEvidenceSelection::BuiltinCastProof {
+                source_type_id,
+                trait_id,
+            } => {
+                if !builtin_cast_proves_core_trait(
+                    source_type_id,
+                    trait_id,
+                    &materialisation_context.type_environment,
+                    materialisation_context.trait_environment(),
+                    materialisation_context.numeric_profile,
+                ) {
+                    return Err(CompilerError::compiler_error(
+                        "Generated request retained an invalid on-demand builtin cast proof",
+                    ));
+                }
+                (source_type_id, trait_id)
+            }
+        };
         let target_type_identity = project_type_id_to_canonical_identity(
-            evidence.target_type_id,
+            target_type_id,
             &materialisation_context.type_environment,
             &projection_context,
         )?;
         let trait_identity = materialisation_context
             .trait_environment()
-            .canonical_identity_for_id(evidence.trait_id)
+            .canonical_identity_for_id(trait_id)
             .cloned()
             .ok_or_else(|| {
                 CompilerError::compiler_error(

@@ -8,11 +8,13 @@
 //!      in one pass and must register builtin evidence rows that
 //!      `builtin_for` can find. Tests here pin that contract without
 //!      touching the full builder pipeline.
-
 use super::{signature_with_trait_this_as_parameter, trait_this_parameter_list};
 use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidTraitConformanceReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -189,7 +191,9 @@ fn register_core_cast_traits_populates_every_canonical_name() {
 }
 
 #[test]
-fn register_builtin_cast_evidence_registers_initial_14_rows() {
+fn register_builtin_cast_evidence_registers_trait_family_rows() {
+    use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
@@ -212,12 +216,23 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
         &type_environment,
         &mut string_table,
         &mut path_fork,
+        NumericProfile::STANDARD,
     )
     .expect("builtin evidence registration should succeed");
 
-    // 14 distinct (source, target) rows from the plan.
-    let rows = crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_rows();
-    for &row in rows {
+    // Every profile-complete row whose target carries a core cast trait family
+    // must have registered builtin evidence; fixed targets are skipped.
+    let rows =
+        crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_rows_for_profile(
+            NumericProfile::STANDARD,
+        );
+    for row in rows {
+        let Ok(trait_kind) =
+            crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
+                .ok_or(())
+        else {
+            continue;
+        };
         let source_type_id =
             crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target(
                 row.source,
@@ -226,8 +241,6 @@ fn register_builtin_cast_evidence_registers_initial_14_rows() {
                 &mut path_fork,
             )
             .expect("source builtin type must resolve to a TypeId");
-        let trait_kind = crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
-            .expect("every builtin evidence row must map to a core cast trait");
         let trait_name =
             crate::compiler_frontend::builtins::casts::traits::builtin_cast_trait_name(trait_kind);
         let trait_id = trait_environment
@@ -561,6 +574,35 @@ fn conformance_target_diagnostic_retains_exact_target_span() {
     let span_builder = ExtendedSpanBuilder::new();
     let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "Int");
+}
+
+#[test]
+fn dec_conformance_targets_report_builtin_target_with_exact_spans() {
+    for target in ["Dec", "Dec2", "_Dec", "__dEc01"] {
+        let source = format!("DISPLAYABLE must:\n;\n{target} must DISPLAYABLE\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::InvalidTraitConformance {
+                    reason: InvalidTraitConformanceReason::BuiltinTarget,
+                    ..
+                }
+            ),
+            "{target} should be rejected as a builtin conformance target"
+        );
+        let target_span = diagnostic
+            .primary_span
+            .expect("builtin-target diagnostics should retain their target span");
+        assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
+
+        let span_builder = ExtendedSpanBuilder::new();
+        let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+        assert_eq!(
+            &source[range.start() as usize..range.end() as usize],
+            target
+        );
+    }
 }
 
 #[test]

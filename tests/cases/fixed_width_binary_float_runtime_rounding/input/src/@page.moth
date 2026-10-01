@@ -1,0 +1,68 @@
+add_f32 |left F32, right F32| -> F32:
+    return left + right
+;
+
+add_f16 |left F16, right F16| -> F32:
+    return left + right
+;
+
+round_f64_to_f16 |value F64| -> F16, Error!:
+    return cast! value
+;
+
+round_f64_to_f32 |value F64| -> F32, Error!:
+    return cast! value
+;
+
+round_f32_to_f16 |value F32| -> F16, Error!:
+    return cast! value
+;
+
+parse_f16 |text String| -> F16, Error!:
+    return cast! text
+;
+
+half_left #F16 = 0.5
+half_right #F16 = 0.25
+f16_sum = add_f16(half_left, half_right)
+f16_sum_folded #F32 = half_left + half_right
+f16_sum_matches_folded = f16_sum is f16_sum_folded
+
+single_left #F32 = 0.1
+single_right #F32 = 0.2
+f32_sum = add_f32(single_left, single_right)
+f32_sum_folded #F32 = single_left + single_right
+f32_sum_matches_folded = f32_sum is f32_sum_folded
+
+half_max #F16 = 65504
+rounding_source #F64 = 1.0004882812500002
+direct_half = round_f64_to_f16(rounding_source) catch:
+    then 0.0
+;
+intermediate_single = round_f64_to_f32(rounding_source) catch:
+    then 0.0
+;
+via_single_half = round_f32_to_f16(intermediate_single) catch:
+    then 0.0
+;
+string_tie_half = parse_f16("1.00048828125") catch:
+    then 0.0
+;
+
+large_integer #I64 = 9007199254740993
+rounded_integer #F32 = cast large_integer
+
+negative_zero #F64 = -0.0
+positive_zero #F64 = 0.0
+negative_zero_equal = negative_zero is positive_zero
+
+f32_sum_text String = cast f32_sum
+f16_sum_text String = cast f16_sum
+half_max_text String = cast half_max
+direct_half_text String = cast direct_half
+via_single_half_text String = cast via_single_half
+string_tie_half_text String = cast string_tie_half
+rounded_integer_text String = cast rounded_integer
+negative_zero_text String = cast negative_zero
+
+[:fixed float runtime f32=[f32_sum_text] f32-folded=[f32_sum_matches_folded] f16-sum=[f16_sum_text] f16-folded=[f16_sum_matches_folded] max-half=[half_max_text] direct-half=[direct_half_text] via-f32-half=[via_single_half_text] string-tie=[string_tie_half_text] i64-to-f32=[rounded_integer_text] negative-zero-equal=[negative_zero_equal] negative-zero-text=[negative_zero_text]]

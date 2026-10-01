@@ -11,11 +11,14 @@ use super::expression::{Expression, ExpressionKind, Operator};
 use super::expression_rpn::ExpressionRpnItem;
 use super::option_propagation::parse_option_propagation_suffix_for_expression;
 use super::parse_expression::{
-    create_expression_until, create_expression_with_trailing_newline_policy,
+    ExpressionFragment, collect_expression_fragment, create_expression_until,
+    create_expression_with_trailing_newline_policy,
 };
 use super::parse_expression_identifiers::parse_identifier_or_call;
 use super::parse_expression_input::{ExpressionParseInput, ExpressionParseResources};
-use super::parse_expression_literals::{LiteralParseState, parse_literal_expression};
+use super::parse_expression_literals::{
+    LiteralParseState, parse_literal_expression, typed_suffix_follows,
+};
 use super::parse_expression_places::{
     parse_copy_place_expression, parse_mutable_receiver_expression,
 };
@@ -23,6 +26,7 @@ use super::parse_expression_templates::parse_template_expression;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::ast_log;
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::field_access::{
@@ -35,7 +39,6 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_starts_match_arm_header;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
@@ -51,6 +54,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
@@ -88,7 +92,9 @@ fn reject_adjacent_operand(
     expression: &[ExpressionRpnItem],
     second_expression_span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    let previous_is_operand = matches!(expression.last(), Some(ExpressionRpnItem::Operand(_)));
+    let previous_is_operand = expression
+        .last()
+        .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal);
 
     if previous_is_operand {
         return Err(CompilerDiagnostic::invalid_expression(
@@ -504,9 +510,14 @@ pub(super) fn dispatch_expression_token(
             }
 
             token_stream.advance();
-            let mut grouped_expected_type = *state.expected_type;
+            // A group is not a receiving boundary: a direct-literal hint becomes
+            // inference inside, while `Known` propagates exactly as the baseline.
+            let mut grouped_expected_type = match *state.expected_type {
+                ExpectedType::DirectLiteral(_) => ExpectedType::Infer,
+                other => other,
+            };
             let mut grouped_cast_target_context = CastTargetContext::None;
-            let grouped_input =
+            let mut grouped_input =
                 ExpressionParseInput::grouped_without_cast_target(ExpressionParseResources {
                     token_stream,
                     scope_context: context,
@@ -517,7 +528,33 @@ pub(super) fn dispatch_expression_token(
                     path_fork,
                     string_table,
                 });
-            let value = create_expression_with_trailing_newline_policy(grouped_input)?;
+            let value = match collect_expression_fragment(&mut grouped_input)? {
+                ExpressionFragment::Value(value) => *value,
+
+                // Parentheses stay transparent for a lone literal: the pending item moves
+                // into the outer fragment unevaluated, so only the outer fragment decides
+                // whether it is a direct literal of its receiving boundary. A typed suffix
+                // after the group (`.`, `!`, `catch`, `?`) needs an evaluated operand.
+                ExpressionFragment::Nodes(nodes)
+                    if matches!(
+                        nodes.as_slice(),
+                        [ExpressionRpnItem::PendingNumericLiteral { .. }]
+                    ) && !typed_suffix_follows(token_stream, 0) =>
+                {
+                    state.expression.extend(nodes);
+                    return Ok(ExpressionTokenStep::Continue);
+                }
+
+                ExpressionFragment::Nodes(nodes) => evaluate_expression(
+                    context,
+                    nodes,
+                    type_interner,
+                    &mut grouped_expected_type,
+                    state.value_mode,
+                    string_table,
+                    path_fork,
+                )?,
+            };
 
             push_expression_operand_with_span(
                 token_stream,
@@ -536,20 +573,10 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
 
-        TokenTag::DATATYPE_INT
-        | TokenTag::DATATYPE_FLOAT
-        | TokenTag::DATATYPE_BOOL
-        | TokenTag::DATATYPE_STRING
-        | TokenTag::DATATYPE_CHAR => {
+        tag if tag.is_builtin_scalar_type_name() => {
             if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
-                let cast_name = match token {
-                    TokenTag::DATATYPE_INT => Some(string_table.intern("Int")),
-                    TokenTag::DATATYPE_FLOAT => Some(string_table.intern("Float")),
-                    TokenTag::DATATYPE_BOOL => Some(string_table.intern("Bool")),
-                    TokenTag::DATATYPE_STRING => Some(string_table.intern("String")),
-                    TokenTag::DATATYPE_CHAR => Some(string_table.intern("Char")),
-                    _ => None,
-                };
+                let cast_name = builtin_scalar_type_name_for_tag(token)
+                    .map(|spelling| string_table.intern(spelling));
                 return Err(CompilerDiagnostic::invalid_builtin_call(
                     InvalidBuiltinCallReason::ScalarConstructorRemoved,
                     cast_name,
@@ -854,7 +881,11 @@ pub(super) fn dispatch_expression_token(
         TokenTag::TYPE_PARAMETER_BRACKET => {
             // A complete operand precedes `|`: there is no binary `|` operator. Runtime
             // `||` is the C-family `or` mistake.
-            if matches!(state.expression.last(), Some(ExpressionRpnItem::Operand(_))) {
+            if state
+                .expression
+                .last()
+                .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal)
+            {
                 if !context.kind.is_constant_context()
                     && let Some(error) =
                         check_expression_common_mistake(token_stream, state.expression.is_empty())
@@ -968,9 +999,7 @@ fn dispatch_newline(
     // If that token continues the expression, skip newlines and keep parsing.
     let saved_position = token_stream.position();
     token_stream.skip_newlines();
-    if context.kind == ContextKind::MatchArm
-        && current_token_starts_match_arm_header(token_stream).is_some()
-    {
+    if context.match_arm_boundary && current_token_starts_match_arm_header(token_stream).is_some() {
         token_stream.set_position(saved_position)?;
         return Ok(ExpressionTokenStep::Break);
     }
@@ -1187,6 +1216,7 @@ fn parse_cast_expression(
         target,
         requires_optional_wrap_after_cast,
         handling,
+        numeric_profile: context.numeric_profile,
         trait_environment: context.trait_environment(),
         trait_evidence_environment: context.trait_evidence_environment(),
         type_environment: type_interner.environment_mut_for_derived_types(),

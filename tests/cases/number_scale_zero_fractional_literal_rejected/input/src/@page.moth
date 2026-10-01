@@ -1,0 +1,7 @@
+scale_zero_boundary || -> Dec0:
+    integral Dec0 = 2.0e2
+    fractional Dec0 = 0.5
+    return integral
+;
+
+[: scale-zero fractional Dec literal rejected]

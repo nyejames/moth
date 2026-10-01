@@ -1,0 +1,8 @@
+remainder || -> Int, Error!:
+    return 10 % 0
+;
+
+recovered = remainder() catch:
+    then 0
+;
+[: [recovered]]

@@ -10,12 +10,13 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
-use crate::compiler_frontend::hir::operators::HirUnaryOp;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::return_hir_transformation_error;
 
 use super::super::LoweredExpression;
 use super::RuntimeRpnTree;
@@ -78,24 +79,28 @@ impl<'a> HirBuilder<'a> {
                     self.lower_runtime_tree_child_for_parent(&mut prelude, operand, span)?;
                 let region = self.current_region_or_error(span)?;
                 let hir_op = self.lower_unary_op(op, span)?;
-                let result_ty = match hir_op {
-                    HirUnaryOp::Not => builtin_type_ids::BOOL,
-                    HirUnaryOp::Neg => lowered_operand.ty,
-                };
 
-                // Numeric negation is a checked effect and must go through NumericOp.
-                if *op == Operator::Negate
-                    && let Some((numeric_op, numeric_result_ty)) =
+                if *op == Operator::Negate {
+                    let Some((numeric_op, numeric_result_ty)) =
                         self.classify_checked_numeric_negation(&lowered_operand)
-                {
+                    else {
+                        return_hir_transformation_error!(
+                            "Numeric negation reached HIR lowering without a valid numeric domain",
+                            self.hir_error_location(span)
+                        );
+                    };
+
                     for prelude_statement in prelude.drain(..) {
                         self.emit_statement_to_current_block(prelude_statement, span)?;
                     }
+                    let operand = self.convert_numeric_operand_to_domain(
+                        lowered_operand,
+                        numeric_op.domain,
+                        span,
+                    )?;
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
-                        HirNumericOperands::Unary {
-                            operand: lowered_operand,
-                        },
+                        HirNumericOperands::Unary { operand },
                         numeric_result_ty,
                         span,
                     )?;
@@ -111,7 +116,7 @@ impl<'a> HirBuilder<'a> {
                         op: hir_op,
                         operand: Box::new(lowered_operand),
                     },
-                    result_ty,
+                    builtin_type_ids::BOOL,
                     ValueKind::RValue,
                     region,
                 );
@@ -149,9 +154,9 @@ impl<'a> HirBuilder<'a> {
                     return Ok(LoweredExpression { prelude, value });
                 }
 
-                // Numeric arithmetic is lowered as a checked NumericOp statement. Comparisons
-                // and booleans retain plain BinOp form, ranges use the dedicated Range node,
-                // and compiler-owned template appends use HirBinOp::StringAppend.
+                // Arithmetic always uses checked NumericOp effects. Mixed Int/Float comparisons
+                // preserve their profile-precision promotion; Dec comparisons explicitly
+                // convert a mixed integer operand to the Dec scale before plain BinOp lowering.
                 if let Some((numeric_op, numeric_result_ty)) =
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
@@ -162,6 +167,7 @@ impl<'a> HirBuilder<'a> {
                         numeric_op,
                         lowered_left,
                         lowered_right,
+                        span,
                     )?;
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
@@ -175,9 +181,21 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
+                if op.numeric_operator().is_some() {
+                    return_hir_transformation_error!(
+                        format!(
+                            "Arithmetic operator {:?} reached plain HIR binary lowering without a valid numeric domain",
+                            op
+                        ),
+                        self.hir_error_location(span)
+                    );
+                }
+
+                let (lowered_left, lowered_right) =
+                    self.lower_numeric_comparison_operands(op, lowered_left, lowered_right, span)?;
+
                 let hir_op = self.lower_bin_op(op, span)?;
-                let result_ty =
-                    self.infer_binop_result_type(lowered_left.ty, lowered_right.ty, hir_op);
+                let result_ty = self.infer_binop_result_type(hir_op);
 
                 let value = self.make_expression(
                     span,
@@ -192,6 +210,61 @@ impl<'a> HirBuilder<'a> {
                 );
                 Ok(LoweredExpression { prelude, value })
             }
+        }
+    }
+
+    /// WHAT: makes mixed Int/Float precision conversion and Dec/integer exact scaling explicit.
+    /// WHY: backends compare already aligned carriers; they must not reconstruct profile rounding
+    ///      or treat a Dec coefficient as an unscaled integer.
+    fn lower_numeric_comparison_operands(
+        &mut self,
+        operator: &Operator,
+        left: HirExpression,
+        right: HirExpression,
+        span: &Option<SourceSpan>,
+    ) -> Result<(HirExpression, HirExpression), CompilerError> {
+        if !matches!(
+            operator,
+            Operator::Equality
+                | Operator::NotEqual
+                | Operator::GreaterThan
+                | Operator::GreaterThanOrEqual
+                | Operator::LessThan
+                | Operator::LessThanOrEqual
+        ) {
+            return Ok((left, right));
+        }
+
+        let left_domain = NumericScalar::from_type_id(left.ty, &self.type_environment);
+        let right_domain = NumericScalar::from_type_id(right.ty, &self.type_environment);
+        match (left_domain, right_domain) {
+            (Some(NumericScalar::Int), Some(NumericScalar::Float)) => {
+                let converted =
+                    self.convert_numeric_operand_to_domain(left, NumericScalar::Float, span)?;
+                Ok((converted, right))
+            }
+            (Some(NumericScalar::Float), Some(NumericScalar::Int)) => {
+                let converted =
+                    self.convert_numeric_operand_to_domain(right, NumericScalar::Float, span)?;
+                Ok((left, converted))
+            }
+            (Some(NumericScalar::Number(scale)), Some(integer)) if integer.is_integer() => {
+                let converted = self.convert_numeric_operand_to_domain(
+                    right,
+                    NumericScalar::Number(scale),
+                    span,
+                )?;
+                Ok((left, converted))
+            }
+            (Some(integer), Some(NumericScalar::Number(scale))) if integer.is_integer() => {
+                let converted = self.convert_numeric_operand_to_domain(
+                    left,
+                    NumericScalar::Number(scale),
+                    span,
+                )?;
+                Ok((converted, right))
+            }
+            _ => Ok((left, right)),
         }
     }
 

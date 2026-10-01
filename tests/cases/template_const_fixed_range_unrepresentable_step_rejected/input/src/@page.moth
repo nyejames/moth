@@ -1,0 +1,6 @@
+minimum #I64 = -9223372036854775808
+zero #I64 = 0
+
+#[loop zero to zero by minimum |i|:
+    [i]
+]

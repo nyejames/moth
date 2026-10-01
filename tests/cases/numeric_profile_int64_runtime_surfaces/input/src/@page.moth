@@ -1,0 +1,130 @@
+@core/text length
+@core/random random_int
+
+format_checked_offset |value Int| -> String, Error!:
+    adjusted = value + 9007199254740990
+    return cast adjusted
+;
+
+-- Error.code remains U32 in the Int64 profile. Widen directly to U64 to
+-- observe it above the JavaScript safe-integer boundary.
+format_u32_checked_offset |code U32| -> String, Error!:
+    wide U64 = cast code
+    total U64 = wide + 9007199254740990
+    return cast total
+;
+
+sum_collection_with_index |items {Int}| -> Int:
+    total ~= 0
+    loop items |value, index|:
+        total = total + value + index
+    ;
+    return total
+;
+
+values ~= {10, 20}
+initial_length = values.length()
+initial_length_checked = format_checked_offset(initial_length) catch:
+    then "overflow"
+;
+
+first = values.get(0) catch:
+    then -1
+;
+~values.set(1, 21) catch:
+;
+~values.push(30)
+second = values.get(1) catch:
+    then -1
+;
+third = values.get(2) catch:
+    then -1
+;
+final_length = values.length()
+final_length_checked = format_checked_offset(final_length) catch:
+    then "overflow"
+;
+
+text_length = length("A🦋B")
+text_length_checked = format_checked_offset(text_length) catch:
+    then "overflow"
+;
+text_length_safe_boundary = text_length + 9007199254740992
+
+range_total ~= 0
+loop 0 to 4 |value, index|:
+    range_total = range_total + value + index
+;
+
+iteration_total = sum_collection_with_index(values)
+
+glyph = '🦋'
+code_point Int = cast glyph
+round_trip Char = cast code_point catch:
+    then '?'
+;
+
+divide |numerator Int, denominator Int| -> Int, Error!:
+    return numerator // denominator
+;
+division_code ~U32 = 0
+ignored = divide(7, 0) catch |division_error|:
+    division_code = division_error.code
+    then 0
+;
+division_code_checked = format_u32_checked_offset(division_code) catch:
+    then "overflow"
+;
+division_code_plus_one = division_code + 1
+
+user_error = Error(code = 41, message = "user")
+user_code = user_error.code
+default_error = Error("default")
+default_code = default_error.code
+user_code_checked = format_u32_checked_offset(user_code) catch:
+    then "overflow"
+;
+user_code_plus_one = user_code + 1
+default_code_checked = format_u32_checked_offset(default_code) catch:
+    then "overflow"
+;
+default_code_plus_one = default_code + 1
+
+bounded ~{2 Int} = {7, 8}
+fixed_push_code ~U32 = 0
+~bounded.push(9) catch |fixed_error|:
+    fixed_push_code = fixed_error.code
+;
+fixed_length = bounded.length()
+fixed_push_code_checked = format_u32_checked_offset(fixed_push_code) catch:
+    then "overflow"
+;
+fixed_push_code_plus_one = fixed_push_code + 1
+fixed_length_checked = format_checked_offset(fixed_length) catch:
+    then "overflow"
+;
+
+collision_map ~{Int = String} = {
+    9007199254740992 = "a",
+    9007199254740993 = "b"
+}
+collision_first = collision_map.get(9007199254740992) catch:
+    then "missing"
+;
+collision_second = collision_map.get(9007199254740993) catch:
+    then "missing"
+;
+collision_length = collision_map.length
+collision_length_checked = format_checked_offset(collision_length) catch:
+    then "overflow"
+;
+
+random_value = random_int(9007199254740995, 9007199254740992)
+random_in_bounds = random_value >= 9007199254740992 and random_value <= 9007199254740995
+
+subtract |left Float, right Float| -> Float:
+    return left - right
+;
+float_zero = subtract(1.0, 1.0)
+
+[:int64 runtime surfaces collection=[initial_length]/[final_length] checked=[initial_length_checked]/[final_length_checked]/[fixed_length_checked]/[text_length_checked] values=[first],[second],[third] text=[text_length] safe_boundary=[text_length_safe_boundary] range=[range_total] iteration=[iteration_total] char=[code_point]/[round_trip] division=[division_code]/[division_code_checked]/[division_code_plus_one] user=[user_code]/[user_code_checked]/[user_code_plus_one] default=[default_code]/[default_code_checked]/[default_code_plus_one] fixed=[fixed_push_code]/[fixed_push_code_checked]/[fixed_push_code_plus_one]/[fixed_length] map=[collision_first]/[collision_second]/[collision_length]/[collision_length_checked] random=[random_in_bounds] zero=[float_zero]]

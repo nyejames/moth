@@ -1,0 +1,5 @@
+power_i32 |base I32, exponent I32| -> I32:
+    return base ^ exponent
+;
+
+result = power_i32(2, 31)

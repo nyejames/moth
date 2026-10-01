@@ -15,6 +15,9 @@ use super::{
 };
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
 use serde::Deserialize;
@@ -27,6 +30,7 @@ use std::path::Path;
 struct ExpectationToml {
     mode: Option<ExpectationMode>,
     entry: Option<String>,
+    numeric_profile: Option<String>,
     #[serde(default)]
     flags: Vec<String>,
     builder: Option<String>,
@@ -70,6 +74,12 @@ struct BackendExpectationToml {
     rendered_output_contains_in_order: Option<Vec<String>>,
     #[serde(default)]
     rendered_output_contains_exactly_once: Option<Vec<String>>,
+    #[serde(default)]
+    runtime_error_contains: Option<Vec<String>>,
+    #[serde(default)]
+    runtime_trap_contains: Option<Vec<String>>,
+    #[serde(default)]
+    math_random_samples: Option<Vec<f64>>,
     #[serde(default)]
     artifacts_must_not_exist: Vec<String>,
 }
@@ -138,6 +148,7 @@ pub(crate) fn parse_expectation_file(
             path.display()
         ))
     })?;
+    let numeric_profile = parse_numeric_profile(path, parsed.numeric_profile.as_deref())?;
 
     if let Some(builder) = &parsed.builder
         && builder != "html"
@@ -155,12 +166,49 @@ pub(crate) fn parse_expectation_file(
         )));
     }
 
-    parse_matrix_expectation_file(path, parsed)
+    parse_matrix_expectation_file(path, parsed, numeric_profile)
+}
+
+const NUMERIC_PROFILE_SPELLINGS: &str =
+    "\"Int32/Float32\", \"Int32/Float64\", \"Int64/Float32\", \"Int64/Float64\"";
+
+fn parse_numeric_profile(
+    path: &Path,
+    raw_profile: Option<&str>,
+) -> Result<NumericProfile, FixtureLoadError> {
+    let Some(raw_profile) = raw_profile else {
+        return Ok(NumericProfile::STANDARD);
+    };
+
+    let profile = match raw_profile {
+        "Int32/Float32" => NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        "Int32/Float64" => NumericProfile::STANDARD,
+        "Int64/Float32" => NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+        "Int64/Float64" => NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+        _ => {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' has invalid numeric_profile value {raw_profile:?}; accepted spellings are {NUMERIC_PROFILE_SPELLINGS}.",
+                path.display()
+            )));
+        }
+    };
+
+    Ok(profile)
 }
 
 fn parse_matrix_expectation_file(
     path: &Path,
     parsed: ExpectationToml,
+    numeric_profile: NumericProfile,
 ) -> Result<ParsedExpectationFile, FixtureLoadError> {
     // In matrix mode, all mode/outcome keys must be declared inside explicit
     // backend sections so each backend can evolve independently.
@@ -187,6 +235,13 @@ fn parse_matrix_expectation_file(
             ))
         })?;
         let context = format!("[backends.{}]", backend_id.as_str());
+        if backend_expectation.math_random_samples.is_some() && backend_id != BackendId::Html {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses 'math_random_samples', which is only supported for the 'html' backend.",
+                path.display(),
+                context
+            )));
+        }
         let warnings = parse_warning_expectation(
             backend_expectation.warnings.as_deref(),
             backend_expectation.warning_codes,
@@ -227,6 +282,16 @@ fn parse_matrix_expectation_file(
             )?;
         }
 
+        if backend_expectation.mode == ExpectationMode::Failure
+            && backend_expectation.math_random_samples.is_some()
+        {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses mode = \"failure\" and must not set 'math_random_samples'.",
+                path.display(),
+                context
+            )));
+        }
+
         if backend_expectation.mode == ExpectationMode::Failure && success_contract.is_some() {
             return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set 'success_contract'.",
@@ -240,37 +305,62 @@ fn parse_matrix_expectation_file(
         let rendered_output = parse_rendered_output_expectation(
             path,
             &context,
-            backend_expectation.rendered_output_exact,
-            backend_expectation.rendered_output_contains,
-            backend_expectation.rendered_output_not_contains,
-            backend_expectation.rendered_output_contains_in_order,
-            backend_expectation.rendered_output_contains_exactly_once,
+            AuthoredRenderedOutput {
+                exact: backend_expectation.rendered_output_exact,
+                contains: backend_expectation.rendered_output_contains,
+                not_contains: backend_expectation.rendered_output_not_contains,
+                contains_in_order: backend_expectation.rendered_output_contains_in_order,
+                contains_exactly_once: backend_expectation.rendered_output_contains_exactly_once,
+                runtime_error_contains: backend_expectation.runtime_error_contains,
+                runtime_trap_contains: backend_expectation.runtime_trap_contains,
+                math_random_samples: backend_expectation.math_random_samples,
+            },
         )?;
+        if !rendered_output.runtime_trap_contains.is_empty() && backend_id != BackendId::HtmlWasm {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} uses 'runtime_trap_contains', which is only supported for the 'html_wasm' backend.",
+                path.display(),
+                context
+            )));
+        }
 
         let has_authored_expected_warning = matches!(&warnings, WarningExpectation::Exact(_));
         if success_contract.is_some()
             && (!artifact_assertions.is_empty()
                 || backend_expectation.golden_mode.is_some()
                 || rendered_output.is_present()
+                || rendered_output.math_random_samples.is_some()
                 || !backend_expectation.artifacts_must_not_exist.is_empty()
                 || !diagnostic_assertions.is_empty()
                 || has_authored_expected_warning)
         {
             return Err(FixtureLoadError::expectation_contract(format!(
-                "Expectation file '{}' {} declares success_contract = \"acceptance_only\" and must not combine it with artifact assertions, golden_mode, rendered-output assertions, artifact-absence assertions, or an authored expected-warning contract.",
+                "Expectation file '{}' {} declares success_contract = \"acceptance_only\" and must not combine it with artifact assertions, golden_mode, rendered-output assertions, 'math_random_samples' host inputs, artifact-absence assertions, or an authored expected-warning contract.",
                 path.display(),
                 context
             )));
         }
 
-        // rendered_output_* is only valid for success mode; validate here so the
-        // error message can reference the backend context.
+        // Rendered-output assertions are only valid for success mode; validate
+        // here so the error message can reference the backend context.
         if backend_expectation.mode == ExpectationMode::Failure && rendered_output.is_present() {
             return Err(FixtureLoadError::expectation_contract(format!(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
-                 'rendered_output_not_contains', 'rendered_output_contains_in_order', or \
-                 'rendered_output_contains_exactly_once'.",
+                 'rendered_output_not_contains', 'rendered_output_contains_in_order', \
+                 'rendered_output_contains_exactly_once', 'runtime_error_contains', or \
+                 'runtime_trap_contains'.",
+                path.display(),
+                context
+            )));
+        }
+
+        if backend_expectation.mode == ExpectationMode::Success
+            && rendered_output.math_random_samples.is_some()
+            && !rendered_output.is_present()
+        {
+            return Err(FixtureLoadError::expectation_contract(format!(
+                "Expectation file '{}' {} sets 'math_random_samples' without a rendered-output assertion; deterministic host inputs do not assert rendered output.",
                 path.display(),
                 context
             )));
@@ -316,6 +406,7 @@ fn parse_matrix_expectation_file(
 
     Ok(ParsedExpectationFile {
         entry: parsed.entry,
+        numeric_profile,
         backend_expectations,
     })
 }
@@ -824,15 +915,41 @@ fn validate_exact_diagnostic_match_reason(
     Ok(())
 }
 
-fn parse_rendered_output_expectation(
-    path: &Path,
-    context: &str,
+/// Rendered-output fields exactly as one backend block authored them, before validation.
+struct AuthoredRenderedOutput {
     exact: Option<String>,
     contains: Vec<String>,
     not_contains: Vec<String>,
     contains_in_order: Option<Vec<String>>,
     contains_exactly_once: Option<Vec<String>>,
+    runtime_error_contains: Option<Vec<String>>,
+    runtime_trap_contains: Option<Vec<String>>,
+    math_random_samples: Option<Vec<f64>>,
+}
+
+fn parse_rendered_output_expectation(
+    path: &Path,
+    context: &str,
+    authored: AuthoredRenderedOutput,
 ) -> Result<RenderedOutputExpectation, FixtureLoadError> {
+    let AuthoredRenderedOutput {
+        exact,
+        contains,
+        not_contains,
+        contains_in_order,
+        contains_exactly_once,
+        runtime_error_contains,
+        runtime_trap_contains,
+        math_random_samples,
+    } = authored;
+    if runtime_error_contains.is_some() && runtime_trap_contains.is_some() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} must not combine 'runtime_trap_contains' with 'runtime_error_contains'.",
+            path.display(),
+            context
+        )));
+    }
+
     if exact.is_some()
         && (!contains.is_empty()
             || !not_contains.is_empty()
@@ -840,7 +957,8 @@ fn parse_rendered_output_expectation(
             || contains_exactly_once.is_some())
     {
         return Err(FixtureLoadError::expectation_contract(format!(
-            "Expectation file '{}' {} sets 'rendered_output_exact' and must not combine it with any other rendered-output assertion field.",
+            "Expectation file '{}' {} sets 'rendered_output_exact' and must not \
+             combine it with any other text-output assertion field.",
             path.display(),
             context
         )));
@@ -892,6 +1010,47 @@ fn parse_rendered_output_expectation(
             )));
         }
     }
+    let runtime_error_contains_was_authored = runtime_error_contains.is_some();
+    let runtime_error_contains = runtime_error_contains.unwrap_or_default();
+    if runtime_error_contains_was_authored && runtime_error_contains.is_empty() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} requires 'runtime_error_contains' to contain at least one entry.",
+            path.display(),
+            context
+        )));
+    }
+    validate_rendered_output_strings(
+        path,
+        context,
+        "runtime_error_contains",
+        &runtime_error_contains,
+    )?;
+    let runtime_trap_contains_was_authored = runtime_trap_contains.is_some();
+    let runtime_trap_contains = runtime_trap_contains.unwrap_or_default();
+    if runtime_trap_contains_was_authored && runtime_trap_contains.is_empty() {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} requires 'runtime_trap_contains' to contain at least one entry.",
+            path.display(),
+            context
+        )));
+    }
+    validate_rendered_output_strings(
+        path,
+        context,
+        "runtime_trap_contains",
+        &runtime_trap_contains,
+    )?;
+    if let Some(samples) = &math_random_samples {
+        for (index, sample) in samples.iter().enumerate() {
+            if !sample.is_finite() || !(0.0..1.0).contains(sample) {
+                return Err(FixtureLoadError::expectation_contract(format!(
+                    "Expectation file '{}' {} has invalid 'math_random_samples[{index}]' value {sample:?}; samples must be finite values in [0, 1).",
+                    path.display(),
+                    context
+                )));
+            }
+        }
+    }
 
     Ok(RenderedOutputExpectation {
         exact,
@@ -899,6 +1058,9 @@ fn parse_rendered_output_expectation(
         not_contains,
         contains_in_order,
         contains_exactly_once,
+        runtime_error_contains,
+        runtime_trap_contains,
+        math_random_samples,
     })
 }
 

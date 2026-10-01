@@ -6,7 +6,10 @@
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::{
-    CollectionExpressionType, Expression, ExpressionKind,
+    CollectionExpressionType, Expression, ExpressionKind, Operator,
+};
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -22,14 +25,15 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, DiagnosticToken, InvalidDeclarationReason, InvalidMapTypeReason,
-    InvalidTypeAnnotationReason, NameNamespace, TypeAnnotationContext,
+    DiagnosticPayload, DiagnosticToken, InvalidCollectionTypeReason, InvalidDeclarationReason,
+    InvalidMapTypeReason, InvalidTypeAnnotationReason, NameNamespace, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::{IntWidth, NumericProfile};
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -1055,4 +1059,150 @@ fn map_type_allows_two_level_nesting() {
 
     let type_id = resolved.type_id.expect("should have a type id");
     assert!(resolution_context.type_environment.is_map_type(type_id));
+}
+
+#[test]
+fn struct_field_default_folds_above_i32_range_under_int64() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let mut type_environment = TypeEnvironment::new();
+    let limit_path = path_fork
+        .try_intern_portable_path("LIMIT", &mut string_table)
+        .expect("test path fits");
+    let limit_declaration = Declaration {
+        id: limit_path,
+        value: Expression::int(2_000_000_000, None, ValueMode::ImmutableOwned),
+        binding_span: None,
+        config_qualifier: None,
+    };
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(
+        vec![limit_declaration],
+        &path_fork,
+    ));
+    let mut resolution_context =
+        TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment)
+            .with_numeric_profile(NumericProfile {
+                int_width: IntWidth::Bits64,
+                ..NumericProfile::STANDARD
+            });
+    let struct_path = path_fork
+        .try_intern_portable_path("Holder", &mut string_table)
+        .expect("test path fits");
+    let field = Declaration {
+        id: path_fork
+            .try_intern_child(struct_path, string_table.intern("total"))
+            .expect("test path fits"),
+        value: Expression::runtime_with_type_id(
+            ExpressionRpn {
+                items: vec![
+                    ExpressionRpnItem::Operand(Expression::reference_with_type_id(
+                        limit_path,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        None,
+                        ValueMode::ImmutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
+                    )),
+                    ExpressionRpnItem::Operand(Expression::reference_with_type_id(
+                        limit_path,
+                        DataType::Int,
+                        builtin_type_ids::INT,
+                        None,
+                        ValueMode::ImmutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
+                    )),
+                    ExpressionRpnItem::Operator {
+                        operator: Operator::Add,
+                        span: None,
+                    },
+                ],
+            },
+            DataType::Int,
+            builtin_type_ids::INT,
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
+        config_qualifier: None,
+    };
+
+    let resolved_fields = resolve_struct_field_types(
+        &struct_path,
+        &[field],
+        &mut resolution_context,
+        &template_ir_store,
+        &mut string_table,
+        &path_fork,
+    )
+    .unwrap_or_else(|_| panic!("Int64 field default above the i32 range should fold"));
+
+    assert!(
+        matches!(
+            resolved_fields[0].value.kind,
+            ExpressionKind::Int(4_000_000_000)
+        ),
+        "LIMIT + LIMIT should fold to 4_000_000_000, got {:?}",
+        resolved_fields[0].value.kind
+    );
+}
+
+#[test]
+fn standard_capacity_rejects_literal_above_i32_range_while_int64_accepts() {
+    let mut string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let over_i32_max = i64::from(i32::MAX) + 1;
+    let parsed = || ParsedTypeRef::Collection {
+        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
+        fixed_capacity: Some(ParsedCollectionCapacity::Literal {
+            value: over_i32_max,
+            span: None,
+        }),
+    };
+
+    let mut standard_environment = TypeEnvironment::new();
+    let mut standard_context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
+        &mut standard_environment,
+    );
+    let error = resolve_parsed_type_annotation(
+        parsed(),
+        None,
+        &mut standard_context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("STANDARD capacity above i32::MAX should be rejected");
+    assert!(
+        matches!(
+            error.payload,
+            DiagnosticPayload::InvalidCollectionType {
+                reason: InvalidCollectionTypeReason::CapacityOverflow,
+                ..
+            }
+        ),
+        "expected CapacityOverflow, got {:?}",
+        error.payload
+    );
+
+    let mut wide_environment = TypeEnvironment::new();
+    let mut wide_context =
+        TypeResolutionContext::from_declaration_table(&declaration_table, &mut wide_environment)
+            .with_numeric_profile(NumericProfile {
+                int_width: IntWidth::Bits64,
+                ..NumericProfile::STANDARD
+            });
+    let resolved =
+        resolve_parsed_type_annotation(parsed(), None, &mut wide_context, &mut string_table, None)
+            .expect("Int64 capacity above i32::MAX should resolve");
+    let type_id = resolved.type_id.expect("should have a type id");
+    assert_eq!(
+        wide_context
+            .type_environment
+            .collection_fixed_capacity(type_id),
+        usize::try_from(over_i32_max).ok(),
+        "Int64 capacity should fold to its literal value"
+    );
 }

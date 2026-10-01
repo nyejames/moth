@@ -101,6 +101,8 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
             borrow_analysis: BorrowCheckReport::default(),
+            numeric_proofs:
+                crate::compiler_frontend::analysis::numeric_proofs::NumericProofs::default(),
             path_table: Arc::new(path_fork.snapshot_table()),
         },
         link_facts: ModuleLinkFacts {

@@ -387,6 +387,8 @@ fn dynamic_expression_guarantees_output(
                 dynamic_expression_guarantees_output(expression, string_table)
             }
             ExpressionRpnItem::Operator { .. } => true,
+            // Resolution removes pending literals before this stage.
+            ExpressionRpnItem::PendingNumericLiteral { .. } => true,
         },
 
         _ => true,

@@ -1,0 +1,5 @@
+divide_i64 |dividend I64, divisor I64| -> I64:
+    return dividend // divisor
+;
+
+result = divide_i64(-9223372036854775808, -1)

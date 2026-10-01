@@ -6,20 +6,28 @@ parse_float |value Float| -> Int, Error!:
     return cast! value
 ;
 
-too_big_string = parse_string("2147483648") catch |big_string_err|:
-    then big_string_err.code
+too_big_string_code ~U32 = 0
+too_big_string_value = parse_string("2147483648") catch |big_string_err|:
+    too_big_string_code = big_string_err.code
+    then 0
 ;
 
-too_small_string = parse_string("-2147483649") catch |small_string_err|:
-    then small_string_err.code
+too_small_string_code ~U32 = 0
+too_small_string_value = parse_string("-2147483649") catch |small_string_err|:
+    too_small_string_code = small_string_err.code
+    then 0
 ;
 
-too_big_float = parse_float(2147483648.0) catch |big_float_err|:
-    then big_float_err.code
+too_big_float_code ~U32 = 0
+too_big_float_value = parse_float(2147483648.0) catch |big_float_err|:
+    too_big_float_code = big_float_err.code
+    then 0
 ;
 
-too_small_float = parse_float(-2147483649.0) catch |small_float_err|:
-    then small_float_err.code
+too_small_float_code ~U32 = 0
+too_small_float_value = parse_float(-2147483649.0) catch |small_float_err|:
+    too_small_float_code = small_float_err.code
+    then 0
 ;
 
-[: runtime i32 boundary catch codes: [too_big_string]/[too_small_string]/[too_big_float]/[too_small_float]]
+[: runtime i32 boundary catch codes: [too_big_string_code]/[too_small_string_code]/[too_big_float_code]/[too_small_float_code]]

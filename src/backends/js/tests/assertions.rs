@@ -7,6 +7,7 @@
 
 use super::support::*;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField, ValueKind,
@@ -76,6 +77,7 @@ fn function_with_assertion(
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         string_table,
         default_config(),
         type_environment,
@@ -101,7 +103,7 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
                 RegionId(0),
                 ValueKind::RValue,
             )),
-            policy: BuiltinCastPolicyId::IntToString,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         types.string,
         RegionId(0),
@@ -397,6 +399,7 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
     let source = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

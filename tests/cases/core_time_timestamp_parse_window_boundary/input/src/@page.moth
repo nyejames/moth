@@ -31,8 +31,10 @@ last_iso = to_iso_string(last) catch |last_render_err|:
     then "unrenderable"
 ;
 
-past_code = parse_past_last() catch |past_err|:
-    then past_err.code
+past_code ~U32 = 0
+ignored = parse_past_last() catch |past_err|:
+    past_code = past_err.code
+    then 0
 ;
 
 [: window first=[unix_milliseconds(first)] last=[unix_milliseconds(last)] first_iso=[first_iso] last_iso=[last_iso] past_code=[past_code]]

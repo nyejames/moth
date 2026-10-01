@@ -1,6 +1,7 @@
 //! Tests for HTML+Wasm artifact planning and emission.
 
 use super::*;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
@@ -47,6 +48,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         const_fragments: &[],
         page_metadata_plan: &page_metadata_plan,
         borrow_analysis: &module.executable.borrow_analysis,
+        numeric_proofs: &module.executable.numeric_proofs,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
@@ -54,6 +56,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
+        numeric_profile: NumericProfile::STANDARD,
     };
     let route =
         derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
@@ -91,10 +94,20 @@ fn wasm_export_plan_contains_single_entry_start_export() {
     let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
-    let plan_a = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
-        .expect("wasm plan should build");
-    let plan_b = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
-        .expect("wasm plan should build");
+    let plan_a = build_html_wasm_plan(
+        &module.executable.hir,
+        &reachability,
+        Vec::new(),
+        NumericProfile::STANDARD,
+    )
+    .expect("wasm plan should build");
+    let plan_b = build_html_wasm_plan(
+        &module.executable.hir,
+        &reachability,
+        Vec::new(),
+        NumericProfile::STANDARD,
+    )
+    .expect("wasm plan should build");
 
     assert_eq!(
         plan_a.export_plan.function_exports.len(),
@@ -127,8 +140,13 @@ fn wasm_export_plan_wires_required_helper_exports() {
     let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
-    let plan = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
-        .expect("wasm plan should build");
+    let plan = build_html_wasm_plan(
+        &module.executable.hir,
+        &reachability,
+        Vec::new(),
+        NumericProfile::STANDARD,
+    )
+    .expect("wasm plan should build");
     let helper = plan.wasm_request.export_policy.helper_exports;
 
     assert!(helper.export_memory);
@@ -156,6 +174,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
         borrow_analysis: &module.executable.borrow_analysis,
+        numeric_proofs: &module.executable.numeric_proofs,
         page_metadata_plan: &page_metadata_plan,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
@@ -164,6 +183,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
+        numeric_profile: NumericProfile::STANDARD,
     };
     let route = derive_logical_html_path(Path::new("src/docs/@page.moth"), Some(Path::new("src")))
         .expect("nested route should resolve");

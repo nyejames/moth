@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 
 use crate::compiler_frontend::type_coercion::compatibility::{
     is_declaration_compatible, is_numeric_coercible_by_id,
@@ -34,6 +35,7 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
     expression: Expression,
     expected_type_id: TypeId,
     type_environment: &TypeEnvironment,
+    float_precision: FloatPrecision,
     mismatch_context: TypeMismatchContext,
 ) -> ContextualCoercionResult<Expression> {
     if expression.type_id == expected_type_id {
@@ -45,6 +47,7 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
             expression,
             expected_type_id,
             type_environment,
+            float_precision,
         ));
     }
 
@@ -69,6 +72,7 @@ pub(crate) fn coerce_expression_to_declared_type(
     expr: Expression,
     declared_type_id: TypeId,
     type_environment: &TypeEnvironment,
+    float_precision: FloatPrecision,
 ) -> Expression {
     if should_wrap_in_option(expr.type_id, declared_type_id, type_environment) {
         return Expression::coerced(expr, declared_type_id);
@@ -76,8 +80,14 @@ pub(crate) fn coerce_expression_to_declared_type(
 
     if is_numeric_coercible_by_id(expr.type_id, declared_type_id, type_environment) {
         if let ExpressionKind::Int(value) = &expr.kind {
-            return Expression::float(*value as f64, expr.span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
+            // `Int -> Float` rounds once at the boundary precision so contextual
+            // coercion agrees with literal materialisation and const folding.
+            return Expression::float(
+                float_precision.round_int(*value),
+                expr.span,
+                ValueMode::ImmutableOwned,
+            )
+            .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
         }
 
         return Expression::coerced(expr, declared_type_id);

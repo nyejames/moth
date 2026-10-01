@@ -76,6 +76,8 @@ fn parsed_type_ref_span(source_ref: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::BuiltinFixedScalar { span, .. }
+        | ParsedTypeRef::BuiltinNumber { span, .. }
         | ParsedTypeRef::This { span, .. }
         | ParsedTypeRef::Collection { span, .. }
         | ParsedTypeRef::Map { span, .. }
@@ -112,6 +114,7 @@ fn resolve_parsed_type_annotation_inner(
                         capacity,
                         scope_context,
                         context.type_environment,
+                        context.numeric_profile,
                     ) {
                         Ok(value) => Some(value),
                         Err(diagnostic) => {
@@ -199,6 +202,16 @@ fn resolve_parsed_type_annotation_inner(
             };
             return Ok(ResolvedTypeAnnotation {
                 diagnostic_type,
+                type_id: Some(type_id),
+            });
+        }
+
+        ParsedTypeRef::BuiltinNumber { scale, .. } => {
+            // Dec scales intern lazily into the consumer environment, so resolution
+            // bypasses the diagnostic-spelling fallback and carries the identity directly.
+            let type_id = context.type_environment.intern_number(*scale);
+            return Ok(ResolvedTypeAnnotation {
+                diagnostic_type: DataType::Number(*scale),
                 type_id: Some(type_id),
             });
         }
@@ -342,12 +355,14 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
         DataType::Bool => Some(type_environment.builtins().bool),
         DataType::Int => Some(type_environment.builtins().int),
         DataType::Float => Some(type_environment.builtins().float),
-        // Decimal is intentionally inactive in the Alpha surface. The reverse lookup
-        // is preserved only for diagnostic round-tripping of the inactive builtin.
-        DataType::Decimal => Some(type_environment.builtins().decimal),
+        // Dec scales intern lazily into the active environment.
+        DataType::Number(scale) => Some(type_environment.intern_number(*scale)),
         DataType::StringSlice => Some(type_environment.builtins().string),
         DataType::Char => Some(type_environment.builtins().char),
         DataType::Range => Some(type_environment.builtins().range),
+        // Fixed scalars are seeded with the other builtins, so their deterministic `TypeId`
+        // needs no declaration-site lookup.
+        DataType::FixedScalar(scalar) => Some(builtin_type_ids::fixed_scalar(*scalar)),
         DataType::None => Some(type_environment.builtins().none),
         DataType::Template => Some(type_environment.builtins().string),
         DataType::True | DataType::False => Some(type_environment.builtins().bool),

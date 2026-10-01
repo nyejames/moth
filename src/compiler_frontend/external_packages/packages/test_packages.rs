@@ -154,7 +154,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalConstantId(1002),
             ExternalConstantDef {
                 name: "TEST_NON_SCALAR_CONST".to_owned(),
-                data_type: ExternalAbiType::Utf8Str,
+                data_type: ExternalAbiType::Utf8Str.into(),
                 value: ExternalConstantValue::StringSlice("test"),
             },
         )
@@ -187,7 +187,7 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalConstantId(1011),
             ExternalConstantDef {
                 name: "PI".to_owned(),
-                data_type: ExternalAbiType::F64,
+                data_type: ExternalAbiType::F64.into(),
                 value: ExternalConstantValue::Float(3.15),
             },
         )

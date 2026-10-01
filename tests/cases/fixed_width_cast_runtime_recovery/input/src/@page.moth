@@ -1,0 +1,101 @@
+CastReport = |
+    code ~U32,
+    message ~String,
+    recovered ~String,
+|
+
+capture_i8 |value I64, report ~CastReport|:
+    recovered I8 = cast value catch |i8_error|:
+        report.code = i8_error.code
+        report.message = i8_error.message
+        then 0
+    ;
+    report.recovered = cast recovered
+;
+
+capture_f16_range |value F64, report ~CastReport|:
+    recovered F16 = cast value catch |f16_range_error|:
+        report.code = f16_range_error.code
+        report.message = f16_range_error.message
+        then 0.0
+    ;
+    report.recovered = cast recovered
+;
+
+capture_i64_range |value F64, report ~CastReport|:
+    recovered I64 = cast value catch |i64_range_error|:
+        report.code = i64_range_error.code
+        report.message = i64_range_error.message
+        then 0
+    ;
+    report.recovered = cast recovered
+;
+
+capture_u64_parse |text String, report ~CastReport|:
+    recovered U64 = cast text catch |u64_parse_error|:
+        report.code = u64_parse_error.code
+        report.message = u64_parse_error.message
+        then 0
+    ;
+    report.recovered = cast recovered
+;
+
+capture_f16_parse |text String, report ~CastReport|:
+    recovered F16 = cast text catch |f16_parse_error|:
+        report.code = f16_parse_error.code
+        report.message = f16_parse_error.message
+        then 0.0
+    ;
+    report.recovered = cast recovered
+;
+
+propagate_i8 |value I64| -> I8, Error!:
+    return cast! value
+;
+
+overflow_i64 |value I64| -> I64, Error!:
+    return value + 1
+;
+
+report ~CastReport = CastReport(code = 0, message = "", recovered = "")
+
+capture_i8(128, ~report)
+i8_code String = cast report.code
+i8_message String = copy report.message
+i8_recovered String = copy report.recovered
+
+a_large_float F64 = 70000
+capture_f16_range(a_large_float, ~report)
+f16_range_code String = cast report.code
+f16_range_message String = copy report.message
+f16_range_recovered String = copy report.recovered
+
+out_of_i64_float F64 = 9.223372036854776e18
+capture_i64_range(out_of_i64_float, ~report)
+i64_range_code String = cast report.code
+i64_range_message String = copy report.message
+i64_range_recovered String = copy report.recovered
+
+capture_u64_parse("18446744073709551616", ~report)
+u64_parse_code String = cast report.code
+u64_parse_message String = copy report.message
+u64_parse_recovered String = copy report.recovered
+
+capture_f16_parse("not-half", ~report)
+f16_parse_code String = cast report.code
+f16_parse_message String = copy report.message
+f16_parse_recovered String = copy report.recovered
+
+bang_report ~= ""
+bang_recovered = propagate_i8(128) catch |bang_error|:
+    bang_report = [:i64-to-i8 bang code=[bang_error.code] message=[bang_error.message]]
+    then 0
+;
+
+overflow_report ~= ""
+recovered_overflow = overflow_i64(9223372036854775807) catch |overflow_error|:
+    overflow_report = [:i64-overflow code=[overflow_error.code] message=[overflow_error.message]]
+    then 0
+;
+
+[:fixed cast recovery i64-to-i8 code=[i8_code] message=[i8_message] recovered=[i8_recovered] f64-to-f16 code=[f16_range_code] message=[f16_range_message] recovered=[f16_range_recovered] f64-to-i64 code=[i64_range_code] message=[i64_range_message] recovered=[i64_range_recovered] u64-parse code=[u64_parse_code] message=[u64_parse_message] recovered=[u64_parse_recovered] f16-parse code=[f16_parse_code] message=[f16_parse_message] recovered=[f16_parse_recovered] bang report=[bang_report] recovered=[bang_recovered] overflow report=[overflow_report] recovered=[recovered_overflow]]

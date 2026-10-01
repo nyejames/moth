@@ -1,0 +1,6 @@
+divide_numbers |left Dec1, right Dec1| -> Dec1:
+    return left / right
+;
+
+io.line("before Dec division trap")
+ignored = divide_numbers(1.0, 0.0)

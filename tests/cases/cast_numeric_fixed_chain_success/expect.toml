@@ -1,0 +1,9 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "fixed numeric chain: 400",
+    "fixed float rounding: 65504 9007199254740992",
+]

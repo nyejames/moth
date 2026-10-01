@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1 direct: 200"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["fixed text: 18446744073709551615 -128 0.1 0.1 direct: 200"]

@@ -1,0 +1,21 @@
+profile_edges |add_value Int, subtract_value Int, multiply_left Int, multiply_right Int, negate_value Int| -> String:
+    incremented = add_value + 1
+    decremented = subtract_value - 1
+    product = multiply_left * multiply_right
+    negated = -negate_value
+    assert(incremented is 9223372036854775807)
+    assert(decremented is -9223372036854775808)
+    assert(product is 9223372030926249001)
+    assert(negated is 9223372036854775807)
+    return "int64-profile-edges-ok"
+;
+
+profile_int_to_i64 |value Int| -> String:
+    widened I64 = cast value
+    assert(widened is 9223372036854775807)
+    return "int64-profile-cast-ok"
+;
+
+edges = profile_edges(9223372036854775806, -9223372036854775807, 3037000499, 3037000499, -9223372036854775807)
+cast_result = profile_int_to_i64(9223372036854775807)
+[:integer trap arithmetic profile=[edges]/[cast_result]]

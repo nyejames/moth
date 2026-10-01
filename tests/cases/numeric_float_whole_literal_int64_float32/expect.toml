@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "profile=16777216 fixed-controls=true/true surfaces=true/true/true/true/true/true/true/true/true/true zero-signs=true/false negative-patterns=true/false/true/false/true/false/true/true/false"

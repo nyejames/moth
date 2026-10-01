@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "number parsing scale=1234/12.3/12.34/12.34 tiny=true signed-huge-zero=true malformed=260/260 exactness=261/261/263"

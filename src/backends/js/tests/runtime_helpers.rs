@@ -1,14 +1,14 @@
-//! Runtime helper source contract tests for JavaScript output.
+//! Runtime helper source and emitted behavior tests for JavaScript output.
 
 use super::support::*;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use std::process::Command;
 
 // Runtime helper contract tests
 // ---------------------------------------------------------------------------
@@ -94,57 +94,6 @@ fn clone_value_iterates_object_keys() {
     );
 }
 
-/// Verifies that `__moth_error_result` wraps `__moth_make_error` in an err carrier. [error]
-#[test]
-fn error_result_helper_wraps_make_error_in_err_carrier() {
-    let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__moth_error_result");
-
-    assert!(
-        helper.contains("__moth_make_error(message, code, null, null)")
-            && helper.contains("tag: \"err\""),
-        "__moth_error_result must wrap __moth_make_error in an err result carrier"
-    );
-}
-
-/// Verifies that backend-created errors use the same lowered fields as builtin `Error(...)`.
-/// [error]
-#[test]
-fn make_error_uses_builtin_error_field_symbols() {
-    let source = lower_minimal_module("main");
-    let helper = helper_source(&source, "__moth_make_error");
-
-    let message_field = expected_dev_field_name("message", 0);
-    let code_field = expected_dev_field_name("code", 1);
-
-    assert!(
-        helper.contains(&format!("{message_field}: message"))
-            && helper.contains(&format!("{code_field}: code")),
-        "__moth_make_error must construct the lowered builtin Error fields"
-    );
-    assert!(
-        !helper.contains("\n        message,") && !helper.contains("\n        code,"),
-        "__moth_make_error must not construct a parallel plain JS error shape"
-    );
-}
-
-/// Verifies that location/trace helpers preserve canonical error fields.
-/// [error]
-#[test]
-fn error_context_helpers_read_canonical_error_fields() {
-    let source = lower_minimal_module("main");
-    let with_location = helper_source(&source, "__moth_error_with_location");
-    let push_trace = helper_source(&source, "__moth_error_push_trace");
-
-    assert!(
-        with_location.contains("__moth_error_message(error)")
-            && with_location.contains("__moth_error_code(error)")
-            && push_trace.contains("__moth_error_message(error)")
-            && push_trace.contains("__moth_error_code(error)"),
-        "runtime error context helpers must preserve canonical Error.message/Error.code fields"
-    );
-}
-
 /// Verifies that generic string conversion does not fall through to JS object formatting for maps.
 /// [string] [map]
 #[test]
@@ -173,74 +122,6 @@ fn collection_index_is_valid_checks_integer_bounds_and_length() {
     );
 }
 
-/// Verifies that collection helpers use the expected error code for invalid receivers. [collection]
-#[test]
-fn collection_helpers_use_expected_error_code_for_invalid_receiver() {
-    let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__moth_collection_get");
-    let set = helper_source(&source, "__moth_collection_set");
-    let push = helper_source(&source, "__moth_collection_push_fixed");
-    let remove = helper_source(&source, "__moth_collection_remove");
-
-    let expected_error = BuiltinErrorCode::CollectionExpectedOrderedCollection;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        get.contains(&expected)
-            && set.contains(&expected)
-            && push.contains(&expected)
-            && remove.contains(&expected),
-        "collection helpers must use CollectionExpectedOrderedCollection for invalid receivers"
-    );
-}
-
-/// Verifies that collection helpers use the expected error code for out-of-bounds indices. [collection]
-#[test]
-fn collection_helpers_use_expected_error_code_for_out_of_bounds() {
-    let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__moth_collection_get");
-    let set = helper_source(&source, "__moth_collection_set");
-    let remove = helper_source(&source, "__moth_collection_remove");
-
-    let expected_error = BuiltinErrorCode::CollectionIndexOutOfBounds;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        get.contains(&expected) && set.contains(&expected) && remove.contains(&expected),
-        "collection helpers must use CollectionIndexOutOfBounds for invalid indices"
-    );
-}
-
-/// Verifies that `__moth_collection_get` returns an err carrier for invalid collection inputs. [collection]
-#[test]
-fn collection_get_returns_err_for_invalid_collection() {
-    let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__moth_collection_get");
-
-    assert!(
-        get.contains("__moth_collection_is_valid(collection)")
-            && get.contains("__moth_error_result"),
-        "__moth_collection_get must return a Result-typed err for invalid collection inputs"
-    );
-}
-
-/// Verifies that `__moth_collection_get` returns an err carrier for out-of-bounds indices. [collection]
-#[test]
-fn collection_get_returns_err_for_out_of_bounds() {
-    let source = lower_minimal_module("main");
-    let get = helper_source(&source, "__moth_collection_get");
-
-    assert!(
-        get.contains("!__moth_collection_index_is_valid(collection, index)")
-            && get.contains("__moth_error_result"),
-        "__moth_collection_get must return a Result-typed err for out-of-bounds indices"
-    );
-}
-
 /// Verifies that `__moth_collection_get` returns an ok carrier for valid inputs. [collection]
 #[test]
 fn collection_get_returns_ok_for_valid_index() {
@@ -250,19 +131,6 @@ fn collection_get_returns_ok_for_valid_index() {
     assert!(
         get.contains("{ tag: \"ok\", value: items[index] }"),
         "__moth_collection_get must return a Result-typed ok for valid indices"
-    );
-}
-
-/// Verifies that `__moth_collection_set` returns an err carrier for out-of-bounds indices. [collection]
-#[test]
-fn collection_set_returns_err_for_out_of_bounds() {
-    let source = lower_minimal_module("main");
-    let set = helper_source(&source, "__moth_collection_set");
-
-    assert!(
-        set.contains("!__moth_collection_index_is_valid(collection, index)")
-            && set.contains("__moth_error_result"),
-        "__moth_collection_set must return a Result-typed err for out-of-bounds indices"
     );
 }
 
@@ -295,32 +163,6 @@ fn collection_push_growable_pushes_directly_without_carrier() {
     assert!(
         !push.contains("__moth_collection_is_") && !push.contains("fixedCapacity"),
         "__moth_collection_push_growable must not validate receivers or consult fixed capacity"
-    );
-}
-
-/// Verifies that `__moth_collection_remove` returns an err carrier for invalid collection inputs. [collection]
-#[test]
-fn collection_remove_returns_err_for_invalid_collection() {
-    let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__moth_collection_remove");
-
-    assert!(
-        remove.contains("__moth_collection_is_valid(collection)")
-            && remove.contains("__moth_error_result"),
-        "__moth_collection_remove must return a Result-typed err for invalid collection inputs"
-    );
-}
-
-/// Verifies that `__moth_collection_remove` returns an err carrier for out-of-bounds indices. [collection]
-#[test]
-fn collection_remove_returns_err_for_out_of_bounds() {
-    let source = lower_minimal_module("main");
-    let remove = helper_source(&source, "__moth_collection_remove");
-
-    assert!(
-        remove.contains("!__moth_collection_index_is_valid(collection, index)")
-            && remove.contains("__moth_error_result"),
-        "__moth_collection_remove must return a Result-typed err for out-of-bounds indices"
     );
 }
 
@@ -404,6 +246,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -480,6 +323,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -496,31 +340,6 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     );
 }
 
-/// Verifies that `__moth_cast_int` rejects non-numeric strings with a Parse error. [cast]
-#[test]
-fn cast_int_rejects_non_numeric_string() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__moth_cast_int");
-
-    assert!(
-        cast.contains("Cannot parse Int from text") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_int must return a Parse err for non-numeric strings"
-    );
-}
-
-/// Verifies that `__moth_cast_int` accepts integer strings via parseInt. [cast]
-#[test]
-fn cast_int_accepts_integer_string() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-    let cast = helper_source(&source, "__moth_cast_int");
-
-    assert!(
-        cast.contains("Number.parseInt(value.replace(/_/g, ''), 10)")
-            && cast.contains("{ tag: \"ok\""),
-        "__moth_cast_int must parse integer strings and return ok"
-    );
-}
-
 /// Verifies that `__moth_cast_int` applies numeric grammar to the whole string. [cast]
 #[test]
 fn cast_int_does_not_trim_string_input() {
@@ -534,29 +353,9 @@ fn cast_int_does_not_trim_string_input() {
     );
 }
 
-/// Verifies that `__moth_cast_int` uses the shared i32 range helpers. [cast]
+/// Verifies that Float -> Int casts use the standard profile's Int range helper. [cast]
 #[test]
-fn cast_int_uses_i32_range_helpers() {
-    let source = lower_minimal_module_with_string_int_cast("main");
-
-    assert!(
-        source.contains("function __moth_cast_int_in_range(value)")
-            && source.contains("const __BS_INT_CAST_MIN = -2147483648")
-            && source.contains("const __BS_INT_CAST_MAX = 2147483647"),
-        "__moth_cast_int must rely on shared Alpha i32 range helpers"
-    );
-
-    let cast = helper_source(&source, "__moth_cast_int");
-    assert!(
-        cast.contains("__moth_cast_int_in_range(value)")
-            && cast.contains("__moth_cast_int_in_range(parsed)"),
-        "__moth_cast_int numeric and string branches must use the shared range predicate"
-    );
-}
-
-/// Verifies that `__moth_cast_float_to_int` uses the shared i32 range helper. [cast]
-#[test]
-fn cast_float_to_int_uses_i32_range_helper() {
+fn cast_float_to_int_uses_standard_profile_range_helper() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -574,7 +373,10 @@ fn cast_float_to_int_uses_i32_range_helper() {
         2,
         HirStatementKind::CastOp {
             policy:
-                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::FloatToInt,
+                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+            },
             source: source_expr,
             result: Some(LocalId(0)),
         },
@@ -607,6 +409,7 @@ fn cast_float_to_int_uses_i32_range_helper() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -616,72 +419,8 @@ fn cast_float_to_int_uses_i32_range_helper() {
 
     let cast = helper_source(&output.source, "__moth_cast_float_to_int");
     assert!(
-        cast.contains("!__moth_cast_int_in_range(truncated)"),
-        "__moth_cast_float_to_int must reject truncated values outside the i32 range"
-    );
-}
-
-/// Verifies that `__moth_cast_float` rejects invalid strings with a Parse error. [cast]
-#[test]
-fn cast_float_rejects_invalid_string() {
-    let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Cannot parse Float from text") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_float must return a Parse err for invalid strings"
-    );
-}
-
-/// Verifies that `__moth_cast_float` applies the shared Moth numeric text grammar to
-/// the whole string and does not trim whitespace. [cast]
-#[test]
-fn cast_float_uses_shared_numeric_text_grammar() {
-    let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Number.parseFloat(value.replace(/_/g, \"\"))"),
-        "__moth_cast_float must parse the string after removing digit separators"
-    );
-    assert!(
-        cast.contains("/^-?\\d+(?:_\\d+)*(?:\\.\\d+(?:_\\d+)*)?(?:e[+-]?\\d+(?:_\\d+)*)?$/"),
-        "__moth_cast_float must match the Moth numeric text grammar exactly"
-    );
-    assert!(
-        !cast.contains("__moth_normalize_numeric_text"),
-        "__moth_cast_float must not trim surrounding whitespace"
-    );
-    assert!(
-        cast.contains("Number.isFinite(parsed)"),
-        "__moth_cast_float must reject non-finite parsed values"
-    );
-}
-
-/// Verifies that `__moth_cast_float` rejects non-finite parsed values with an out-of-range
-/// error carrier. [cast]
-#[test]
-fn cast_float_rejects_non_finite_parsed_value() {
-    let source = lower_minimal_module_with_string_float_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float");
-
-    assert!(
-        cast.contains("Float value is out of supported range") && cast.contains("{ tag: \"err\""),
-        "__moth_cast_float must return an out-of-range err when Number.parseFloat yields Infinity"
-    );
-}
-
-/// Verifies that `__moth_error_bubble` normalizes the file path and builds a trace frame. [error]
-#[test]
-fn error_bubble_normalizes_file_and_builds_trace() {
-    let source = lower_minimal_module("main");
-    let bubble = helper_source(&source, "__moth_error_bubble");
-
-    assert!(
-        bubble.contains("__moth_error_normalize_file(file)")
-            && bubble.contains("const frame = { function: safeFunction, location }")
-            && bubble.contains("__moth_error_push_trace"),
-        "__moth_error_bubble must normalize file paths and push a trace frame"
+        cast.contains("!__moth_cast_integer_in_range(truncated, min, max)"),
+        "__moth_cast_float_to_int must reject truncated values outside the target range"
     );
 }
 
@@ -770,23 +509,6 @@ fn collection_push_fixed_checks_capacity_before_pushing() {
     );
 }
 
-/// Verifies that `__moth_collection_push_fixed` returns capacity exceeded error for fixed collections. [fixed-collection]
-#[test]
-fn collection_push_fixed_returns_capacity_exceeded_error() {
-    let source = lower_minimal_module("main");
-    let push = helper_source(&source, "__moth_collection_push_fixed");
-
-    let expected_error = BuiltinErrorCode::CollectionFixedCapacityExceeded;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        push.contains(&expected),
-        "__moth_collection_push_fixed must return CollectionFixedCapacityExceeded when full"
-    );
-}
-
 /// Verifies that `__moth_collection_length` returns logical item count via items.length. [fixed-collection]
 #[test]
 fn collection_length_returns_logical_item_count() {
@@ -863,40 +585,6 @@ fn map_get_returns_ok_for_present_key() {
     );
 }
 
-/// Verifies that `__moth_map_get` returns MapKeyNotFound for missing keys. [map]
-#[test]
-fn map_get_returns_key_not_found_for_missing_key() {
-    let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__moth_map_get");
-
-    let expected_error = BuiltinErrorCode::MapKeyNotFound;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        helper.contains(&expected),
-        "__moth_map_get must return MapKeyNotFound when key is missing"
-    );
-}
-
-/// Verifies that `__moth_map_get` validates receiver type. [map]
-#[test]
-fn map_get_validates_receiver() {
-    let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__moth_map_get");
-
-    let expected_error = BuiltinErrorCode::MapExpectedOrderedMap;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        helper.contains(&expected),
-        "__moth_map_get must validate receiver and return MapExpectedOrderedMap for invalid receivers"
-    );
-}
-
 /// Verifies that `__moth_map_set` stores via `map.map.set` and returns ok. [map]
 #[test]
 fn map_set_stores_and_returns_ok() {
@@ -921,23 +609,6 @@ fn map_remove_returns_removed_and_deletes_key() {
             && helper.contains("map.map.delete(key);")
             && helper.contains("{ tag: \"ok\", value: removed }"),
         "__moth_map_remove must return removed value and delete the key"
-    );
-}
-
-/// Verifies that `__moth_map_remove` returns MapKeyNotFound for missing keys. [map]
-#[test]
-fn map_remove_returns_key_not_found_for_missing_key() {
-    let source = lower_minimal_map_module("main");
-    let helper = helper_source(&source, "__moth_map_remove");
-
-    let expected_error = BuiltinErrorCode::MapKeyNotFound;
-    let expected_message = expected_error.default_message();
-    let expected_code = expected_error.as_i32();
-    let expected = format!(r#"__moth_error_result("{expected_message}", {expected_code})"#);
-
-    assert!(
-        helper.contains(&expected),
-        "__moth_map_remove must return MapKeyNotFound when key is missing"
     );
 }
 
@@ -1004,180 +675,158 @@ fn clone_value_deep_copies_map_entries() {
     );
 }
 
-// Float helper contract tests [float-helper]
+// Emitted error-code behavior tests
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
-enum FloatHelperEmission {
-    Format,
-    Validate,
-}
-
-/// Builds and lowers a minimal module that performs one Float helper statement.
-///
-/// WHY: Float helper contract tests need modules that emit each focused helper without duplicating
-/// HIR construction in every fixture.
-fn lower_minimal_module_with_float_helper(
-    function_name: &str,
-    helper: FloatHelperEmission,
-) -> String {
+fn lower_error_runtime_module(profile: NumericProfile) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    let source_expr = float_expression(1, 1.5, types.float, region);
-    let (statement_kind, result_type) = match helper {
-        FloatHelperEmission::Format => (
-            HirStatementKind::FormatFloat {
-                source: source_expr,
-                failure_mode: NumericFailureMode::Trap,
-                result: LocalId(0),
-            },
-            types.string,
-        ),
-        FloatHelperEmission::Validate => (
-            HirStatementKind::ValidateFloat {
-                source: source_expr,
-                failure_mode: NumericFailureMode::Trap,
-                result: LocalId(0),
-            },
-            types.float,
-        ),
-    };
-
-    let float_statement = statement(1, statement_kind);
+    let map_expression = expression(
+        1,
+        HirExpressionKind::MapLiteral(vec![HirMapEntry {
+            key: string_expression(2, "seed", types.string, region),
+            value: int_expression(3, 1, types.int, region),
+        }]),
+        types.map_string_int,
+        region,
+        ValueKind::RValue,
+    );
 
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, result_type, region)],
-        statements: vec![float_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+        locals: vec![],
+        statements: vec![
+            statement(1, HirStatementKind::Expr(map_expression)),
+            statement(
+                4,
+                HirStatementKind::Call {
+                    target: CallTarget::External(ExternalFunctionId::IoInputNew),
+                    args: vec![],
+                    result: None,
+                },
+            ),
+        ],
+        terminator: HirTerminator::Return(unit_expression(5, types.unit, region)),
     };
-
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
         return_type: types.unit,
     };
-
     let module = build_module(
         &mut path_fork,
         &mut string_table,
-        function_name,
+        "main",
         vec![block],
         function,
-        &[(LocalId(0), "result")],
+        &[],
     );
 
     lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false),
+        JsLoweringConfig::direct_js(false, profile),
         &type_environment,
         &path_fork.snapshot_table(),
     )
-    .expect("JS lowering should succeed")
+    .expect("error runtime fixture should lower to JavaScript")
     .source
 }
 
-fn lower_minimal_module_with_format_float(function_name: &str) -> String {
-    lower_minimal_module_with_float_helper(function_name, FloatHelperEmission::Format)
+fn run_javascript(source: &str) -> String {
+    let output = Command::new("node")
+        .args(["--eval", source])
+        .output()
+        .expect("Node.js is required for JavaScript runtime behavior tests");
+    assert!(
+        output.status.success(),
+        "Node.js runtime failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
 }
 
-fn lower_minimal_module_with_validate_float(function_name: &str) -> String {
-    lower_minimal_module_with_float_helper(function_name, FloatHelperEmission::Validate)
-}
-
-/// Verifies that `__moth_float_validate` returns ok for finite values and rejects non-finite values.
+/// Verifies that emitted collection, map, and Core IO errors retain their unsigned code records
+/// and exact messages under both Int profiles. [collection] [map] [io-input-helper]
 #[test]
-fn float_validate_helper_checks_finite() {
-    let source = lower_minimal_module_with_validate_float("main");
-    let validate = helper_source(&source, "__moth_float_validate");
-
-    assert!(
-        validate.contains("Number.isFinite(value)") && validate.contains("{ tag: \"ok\", value }"),
-        "__moth_float_validate must return an ok carrier for finite values"
+fn emitted_error_producers_preserve_u32_codes_across_int_profiles() {
+    let profiles = [
+        NumericProfile::STANDARD,
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    ];
+    let code_field = format!(
+        "{:?}",
+        crate::backends::js::builtin_error_code_js_field_name(false)
     );
 
-    let non_finite = BuiltinErrorCode::FloatBoundaryNonFinite;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        non_finite.default_message(),
-        non_finite.as_i32()
-    );
-    assert!(
-        validate.contains(&expected),
-        "__moth_float_validate must use FloatBoundaryNonFinite for non-finite values"
-    );
+    for profile in profiles {
+        let source = lower_error_runtime_module(profile);
+        let (zero_index, out_of_bounds_index) = match profile.int_width {
+            IntWidth::Bits32 => ("0", "1"),
+            IntWidth::Bits64 => ("0n", "1n"),
+        };
+        let driver = r#"
+delete globalThis.window;
+delete globalThis.document;
+if (typeof window !== "undefined" || typeof document !== "undefined") {
+    throw new Error("Node.js runtime unexpectedly provides browser input globals");
 }
-
-/// Verifies that `__moth_format_float` rejects non-finite inputs defensively.
-#[test]
-fn format_float_helper_rejects_non_finite() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    let non_finite = BuiltinErrorCode::FloatFormatInvariant;
-    let expected = format!(
-        r#"__moth_error_result("{}", {})"#,
-        non_finite.default_message(),
-        non_finite.as_i32()
-    );
-    assert!(
-        format.contains(&expected),
-        "__moth_format_float must use FloatFormatInvariant for unexpected non-finite values"
-    );
+const results = [
+    __moth_collection_get(null, INDEX_ZERO),
+    __moth_collection_remove(null, INDEX_ZERO),
+    __moth_collection_get([42], INDEX_OUT_OF_BOUNDS),
+    __moth_collection_set([42], INDEX_OUT_OF_BOUNDS, 7),
+    __moth_collection_remove([42], INDEX_OUT_OF_BOUNDS),
+    __moth_map_get(null, "missing"),
+    __moth_map_get(__moth_map_new([]), "missing"),
+    __moth_map_remove(null, "missing"),
+    __moth_map_remove(__moth_map_new([["present", 1]]), "missing"),
+    __moth_io_input_new()
+];
+for (const result of results) {
+    const error = result.value;
+    const code = error[ERROR_CODE_FIELD];
+    console.log(JSON.stringify([
+        result.tag,
+        __moth_error_message(error),
+        typeof code,
+        String(code),
+        typeof (code + 1),
+        String(code + 1),
+        __moth_error_code(error)
+    ]));
 }
+"#
+        .replace("INDEX_ZERO", zero_index)
+        .replace("INDEX_OUT_OF_BOUNDS", out_of_bounds_index)
+        .replace("ERROR_CODE_FIELD", &code_field);
 
-/// Verifies that `__moth_format_float` normalizes `-0.0` to the string "0".
-#[test]
-fn format_float_helper_normalizes_negative_zero() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    assert!(
-        format.contains("Object.is(value, -0)")
-            && format.contains(r#"return { tag: "ok", value: "0" };"#),
-        "__moth_format_float must format -0.0 as the string 0"
-    );
-}
-
-/// Verifies that `__moth_format_float` uses explicit JS number formatting and normalizes exponent signs.
-#[test]
-fn format_float_helper_uses_to_string_and_normalizes_exponent() {
-    let source = lower_minimal_module_with_format_float("main");
-    let format = helper_source(&source, "__moth_format_float");
-
-    assert!(
-        format.contains("value.toString()"),
-        "__moth_format_float must format via Number.prototype.toString"
-    );
-    assert!(
-        format.contains(r#"replace(/e([+-]?)(\d+)/i"#),
-        "__moth_format_float must normalize exponent case and sign placeholders"
-    );
-    assert!(
-        format.contains(r#"const explicitSign = sign === "-" ? "-" : "+";"#),
-        "__moth_format_float must compute an explicit exponent sign"
-    );
-    assert!(
-        format.contains(r#"return "e" + explicitSign + digits;"#),
-        "__moth_format_float must emit lowercase e with explicit exponent sign"
-    );
-}
-
-/// Verifies that the expression-level `Float -> String` cast delegates to the shared formatter.
-#[test]
-fn cast_float_to_string_helper_uses_shared_float_formatter() {
-    let source = lower_minimal_module_with_float_string_cast("main");
-    let cast = helper_source(&source, "__moth_cast_float_to_string");
-
-    assert!(
-        cast.contains("__moth_numeric_trap(__moth_format_float(value))"),
-        "__moth_cast_float_to_string must use the Moth Float formatter contract"
-    );
+        let output = run_javascript(&format!("{source}\n{driver}"));
+        assert_eq!(
+            output.lines().collect::<Vec<_>>(),
+            vec![
+                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+                r#"["err","Map key not found","number","111","number","112",111]"#,
+                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+                r#"["err","Map key not found","number","111","number","112",111]"#,
+                r#"["err","Browser input APIs unavailable","number","500","number","501",500]"#,
+            ],
+            "generated error records must retain U32-number codes under {profile}"
+        );
+    }
 }

@@ -1,0 +1,6 @@
+export:
+    readings || -> {U32}, U32:
+        first U32 = 4294967295
+        return {first}, first
+    ;
+;

@@ -463,6 +463,7 @@ fn self_reference_error(reference: &InitializerReference) -> CompilerDiagnostic 
             CompileTimeEvaluationErrorReason::ConstantSelfReference,
             Some(reference.name),
             reference.span,
+            None,
         ),
         reference,
     )
@@ -474,6 +475,7 @@ fn not_visible_constant_error(reference: &InitializerReference) -> CompilerDiagn
             CompileTimeEvaluationErrorReason::ConstantNotVisible,
             Some(reference.name),
             reference.span,
+            None,
         ),
         reference,
     )
@@ -485,6 +487,7 @@ fn non_constant_reference_error(reference: &InitializerReference) -> CompilerDia
             CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
             Some(reference.name),
             reference.span,
+            None,
         ),
         reference,
     )
@@ -504,6 +507,7 @@ fn same_file_forward_reference_error(
             CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
             target_name,
             reference.span,
+            None,
         ),
         reference,
     )

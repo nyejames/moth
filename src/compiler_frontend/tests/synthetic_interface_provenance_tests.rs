@@ -21,6 +21,7 @@ use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, Bu
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -152,7 +153,10 @@ fn provenance_preserved_through_cast() {
         target: BuiltinCastTarget::Float,
         requires_optional_wrap_after_cast: false,
         evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::IntToFloat,
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+            },
         },
         handling: CastHandling::Infallible,
         span: None,
@@ -295,8 +299,12 @@ fn provenance_preserved_through_int_to_float_coercion() {
         .with_synthetic_interface_provenance(provenance);
 
     let type_environment = TypeEnvironment::new();
-    let coerced =
-        coerce_expression_to_declared_type(int_expr, builtin_type_ids::FLOAT, &type_environment);
+    let coerced = coerce_expression_to_declared_type(
+        int_expr,
+        builtin_type_ids::FLOAT,
+        &type_environment,
+        NumericProfile::STANDARD.float_precision,
+    );
 
     assert_eq!(
         coerced.synthetic_interface_provenance.members(),
@@ -336,7 +344,8 @@ fn provenance_unioned_through_constant_folding() {
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let folded = match constant_fold(rpn.items, &mut string_table).expect("folding should succeed")
+    let folded = match constant_fold(rpn.items, &mut string_table, NumericProfile::STANDARD, None)
+        .expect("folding should succeed")
     {
         ConstantFoldOutcome::Folded(stack) => stack,
         ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),

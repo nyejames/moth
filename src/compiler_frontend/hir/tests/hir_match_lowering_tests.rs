@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::hir::expressions::{
@@ -36,7 +37,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, assert_no_placeholder_terminators, build_ast_with_choices,
-    build_ast_with_registered_types, lower_ast,
+    build_ast_with_registered_types, lower_ast, validate_module_for_tests,
 };
 
 #[test]
@@ -320,6 +321,179 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
     assert!(matches!(arms[0].pattern, HirPattern::Literal(_)));
     assert!(matches!(arms[1].pattern, HirPattern::Literal(_)));
     assert!(matches!(arms[2].pattern, HirPattern::Wildcard));
+}
+
+#[test]
+fn lowers_and_validates_fixed_scalar_match_pattern() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let value_name = super::symbol("value", &mut path_fork, &mut string_table);
+    let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
+    let pattern_value = FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8");
+    let relational_pattern_value =
+        FixedScalarValue::unsigned(FixedScalar::U8, 100).expect("100 fits in U8");
+
+    let match_node = node(
+        NodeKind::Match {
+            scrutinee: reference_expr_with_type_id(
+                value_name,
+                u8_type,
+                None,
+                ValueMode::ImmutableReference,
+            ),
+            arms: vec![
+                MatchArm {
+                    pattern: MatchPattern::Literal(Expression::fixed_scalar(
+                        pattern_value,
+                        None,
+                        ValueMode::ImmutableOwned,
+                    )),
+                    guard: None,
+                    body: vec![node(NodeKind::Return(vec![]), None)],
+                },
+                MatchArm {
+                    pattern: MatchPattern::Relational {
+                        op: RelationalPatternOp::LessThan,
+                        value: Expression::fixed_scalar(
+                            relational_pattern_value,
+                            None,
+                            ValueMode::ImmutableOwned,
+                        ),
+                        span: None,
+                    },
+                    guard: None,
+                    body: vec![node(NodeKind::Return(vec![]), None)],
+                },
+            ],
+            default: Some(vec![node(NodeKind::Return(vec![]), None)]),
+            exhaustiveness: MatchExhaustiveness::HasDefault,
+        },
+        None,
+    );
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![param_with_type_id(value_name, u8_type, false, None)],
+            returns: vec![],
+        },
+        vec![match_node],
+        None,
+    );
+    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    let (module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
+    let entry_block = &module.blocks[start.entry.0 as usize];
+    let arms = match &entry_block.terminator {
+        HirTerminator::Match { arms, .. } => arms,
+        _ => panic!("expected match terminator"),
+    };
+    assert_eq!(arms.len(), 3);
+    let HirPattern::Literal(value) = &arms[0].pattern else {
+        panic!("fixed scalar literal should lower to HirPattern::Literal");
+    };
+
+    assert_eq!(value.ty, u8_type);
+    assert!(matches!(
+        value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == pattern_value
+    ));
+    assert_eq!(value.value_kind, ValueKind::Const);
+
+    let HirPattern::Relational {
+        value: relational_value,
+        ..
+    } = &arms[1].pattern
+    else {
+        panic!("fixed scalar relational pattern should lower to HirPattern::Relational");
+    };
+    assert_eq!(relational_value.ty, u8_type);
+    assert!(matches!(
+        relational_value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == relational_pattern_value
+    ));
+    assert_eq!(relational_value.value_kind, ValueKind::Const);
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("HIR validation should accept a fixed scalar literal pattern");
+}
+
+#[test]
+fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let maybe_name = super::symbol("maybe", &mut path_fork, &mut string_table);
+    let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
+    let mut type_environment = TypeEnvironment::new();
+    let option_u8_type = type_environment.intern_option(u8_type);
+    let pattern_value = FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8");
+
+    let match_node = node(
+        NodeKind::Match {
+            scrutinee: reference_expr_with_type_id(
+                maybe_name,
+                option_u8_type,
+                None,
+                ValueMode::ImmutableReference,
+            ),
+            arms: vec![MatchArm {
+                pattern: MatchPattern::OptionValue {
+                    value: Expression::fixed_scalar(pattern_value, None, ValueMode::ImmutableOwned),
+                    span: None,
+                },
+                guard: None,
+                body: vec![node(NodeKind::Return(vec![]), None)],
+            }],
+            default: Some(vec![node(NodeKind::Return(vec![]), None)]),
+            exhaustiveness: MatchExhaustiveness::HasDefault,
+        },
+        None,
+    );
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![param_with_type_id(maybe_name, option_u8_type, false, None)],
+            returns: vec![],
+        },
+        vec![match_node],
+        None,
+    );
+    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    assert_eq!(
+        ast.type_environment.intern_option(u8_type),
+        option_u8_type,
+        "the AST fixture should use the registered U8? type"
+    );
+
+    let (module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let start = &module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize];
+    let entry_block = &module.blocks[start.entry.0 as usize];
+    let arms = match &entry_block.terminator {
+        HirTerminator::Match { arms, .. } => arms,
+        _ => panic!("expected match terminator"),
+    };
+    let HirPattern::OptionValue { value } = &arms[0].pattern else {
+        panic!("fixed scalar optional literal should lower to HirPattern::OptionValue");
+    };
+    assert_eq!(value.ty, u8_type);
+    assert!(matches!(
+        value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == pattern_value
+    ));
+    assert_eq!(value.value_kind, ValueKind::Const);
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("HIR validation should accept a fixed scalar optional literal pattern");
 }
 
 #[test]

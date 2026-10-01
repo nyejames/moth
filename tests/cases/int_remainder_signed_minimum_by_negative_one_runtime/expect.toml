@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "int_remainder_signed_minimum_by_negative_one_runtime minimum=0 ordinary=-1"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "int_remainder_signed_minimum_by_negative_one_runtime minimum=0 ordinary=-1"

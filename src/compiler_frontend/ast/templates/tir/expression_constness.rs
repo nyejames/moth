@@ -125,6 +125,8 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     match &expression.kind {
         ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::FixedScalar(_)
+        | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
         | ExpressionKind::Bool(_)

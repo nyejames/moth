@@ -1,18 +1,29 @@
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
-use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
+use crate::backends::wasm::lir::instructions::{
+    WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
+};
 use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage};
-use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirFunctionId, WasmLirLocalId};
+use crate::backends::wasm::lir::types::{
+    WasmAbiType, WasmLirFunctionId, WasmLirLocalId, WasmLocalRole,
+};
 use crate::backends::wasm::request::{
     WasmBackendRequest, WasmDebugFlags, WasmExportPolicy, WasmFunctionEmissionPolicy,
 };
 use crate::backends::wasm::tests::lowering::test_support::{
     bool_expression, borrow_facts_with_drop_site, build_module, build_type_environment,
-    default_borrow_facts, expression, int_expression, load_local, local, statement,
-    string_expression, unit_expression,
+    default_borrow_facts, default_numeric_proofs, expression, int_expression, load_local, local,
+    statement, string_expression, unit_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
@@ -21,6 +32,7 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -146,6 +158,7 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
         let result = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
+            &default_numeric_proofs(),
             &WasmBackendRequest::default(),
             &string_table,
             &type_environment,
@@ -176,6 +189,7 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
     let error = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -285,6 +299,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -403,6 +418,7 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -491,17 +507,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
             305,
             HirStatementKind::Assign {
                 target: HirPlace::Local(LocalId(0)),
-                value: expression(
-                    306,
-                    HirExpressionKind::BinOp {
-                        left: Box::new(load_local(307, LocalId(0), types.int, RegionId(0))),
-                        op: HirBinOp::Add,
-                        right: Box::new(int_expression(308, 1, types.int, RegionId(0))),
-                    },
-                    types.int,
-                    RegionId(0),
-                    ValueKind::RValue,
-                ),
+                value: load_local(307, LocalId(0), types.int, RegionId(0)),
             },
             305,
         )],
@@ -542,6 +548,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -621,6 +628,7 @@ fn lowers_internal_string_append_as_buffer_concat() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -692,6 +700,7 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -791,6 +800,7 @@ fn lowers_string_equality_by_content_comparison_operations() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -827,7 +837,7 @@ fn lowers_string_equality_by_content_comparison_operations() {
 }
 
 #[test]
-fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
+fn lowers_ordered_comparison_and_control_flow() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -846,54 +856,19 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         RegionId(0),
         ValueKind::RValue,
     );
-    let updated_sum = expression(
-        1403,
-        HirExpressionKind::BinOp {
-            left: Box::new(load_local(1404, LocalId(1), types.int, RegionId(0))),
-            op: HirBinOp::Add,
-            right: Box::new(int_expression(1405, 1, types.int, RegionId(0))),
-        },
-        types.int,
-        RegionId(0),
-        ValueKind::RValue,
-    );
-    let decremented_counter = expression(
-        1410,
-        HirExpressionKind::BinOp {
-            left: Box::new(load_local(1411, LocalId(0), types.int, RegionId(0))),
-            op: HirBinOp::Sub,
-            right: Box::new(int_expression(1412, 1, types.int, RegionId(0))),
-        },
-        types.int,
-        RegionId(0),
-        ValueKind::RValue,
-    );
 
     let entry_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
-        ],
-        statements: vec![
-            statement(
-                1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(1406, 0, types.int, RegionId(0)),
-                },
-                1,
-            ),
-            statement(
-                2,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: int_expression(1407, 10, types.int, RegionId(0)),
-                },
-                2,
-            ),
-        ],
+        locals: vec![local(0, types.int, RegionId(0))],
+        statements: vec![statement(
+            1,
+            HirStatementKind::Assign {
+                target: HirPlace::Local(LocalId(0)),
+                value: int_expression(1406, 0, types.int, RegionId(0)),
+            },
+            1,
+        )],
         terminator: HirTerminator::If {
             condition,
             then_block: BlockId(1),
@@ -904,25 +879,8 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         id: BlockId(1),
         region: RegionId(0),
         locals: vec![],
-        statements: vec![
-            statement(
-                3,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: updated_sum,
-                },
-                3,
-            ),
-            statement(
-                4,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: decremented_counter,
-                },
-                4,
-            ),
-        ],
-        terminator: HirTerminator::Return(load_local(1408, LocalId(1), types.int, RegionId(0))),
+        statements: vec![],
+        terminator: HirTerminator::Return(load_local(1408, LocalId(0), types.int, RegionId(0))),
     };
     let else_block = HirBlock {
         id: BlockId(2),
@@ -948,12 +906,13 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
         &path_fork.snapshot_table(),
     )
-    .expect("ordered comparisons and Add should lower in non-runtime functions");
+    .expect("ordered comparison and control flow should lower");
 
     let lowered = result
         .lir_module
@@ -966,22 +925,23 @@ fn lowers_ordered_comparison_and_numeric_add_for_control_flow() {
         lowered.blocks[0]
             .statements
             .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::OrderedLe { .. })),
-        "entry block should include ordered comparison lowering"
+            .any(|statement| matches!(
+                statement,
+                WasmLirStmt::ScalarCompare {
+                    op: WasmScalarComparisonOp::Le,
+                    lhs_type: WasmScalarComparisonType::SignedInteger(32),
+                    rhs_type: WasmScalarComparisonType::SignedInteger(32),
+                    ..
+                }
+            )),
+        "entry block should include profile-aware signed scalar comparison lowering"
     );
     assert!(
-        lowered.blocks[1]
-            .statements
-            .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::IntAdd { .. })),
-        "then block should include numeric add lowering"
-    );
-    assert!(
-        lowered.blocks[1]
-            .statements
-            .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::IntSub { .. })),
-        "then block should include numeric sub lowering"
+        matches!(
+            lowered.blocks[0].terminator,
+            WasmLirTerminator::Branch { .. }
+        ),
+        "entry block should preserve the conditional control flow"
     );
 }
 
@@ -1040,6 +1000,7 @@ fn deduplicates_static_utf8_segments() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -1085,6 +1046,7 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &borrow_facts,
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -1164,11 +1126,13 @@ fn synthesizes_export_wrappers_with_stable_names() {
         external_package_registry: Default::default(),
         structural_string_urls: None,
         function_emission_policy: Default::default(),
+        numeric_profile: NumericProfile::STANDARD,
     };
 
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &request,
         &string_table,
         &type_environment,
@@ -1205,6 +1169,126 @@ fn synthesizes_export_wrappers_with_stable_names() {
                     ..
                 }
             ))
+    );
+}
+
+#[test]
+fn exported_f16_parameters_are_rounded_before_the_internal_call() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let f16_type = builtin_type_ids::fixed_scalar(FixedScalar::F16);
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let exported_path = path_fork
+        .try_intern_portable_path("process_half", &mut string_table)
+        .expect("test path fits");
+
+    let start_function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.int,
+    };
+    let exported_function = HirFunction {
+        id: FunctionId(1),
+        entry: BlockId(1),
+        params: vec![LocalId(10)],
+        return_type: f16_type,
+    };
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![
+            (start_function, start_path, HirFunctionOrigin::EntryStart),
+            (exported_function, exported_path, HirFunctionOrigin::Normal),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(500, 0, types.int, RegionId(0))),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![local(10, f16_type, RegionId(0))],
+                statements: vec![],
+                terminator: HirTerminator::Return(load_local(
+                    501,
+                    LocalId(10),
+                    f16_type,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    );
+
+    let mut export_names = FxHashMap::default();
+    export_names.insert(FunctionId(1), "process_half".to_owned());
+    let request = WasmBackendRequest {
+        export_policy: WasmExportPolicy {
+            exported_functions: vec![FunctionId(1)],
+            export_names,
+            helper_exports: Default::default(),
+        },
+        ..Default::default()
+    };
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &request,
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("F16 export wrapper should lower");
+
+    let WasmExportKind::Function(wrapper_id) = lowered.lir_module.exports[0].kind;
+    let wrapper = lowered
+        .lir_module
+        .functions
+        .iter()
+        .find(|function| function.id == wrapper_id)
+        .expect("export wrapper should be present");
+    assert_eq!(wrapper.signature.params, vec![WasmAbiType::F32]);
+    assert_eq!(wrapper.signature.results, vec![WasmAbiType::F32]);
+
+    let statements = &wrapper.blocks[0].statements;
+    let round_index = statements
+        .iter()
+        .position(|statement| matches!(statement, WasmLirStmt::RoundF16 { .. }))
+        .expect("the wrapper should round its external F32 parameter");
+    let call_index = statements
+        .iter()
+        .position(|statement| matches!(statement, WasmLirStmt::Call { .. }))
+        .expect("the wrapper should call its internal function");
+    assert!(round_index < call_index, "rounding must precede the call");
+
+    let WasmLirStmt::RoundF16 { dst, source } = &statements[round_index] else {
+        unreachable!("the round index selects a RoundF16")
+    };
+    assert_eq!(*source, WasmLirLocalId(0));
+    let WasmLirStmt::Call {
+        dst: Some(call_result),
+        args,
+        ..
+    } = &statements[call_index]
+    else {
+        unreachable!("the call index selects a value-returning Call")
+    };
+    assert_eq!(args, &vec![*dst]);
+    assert!(
+        matches!(
+            &wrapper.blocks[0].terminator,
+            WasmLirTerminator::Return { value: Some(value) } if *value == *call_result
+        ),
+        "the wrapper should return the callee's canonical F32 carrier unchanged"
     );
 }
 
@@ -1250,6 +1334,7 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
     let error = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &invalid_request,
         &string_table,
         &type_environment,
@@ -1264,6 +1349,606 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
             .msg
             .contains("missing stable export name for FunctionId(0)")
     );
+}
+
+fn validate_float_test_module(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+    type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+) -> crate::compiler_frontend::hir::module::HirModule {
+    let int_type = type_environment.builtins().int;
+    let float_type = type_environment.builtins().float;
+    let start_path = path_fork
+        .try_intern_portable_path("main", string_table)
+        .expect("test path fits");
+    let validator_path = path_fork
+        .try_intern_portable_path("validate_float", string_table)
+        .expect("test path fits");
+
+    build_module(
+        path_fork,
+        string_table,
+        vec![
+            (
+                HirFunction {
+                    id: FunctionId(0),
+                    entry: BlockId(0),
+                    params: vec![],
+                    return_type: int_type,
+                },
+                start_path,
+                HirFunctionOrigin::EntryStart,
+            ),
+            (
+                HirFunction {
+                    id: FunctionId(1),
+                    entry: BlockId(1),
+                    params: vec![LocalId(10)],
+                    return_type: float_type,
+                },
+                validator_path,
+                HirFunctionOrigin::Normal,
+            ),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(100, 0, int_type, RegionId(0))),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![
+                    local(10, float_type, RegionId(0)),
+                    local(20, float_type, RegionId(0)),
+                ],
+                statements: vec![statement(
+                    102,
+                    HirStatementKind::ValidateFloat {
+                        source: load_local(101, LocalId(10), float_type, RegionId(0)),
+                        failure_mode: NumericFailureMode::Trap,
+                        result: LocalId(20),
+                    },
+                    2,
+                )],
+                terminator: HirTerminator::Return(load_local(
+                    103,
+                    LocalId(20),
+                    float_type,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    )
+}
+
+#[test]
+fn lowers_validate_float_with_profile_precision_and_local_value_path() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, _) = build_type_environment();
+    let module = validate_float_test_module(&mut path_fork, &mut string_table, &type_environment);
+
+    for (float_precision, expected_carrier, expected_precision) in [
+        (
+            FloatPrecision::Bits32,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+        (
+            FloatPrecision::Bits64,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+    ] {
+        let profile = NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision,
+        };
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("Float validator should be lowered");
+        let source_local = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::Param)
+            .expect("source Float parameter should have a LIR local");
+        let result_local = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::UserLocal)
+            .expect("result Float local should have a LIR local");
+
+        assert_eq!(
+            function.signature.params,
+            vec![expected_carrier],
+            "{profile}"
+        );
+        assert_eq!(
+            function.signature.results,
+            vec![expected_carrier],
+            "{profile}"
+        );
+        assert_eq!(source_local.ty, expected_carrier, "{profile}");
+        assert_eq!(result_local.ty, expected_carrier, "{profile}");
+        assert_eq!(
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .filter(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+                .count(),
+            1,
+            "{profile} should lower exactly one validation"
+        );
+
+        let validation_block = function
+            .blocks
+            .iter()
+            .find(|block| {
+                block
+                    .statements
+                    .iter()
+                    .any(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+            })
+            .expect("validation block should be present");
+        let validation = validation_block
+            .statements
+            .iter()
+            .find(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
+            .expect("ValidateFloat statement should be present");
+        let WasmLirStmt::ValidateFloat {
+            dst,
+            source,
+            precision,
+        } = validation
+        else {
+            unreachable!("the selected statement is ValidateFloat")
+        };
+        assert_eq!(*source, source_local.id, "{profile}");
+        assert_eq!(*dst, result_local.id, "{profile}");
+        assert_eq!(*precision, expected_precision, "{profile}");
+        assert!(
+            matches!(
+                &validation_block.terminator,
+                WasmLirTerminator::Return { value: Some(value) } if *value == *dst
+            ),
+            "{profile} should return the validated destination unchanged"
+        );
+    }
+}
+
+#[test]
+fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let float_type = type_environment.builtins().float;
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let formatter_path = path_fork
+        .try_intern_portable_path("format_float", &mut string_table)
+        .expect("test path fits");
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![
+            (
+                HirFunction {
+                    id: FunctionId(0),
+                    entry: BlockId(0),
+                    params: vec![],
+                    return_type: types.int,
+                },
+                start_path,
+                HirFunctionOrigin::EntryStart,
+            ),
+            (
+                HirFunction {
+                    id: FunctionId(1),
+                    entry: BlockId(1),
+                    params: vec![],
+                    return_type: types.string,
+                },
+                formatter_path,
+                HirFunctionOrigin::Normal,
+            ),
+        ],
+        vec![
+            HirBlock {
+                id: BlockId(0),
+                region: RegionId(0),
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(int_expression(200, 0, types.int, RegionId(0))),
+            },
+            HirBlock {
+                id: BlockId(1),
+                region: RegionId(0),
+                locals: vec![local(20, types.string, RegionId(0))],
+                statements: vec![statement(
+                    202,
+                    HirStatementKind::FormatFloat {
+                        source: expression(
+                            201,
+                            HirExpressionKind::Float(1.5),
+                            float_type,
+                            RegionId(0),
+                            ValueKind::Const,
+                        ),
+                        failure_mode: NumericFailureMode::Trap,
+                        result: LocalId(20),
+                    },
+                    2,
+                )],
+                terminator: HirTerminator::Return(load_local(
+                    203,
+                    LocalId(20),
+                    types.string,
+                    RegionId(0),
+                )),
+            },
+        ],
+        FunctionId(0),
+    );
+
+    for (float_precision, expected_carrier, expected_precision) in [
+        (
+            FloatPrecision::Bits32,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+        (
+            FloatPrecision::Bits64,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: NumericProfile {
+                int_width: IntWidth::Bits64,
+                float_precision,
+            },
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{float_precision:?} FormatFloat should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("formatter function should be lowered");
+        assert_eq!(function.signature.results, vec![WasmAbiType::Handle]);
+
+        let statements = &function.blocks[0].statements;
+        let float_constants = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            float_constants.len(),
+            1,
+            "{float_precision:?} source expression should be lowered exactly once"
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|statement| matches!(statement, WasmLirStmt::StringFromFloat { .. }))
+                .count(),
+            1,
+            "{float_precision:?} should emit one StringFromFloat"
+        );
+        let formatted = statements
+            .iter()
+            .find_map(|statement| match statement {
+                WasmLirStmt::StringFromFloat {
+                    dst,
+                    value,
+                    precision,
+                } => Some((*dst, *value, *precision)),
+                _ => None,
+            })
+            .expect("FormatFloat should lower through StringFromFloat");
+        assert_eq!(formatted.1, float_constants[0]);
+        assert_eq!(formatted.2, expected_precision);
+        let source_local = function
+            .locals
+            .iter()
+            .find(|local| local.id == formatted.1)
+            .expect("formatted source local should exist");
+        assert_eq!(source_local.ty, expected_carrier);
+        let destination = function
+            .locals
+            .iter()
+            .find(|local| local.role == WasmLocalRole::UserLocal)
+            .expect("formatted String result local should exist");
+        assert_eq!(destination.ty, WasmAbiType::Handle);
+        assert_eq!(formatted.0, destination.id);
+    }
+}
+
+#[test]
+fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let formatter_path = path_fork
+        .try_intern_portable_path("format_fixed_float", &mut string_table)
+        .expect("test path fits");
+
+    for (scalar, expected_precision, expected_carrier) in [
+        (
+            FixedScalar::F16,
+            BinaryFloatPrecision::Binary16,
+            WasmAbiType::F32,
+        ),
+        (
+            FixedScalar::F32,
+            BinaryFloatPrecision::Binary32,
+            WasmAbiType::F32,
+        ),
+        (
+            FixedScalar::F64,
+            BinaryFloatPrecision::Binary64,
+            WasmAbiType::F64,
+        ),
+    ] {
+        let source = expression(
+            501,
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::binary_float(scalar, 1.5)
+                    .expect("1.5 is a finite fixed-width float"),
+            ),
+            builtin_type_ids::fixed_scalar(scalar),
+            RegionId(0),
+            ValueKind::Const,
+        );
+        let cast = expression(
+            502,
+            HirExpressionKind::Cast {
+                source: Box::new(source),
+                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(scalar)),
+            },
+            types.string,
+            RegionId(0),
+            ValueKind::RValue,
+        );
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            vec![
+                (
+                    HirFunction {
+                        id: FunctionId(0),
+                        entry: BlockId(0),
+                        params: vec![],
+                        return_type: types.int,
+                    },
+                    start_path,
+                    HirFunctionOrigin::EntryStart,
+                ),
+                (
+                    HirFunction {
+                        id: FunctionId(1),
+                        entry: BlockId(1),
+                        params: vec![],
+                        return_type: types.string,
+                    },
+                    formatter_path,
+                    HirFunctionOrigin::Normal,
+                ),
+            ],
+            vec![
+                HirBlock {
+                    id: BlockId(0),
+                    region: RegionId(0),
+                    locals: vec![],
+                    statements: vec![],
+                    terminator: HirTerminator::Return(int_expression(
+                        500,
+                        0,
+                        types.int,
+                        RegionId(0),
+                    )),
+                },
+                HirBlock {
+                    id: BlockId(1),
+                    region: RegionId(0),
+                    locals: vec![],
+                    statements: vec![],
+                    terminator: HirTerminator::Return(cast),
+                },
+            ],
+            FunctionId(0),
+        );
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} NumericToString should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("fixed-float formatter should be lowered");
+        assert_eq!(function.signature.results, vec![WasmAbiType::Handle]);
+        let statements = &function.blocks[0].statements;
+        let float_constants = statements
+            .iter()
+            .filter_map(|statement| match statement {
+                WasmLirStmt::ConstF32 { dst, .. } | WasmLirStmt::ConstF64 { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            float_constants.len(),
+            1,
+            "{scalar:?} source expression should be lowered exactly once"
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|statement| matches!(statement, WasmLirStmt::StringFromFloat { .. }))
+                .count(),
+            1,
+            "{scalar:?} should emit one StringFromFloat"
+        );
+        let formatted = statements
+            .iter()
+            .find_map(|statement| match statement {
+                WasmLirStmt::StringFromFloat {
+                    dst,
+                    value,
+                    precision,
+                } => Some((*dst, *value, *precision)),
+                _ => None,
+            })
+            .expect("NumericToString should lower through StringFromFloat");
+        assert_eq!(formatted.1, float_constants[0]);
+        assert_eq!(formatted.2, expected_precision);
+        assert_eq!(
+            function
+                .locals
+                .iter()
+                .find(|local| local.id == formatted.1)
+                .expect("formatted input local should exist")
+                .ty,
+            expected_carrier
+        );
+        assert_eq!(
+            function
+                .locals
+                .iter()
+                .find(|local| local.id == formatted.0)
+                .expect("String result local should exist")
+                .ty,
+            WasmAbiType::Handle
+        );
+    }
+}
+
+#[test]
+fn lowers_every_numeric_profile_with_selected_int_carrier() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+
+    let start_block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(int_expression(500, 123, types.int, RegionId(0))),
+    };
+    let start_function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.int,
+    };
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+        vec![start_block],
+        FunctionId(0),
+    );
+
+    for profile in [
+        NumericProfile::STANDARD,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        let start = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.origin == WasmLirFunctionOrigin::EntryStart)
+            .expect("the start function should be lowered");
+        let expected = match profile.int_width {
+            IntWidth::Bits32 => WasmAbiType::I32,
+            IntWidth::Bits64 => WasmAbiType::I64,
+        };
+        assert_eq!(start.signature.results, vec![expected], "{profile}");
+        assert!(
+            start.blocks[0].statements.iter().any(|statement| matches!(
+                (expected, statement),
+                (WasmAbiType::I32, WasmLirStmt::ConstI32 { value: 123, .. })
+                    | (WasmAbiType::I64, WasmLirStmt::ConstI64 { value: 123, .. })
+            )),
+            "{profile} Int literal must use the selected carrier"
+        );
+    }
 }
 
 #[test]
@@ -1310,6 +1995,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
     let error = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -1410,6 +2096,7 @@ fn selected_function_policy_ignores_unselected_host_calls() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &request,
         &string_table,
         &type_environment,
@@ -1437,6 +2124,7 @@ fn selected_function_policy_ignores_unselected_host_calls() {
     let error = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &invalid_export_request,
         &string_table,
         &type_environment,
@@ -1484,34 +2172,78 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
     let builtins = type_environment.builtins();
     let float_id = builtins.float;
     let char_id = builtins.char;
-    // Decimal is intentionally inactive in the Alpha surface; it must not lower to a
-    // numeric ABI type even though the builtin TypeId still exists.
-    let decimal_id = builtins.decimal;
     let range_id = builtins.range;
 
     let borrow_facts = default_borrow_facts();
-    let request = WasmBackendRequest::default();
     let path_table = path_fork.snapshot_table();
-    let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
-        &module,
-        &borrow_facts,
-        &request,
-        &string_table,
-        &path_table,
-        &type_environment,
-    );
+    for profile in [
+        NumericProfile::STANDARD,
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+    ] {
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let proofs = default_numeric_proofs();
+        let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
+            &module,
+            &borrow_facts,
+            &proofs,
+            &request,
+            &string_table,
+            &path_table,
+            &type_environment,
+        );
 
-    assert_eq!(lower_type_to_abi(&context, types.int), WasmAbiType::I64);
-    assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
-    assert_eq!(
-        lower_type_to_abi(&context, types.string),
-        WasmAbiType::Handle
-    );
-    assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
-    assert_eq!(lower_type_to_abi(&context, float_id), WasmAbiType::F64);
-    assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
-    assert_eq!(lower_type_to_abi(&context, decimal_id), WasmAbiType::Handle);
-    assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
+        assert_eq!(
+            lower_type_to_abi(&context, types.int),
+            match profile.int_width {
+                IntWidth::Bits32 => WasmAbiType::I32,
+                IntWidth::Bits64 => WasmAbiType::I64,
+            },
+            "{profile}"
+        );
+        assert_eq!(
+            lower_type_to_abi(&context, float_id),
+            match profile.float_precision {
+                FloatPrecision::Bits32 => WasmAbiType::F32,
+                FloatPrecision::Bits64 => WasmAbiType::F64,
+            },
+            "{profile}"
+        );
+        for scalar in FixedScalar::ALL {
+            let expected = match scalar {
+                FixedScalar::I64 | FixedScalar::U64 => WasmAbiType::I64,
+                FixedScalar::F64 => WasmAbiType::F64,
+                FixedScalar::F16 | FixedScalar::F32 => WasmAbiType::F32,
+                _ => WasmAbiType::I32,
+            };
+            assert_eq!(
+                lower_type_to_abi(&context, builtin_type_ids::fixed_scalar(scalar)),
+                expected,
+                "{profile} {scalar:?}"
+            );
+        }
+        assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
+        assert_eq!(
+            lower_type_to_abi(&context, types.string),
+            WasmAbiType::Handle
+        );
+        assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
+        assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
+        assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
+    }
 }
 
 #[test]
@@ -1600,6 +2332,7 @@ fn multi_fragment_template_produces_all_push_operations() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -1662,6 +2395,7 @@ fn debug_name_uses_source_name_when_available() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,
@@ -1737,6 +2471,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
     let result = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
+        &default_numeric_proofs(),
         &WasmBackendRequest::default(),
         &string_table,
         &type_environment,

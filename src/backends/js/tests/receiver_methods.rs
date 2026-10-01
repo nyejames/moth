@@ -119,6 +119,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,
@@ -226,6 +227,7 @@ fn receiver_method_call_assigns_value_for_return() {
     let output = lower_hir_to_js(
         &module,
         &BorrowCheckReport::default(),
+        &NumericProofs::default(),
         &string_table,
         default_config(),
         &type_environment,

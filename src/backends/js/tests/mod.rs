@@ -1,8 +1,7 @@
 //! JavaScript backend semantic correctness tests.
 //!
-//! These modules pin the observable contract between Moth HIR semantics and emitted JS text.
-//! They inspect generated source rather than executing JavaScript, keeping each backend concern in
-//! a focused file and sharing direct-HIR construction through `support`.
+//! These modules verify emitted backend behavior through direct HIR inputs. Most concerns inspect
+//! generated source; runtime numeric invariants execute the emitted helpers in Node.js.
 
 mod support;
 
@@ -15,6 +14,9 @@ mod expressions;
 mod host;
 mod inline_expressions;
 mod map_statements;
+mod number_runtime;
+mod numeric_carrier;
+mod numeric_proofs;
 mod numeric_statements;
 mod prelude;
 mod reactivity;

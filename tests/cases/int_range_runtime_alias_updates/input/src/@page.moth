@@ -1,0 +1,35 @@
+check_range_aliases |ascending_start Int, ascending_end Int, ascending_step Int, descending_start Int, descending_end Int, descending_step Int, negative_descending_step Int| -> String:
+    ascending_values ~= 0
+    ascending_indices ~= 0
+    loop ascending_start to ascending_end by ascending_step |ascending_value, ascending_index|:
+        assert(ascending_value is ascending_start + ascending_index * ascending_step, "ascending value/index")
+        ascending_values = ascending_values + ascending_value
+        ascending_indices = ascending_indices + ascending_index
+    ;
+    assert(ascending_values is 12, "ascending value sum")
+    assert(ascending_indices is 3, "ascending index sum")
+
+    descending_values ~= 0
+    descending_indices ~= 0
+    loop descending_start to descending_end by descending_step |descending_value, descending_index|:
+        assert(descending_value is descending_start - descending_index * descending_step, "descending value/index")
+        descending_values = descending_values + descending_value
+        descending_indices = descending_indices + descending_index
+    ;
+    assert(descending_values is 24, "descending value sum")
+    assert(descending_indices is 6, "descending index sum")
+
+    negative_step_values ~= 0
+    negative_step_indices ~= 0
+    loop descending_start to descending_end by negative_descending_step |negative_step_value, negative_step_index|:
+        assert(negative_step_value is descending_start + negative_step_index * negative_descending_step, "negative-step value/index")
+        negative_step_values = negative_step_values + negative_step_value
+        negative_step_indices = negative_step_indices + negative_step_index
+    ;
+    assert(negative_step_values is 24, "negative-step value sum")
+    assert(negative_step_indices is 6, "negative-step index sum")
+    return "range-aliases-ok"
+;
+
+checks = check_range_aliases(2, 8, 2, 9, 2, 2, -2)
+[:integer range aliases=[checks]]

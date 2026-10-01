@@ -62,7 +62,7 @@ Source calls use explicit target classes:
 
 Generated concrete functions add another stable target class once materialised.
 
-HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operations, resource uses, project-context provenance and generated-function requests.
+HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate profile-aware `NumericProofs` side table paired with executable HIR.
 
 Those facts are the linking authority later stages consume.
 
@@ -110,7 +110,7 @@ Those facts are the linking authority later stages consume.
 
 A backend-neutral **structured HIR view** may be derived when a structured lowerer needs it. It is not a second semantic authority. Cache it only as derived data.
 
-Borrow validation will read validated HIR and write side tables. It will not rewrite the IR to taste.
+Borrow validation will read validated HIR and write side tables. It will not rewrite the IR to taste. Numeric proof analysis likewise reads validated HIR and writes statement-keyed facts before publication without rewriting the IR.
 
 ## What can fail here
 

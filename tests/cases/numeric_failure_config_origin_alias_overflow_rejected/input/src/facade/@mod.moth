@@ -1,0 +1,5 @@
+configured_maximum #Config of Int = 2147483647
+
+export:
+    maximum #Int = configured_maximum
+;
