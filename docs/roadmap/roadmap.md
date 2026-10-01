@@ -11,17 +11,23 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 # Plans
 
-- [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
+## Ongoing in parallel 
 
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Partially complete and underway. **ACTIVE IN PARALLEL.**
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
+
+- [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes. **PAUSED**
+
+## Sequenced work
+
+- [MON crate better visibility boundaries and structure](./plans/mon-crate-extraction-and-syntax-parity-plan.md)
+
+- [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
 
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
 
 - [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after delivered MON syntax/Rust tooling and the numeric checkpoint, and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
 
 - [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
-
-- [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes.
 
 - [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted MON syntax/Rust tooling, unified numeric semantics, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
 

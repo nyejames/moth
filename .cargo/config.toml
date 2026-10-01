@@ -1,8 +1,7 @@
 # Shared defaults for direct Cargo commands, just recipes and nested Cargo builds.
-# Environment variables and explicit command-line options can lower these bounds.
+# Bound build and test-harness concurrency without overriding Rayon application defaults.
 [build]
 jobs = 4
 
 [env]
 RUST_TEST_THREADS = { value = "4", force = false }
-RAYON_NUM_THREADS = { value = "4", force = false }

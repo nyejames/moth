@@ -136,16 +136,18 @@ checks retained. Release and profiling keep their existing settings. The
 workspace warning policy denies warnings for both packages in direct Cargo
 commands and recipes. It does not change dependency lint policy.
 
-`.cargo/config.toml` defaults Cargo build jobs, Rust test threads and Rayon
-threads to four. Environment overrides and explicit command options remain
-available. For example, lower all three bounds on a smaller host:
+`.cargo/config.toml` defaults Cargo build jobs and Rust test threads to four.
+Rayon intentionally keeps its host-selected default unless the caller sets
+`RAYON_NUM_THREADS` for a specific command. Environment overrides and explicit
+Cargo options remain available. For example, bound all three forms of concurrency
+on a smaller host:
 
 [codeblock, $code("bash"):
     CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 just validate
 ]
 
-The defaults are concurrency bounds, not an aggregate memory limit. Preserve
-one effective configuration during timing comparisons. Changing compiler,
+These controls bound concurrency, not aggregate memory. Preserve one effective
+configuration during timing comparisons. Changing compiler,
 features, profile settings or environment flags can require different artifacts.
 Source edits can reuse dependencies and incremental state from earlier builds.
 
