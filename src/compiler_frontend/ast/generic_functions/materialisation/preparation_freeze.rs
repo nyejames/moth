@@ -99,21 +99,27 @@ pub(crate) struct ModuleMaterialisationPreparation {
     pub(crate) const_values: ConstValueStore,
     pub(super) default_const_templates_by_path: FxHashMap<PathId, PublicConstTemplate>,
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
-    pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
-    pub(crate) resolved_function_signatures_by_path: FxHashMap<PathId, ResolvedFunctionSignature>,
+    // Preparation and preparing sidecars retain the completed environment's immutable lookup
+    // owners. Their local type IDs remain valid through the inherited type snapshot; published
+    // materialisation reconstructs its own tables in the consumer's identity domain.
+    // Trait identity registration uses copy-on-write while building the preparation; subsequent
+    // sidecars only read that shared table. Request-local evidence stays independently owned.
+    pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<PathId, Vec<Declaration>>>,
+    pub(crate) resolved_function_signatures_by_path:
+        Rc<FxHashMap<PathId, ResolvedFunctionSignature>>,
     pub(crate) generic_function_templates_by_path: FxHashMap<PathId, GenericFunctionTemplate>,
     pub(super) generic_template_paths_by_identity: FxHashMap<GeneratedDeclarationIdentity, PathId>,
-    pub(crate) resolved_type_aliases_by_path: FxHashMap<PathId, ResolvedTypeAlias>,
-    pub(crate) choice_variant_shells_by_path: FxHashMap<PathId, Vec<ChoiceVariant>>,
-    pub(crate) declaration_semantics: DeclarationSemanticTable,
-    pub(crate) generic_declarations_by_path: FxHashMap<PathId, GenericDeclarationKind>,
-    pub(crate) nominal_type_ids_by_path: FxHashMap<PathId, TypeId>,
-    pub(super) source_nominal_paths: FxHashSet<PathId>,
+    pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<PathId, ResolvedTypeAlias>>,
+    pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
+    pub(crate) declaration_semantics: Rc<DeclarationSemanticTable>,
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<PathId, GenericDeclarationKind>>,
+    pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
+    pub(super) source_nominal_paths: Rc<FxHashSet<PathId>>,
     pub(super) public_trait_paths: Vec<PathId>,
     pub(super) nominal_blueprints:
         FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
-    pub(crate) receiver_methods: ReceiverMethodCatalog,
-    pub(crate) trait_environment: TraitEnvironment,
+    pub(crate) receiver_methods: Rc<ReceiverMethodCatalog>,
+    pub(crate) trait_environment: Rc<TraitEnvironment>,
     pub(crate) trait_evidence_environment: TraitEvidenceEnvironment,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
@@ -1303,7 +1309,7 @@ impl ModuleMaterialisationPreparation {
                 .canonical_identity_for_id(trait_id)
                 .is_none()
             {
-                self.trait_environment.register_canonical_identity(
+                Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
                     CanonicalTraitIdentity::Source(OriginTraitId::new(
                         module_origin.clone(),
                         defining_name,
@@ -1334,7 +1340,7 @@ impl ModuleMaterialisationPreparation {
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
         for (trait_id, defining_path) in private_traits {
-            self.trait_environment.register_canonical_identity(
+            Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
                 CanonicalTraitIdentity::ModulePrivate(ModulePrivateTraitIdentity::new(
                     module_origin.clone(),
                     defining_path,
@@ -1428,24 +1434,27 @@ impl ModuleMaterialisationPreparation {
             const_values: const_values.clone(),
             default_const_templates_by_path,
             builtin_struct_ast_nodes: lookups.builtin_struct_ast_nodes.clone(),
-            resolved_struct_fields_by_path: (*lookups.resolved_struct_fields_by_path).clone(),
-            resolved_function_signatures_by_path: (*lookups.resolved_function_signatures_by_path)
-                .clone(),
+            // Completed immutable tables keep the environment's existing `Rc` owner.
+            resolved_struct_fields_by_path: Rc::clone(&lookups.resolved_struct_fields_by_path),
+            resolved_function_signatures_by_path: Rc::clone(
+                &lookups.resolved_function_signatures_by_path,
+            ),
             generic_function_templates_by_path: lookups.generic_function_templates_by_path.clone(),
             generic_template_paths_by_identity: FxHashMap::default(),
-            resolved_type_aliases_by_path: (*lookups.resolved_type_aliases_by_path).clone(),
-            choice_variant_shells_by_path: (*lookups.choice_variant_shells_by_path).clone(),
-            declaration_semantics: (*lookups.declaration_semantics).clone(),
-            generic_declarations_by_path: (*lookups.generic_declarations_by_path).clone(),
-            nominal_type_ids_by_path: (*lookups.nominal_type_ids_by_path).clone(),
-            source_nominal_paths: (*lookups.source_nominal_paths).clone(),
+            resolved_type_aliases_by_path: Rc::clone(&lookups.resolved_type_aliases_by_path),
+            choice_variant_shells_by_path: Rc::clone(&lookups.choice_variant_shells_by_path),
+            declaration_semantics: Rc::clone(&lookups.declaration_semantics),
+            generic_declarations_by_path: Rc::clone(&lookups.generic_declarations_by_path),
+            nominal_type_ids_by_path: Rc::clone(&lookups.nominal_type_ids_by_path),
+            source_nominal_paths: Rc::clone(&lookups.source_nominal_paths),
             public_trait_paths: public_trait_roots
                 .iter()
                 .map(|root| root.canonical_path)
                 .collect(),
             nominal_blueprints: FxHashMap::default(),
-            receiver_methods: (*lookups.receiver_methods).clone(),
-            trait_environment: (*lookups.trait_environment).clone(),
+            receiver_methods: Rc::clone(&lookups.receiver_methods),
+            // Trait identities may fork this owner during preparation; evidence mutates per request.
+            trait_environment: Rc::clone(&lookups.trait_environment),
             trait_evidence_environment: (*lookups.trait_evidence_environment).clone(),
             external_package_registry: Arc::clone(&lookups.external_package_registry),
             style_directives: lookups.style_directives.clone(),

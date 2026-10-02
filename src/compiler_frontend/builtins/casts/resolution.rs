@@ -9,7 +9,7 @@
 
 use super::evidence::{BuiltinCastEvidenceRow, lookup_builtin_evidence};
 use super::targets::{BuiltinCastFallibility, BuiltinCastTarget, builtin_cast_target_for_type};
-use super::traits::{BUILTIN_CAST_TRAIT_ROWS, CoreCastTrait, builtin_cast_trait_metadata};
+use super::traits::{builtin_cast_trait_metadata, core_cast_trait_for_target_and_fallibility};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_types::{
@@ -360,16 +360,4 @@ fn builtin_cast_target_and_fallibility_for_trait_id(
         } => Some((target, fallibility)),
         crate::compiler_frontend::traits::environment::CoreTraitKind::Displayable => None,
     }
-}
-
-fn core_cast_trait_for_target_and_fallibility(
-    target: BuiltinCastTarget,
-    fallibility: BuiltinCastFallibility,
-) -> Option<CoreCastTrait> {
-    for metadata in BUILTIN_CAST_TRAIT_ROWS {
-        if metadata.target == target && metadata.fallibility == fallibility {
-            return Some(metadata.kind);
-        }
-    }
-    None
 }

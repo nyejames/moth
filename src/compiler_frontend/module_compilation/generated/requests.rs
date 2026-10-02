@@ -10,8 +10,7 @@
 use crate::compiler_frontend::ast::generic_bounds::BoundEvidenceSelection;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, GenericFunctionTemplate, ModuleMaterialisationPreparation,
-    bootstrap_call_summary_from_signature, concrete_argument_mapping,
-    substitute_function_signature,
+    bootstrap_call_summary_from_signature, substitute_function_signature,
 };
 use crate::compiler_frontend::ast::{Ast, AstImportedFunctionContract};
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
@@ -195,16 +194,17 @@ pub(crate) fn install_generated_request_contracts(
             )?,
         );
 
-        let mapping = concrete_argument_mapping(
-            template.generic_parameter_list_id,
-            request.key.type_arguments.as_ref(),
-            &module_ast.type_environment,
-        )
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Deferred generic request does not match its projected parameter list",
+        let mapping = module_ast
+            .type_environment
+            .build_parameter_mapping(
+                template.generic_parameter_list_id,
+                request.key.type_arguments.as_ref(),
             )
-        })?;
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Deferred generic request does not match its projected parameter list",
+                )
+            })?;
         let signature = substitute_function_signature(
             &template.signature,
             &mapping,

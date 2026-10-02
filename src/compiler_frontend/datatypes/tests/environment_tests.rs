@@ -1464,21 +1464,60 @@ fn intern_generic_instance_reuses_ids() {
 
     let mut path_builder = PathInternerBuilder::new();
     let box_path = test_path(&mut path_builder, &mut table, "Box");
-    let (box_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
+    let box_parameter_name = table.intern("T");
+    let box_parameter_ids = single_generic_parameter_list(box_parameter_name);
+    let box_registered_parameters =
+        env.register_generic_parameter_list(box_parameter_ids.into_iter(), &Default::default());
+    let box_parameter_list = box_registered_parameters.list_id;
+    let box_parameter_id = box_registered_parameters.canonical_by_local[&TypeParameterId(0)];
+    let box_parameter_type_id = env
+        .type_id_for_generic_parameter(box_parameter_id)
+        .expect("registered generic parameter should have a TypeId");
+
+    let (box_nominal, box_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: box_path,
         fields: Box::new([]),
-        generic_parameters: None,
+        generic_parameters: Some(box_parameter_list),
         const_record: false,
     });
+    env.update_struct_fields(
+        box_type_id,
+        vec![FieldDefinition {
+            name: test_path(&mut path_builder, &mut table, "value"),
+            type_id: box_parameter_type_id,
+            span: None,
+        }]
+        .into_boxed_slice(),
+    );
 
     let int = env.builtins().int;
     let instance_a = env.intern_generic_instance(box_nominal, Box::new([int]));
+    let count_after_first_intern = env.type_count();
     let instance_b = env.intern_generic_instance(box_nominal, Box::new([int]));
 
     assert_eq!(
         instance_a, instance_b,
         "same generic instance key should reuse TypeId"
+    );
+    assert_eq!(
+        env.type_count(),
+        count_after_first_intern,
+        "re-interning a known key should not add another definition"
+    );
+    assert!(matches!(
+        env.get(instance_b),
+        Some(TypeDefinition::GenericInstance(def))
+            if def.base == box_nominal && def.arguments == Box::new([int])
+    ));
+
+    let fields = env
+        .fields_for(instance_b)
+        .expect("generic struct instance should expose substituted fields");
+    assert_eq!(fields.len(), 1);
+    assert_eq!(
+        fields[0].type_id, int,
+        "the substituted field should resolve the parameter to the concrete argument"
     );
 }
 
@@ -1488,22 +1527,223 @@ fn intern_generic_instance_distinguishes_different_arguments() {
     let mut table = StringTable::new();
 
     let mut path_builder = PathInternerBuilder::new();
-    let box_path = test_path(&mut path_builder, &mut table, "Box");
-    let (box_nominal, _) = env.register_nominal_struct(StructTypeDefinition {
+    let pair_path = test_path(&mut path_builder, &mut table, "Pair");
+    let pair_parameter_ids = [
+        (TypeParameterId(0), table.intern("First")),
+        (TypeParameterId(1), table.intern("Second")),
+    ];
+    let pair_registered_parameters =
+        env.register_generic_parameter_list(pair_parameter_ids.into_iter(), &Default::default());
+    let pair_parameter_list = pair_registered_parameters.list_id;
+    let first_parameter_type_id = env
+        .type_id_for_generic_parameter(
+            pair_registered_parameters.canonical_by_local[&TypeParameterId(0)],
+        )
+        .expect("registered generic parameter should have a TypeId");
+    let second_parameter_type_id = env
+        .type_id_for_generic_parameter(
+            pair_registered_parameters.canonical_by_local[&TypeParameterId(1)],
+        )
+        .expect("registered generic parameter should have a TypeId");
+
+    let (pair_nominal, pair_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
-        path: box_path,
+        path: pair_path,
         fields: Box::new([]),
-        generic_parameters: None,
+        generic_parameters: Some(pair_parameter_list),
         const_record: false,
     });
+    env.update_struct_fields(
+        pair_type_id,
+        vec![
+            FieldDefinition {
+                name: test_path(&mut path_builder, &mut table, "first"),
+                type_id: first_parameter_type_id,
+                span: None,
+            },
+            FieldDefinition {
+                name: test_path(&mut path_builder, &mut table, "second"),
+                type_id: second_parameter_type_id,
+                span: None,
+            },
+        ]
+        .into_boxed_slice(),
+    );
 
     let int = env.builtins().int;
     let string = env.builtins().string;
 
-    let box_of_int = env.intern_generic_instance(box_nominal, Box::new([int]));
-    let box_of_string = env.intern_generic_instance(box_nominal, Box::new([string]));
+    let pair_of_int_string = env.intern_generic_instance(pair_nominal, Box::new([int, string]));
+    let pair_of_string_int = env.intern_generic_instance(pair_nominal, Box::new([string, int]));
 
-    assert_ne!(box_of_int, box_of_string);
+    assert_ne!(
+        pair_of_int_string, pair_of_string_int,
+        "argument order is part of the generic instance identity"
+    );
+
+    let fields = env
+        .fields_for(pair_of_int_string)
+        .expect("generic struct instance should expose substituted fields");
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].type_id, int);
+    assert_eq!(fields[1].type_id, string);
+
+    let swapped_fields = env
+        .fields_for(pair_of_string_int)
+        .expect("generic struct instance should expose substituted fields");
+    assert_eq!(swapped_fields[0].type_id, string);
+    assert_eq!(swapped_fields[1].type_id, int);
+}
+
+#[test]
+fn intern_generic_instance_distinguishes_identically_shaped_bases() {
+    let mut env = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+
+    let mut register_generic_box = |spelling: &str| -> NominalTypeId {
+        let path = test_path(&mut path_builder, &mut table, spelling);
+        let parameter_ids = single_generic_parameter_list(table.intern("T"));
+        let registered_parameters =
+            env.register_generic_parameter_list(parameter_ids.into_iter(), &Default::default());
+        let parameter_type_id = env
+            .type_id_for_generic_parameter(
+                registered_parameters.canonical_by_local[&TypeParameterId(0)],
+            )
+            .expect("registered generic parameter should have a TypeId");
+
+        let (nominal_id, struct_type_id) = env.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path,
+            fields: Box::new([]),
+            generic_parameters: Some(registered_parameters.list_id),
+            const_record: false,
+        });
+        env.update_struct_fields(
+            struct_type_id,
+            vec![FieldDefinition {
+                name: test_path(&mut path_builder, &mut table, "value"),
+                type_id: parameter_type_id,
+                span: None,
+            }]
+            .into_boxed_slice(),
+        );
+        nominal_id
+    };
+
+    let box_a_nominal = register_generic_box("BoxA");
+    let box_b_nominal = register_generic_box("BoxB");
+
+    let int = env.builtins().int;
+    let box_a_of_int = env.intern_generic_instance(box_a_nominal, Box::new([int]));
+    let box_b_of_int = env.intern_generic_instance(box_b_nominal, Box::new([int]));
+
+    assert_ne!(
+        box_a_of_int, box_b_of_int,
+        "instances of different nominal bases must not share a TypeId, even with identical field shapes and arguments"
+    );
+
+    let box_a_fields = env
+        .fields_for(box_a_of_int)
+        .expect("generic struct instance should expose substituted fields");
+    let box_b_fields = env
+        .fields_for(box_b_of_int)
+        .expect("generic struct instance should expose substituted fields");
+    assert_eq!(box_a_fields[0].type_id, int);
+    assert_eq!(box_b_fields[0].type_id, int);
+
+    assert_eq!(
+        env.intern_generic_instance(box_a_nominal, Box::new([int])),
+        box_a_of_int
+    );
+    assert_eq!(
+        env.intern_generic_instance(box_b_nominal, Box::new([int])),
+        box_b_of_int
+    );
+}
+
+#[test]
+fn recursive_generic_instance_members_resolve_to_the_same_instance_id() {
+    let mut env = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+    let list_path = test_path(&mut path_builder, &mut table, "List");
+    let parameter_name = table.intern("T");
+
+    let parameter_ids = single_generic_parameter_list(parameter_name);
+    let registered_parameters =
+        env.register_generic_parameter_list(parameter_ids.into_iter(), &Default::default());
+    let parameter_list = registered_parameters.list_id;
+    let parameter_type_id = env
+        .type_id_for_generic_parameter(
+            registered_parameters.canonical_by_local[&TypeParameterId(0)],
+        )
+        .expect("registered generic parameter should have a TypeId");
+
+    let (list_nominal, list_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
+        id: NominalTypeId(0),
+        path: list_path,
+        variants: Box::new([]),
+        generic_parameters: Some(parameter_list),
+    });
+
+    // The canonical member shell refers back to `List of T` itself.
+    let list_of_parameter =
+        env.intern_generic_instance(list_nominal, Box::new([parameter_type_id]));
+    env.update_choice_variants(
+        list_type_id,
+        vec![ChoiceVariantDefinition {
+            name: table.intern("Cons"),
+            tag: 0,
+            payload: ChoiceVariantPayloadDefinition::Record {
+                fields: vec![
+                    FieldDefinition {
+                        name: test_path(&mut path_builder, &mut table, "head"),
+                        type_id: parameter_type_id,
+                        span: None,
+                    },
+                    FieldDefinition {
+                        name: test_path(&mut path_builder, &mut table, "tail"),
+                        type_id: list_of_parameter,
+                        span: None,
+                    },
+                ]
+                .into_boxed_slice(),
+            },
+            span: None,
+        }]
+        .into_boxed_slice(),
+    );
+
+    // Substituting the recursive tail member re-enters `intern_generic_instance`
+    // with the key of the instance currently being populated. This only
+    // terminates because the key is registered before substitution runs.
+    let int = env.builtins().int;
+    let list_of_int = env.intern_generic_instance(list_nominal, Box::new([int]));
+
+    let variants = env
+        .variants_for(list_of_int)
+        .expect("generic choice instance should expose substituted variants");
+    assert_eq!(variants.len(), 1);
+    let ChoiceVariantPayloadDefinition::Record { fields } = &variants[0].payload else {
+        panic!("Cons variant should keep its payload fields");
+    };
+    assert_eq!(fields[0].type_id, int);
+    assert_eq!(
+        fields[1].type_id, list_of_int,
+        "the recursive member must resolve to the instance being populated"
+    );
+
+    let parameter_variants = env
+        .variants_for(list_of_parameter)
+        .expect("generic choice instance should expose substituted variants");
+    let ChoiceVariantPayloadDefinition::Record { fields } = &parameter_variants[0].payload else {
+        panic!("Cons variant should keep its payload fields");
+    };
+    assert_eq!(
+        fields[1].type_id, list_of_parameter,
+        "the parameter instance's own recursive member resolves to itself"
+    );
 }
 
 #[test]
@@ -1786,6 +2026,110 @@ fn generated_forks_share_inherited_types_and_keep_local_interning_independent() 
         second.option_inner_type(second_local),
         Some(second.builtins().string)
     );
+}
+
+#[test]
+fn generated_forks_reuse_inherited_generic_instances_and_keep_local_misses_independent() {
+    let mut requester = TypeEnvironment::new();
+    let mut table = StringTable::new();
+    let mut path_builder = PathInternerBuilder::new();
+    let box_path = test_path(&mut path_builder, &mut table, "Box");
+    let box_parameter_ids = single_generic_parameter_list(table.intern("T"));
+    let box_registered_parameters = requester
+        .register_generic_parameter_list(box_parameter_ids.into_iter(), &Default::default());
+    let box_parameter_type_id = requester
+        .type_id_for_generic_parameter(
+            box_registered_parameters.canonical_by_local[&TypeParameterId(0)],
+        )
+        .expect("registered generic parameter should have a TypeId");
+
+    let (box_nominal, box_type_id) = requester.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: box_path,
+        fields: Box::new([]),
+        generic_parameters: Some(box_registered_parameters.list_id),
+        const_record: false,
+    });
+    requester.update_struct_fields(
+        box_type_id,
+        vec![FieldDefinition {
+            name: test_path(&mut path_builder, &mut table, "value"),
+            type_id: box_parameter_type_id,
+            span: None,
+        }]
+        .into_boxed_slice(),
+    );
+
+    let int = requester.builtins().int;
+    let string = requester.builtins().string;
+    let bool = requester.builtins().bool;
+    let inherited_instance = requester.intern_generic_instance(box_nominal, Box::new([int]));
+    let requester_count = requester.type_count();
+
+    let preparation = requester.fork_for_generated();
+    let mut first = preparation.clone();
+    let mut second = preparation;
+
+    // Inherited hit: the requester's instance resolves through the snapshot and
+    // creates no local duplicate.
+    assert_eq!(
+        first.intern_generic_instance(box_nominal, Box::new([int])),
+        inherited_instance
+    );
+    assert_eq!(
+        second.intern_generic_instance(box_nominal, Box::new([int])),
+        inherited_instance
+    );
+    assert_eq!(
+        first.type_count(),
+        requester_count,
+        "an inherited hit must not duplicate the definition in the fork"
+    );
+    let inherited_fields = first
+        .fields_for(inherited_instance)
+        .expect("generated fork should resolve inherited generic instance fields");
+    assert_eq!(inherited_fields[0].type_id, int);
+
+    // A miss interns one local definition; neither the base nor the sibling fork
+    // inherits it.
+    let first_local = first.intern_generic_instance(box_nominal, Box::new([string]));
+    assert_ne!(first_local, inherited_instance);
+    assert_eq!(
+        first.type_count(),
+        requester_count + 1,
+        "a local miss adds exactly one definition to the fork"
+    );
+    assert_eq!(
+        requester.type_count(),
+        requester_count,
+        "fork-local interning must not grow the base environment"
+    );
+    assert!(
+        requester.get(first_local).is_none(),
+        "the base environment must not contain the fork's local instance"
+    );
+    let first_local_fields = first
+        .fields_for(first_local)
+        .expect("fork should substitute fields for its own local instance");
+    assert_eq!(first_local_fields[0].type_id, string);
+
+    // Sibling forks share id arithmetic but not identity: the same local slot
+    // holds each fork's own instance.
+    let second_local = second.intern_generic_instance(box_nominal, Box::new([bool]));
+    assert_eq!(
+        second_local, first_local,
+        "sibling forks allocate the same local slot for their first miss"
+    );
+    assert!(matches!(
+        first.get(first_local),
+        Some(TypeDefinition::GenericInstance(def))
+            if def.base == box_nominal && def.arguments == Box::new([string])
+    ));
+    assert!(matches!(
+        second.get(second_local),
+        Some(TypeDefinition::GenericInstance(def))
+            if def.base == box_nominal && def.arguments == Box::new([bool])
+    ));
 }
 
 #[test]

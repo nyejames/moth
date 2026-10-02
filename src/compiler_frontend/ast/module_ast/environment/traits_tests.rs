@@ -8,15 +8,25 @@
 //!      in one pass and must register builtin evidence rows that
 //!      `builtin_for` can find. Tests here pin that contract without
 //!      touching the full builder pipeline.
+use std::collections::BTreeSet;
+
 use super::{signature_with_trait_this_as_parameter, trait_this_parameter_list};
 use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
+use crate::compiler_frontend::builtins::casts::evidence::{
+    lookup_builtin_evidence, type_id_for_builtin_target,
+};
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
+use crate::compiler_frontend::builtins::casts::traits::BUILTIN_CAST_TRAIT_ROWS;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTraitConformanceReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use crate::compiler_frontend::datatypes::numeric_profile::{
+    FloatPrecision, IntWidth, NumericProfile,
+};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -34,6 +44,247 @@ use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+
+#[test]
+fn register_builtin_cast_evidence_matches_lookup_policy_across_profiles() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
+
+    let mut trait_environment = TraitEnvironment::new();
+    trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
+    AstModuleEnvironmentBuilder::register_core_cast_traits(
+        &mut trait_environment,
+        &mut type_environment,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("core cast traits should register");
+
+    // This is the bounded source domain, independent of the registration iterator. Dec stays
+    // excluded because its scale-specific evidence is resolved on demand.
+    let source_targets = [
+        BuiltinCastTarget::Bool,
+        BuiltinCastTarget::Int,
+        BuiltinCastTarget::Float,
+        BuiltinCastTarget::String,
+        BuiltinCastTarget::Char,
+        BuiltinCastTarget::Error,
+    ]
+    .into_iter()
+    .chain(FixedScalar::ALL.into_iter().map(BuiltinCastTarget::Fixed))
+    .collect::<Vec<_>>();
+    let source_type_ids = source_targets
+        .iter()
+        .copied()
+        .map(|source| {
+            let source_type_id = type_id_for_builtin_target(
+                source,
+                &type_environment,
+                &mut string_table,
+                &mut path_fork,
+            )
+            .unwrap_or_else(|| panic!("source builtin type {source:?} must resolve"));
+            (source, source_type_id)
+        })
+        .collect::<Vec<_>>();
+    let trait_ids = BUILTIN_CAST_TRAIT_ROWS
+        .iter()
+        .map(|metadata| {
+            let trait_id = trait_environment
+                .core_trait_id_for_name(string_table.intern(metadata.trait_name), &string_table)
+                .unwrap_or_else(|| panic!("core cast trait {} must register", metadata.trait_name));
+            (metadata.trait_name, trait_id)
+        })
+        .collect::<Vec<_>>();
+    let profiles = [
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits64,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits32,
+        },
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        },
+    ];
+
+    for profile in profiles {
+        let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
+        AstModuleEnvironmentBuilder::register_builtin_cast_evidence(
+            &trait_environment,
+            &mut trait_evidence_environment,
+            &type_environment,
+            &mut string_table,
+            &mut path_fork,
+            profile,
+        )
+        .expect("builtin evidence registration should succeed");
+
+        // A (source, trait) fact is expected exactly when the unchanged lookup policy proves
+        // the trait's target with the trait's fallibility. Identity pairs have no lookup row.
+        let mut expected_facts = BTreeSet::new();
+        for source in source_targets.iter().copied() {
+            for metadata in BUILTIN_CAST_TRAIT_ROWS {
+                if lookup_builtin_evidence(source, metadata.target, profile)
+                    .is_some_and(|row| row.fallibility == metadata.fallibility)
+                {
+                    expected_facts.insert(format!("{source:?} -> {}", metadata.trait_name));
+                }
+            }
+        }
+
+        let mut registered_facts = BTreeSet::new();
+        let mut duplicate_or_unknown_rows = Vec::new();
+        for evidence in trait_evidence_environment.builtins() {
+            let source = source_type_ids
+                .iter()
+                .find(|(_, type_id)| *type_id == evidence.target_type_id)
+                .map(|(source, _)| *source);
+            let trait_name = trait_ids
+                .iter()
+                .find(|(_, trait_id)| *trait_id == evidence.trait_id)
+                .map(|(trait_name, _)| *trait_name);
+            let (Some(source), Some(trait_name)) = (source, trait_name) else {
+                duplicate_or_unknown_rows.push(format!(
+                    "unknown {:?} -> {:?}",
+                    evidence.target_type_id, evidence.trait_id
+                ));
+                continue;
+            };
+            let fact = format!("{source:?} -> {trait_name}");
+            if !registered_facts.insert(fact.clone()) {
+                duplicate_or_unknown_rows.push(format!("duplicate {fact}"));
+            }
+        }
+
+        let missing_rows: Vec<_> = expected_facts.difference(&registered_facts).collect();
+        let unexpected_rows: Vec<_> = registered_facts.difference(&expected_facts).collect();
+        assert!(
+            missing_rows.is_empty()
+                && unexpected_rows.is_empty()
+                && duplicate_or_unknown_rows.is_empty(),
+            "builtin cast evidence mismatch for {profile}: missing {missing_rows:?}; \
+             unexpected {unexpected_rows:?}; duplicate/unknown {duplicate_or_unknown_rows:?}"
+        );
+
+        // Hard-coded anchors pin the profile-sensitive fallibility boundary independently of
+        // the generated expected set.
+        let is_builtin_trait_registered = |source, trait_name: &str| {
+            let source_type_id = source_type_ids
+                .iter()
+                .find(|(candidate, _)| *candidate == source)
+                .map(|(_, type_id)| *type_id)
+                .unwrap_or_else(|| panic!("anchor source {source:?} must be in the test domain"));
+            let trait_id = trait_ids
+                .iter()
+                .find(|(candidate, _)| *candidate == trait_name)
+                .map(|(_, trait_id)| *trait_id)
+                .unwrap_or_else(|| panic!("anchor trait {trait_name} must be registered"));
+            trait_evidence_environment
+                .builtin_for(source_type_id, trait_id)
+                .is_some()
+        };
+
+        let (int_present, int_absent) = match profile.int_width {
+            IntWidth::Bits32 => ("TRY_CASTABLE_TO_INT", "CASTABLE_TO_INT"),
+            IntWidth::Bits64 => ("CASTABLE_TO_INT", "TRY_CASTABLE_TO_INT"),
+        };
+        assert!(
+            is_builtin_trait_registered(BuiltinCastTarget::Fixed(FixedScalar::I64), int_present),
+            "{profile}: I64 -> Int must register {int_present}"
+        );
+        assert!(
+            !is_builtin_trait_registered(BuiltinCastTarget::Fixed(FixedScalar::I64), int_absent),
+            "{profile}: I64 -> Int must not register {int_absent}"
+        );
+
+        let (float_present, float_absent) = match profile.float_precision {
+            FloatPrecision::Bits32 => ("TRY_CASTABLE_TO_FLOAT", "CASTABLE_TO_FLOAT"),
+            FloatPrecision::Bits64 => ("CASTABLE_TO_FLOAT", "TRY_CASTABLE_TO_FLOAT"),
+        };
+        assert!(
+            is_builtin_trait_registered(BuiltinCastTarget::Fixed(FixedScalar::F64), float_present),
+            "{profile}: F64 -> Float must register {float_present}"
+        );
+        assert!(
+            !is_builtin_trait_registered(BuiltinCastTarget::Fixed(FixedScalar::F64), float_absent),
+            "{profile}: F64 -> Float must not register {float_absent}"
+        );
+    }
+}
+
+#[test]
+fn register_builtin_cast_evidence_fails_when_core_cast_traits_are_missing() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
+    let mut trait_environment = TraitEnvironment::new();
+    trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
+
+    let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
+    let result = AstModuleEnvironmentBuilder::register_builtin_cast_evidence(
+        &trait_environment,
+        &mut trait_evidence_environment,
+        &type_environment,
+        &mut string_table,
+        &mut path_fork,
+        NumericProfile::STANDARD,
+    );
+
+    assert!(
+        result.is_err(),
+        "registration must fail instead of skipping rows whose core cast trait is missing"
+    );
+}
+
+#[test]
+fn register_builtin_cast_evidence_fails_when_error_source_type_is_missing() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut trait_type_environment = TypeEnvironment::new();
+    register_error_nominal_type(
+        &mut trait_type_environment,
+        &mut path_fork,
+        &mut string_table,
+    );
+    let mut trait_environment = TraitEnvironment::new();
+    trait_environment.register_core_displayable(&mut trait_type_environment, &mut string_table);
+    AstModuleEnvironmentBuilder::register_core_cast_traits(
+        &mut trait_environment,
+        &mut trait_type_environment,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("core cast traits should register");
+
+    // The evidence environment lacks the builtin Error nominal, so the `Error -> String`
+    // row's source type cannot resolve.
+    let type_environment_without_error = TypeEnvironment::new();
+    let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
+    let result = AstModuleEnvironmentBuilder::register_builtin_cast_evidence(
+        &trait_environment,
+        &mut trait_evidence_environment,
+        &type_environment_without_error,
+        &mut string_table,
+        &mut path_fork,
+        NumericProfile::STANDARD,
+    );
+
+    assert!(
+        result.is_err(),
+        "registration must fail instead of skipping rows whose source type is missing"
+    );
+}
 
 #[test]
 fn displayable_registers_through_unified_core_path() {
@@ -187,75 +438,6 @@ fn register_core_cast_traits_populates_every_canonical_name() {
             resolved.is_some(),
             "{name} must resolve through core_trait_id_for_name"
         );
-    }
-}
-
-#[test]
-fn register_builtin_cast_evidence_registers_trait_family_rows() {
-    use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut type_environment = TypeEnvironment::new();
-    register_error_nominal_type(&mut type_environment, &mut path_fork, &mut string_table);
-
-    let mut trait_environment = TraitEnvironment::new();
-    trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
-    AstModuleEnvironmentBuilder::register_core_cast_traits(
-        &mut trait_environment,
-        &mut type_environment,
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("core cast traits should register");
-
-    let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
-    AstModuleEnvironmentBuilder::register_builtin_cast_evidence(
-        &trait_environment,
-        &mut trait_evidence_environment,
-        &type_environment,
-        &mut string_table,
-        &mut path_fork,
-        NumericProfile::STANDARD,
-    )
-    .expect("builtin evidence registration should succeed");
-
-    // Every profile-complete row whose target carries a core cast trait family
-    // must have registered builtin evidence; fixed targets are skipped.
-    let rows =
-        crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_rows_for_profile(
-            NumericProfile::STANDARD,
-        );
-    for row in rows {
-        let Ok(trait_kind) =
-            crate::compiler_frontend::builtins::casts::evidence::builtin_evidence_trait_kind_for_row(row)
-                .ok_or(())
-        else {
-            continue;
-        };
-        let source_type_id =
-            crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target(
-                row.source,
-                &type_environment,
-                &mut string_table,
-                &mut path_fork,
-            )
-            .expect("source builtin type must resolve to a TypeId");
-        let trait_name =
-            crate::compiler_frontend::builtins::casts::traits::builtin_cast_trait_name(trait_kind);
-        let trait_id = trait_environment
-            .core_trait_id_for_name(string_table.intern(trait_name), &string_table)
-            .expect("core cast trait id must be registered");
-
-        let evidence_id = trait_evidence_environment
-            .builtin_for(source_type_id, trait_id)
-            .unwrap_or_else(|| panic!("builtin evidence must exist for source {source_type_id:?} and trait {trait_name}"));
-
-        let evidence = trait_evidence_environment
-            .get(evidence_id)
-            .expect("builtin evidence id must resolve");
-        assert_eq!(evidence.trait_id, trait_id);
-        assert_eq!(evidence.target_type_id, source_type_id);
     }
 }
 

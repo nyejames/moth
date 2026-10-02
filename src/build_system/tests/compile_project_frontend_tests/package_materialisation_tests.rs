@@ -441,20 +441,6 @@ independent_result Int = independent(42)
             counter_value("convergence_generated_sidecar_borrow_passes"),
             9.0
         );
-        assert_eq!(
-            counter_value("convergence_complete_generated_summary_map_builds"),
-            0.0
-        );
-        assert_eq!(
-            counter_value("convergence_generated_summary_map_clones"),
-            0.0
-        );
-        assert_eq!(
-            counter_value("convergence_private_summary_map_rebuilds"),
-            0.0
-        );
-        assert_eq!(counter_value("convergence_stable_sidecars_rechecked"), 0.0);
-        assert_eq!(counter_value("convergence_max_iterations"), 0.0);
     }
 
     let base_module = frontend

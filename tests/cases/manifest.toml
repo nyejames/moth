@@ -14005,3 +14005,10 @@ path = "numeric_bounded_proofs_error_recovery_runtime"
 tags = ["integration", "numeric", "runtime", "errors", "casts", "html-wasm"]
 contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "boundary"
+
+[[case]]
+id = "generic_receiver_private_helper_default_rejected"
+path = "generic_receiver_private_helper_default_rejected"
+tags = ["integration", "generics", "templates", "diagnostics"]
+contract = "language.templates.private_generic_receiver_default_helper_escape"
+role = "primary"

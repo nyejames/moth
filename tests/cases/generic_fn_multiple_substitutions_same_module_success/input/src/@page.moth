@@ -1,7 +1,11 @@
-@helpers identity
+@helpers Box, identity, unbox
 
-int_value = identity(42)
-string_value = identity("hello")
-float_value = identity(3.14)
+int_box = Box(identity(42))
+string_box = Box(identity("hello"))
+float_box = Box(identity(3.14))
 
-io.line([: [int_value] [string_value] [float_value]])
+int_value = unbox(int_box)
+string_value = unbox(string_box)
+float_value = unbox(float_box)
+
+[: [int_value] [string_value] [float_value]]

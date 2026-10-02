@@ -42,9 +42,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
-use crate::compiler_frontend::datatypes::ids::{
-    GenericParameterId, GenericParameterListId, TypeId,
-};
+use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -484,18 +482,15 @@ pub(crate) fn infer_generic_function_call(
         .into());
     };
 
-    let mapping = concrete_argument_mapping(
-        template.generic_parameter_list_id,
-        &type_arguments,
-        type_environment,
-    )
-    .ok_or_else(|| {
-        cannot_infer_generic_function_arguments(
-            path_fork.component(template.function_path),
-            missing_generic_parameter_names(template, &bindings, type_environment),
-            call_span,
-        )
-    })?;
+    let mapping = type_environment
+        .build_parameter_mapping(template.generic_parameter_list_id, &type_arguments)
+        .ok_or_else(|| {
+            cannot_infer_generic_function_arguments(
+                path_fork.component(template.function_path),
+                missing_generic_parameter_names(template, &bindings, type_environment),
+                call_span,
+            )
+        })?;
     let signature = substitute_function_signature(&template.signature, &mapping, type_environment);
     let instance_path = generic_function_instance_path(
         template.function_path,
@@ -831,24 +826,6 @@ fn substitute_return_slot(
         reactive_template: slot.reactive_template.clone(),
         channel: slot.channel,
     }
-}
-
-pub(crate) fn concrete_argument_mapping(
-    parameter_list_id: GenericParameterListId,
-    arguments: &[TypeId],
-    type_environment: &TypeEnvironment,
-) -> Option<FxHashMap<GenericParameterId, TypeId>> {
-    let parameters = type_environment.generic_parameters(parameter_list_id)?;
-    if parameters.parameters.len() != arguments.len() {
-        return None;
-    }
-
-    let mut mapping = FxHashMap::default();
-    for (parameter, argument) in parameters.parameters.iter().zip(arguments.iter()) {
-        mapping.insert(parameter.id, *argument);
-    }
-
-    Some(mapping)
 }
 
 fn missing_generic_parameter_names(

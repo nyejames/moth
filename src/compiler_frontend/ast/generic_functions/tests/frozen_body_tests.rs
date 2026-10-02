@@ -15,12 +15,17 @@ use super::frozen_file_references::StableResolvedFileReferenceOutcome;
 use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
 use super::preparation_freeze::ModuleMaterialisationPreparation;
 use super::stable_types::GeneratedFoldedValueMaterialiser;
+use crate::compiler_frontend::ast::AstBuildContext;
 use crate::compiler_frontend::ast::Stage0ResolutionFacts;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::generic_bounds::generated_evidence_pair_is_selected;
+use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
+#[cfg(feature = "timers")]
+use crate::compiler_frontend::ast::module_ast::build_context::AstTimingMetricFamily;
+use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_owned_folded_string;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
@@ -37,6 +42,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, render_payload,
 };
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
@@ -1545,18 +1551,345 @@ fn generated_materialisation_requires_live_table_to_extend_requester_prefix() {
 #[test]
 fn generated_materialisation_rejects_an_incompatible_string_prefix() {
     let fixture = resource_body_materialisation_fixture();
-    let incompatible_strings = StringTable::new();
-    let error = fixture
+    let rows = fixture
         .preparation
-        .validate_requester_string_prefix(&incompatible_strings)
-        .expect_err("an incompatible requester prefix must be rejected");
+        .string_table
+        .iter()
+        .map(|(_, string)| string.to_owned())
+        .collect::<Vec<_>>();
+
+    // Every rejected table must fail with the prefix invariant, not an unrelated error.
+    let assert_prefix_rejected = |live_strings: &StringTable, case: &str| {
+        let error = fixture
+            .preparation
+            .validate_requester_string_prefix(live_strings)
+            .expect_err(case);
+        assert!(
+            error
+                .msg
+                .contains("not an exact prefix of the live boundary string table"),
+            "{case}: the failure should identify the incompatible string domain: {}",
+            error.msg
+        );
+    };
+
+    // Empty live table: no requester row survives.
+    assert_prefix_rejected(
+        &StringTable::new(),
+        "a live table without the requester rows must be rejected",
+    );
+
+    // Strict truncation: one requester row is missing while the rest still match.
+    let mut truncated = StringTable::new();
+    for string in &rows[..rows.len() - 1] {
+        truncated.intern(string);
+    }
+    assert_eq!(
+        truncated.len(),
+        rows.len() - 1,
+        "the fixture must build a shortened live table"
+    );
+    assert_prefix_rejected(&truncated, "a shortened live table must be rejected");
+
+    // Equal length, different spelling: the last live row spells a different string.
+    let mut foreign = StringTable::new();
+    for string in &rows[..rows.len() - 1] {
+        foreign.intern(string);
+    }
+    foreign.intern(&format!("{}?", rows[rows.len() - 1]));
+    assert_eq!(
+        foreign.len(),
+        rows.len(),
+        "the fixture must build an equal-length foreign table"
+    );
+    assert_prefix_rejected(
+        &foreign,
+        "an equal-length live table with a different spelling must be rejected",
+    );
+}
+
+/// Inspect the preparing environment's sharing contract without materialising a full body.
+fn preparing_sidecar_environment(
+    preparation: &ModuleMaterialisationPreparation,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> AstModuleEnvironment {
+    let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
+    let build_context = AstBuildContext {
+        external_package_registry: Arc::clone(&preparation.external_package_registry),
+        style_directives: &preparation.style_directives,
+        string_table,
+        path_fork,
+        entry_dir: preparation.entry_dir,
+        root_role: ModuleRootRole::Support,
+        build_profile: preparation.build_profile,
+        numeric_profile: preparation.numeric_profile,
+        file_value_resolution: None,
+        config_resolution: None,
+        build_config_values: Arc::new(Default::default()),
+        template_const_loop_iteration_limit: preparation.template_const_loop_iteration_limit,
+        capacity_estimate: preparation.capacity_estimate,
+        #[cfg(feature = "timers")]
+        timing_context: None,
+        #[cfg(feature = "timers")]
+        timing_metric_family: AstTimingMetricFamily::Generated,
+    };
+    let (phase_context, string_table_ref, path_fork_ref) =
+        AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
+    preparation
+        .build_environment(
+            &phase_context,
+            Rc::clone(&module_resources),
+            string_table_ref,
+            path_fork_ref,
+        )
+        .expect("the preparing sidecar environment should build")
+}
+
+#[test]
+fn preparing_sidecars_share_completed_tables_and_keep_request_mutations_local() {
+    let fixture = resource_body_materialisation_fixture();
+    let mut strings = fixture
+        .preparation
+        .string_table
+        .clone_preserving_inherited_prefix();
+    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+    let mut first =
+        preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
+    let second = preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
+
+    // Sidecar emission never writes these completed tables, so both sidecars must keep the one
+    // environment-finished owner the preparation retained. A per-sidecar deep copy would mint a
+    // fresh owner and fail this pointer identity.
+    assert!(Rc::ptr_eq(
+        &first.lookups.resolved_struct_fields_by_path,
+        &second.lookups.resolved_struct_fields_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.resolved_function_signatures_by_path,
+        &second.lookups.resolved_function_signatures_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.resolved_type_aliases_by_path,
+        &second.lookups.resolved_type_aliases_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.choice_variant_shells_by_path,
+        &second.lookups.choice_variant_shells_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.declaration_semantics,
+        &second.lookups.declaration_semantics,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.generic_declarations_by_path,
+        &second.lookups.generic_declarations_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.nominal_type_ids_by_path,
+        &second.lookups.nominal_type_ids_by_path,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.source_nominal_paths,
+        &second.lookups.source_nominal_paths,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.receiver_methods,
+        &second.lookups.receiver_methods,
+    ));
+    assert!(Rc::ptr_eq(
+        &first.lookups.trait_environment,
+        &second.lookups.trait_environment,
+    ));
+
+    let function_path = *first
+        .lookups
+        .generic_function_templates_by_path
+        .keys()
+        .next()
+        .expect("the fixture declares draw");
+    let original_evidence = first
+        .lookups
+        .trait_evidence_environment
+        .builtins()
+        .next()
+        .expect("the fixture installs builtin evidence")
+        .clone();
+    let mut local_evidence = original_evidence.clone();
+    local_evidence.source_file = function_path;
+
+    let local_lookups = Rc::make_mut(&mut first.lookups);
+    local_lookups
+        .generic_function_templates_by_path
+        .get_mut(&function_path)
+        .expect("draw is retained")
+        .body_tokens = None;
+    Rc::make_mut(&mut local_lookups.trait_evidence_environment).insert_builtin(local_evidence);
 
     assert!(
-        error
-            .msg
-            .contains("not an exact prefix of the live boundary string table"),
-        "the invariant failure should identify the incompatible string domain: {}",
-        error.msg
+        second.lookups.generic_function_templates_by_path[&function_path]
+            .body_tokens
+            .is_some()
+    );
+    assert!(
+        fixture
+            .preparation
+            .template_for_identity(fixture.identity.declaration())
+            .is_some()
+    );
+    let local_evidence_id = first
+        .lookups
+        .trait_evidence_environment
+        .builtin_for(original_evidence.target_type_id, original_evidence.trait_id)
+        .expect("the local evidence remains selectable");
+    assert_eq!(
+        first
+            .lookups
+            .trait_evidence_environment
+            .get(local_evidence_id)
+            .expect("selected evidence resolves")
+            .source_file,
+        function_path,
+    );
+    for retained in [
+        second.lookups.trait_evidence_environment.as_ref(),
+        &fixture.preparation.trait_evidence_environment,
+    ] {
+        let evidence_id = retained
+            .builtin_for(original_evidence.target_type_id, original_evidence.trait_id)
+            .expect("retained evidence remains selectable");
+        assert_eq!(
+            retained
+                .get(evidence_id)
+                .expect("selected evidence resolves")
+                .source_file,
+            original_evidence.source_file,
+        );
+    }
+}
+
+#[test]
+fn shared_preparing_tables_survive_the_preparation_and_sibling_drop() {
+    let fixture = resource_body_materialisation_fixture();
+    let function_path = fixture
+        .preparation
+        .generic_function_templates_by_path
+        .values()
+        .next()
+        .expect("the fixture declares draw")
+        .function_path;
+    let mut strings = fixture
+        .preparation
+        .string_table
+        .clone_preserving_inherited_prefix();
+    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+    let environment =
+        preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
+    let sibling = preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
+
+    drop(fixture);
+    drop(sibling);
+
+    let signature = &environment.lookups.resolved_function_signatures_by_path[&function_path];
+    let parameter = signature
+        .signature
+        .parameters
+        .first()
+        .expect("draw retains its name parameter");
+    let Some(TypeDefinition::GenericParameter(generic_parameter)) =
+        environment.type_environment.get(parameter.value.type_id)
+    else {
+        panic!("the retained parameter must resolve in the inherited type domain");
+    };
+    assert_eq!(strings.resolve(generic_parameter.name), "T");
+    assert_eq!(
+        signature.signature.returns[0].type_id,
+        Some(builtin_type_ids::STRING),
+    );
+}
+
+#[test]
+fn published_siblings_materialise_independently_and_leave_the_retained_context_frozen() {
+    let fixture = resource_body_materialisation_fixture();
+    let declaration_identity = fixture
+        .context
+        .artefacts
+        .first()
+        .expect("the frozen context should retain one generic artefact")
+        .declaration_identity
+        .clone();
+    let string_identity = GeneratedFunctionIdentity::new(
+        declaration_identity,
+        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)]),
+        Box::new([]),
+    );
+    let materialise = |identity: &GeneratedFunctionIdentity| {
+        let mut live_strings = fixture
+            .preparation
+            .string_table
+            .clone_preserving_inherited_prefix();
+        let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
+        fixture
+            .context
+            .materialise_ast_at(
+                0,
+                ModuleMaterialisationInput {
+                    numeric_profile: NumericProfile::STANDARD,
+                    identity,
+                    requester_context: &fixture.preparation,
+                    requester_call_span: None,
+                    external_package_registry: fixture
+                        .preparation
+                        .external_package_registry
+                        .as_ref(),
+                    string_table: &mut live_strings,
+                    path_fork: &mut path_fork,
+                    style_directives: &fixture.preparation.style_directives,
+                    build_profile: fixture.preparation.build_profile,
+                    template_const_loop_iteration_limit: fixture
+                        .preparation
+                        .template_const_loop_iteration_limit,
+                    #[cfg(feature = "timers")]
+                    timing_context: None,
+                },
+            )
+            .expect("the frozen generic should materialise")
+    };
+
+    let int_sibling = materialise(&fixture.identity);
+    let string_sibling = materialise(&string_identity);
+
+    let parameter_type = |materialised: &super::MaterialisedGenericAst| {
+        materialised
+            .build_result
+            .ast
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                NodeKind::Function(path, signature, _) if path == &materialised.instance_path => {
+                    Some(signature.parameters[0].value.type_id)
+                }
+                _ => None,
+            })
+            .expect("the sidecar emits draw with its concrete parameter")
+    };
+    assert_eq!(parameter_type(&int_sibling), builtin_type_ids::INT);
+    assert_eq!(parameter_type(&string_sibling), builtin_type_ids::STRING);
+
+    // The retained context and the preparation's own templates must stay frozen: sibling
+    // materialisations may never install generated bodies into the declaring owner.
+    assert!(
+        fixture
+            .preparation
+            .generic_function_templates_by_path
+            .values()
+            .all(|template| {
+                !matches!(
+                    template.body_tokens,
+                    Some(GenericFunctionBody::Materialised { .. })
+                )
+            }),
+        "sibling materialisation must leave the declaring preparation's templates frozen"
     );
 }
 

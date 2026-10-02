@@ -1335,3 +1335,341 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
     assert!(message.reactive_template.is_none());
     assert!(message.synthetic_interface_provenance.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+//  Real-finalizer receiver default synchronization
+// ---------------------------------------------------------------------------
+//
+// End-to-end coverage for `synchronize_normalized_public_defaults` through the real
+// single-file frontend pipeline: environment build, emission and finalization all run, so the
+// resolved public root table is the post-finalization table the public-interface draft reads.
+// Root receiver entries carry the emitted normalized signature copy, retained generic defaults
+// normalize in place, private methods join by receiver ownership, and private-receiver methods
+// stay out of the public table while their call sites still fill retained defaults. Defaulted
+// parameters use authored foldable constant template joins so the joined value must read as one
+// folded string. Aligned generic receivers cannot yet author an extra defaulted parameter (the
+// `of` argument list consumes the following comma), so the retained generic default is covered
+// through an exported generic free function sharing `normalize_retained_signature_defaults`.
+
+use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
+
+fn path_display_name(
+    path: PathId,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+) -> Option<String> {
+    path_fork
+        .component(path)
+        .map(|name| string_table.resolve(name).to_owned())
+}
+
+fn emitted_nominal_path(
+    nodes: &[AstNode],
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> Option<PathId> {
+    nodes.iter().find_map(|node| match &node.kind {
+        NodeKind::StructDefinition(path, _)
+            if path_display_name(*path, path_fork, string_table).as_deref() == Some(name) =>
+        {
+            Some(*path)
+        }
+        _ => None,
+    })
+}
+
+fn emitted_function<'a>(
+    nodes: &'a [AstNode],
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> Option<(PathId, &'a FunctionSignature, &'a [AstNode])> {
+    nodes.iter().find_map(|node| match &node.kind {
+        NodeKind::Function(path, signature, body)
+            if path_display_name(*path, path_fork, string_table).as_deref() == Some(name) =>
+        {
+            Some((*path, signature, body.as_slice()))
+        }
+        _ => None,
+    })
+}
+
+fn root_receiver_entry<'a>(
+    entries: &'a [ReceiverMethodEntry],
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> Option<&'a ReceiverMethodEntry> {
+    entries.iter().find(|entry| {
+        path_display_name(entry.function_path, path_fork, string_table).as_deref() == Some(name)
+    })
+}
+
+fn signature_parameter<'a>(
+    signature: &'a FunctionSignature,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> Option<&'a Declaration> {
+    signature.parameters.iter().find(|parameter| {
+        path_display_name(parameter.id, path_fork, string_table).as_deref() == Some(name)
+    })
+}
+
+fn body_method_call_args<'a>(
+    body: &'a [AstNode],
+    method_path: &PathId,
+) -> Option<&'a [CallArgument]> {
+    body.iter().find_map(|node| {
+        let NodeKind::ExpressionStatement(expression) = &node.kind else {
+            return None;
+        };
+        let ExpressionKind::MethodCall {
+            method_path: call_path,
+            args,
+            ..
+        } = &expression.kind
+        else {
+            return None;
+        };
+        (call_path == method_path).then_some(args.as_slice())
+    })
+}
+
+#[test]
+fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature() {
+    // Receiver ownership publishes this private method through Counter's public surface.
+    let source = "export:\n    Counter = | count Int = 0 |\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> Int:\n    return this.count\n;\n";
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+        .expect("an ordinary receiver method with a template default should finalize");
+    let nodes = &build_result.ast.nodes;
+    let receiver_entries = &build_result
+        .public_interface_projection_input
+        .root_table
+        .receiver_methods;
+
+    let struct_path = emitted_nominal_path(nodes, &path_fork, &string_table, "Counter")
+        .expect("the public struct should emit a declaration node");
+
+    // The free `run` function is a root, not a receiver entry: an extra vector row would
+    // admit non-method callables into this vector.
+    assert_eq!(
+        receiver_entries.len(),
+        1,
+        "only the receiver method joins the root table receiver vector"
+    );
+    let entry = root_receiver_entry(receiver_entries, &path_fork, &string_table, "bump")
+        .expect("the public receiver method must join the root table");
+    assert_eq!(entry.receiver, ReceiverKey::Struct(struct_path));
+    assert!(
+        !entry.receiver_mutable,
+        "an immutable this receiver must not mark the entry mutable"
+    );
+
+    // The sync contract, semantically: the root entry carries the emitted signature's
+    // once-normalized parameter facts, not an independent interpretation.
+    let (_, emitted_signature, _) = emitted_function(nodes, &path_fork, &string_table, "bump")
+        .expect("the non-generic receiver method must emit an ordinary declaration node");
+    assert_eq!(
+        entry.signature.parameters.len(),
+        emitted_signature.parameters.len(),
+        "the root entry must join the emitted parameter list"
+    );
+    for (entry_parameter, emitted_parameter) in entry
+        .signature
+        .parameters
+        .iter()
+        .zip(emitted_signature.parameters.iter())
+    {
+        assert_eq!(
+            path_display_name(entry_parameter.id, &path_fork, &string_table),
+            path_display_name(emitted_parameter.id, &path_fork, &string_table),
+            "the root entry must join the emitted parameters in order"
+        );
+        assert_eq!(
+            entry_parameter.value.type_id, emitted_parameter.value.type_id,
+            "the joined parameter must keep the emitted semantic type"
+        );
+        assert_eq!(
+            entry_parameter.value.span, emitted_parameter.value.span,
+            "the joined parameter must keep the authored default span"
+        );
+        assert_eq!(
+            entry_parameter.value.synthetic_interface_provenance,
+            emitted_parameter.value.synthetic_interface_provenance,
+            "the joined parameter must keep the normalized default provenance"
+        );
+    }
+
+    let entry_label = signature_parameter(&entry.signature, &path_fork, &string_table, "label")
+        .expect("the receiver signature must retain its defaulted label parameter");
+    let ExpressionKind::StringSlice(entry_label_text) = &entry_label.value.kind else {
+        panic!(
+            "the authored template default must reach the root table folded, got {:?}",
+            entry_label.value.kind
+        );
+    };
+    assert_eq!(
+        string_table.resolve(*entry_label_text),
+        "joined default",
+        "the root default must carry the folded template text"
+    );
+    assert!(
+        entry_label.value.span.is_some(),
+        "the folded root default must keep an authored span"
+    );
+    assert!(
+        entry_label.value.synthetic_interface_provenance.is_empty(),
+        "a template join over portable literals must stay portable"
+    );
+
+    // The omitted defaulted argument at the call site is filled from the retained signature
+    // and normalized with the caller's body into the same concrete folded value.
+    let (_, _, run_body) = emitted_function(nodes, &path_fork, &string_table, "run")
+        .expect("the exported free function must emit an ordinary declaration node");
+    let call_args = body_method_call_args(run_body, &entry.function_path)
+        .expect("the receiver call inside run must be a method call node");
+    let [filled] = call_args else {
+        panic!("the receiver call must fill exactly its defaulted parameter")
+    };
+    let ExpressionKind::StringSlice(filled_text) = &filled.value.kind else {
+        panic!(
+            "the omitted template default must fill as a folded string, got {:?}",
+            filled.value.kind
+        );
+    };
+    assert_eq!(
+        string_table.resolve(*filled_text),
+        "joined default",
+        "the omitted default must fill with the declared folded value"
+    );
+}
+
+#[test]
+fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_default() {
+    // Generic declarations do not emit ordinary declaration nodes, so their root-table
+    // signatures are the retained normalization owner. Aligned generic receivers cannot yet
+    // author an extra defaulted parameter, so the retained template default rides the
+    // supported exported generic free function sharing `normalize_retained_signature_defaults`.
+    let source = "export:\n    Cell type T = |\n        value T,\n    |\n    pick type T |value T, tag String = [\"joined \", \"n/a\"]| -> T:\n        return value\n    ;\n;\ncell_value type T |this Cell of T| -> T:\n    return this.value\n;\nbox = Cell(\"v\")\n";
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+        .expect("generic receiver and function roots with retained defaults should finalize");
+    let nodes = &build_result.ast.nodes;
+    let root_table = &build_result.public_interface_projection_input.root_table;
+
+    let entry = root_receiver_entry(
+        &root_table.receiver_methods,
+        &path_fork,
+        &string_table,
+        "cell_value",
+    )
+    .expect("the generic receiver method must join the root table");
+    assert!(
+        !nodes.iter().any(
+            |node| matches!(&node.kind, NodeKind::Function(path, ..) if *path == entry.function_path)
+        ),
+        "generic receiver methods must not emit an ordinary declaration node"
+    );
+
+    let struct_path = root_table
+        .roots
+        .iter()
+        .filter(|root| {
+            matches!(&root.kind, ResolvedPublicTypeRootKind::Struct { .. })
+                && path_display_name(root.path, &path_fork, &string_table).as_deref()
+                    == Some("Cell")
+        })
+        .map(|root| root.path)
+        .next()
+        .expect("the exported generic struct must retain a struct root");
+    assert_eq!(
+        entry.receiver,
+        ReceiverKey::Struct(struct_path),
+        "a generic receiver's key must resolve to its generic struct base path"
+    );
+
+    let function_signature = root_table
+        .roots
+        .iter()
+        .find_map(|root| match &root.kind {
+            ResolvedPublicTypeRootKind::Function {
+                signature,
+                generic_parameter_list_id,
+            } if generic_parameter_list_id.is_some()
+                && path_display_name(root.path, &path_fork, &string_table).as_deref()
+                    == Some("pick") =>
+            {
+                Some(signature)
+            }
+            _ => None,
+        })
+        .expect("the exported generic function must retain a generic function root");
+    let tag = signature_parameter(function_signature, &path_fork, &string_table, "tag")
+        .expect("the generic function signature must retain its defaulted tag parameter");
+    let ExpressionKind::StringSlice(tag_text) = &tag.value.kind else {
+        panic!(
+            "the retained generic template default must normalize to a folded string, got {:?}",
+            tag.value.kind
+        );
+    };
+    assert_eq!(
+        string_table.resolve(*tag_text),
+        "joined n/a",
+        "the retained generic default must carry the folded template text"
+    );
+    assert!(
+        tag.value.span.is_some(),
+        "the normalized generic default must keep an authored span"
+    );
+    assert!(
+        tag.value.synthetic_interface_provenance.is_empty(),
+        "a template join over portable literals must stay portable"
+    );
+}
+
+#[test]
+fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_call_defaults() {
+    let source = "Counter = | count Int = 0 |\nbump |this Counter, step Int = 7| -> Int:\n    return this.count + step\n;\nexport:\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+        .expect("a private receiver method on a private struct should finalize and stay callable");
+    let nodes = &build_result.ast.nodes;
+    let receiver_entries = &build_result
+        .public_interface_projection_input
+        .root_table
+        .receiver_methods;
+
+    // The private struct's receiver is not a public nominal, so the method never joins the
+    // root table receiver vector.
+    assert!(
+        receiver_entries.is_empty(),
+        "a method on a private receiver must stay out of the public root table"
+    );
+
+    // The private method still emits and its retained signature keeps the authored default.
+    let (bump_path, bump_signature, _) = emitted_function(nodes, &path_fork, &string_table, "bump")
+        .expect("the private receiver method must emit an ordinary declaration node");
+    let step = signature_parameter(bump_signature, &path_fork, &string_table, "step")
+        .expect("the private method signature must retain its step parameter");
+    assert!(
+        matches!(step.value.kind, ExpressionKind::Int(7)),
+        "the private method's authored default must survive finalization, got {:?}",
+        step.value.kind
+    );
+
+    // The equivalent lane for non-root receiver defaults lives at the real consumer: the call
+    // site fills the defaulted argument from the retained signature with the declared value.
+    let (_, _, run_body) = emitted_function(nodes, &path_fork, &string_table, "run")
+        .expect("the exported free function must emit an ordinary declaration node");
+    let call_args = body_method_call_args(run_body, &bump_path)
+        .expect("the receiver call inside run must be a method call node");
+    let [filled] = call_args else {
+        panic!("the receiver call must fill exactly its defaulted parameter")
+    };
+    assert!(
+        matches!(filled.value.kind, ExpressionKind::Int(7)),
+        "the omitted default must fill with the declared value at the call site, got {:?}",
+        filled.value.kind
+    );
+}

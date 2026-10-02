@@ -55,9 +55,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRootKind;
-use crate::compiler_frontend::ast::module_ast::scope_context::{
-    ReceiverMethodCatalog, ReceiverMethodEntry,
-};
+use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -86,7 +84,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -137,28 +135,32 @@ impl AstFinalizer<'_, '_> {
     }
 
     /// Synchronize normalized emitted declaration defaults into the retained public root
-    /// table and receiver catalog, and normalize retained-only generic defaults.
+    /// table, and normalize retained-only generic defaults.
     ///
     /// WHAT: after the emitted AST is normalized once (function signature parameter defaults
     /// and struct field defaults folded alongside function bodies), copy the exact normalized
-    /// signatures and fields into the retained public root table and receiver catalog so the
-    /// public-interface draft reads one normalized copy. Generic free functions, generic structs
-    /// and generic receiver methods have no emitted declaration node, so their retained defaults
-    /// are normalized in place through the same [`normalize_expression_templates`] helper using
-    /// their exact source-file context: the generic template's retained source file for generic
-    /// functions, and the canonical source metadata for generic structs.
+    /// signatures and fields into the retained public root table so the public-interface draft
+    /// reads one normalized copy. Generic free functions, generic structs and generic receiver
+    /// methods have no emitted declaration node, so their retained defaults are normalized in
+    /// place through the same [`normalize_expression_templates`] helper: the generic template's
+    /// retained source file for generic functions, and the canonical source metadata for
+    /// generic structs.
     ///
     /// WHY: folding the emitted copy and retained copy independently would create a second
     /// normalization interpretation. Synchronizing from the single emitted fold guarantees one
     /// owner. Generic declarations without an emitted node still need their defaults normalized
-    /// so the draft receives no live TIR references. The receiver catalog is synchronized as an
-    /// exact bidirectional invariant: every primary joins exactly one secondary entry in each
-    /// index and every secondary entry joins exactly one primary.
+    /// so the draft receives no live TIR references. Root receiver entries are synchronized
+    /// directly from the emitted fold and the retained generic templates; the receiver catalog
+    /// itself is the emission-time lookup side-table and is not a post-finalization default
+    /// owner, so it stays unrewritten. Generic receiver entries that join no root entry have no
+    /// other normalization owner after that, so their defaults are validated through a
+    /// discarded temporary signature copy to keep helper, type and TIR diagnostics observable
+    /// even when the method is never called.
     pub(super) fn synchronize_normalized_public_defaults(
         &mut self,
         emitted_ast: &[AstNode],
         string_table: &mut StringTable,
-    ) -> Result<ReceiverMethodCatalog, TemplateNormalizationError> {
+    ) -> Result<(), TemplateNormalizationError> {
         let EmittedDeclarationDefaults {
             function_signatures_by_path: normalized_function_signatures_by_path,
             struct_fields_by_path: normalized_struct_fields_by_path,
@@ -220,6 +222,7 @@ impl AstFinalizer<'_, '_> {
                         // Non-generic free function: must have exactly one emitted signature.
                         let normalized = normalized_function_signatures_by_path
                             .get(&root.path)
+                            .copied()
                             .ok_or_else(|| {
                                 CompilerError::compiler_error(format!(
                                     "public default synchronization: a non-generic free-function root at {:?} has no emitted declaration node; only generic functions may omit an emitted node",
@@ -266,6 +269,7 @@ impl AstFinalizer<'_, '_> {
                         // Non-generic struct: must have exactly one emitted declaration.
                         let normalized = normalized_struct_fields_by_path
                             .get(&root.path)
+                            .copied()
                             .ok_or_else(|| {
                                 CompilerError::compiler_error(format!(
                                     "public default synchronization: a non-generic struct root at {:?} (TypeId({})) has no emitted declaration node; only generic structs may omit an emitted node",
@@ -273,46 +277,46 @@ impl AstFinalizer<'_, '_> {
                                     type_id.0
                                 ))
                             })?;
-                        *fields = normalized.clone();
+                        *fields = normalized.to_vec();
                     }
                 }
                 _ => {}
             }
         }
 
-        // Reject duplicate receiver-method function paths in the root table before joining each
-        // root entry to exactly one primary catalog entry.
-        reject_duplicate_receiver_method_paths(&root_table.receiver_methods)?;
+        // Collect the root receiver path set once: a duplicate is an internal invariant
+        // violation, and the set classifies catalog signatures that join no root entry.
+        let root_receiver_paths = unique_root_receiver_paths(&root_table.receiver_methods)?;
 
-        // Synchronize receiver catalog: update existing entries in place, preserving vector
-        // order in every index. Do not rebuild secondary vectors by iterating the unordered
-        // by_function_path map.
-        let mut catalog = (*self.environment.lookups.receiver_methods).clone();
-
-        // First, synchronize every by_function_path entry by branching on generic metadata.
-        for (function_path, entry) in &mut catalog.by_function_path {
-            // Imported receiver contracts arrive from an already-completed provider interface.
-            // Their defaults were folded by the provider's normalization owner, and they have no
-            // consumer-emitted declaration node to synchronize against.
+        // Synchronize receiver-method root entries directly from the once-normalized emitted
+        // copy, preserving vector order. Root receiver entries are selected from this module's
+        // parsed headers, so a non-generic entry must join exactly one emitted signature and a
+        // generic entry must have none: its retained defaults normalize in place. Imported
+        // receiver contracts arrive from an already-completed provider interface with their
+        // defaults folded by the provider's normalization owner, so they keep the signature the
+        // root-table build cloned from the catalog.
+        for root_entry in &mut root_table.receiver_methods {
+            // Imported receiver contracts have no consumer-emitted declaration node to
+            // synchronize against.
             if self
                 .environment
                 .lookups
                 .imported_functions_by_local_path
-                .contains_key(function_path)
+                .contains_key(&root_entry.function_path)
             {
                 continue;
             }
-            if generic_function_templates_by_path.contains_key(function_path) {
+            if generic_function_templates_by_path.contains_key(&root_entry.function_path) {
                 // Generic receiver method: must have no emitted node.
-                if normalized_function_signatures_by_path.contains_key(function_path) {
+                if normalized_function_signatures_by_path.contains_key(&root_entry.function_path) {
                     return Err(CompilerError::compiler_error(format!(
                         "public default synchronization: a generic receiver method at {:?} has an emitted declaration node; generic functions must not emit an ordinary declaration",
-                        function_path
+                        root_entry.function_path
                     ))
                     .into());
                 }
                 normalize_retained_signature_defaults(
-                    &mut entry.signature,
+                    &mut root_entry.signature,
                     template_const_loop_iteration_limit,
                     numeric_profile,
                     &template_ir_store,
@@ -321,39 +325,70 @@ impl AstFinalizer<'_, '_> {
             } else {
                 // Non-generic receiver method: must have exactly one emitted node.
                 let normalized = normalized_function_signatures_by_path
-                    .get(function_path)
+                    .get(&root_entry.function_path)
+                    .copied()
                     .ok_or_else(|| {
                         CompilerError::compiler_error(format!(
                             "public default synchronization: a non-generic receiver method at {:?} has no emitted declaration node; only generic functions may omit an emitted node",
-                            function_path
+                            root_entry.function_path
                         ))
                     })?;
-                entry.signature = normalized.clone();
+                root_entry.signature = normalized.clone();
             }
         }
 
-        // Synchronize the secondary indexes as an exact bidirectional invariant and copy the
-        // synchronized signatures from the primary index in place, preserving vector order.
-        synchronize_receiver_secondary_indexes(&mut catalog, self.path_fork)?;
+        // Uncalled private generic methods have neither an emitted node nor a public root.
+        // Validate their defaults without retaining another normalized signature or rewriting
+        // the emission-time catalog.
+        for catalog_entry in self
+            .environment
+            .lookups
+            .receiver_methods
+            .by_function_path
+            .values()
+        {
+            // A root receiver entry has exactly one normalized owner above; normalizing its
+            // catalog copy again would be a second normalization interpretation.
+            if root_receiver_paths.contains(&catalog_entry.function_path) {
+                continue;
+            }
 
-        // Synchronize every root table receiver method entry by exact path. A missing catalog
-        // entry is a CompilerError, not a silent no-op.
-        for root_entry in &mut root_table.receiver_methods {
-            let synchronized = catalog
-                .by_function_path
-                .get(&root_entry.function_path)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "public default synchronization: a root table receiver method at {:?} has no matching catalog entry; every root receiver method must join exactly one catalog entry",
-                        root_entry.function_path
-                    ))
-                })?;
-            root_entry.signature = synchronized.signature.clone();
+            // Imported receiver contracts keep the provider's normalized defaults.
+            if self
+                .environment
+                .lookups
+                .imported_functions_by_local_path
+                .contains_key(&catalog_entry.function_path)
+            {
+                continue;
+            }
+
+            // Ordinary receiver methods normalize defaults through their emitted declaration node.
+            if !generic_function_templates_by_path.contains_key(&catalog_entry.function_path) {
+                continue;
+            }
+
+            if normalized_function_signatures_by_path.contains_key(&catalog_entry.function_path) {
+                return Err(CompilerError::compiler_error(format!(
+                    "public default synchronization: a generic receiver method at {:?} has an emitted declaration node; generic functions must not emit an ordinary declaration",
+                    catalog_entry.function_path
+                ))
+                .into());
+            }
+
+            let mut diagnostic_only_signature = catalog_entry.signature.clone();
+            normalize_retained_signature_defaults(
+                &mut diagnostic_only_signature,
+                template_const_loop_iteration_limit,
+                numeric_profile,
+                &template_ir_store,
+                string_table,
+            )?;
         }
 
         self.environment.resolved_public_type_roots = root_table;
 
-        Ok(catalog)
+        Ok(())
     }
 }
 
@@ -413,13 +448,12 @@ fn normalize_retained_field_defaults(
     Ok(())
 }
 
-/// Total normalized emitted declaration defaults keyed by declaration path.
+/// Borrowed normalized declaration facts indexed for the public-root synchronization join.
 ///
-/// WHAT: the function-signature and struct-field maps collected from the once-normalized
-/// emitted AST. A named result keeps each map's role explicit at the synchronization join.
-struct EmittedDeclarationDefaults {
-    function_signatures_by_path: FxHashMap<PathId, FunctionSignature>,
-    struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
+/// The emitted AST remains the owner; only the final retained roots copy signatures and fields.
+struct EmittedDeclarationDefaults<'ast> {
+    function_signatures_by_path: FxHashMap<PathId, &'ast FunctionSignature>,
+    struct_fields_by_path: FxHashMap<PathId, &'ast [Declaration]>,
 }
 
 /// Collect normalized function signatures and struct fields from the once-normalized emitted
@@ -430,10 +464,10 @@ struct EmittedDeclarationDefaults {
 /// synchronization orchestration focused on its joins.
 fn collect_emitted_declaration_defaults(
     emitted_ast: &[AstNode],
-) -> Result<EmittedDeclarationDefaults, CompilerError> {
-    let mut normalized_function_signatures_by_path: FxHashMap<PathId, FunctionSignature> =
+) -> Result<EmittedDeclarationDefaults<'_>, CompilerError> {
+    let mut normalized_function_signatures_by_path: FxHashMap<PathId, &FunctionSignature> =
         FxHashMap::default();
-    let mut normalized_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>> =
+    let mut normalized_struct_fields_by_path: FxHashMap<PathId, &[Declaration]> =
         FxHashMap::default();
 
     for node in emitted_ast {
@@ -446,7 +480,7 @@ fn collect_emitted_declaration_defaults(
                     )));
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(signature.clone());
+                    slot.insert(signature);
                 }
             }
         } else if let NodeKind::StructDefinition(path, fields) = &node.kind {
@@ -458,7 +492,7 @@ fn collect_emitted_declaration_defaults(
                     )));
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(fields.clone());
+                    slot.insert(fields.as_slice());
                 }
             }
         }
@@ -470,193 +504,22 @@ fn collect_emitted_declaration_defaults(
     })
 }
 
-/// Reject duplicate function paths among the retained root-table receiver methods.
+/// Collect receiver-root paths, rejecting duplicates before joining normalized defaults.
 ///
-/// WHAT: each root receiver method must join exactly one primary catalog entry, so a repeated
-/// function path in the root table is an internal invariant violation.
-fn reject_duplicate_receiver_method_paths(
+/// The set also distinguishes private catalog entries from already-normalized roots.
+fn unique_root_receiver_paths(
     receiver_methods: &[ReceiverMethodEntry],
-) -> Result<(), CompilerError> {
-    let mut seen_paths: FxHashSet<&PathId> = FxHashSet::default();
+) -> Result<FxHashSet<PathId>, CompilerError> {
+    let mut seen_paths: FxHashSet<PathId> = FxHashSet::default();
     for entry in receiver_methods {
-        if !seen_paths.insert(&entry.function_path) {
+        if !seen_paths.insert(entry.function_path) {
             return Err(CompilerError::compiler_error(format!(
                 "public default synchronization: a root table receiver method at {:?} is duplicated; each root receiver method must join exactly one catalog entry",
                 entry.function_path
             )));
         }
     }
-    Ok(())
-}
-
-/// Synchronize the receiver catalog secondary indexes as an exact bidirectional invariant.
-///
-/// WHAT: every `by_function_path` primary must join exactly one matching entry under
-/// `(primary.receiver, function_path.name())` in `by_receiver_and_name` and exactly one
-/// matching entry under `function_path.name()` in `by_method_name`. Every secondary entry must
-/// join exactly one primary, be stored under the key matching its own receiver and name, and
-/// carry non-signature metadata consistent with its primary. A missing method name, missing or
-/// duplicate secondary entry, extra secondary entry, wrong receiver/name key, or inconsistent
-/// non-signature metadata is a `CompilerError`. Synchronized signatures are copied in place so
-/// vector order is preserved in every index.
-/// WHY: the catalog is an internal side-table; an inconsistent index is a compiler bug, not a
-/// silent skip. Extracting the synchronization makes the bidirectional invariant testable.
-fn synchronize_receiver_secondary_indexes(
-    catalog: &mut ReceiverMethodCatalog,
-    path_fork: &PathInternerFork,
-) -> Result<(), CompilerError> {
-    // Validate that every primary joins exactly one secondary entry in each index before
-    // copying any signature.
-    for (function_path, primary) in &catalog.by_function_path {
-        if primary.function_path != *function_path {
-            return Err(CompilerError::compiler_error(format!(
-                "public default synchronization: a receiver catalog by_function_path primary at {:?} carries the different function path {:?}; the map key and entry path must match",
-                function_path, primary.function_path
-            )));
-        }
-
-        let method_name = path_fork.component(*function_path).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "public default synchronization: a receiver catalog by_function_path entry at {:?} has no resolvable method name; every receiver method path must have a final name component",
-                function_path
-            ))
-        })?;
-
-        let receiver_name_entries = catalog
-            .by_receiver_and_name
-            .get(&(primary.receiver.clone(), method_name))
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_function_path primary at {:?} has no matching by_receiver_and_name entry; every primary must join exactly one secondary entry",
-                    function_path
-                ))
-            })?;
-        match receiver_name_entries
-            .iter()
-            .filter(|entry| entry.function_path == *function_path)
-            .count()
-        {
-            0 => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_function_path primary at {:?} has no matching by_receiver_and_name entry; every primary must join exactly one secondary entry",
-                    function_path
-                )));
-            }
-            1 => {}
-            count => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_function_path primary at {:?} has {} matching by_receiver_and_name entries; every primary must join exactly one secondary entry",
-                    function_path, count
-                )));
-            }
-        }
-
-        let method_name_entries = catalog.by_method_name.get(&method_name).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "public default synchronization: a receiver catalog by_function_path primary at {:?} has no matching by_method_name entry; every primary must join exactly one secondary entry",
-                function_path
-            ))
-        })?;
-        match method_name_entries
-            .iter()
-            .filter(|entry| entry.function_path == *function_path)
-            .count()
-        {
-            0 => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_function_path primary at {:?} has no matching by_method_name entry; every primary must join exactly one secondary entry",
-                    function_path
-                )));
-            }
-            1 => {}
-            count => {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_function_path primary at {:?} has {} matching by_method_name entries; every primary must join exactly one secondary entry",
-                    function_path, count
-                )));
-            }
-        }
-    }
-
-    // Copy synchronized signatures from the primary index into every by_receiver_and_name entry,
-    // validating the key and non-signature metadata of each secondary entry in place.
-    for ((key_receiver, key_name), entries) in &mut catalog.by_receiver_and_name {
-        for entry in entries.iter_mut() {
-            if entry.receiver != *key_receiver {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_receiver_and_name entry at {:?} is stored under the wrong receiver key; the entry receiver does not match the index key",
-                    entry.function_path
-                )));
-            }
-            if path_fork.component(entry.function_path) != Some(*key_name) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_receiver_and_name entry at {:?} is stored under the wrong method-name key; the entry name does not match the index key",
-                    entry.function_path
-                )));
-            }
-            let primary = catalog
-                .by_function_path
-                .get(&entry.function_path)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "public default synchronization: a receiver catalog by_receiver_and_name entry at {:?} has no matching by_function_path primary; every secondary entry must join exactly one primary",
-                        entry.function_path
-                    ))
-                })?;
-            if !secondary_metadata_matches_primary(entry, primary) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_receiver_and_name entry at {:?} has non-signature metadata inconsistent with its by_function_path primary",
-                    entry.function_path
-                )));
-            }
-            entry.signature = primary.signature.clone();
-        }
-    }
-
-    // Copy synchronized signatures from the primary index into every by_method_name entry,
-    // validating the key and non-signature metadata of each secondary entry in place.
-    for (key_name, entries) in &mut catalog.by_method_name {
-        for entry in entries.iter_mut() {
-            if path_fork.component(entry.function_path) != Some(*key_name) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_method_name entry at {:?} is stored under the wrong method-name key; the entry name does not match the index key",
-                    entry.function_path
-                )));
-            }
-            let primary = catalog
-                .by_function_path
-                .get(&entry.function_path)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "public default synchronization: a receiver catalog by_method_name entry at {:?} has no matching by_function_path primary; every secondary entry must join exactly one primary",
-                        entry.function_path
-                    ))
-                })?;
-            if !secondary_metadata_matches_primary(entry, primary) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public default synchronization: a receiver catalog by_method_name entry at {:?} has non-signature metadata inconsistent with its by_function_path primary",
-                    entry.function_path
-                )));
-            }
-            entry.signature = primary.signature.clone();
-        }
-    }
-
-    Ok(())
-}
-
-/// Compare the non-signature metadata of a secondary catalog entry against its primary.
-///
-/// WHAT: `function_path` is the lookup key by construction, so only `receiver`, `source_file`
-/// and `receiver_mutable` are compared. A mismatch means the secondary index was built or
-/// mutated inconsistently with the primary index.
-fn secondary_metadata_matches_primary(
-    secondary: &ReceiverMethodEntry,
-    primary: &ReceiverMethodEntry,
-) -> bool {
-    secondary.receiver == primary.receiver
-        && secondary.source_file == primary.source_file
-        && secondary.receiver_mutable == primary.receiver_mutable
+    Ok(seen_paths)
 }
 
 /// Normalizes templates in an AST node by routing to category-specific handlers.

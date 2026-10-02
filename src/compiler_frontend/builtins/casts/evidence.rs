@@ -14,7 +14,6 @@ use super::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
     builtin_cast_target_for_builtin_type,
 };
-use super::traits::CoreCastTrait;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -341,27 +340,34 @@ pub(crate) fn builtin_cast_proves_core_trait(
         .is_some_and(|row| row.fallibility == fallibility)
 }
 
-/// The bounded builtin evidence rows registered for one numeric profile.
+/// The bounded builtin evidence rows registered as core cast trait evidence for one profile.
 ///
-/// WHAT: static rows, distinct bounded numeric pairs and their numeric text rows.
-/// WHY: registration stays finite. `Dec` scale pairs resolve on demand through
-///      `lookup_builtin_evidence` rather than expanding the registered row set.
+/// WHAT: static rows, distinct numeric pairs and numeric text rows whose target carries a
+///       source-authorable core cast trait. Fixed-target rows are never built here; fixed
+///       and `Dec` casts resolve on demand through `lookup_builtin_evidence`.
+/// WHY: registration stays finite and only constructs rows it registers.
 pub(crate) fn builtin_evidence_rows_for_profile(
     profile: NumericProfile,
 ) -> impl Iterator<Item = BuiltinCastEvidenceRow> {
+    const NUMERIC_TRAIT_TARGETS: [NumericScalar; 2] = [NumericScalar::Int, NumericScalar::Float];
+
     let numeric_rows = numeric_scalars().flat_map(move |source| {
-        numeric_scalars()
+        NUMERIC_TRAIT_TARGETS
+            .into_iter()
             .filter(move |target| *target != source)
             .map(move |target| numeric_evidence_row(source, target, profile))
     });
 
-    let text_rows = numeric_scalars()
-        .map(numeric_text_evidence_row)
-        .chain(numeric_scalars().map(string_numeric_evidence_row));
+    let text_rows = numeric_scalars().map(numeric_text_evidence_row).chain(
+        NUMERIC_TRAIT_TARGETS
+            .into_iter()
+            .map(string_numeric_evidence_row),
+    );
 
     STATIC_BUILTIN_EVIDENCE_ROWS
         .iter()
         .copied()
+        .filter(|row| !matches!(row.target, BuiltinCastTarget::Fixed(_)))
         .chain(numeric_rows)
         .chain(text_rows)
 }
@@ -411,31 +417,4 @@ pub(crate) fn type_id_for_builtin_target(
             Some(type_id)
         }
     }
-}
-
-/// Returns the `CoreCastTrait` variant for a builtin evidence row.
-///
-/// WHAT: maps a builtin evidence row's target and fallibility to the core
-///      cast trait that proves the row. Fixed and `Dec` targets carry compiler-owned
-///      builtin evidence only and map to no source-authorable trait. The lookup scans
-///      the single `BUILTIN_CAST_TRAIT_ROWS` table for the trait catalogue.
-/// WHY: lets `register_builtin_cast_evidence` and its tests share one
-///      (source, target) → trait mapping instead of re-deriving the
-///      (source, target) → `CoreCastTrait` translation in multiple places.
-pub(crate) fn builtin_evidence_trait_kind_for_row(
-    row: BuiltinCastEvidenceRow,
-) -> Option<CoreCastTrait> {
-    if matches!(
-        row.target,
-        BuiltinCastTarget::Fixed(_) | BuiltinCastTarget::Number(_)
-    ) {
-        return None;
-    }
-
-    for metadata in super::traits::BUILTIN_CAST_TRAIT_ROWS {
-        if metadata.target == row.target && metadata.fallibility == row.fallibility {
-            return Some(metadata.kind);
-        }
-    }
-    None
 }

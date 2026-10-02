@@ -7,9 +7,10 @@
 
 use super::*;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
-    PublishedBoundary, facts, generated_identity, summary,
+    PublishedBoundary, facts, generated_identity, summary, test_sidecar,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use std::sync::Arc;
 
 #[test]
 fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_ids() {
@@ -148,4 +149,69 @@ fn transaction_summary_lookup_stays_inside_its_own_boundary() {
         second_transaction.summary(&identity),
         "equal identities in unrelated boundaries must not share summaries"
     );
+}
+
+#[test]
+fn failed_completion_discards_earlier_unpublished_work_and_preserves_published_work() {
+    let published_identity = generated_identity("published");
+    let published_summary = summary();
+    let published_sidecar = test_sidecar(published_identity.clone(), published_summary.clone());
+    let published_registry = Arc::downgrade(
+        &published_sidecar
+            .module
+            .link_facts
+            .external_package_registry,
+    );
+    let known = PublishedBoundary::with_sidecar(
+        published_identity.clone(),
+        published_summary.clone(),
+        published_sidecar,
+    );
+    let mut transaction = GeneratedFunctionTransaction::new(known.view());
+    let first_identity = generated_identity("first");
+    let first_request = transaction.register_requests([facts("first")])[0];
+    assert_eq!(
+        transaction
+            .enter(first_request)
+            .expect("first request enters"),
+        GeneratedRequestEntry::Materialise,
+    );
+    let first_sidecar = test_sidecar(first_identity.clone(), summary());
+    let unpublished_registry =
+        Arc::downgrade(&first_sidecar.module.link_facts.external_package_registry);
+    transaction
+        .complete(first_request, summary(), first_sidecar)
+        .expect("the first sidecar completes");
+    assert_eq!(
+        transaction
+            .enter(first_request)
+            .expect("first request is complete"),
+        GeneratedRequestEntry::Complete,
+    );
+
+    let later_request = transaction.register_requests([facts("later")])[0];
+    assert_eq!(
+        transaction
+            .enter(later_request)
+            .expect("later request enters"),
+        GeneratedRequestEntry::Materialise,
+    );
+    assert!(
+        transaction
+            .complete(
+                later_request,
+                summary(),
+                test_sidecar(generated_identity("foreign"), summary()),
+            )
+            .is_err()
+    );
+    assert!(transaction.finish().is_err());
+
+    assert!(unpublished_registry.upgrade().is_none());
+    assert!(published_registry.upgrade().is_some());
+    assert_eq!(
+        known.view().summary(&published_identity),
+        Some(&published_summary)
+    );
+    assert!(!known.view().contains(&first_identity));
 }

@@ -15,7 +15,7 @@ mod templates;
 pub(crate) use body_rules::{GenericFunctionBodyValidationInput, validate_generic_function_body};
 pub(crate) use calls::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionInferenceInput,
-    concrete_argument_mapping, infer_generic_function_call, parse_generic_function_call_expression,
+    infer_generic_function_call, parse_generic_function_call_expression,
     substitute_function_signature, validate_generic_function_bound_evidence,
     validate_generic_function_template_call_expression,
 };

@@ -18,6 +18,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
+use std::rc::Rc;
 
 struct PreparedModule {
     preparation: ModuleMaterialisationPreparation,
@@ -118,9 +119,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         })
         .cloned()
         .expect("the module should retain its Count alias");
-    let alias = prepared
-        .preparation
-        .resolved_type_aliases_by_path
+    let alias = Rc::make_mut(&mut prepared.preparation.resolved_type_aliases_by_path)
         .get_mut(&alias_path)
         .expect("the alias row should be present");
     alias.target_type_id = TypeId(u32::MAX);

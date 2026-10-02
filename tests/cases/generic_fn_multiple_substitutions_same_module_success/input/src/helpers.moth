@@ -1,3 +1,11 @@
+Box type T = |
+    value T,
+|
+
 identity type T |value T| -> T:
     return value
+;
+
+unbox type T |box Box of T| -> T:
+    return box.value
 ;

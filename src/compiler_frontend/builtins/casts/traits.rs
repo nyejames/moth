@@ -160,6 +160,19 @@ pub(crate) fn builtin_cast_trait_metadata(
         .expect("core cast trait row list must cover every variant")
 }
 
+/// Returns the core cast trait proving a conversion to `target` with `fallibility`.
+///
+/// Fixed and `Dec` targets have no source-authorable trait and return `None`.
+pub(crate) fn core_cast_trait_for_target_and_fallibility(
+    target: BuiltinCastTarget,
+    fallibility: BuiltinCastFallibility,
+) -> Option<CoreCastTrait> {
+    BUILTIN_CAST_TRAIT_ROWS
+        .iter()
+        .find(|row| row.target == target && row.fallibility == fallibility)
+        .map(|row| row.kind)
+}
+
 /// Returns the source-defined trait name for a core cast trait.
 pub(crate) fn builtin_cast_trait_name(trait_kind: CoreCastTrait) -> &'static str {
     builtin_cast_trait_metadata(trait_kind).trait_name

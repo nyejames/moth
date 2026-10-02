@@ -326,8 +326,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         //  Synchronize finalized public defaults
         // ----------------------------
         // The emitted AST now carries normalized defaults and active reactive return metadata.
-        // Synchronize that one completed copy into public roots and receiver indexes. Generic
-        // declarations without emitted nodes normalize their retained defaults here as before.
+        // Synchronize that one completed copy into public roots and receiver root entries.
+        // Generic declarations without emitted nodes normalize their retained defaults here as
+        // before.
         self.synchronize_normalized_public_defaults(&emitted.ast, string_table)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -349,15 +350,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
         })?;
 
-        // ----------------------------
-        //  Merge builtin AST nodes
-        // ----------------------------
-        if !self.environment.lookups.builtin_struct_ast_nodes.is_empty() {
-            let mut ast_nodes = self.environment.lookups.builtin_struct_ast_nodes.clone();
-            ast_nodes.extend(emitted.ast);
-            emitted.ast = ast_nodes;
-        }
-
         let mut choice_definitions = self.collect_choice_definitions();
         for imported in &self.environment.lookups.imported_choice_definitions {
             if !choice_definitions
@@ -376,23 +368,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             resolved_public_trait_roots,
         } = self.environment;
 
-        #[cfg(debug_assertions)]
-        {
-            // The shared module store is the authority for finalized views.
-            let template_ir_store = self.context.template_ir_store.borrow();
-            debug_validate_type_ids_for_hir(
-                &emitted.ast,
-                &const_values,
-                &choice_definitions,
-                &type_environment,
-                &template_ir_store,
-            );
-        }
-
         // Emission is complete, so the environment lookups `Rc` is the sole strong reference.
-        // Recovering owned access lets the donor-local generic-template map move directly into
-        // the build result without cloning body tokens or an `Rc::try_unwrap` dance in semantic
-        // orchestration.
+        // Recovering owned access lets the donor-local generic-template map and the builtin
+        // struct nodes move directly into the build result without cloning body tokens or an
+        // `Rc::try_unwrap` dance in semantic orchestration.
         let owned_lookups = match Rc::try_unwrap(lookups) {
             Ok(lookups) => lookups,
             Err(shared) => {
@@ -467,6 +446,34 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         } else {
             None
         };
+
+        // ----------------------------
+        //  Merge builtin AST nodes
+        // ----------------------------
+        // The materialisation preparation above is the last reader of the environment's builtin
+        // nodes and captures its own complete snapshot whenever it builds a context, so the
+        // nodes move straight into the returned AST instead of paying one final deep clone.
+        // Builtin definitions stay ahead of every authored node.
+        if !owned_lookups.builtin_struct_ast_nodes.is_empty() {
+            let mut ast_nodes = owned_lookups.builtin_struct_ast_nodes;
+            ast_nodes.extend(emitted.ast);
+            emitted.ast = ast_nodes;
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            // Runs after the builtin merge so the boundary check walks the complete
+            // builtin+source AST. The shared module store is the authority for finalized views.
+            let template_ir_store = self.context.template_ir_store.borrow();
+            debug_validate_type_ids_for_hir(
+                &emitted.ast,
+                &const_values,
+                &choice_definitions,
+                &type_environment,
+                &template_ir_store,
+            );
+        }
+
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
             trait_roots: resolved_public_trait_roots,

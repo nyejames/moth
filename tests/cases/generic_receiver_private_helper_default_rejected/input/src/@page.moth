@@ -1,0 +1,9 @@
+Counter = |
+    count Int,
+|
+
+bump type T |this Counter, value T, label String = [$insert("x"): text]| -> T:
+    return value
+;
+
+#[:<h1>Private generic receiver helper default rejected</h1>]

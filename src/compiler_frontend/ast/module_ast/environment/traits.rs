@@ -14,14 +14,13 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::resolve_function_signature;
 use crate::compiler_frontend::builtins::casts::evidence::{
-    builtin_evidence_rows_for_profile, builtin_evidence_trait_kind_for_row,
-    type_id_for_builtin_target,
+    builtin_evidence_rows_for_profile, type_id_for_builtin_target,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::builtins::casts::traits::{
-    BUILTIN_CAST_TRAIT_ROWS, builtin_cast_trait_name,
+    BUILTIN_CAST_TRAIT_ROWS, builtin_cast_trait_name, core_cast_trait_for_target_and_fallibility,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
@@ -273,13 +272,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Registers the compiler-owned builtin evidence rows for every core
     /// cast trait row.
     ///
-    /// WHAT: walks the profile-complete builtin evidence rows and inserts one
+    /// WHAT: walks the profile's trait-target builtin evidence rows and inserts one
     ///      `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for
-    ///      every (source, target) row whose target carries a source-authorable
-    ///      core cast trait family. Fixed targets carry compiler-owned builtin
-    ///      evidence only and are skipped. Rejects rows whose trait id is
+    ///      every (source, target) row. Rejects rows whose trait id is
     ///      missing because registration order was somehow violated.
-    /// WHY: builtin evidence must satisfy static generic-bound checks via
+    /// WHY: builtin evidence must satisfy static generic-bound checks via `builtin_for`.
     pub(in crate::compiler_frontend::ast) fn register_builtin_cast_evidence(
         trait_environment: &TraitEnvironment,
         trait_evidence_environment: &mut TraitEvidenceEnvironment,
@@ -294,12 +291,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         for row in builtin_evidence_rows_for_profile(numeric_profile) {
             let source = row.source;
-            // Fixed targets carry compiler-owned builtin evidence only: no
-            // source-authorable core cast trait family exists for them.
-            if matches!(row.target, BuiltinCastTarget::Fixed(_)) {
-                continue;
-            }
-            let Some(trait_kind) = builtin_evidence_trait_kind_for_row(row) else {
+            let Some(trait_kind) =
+                core_cast_trait_for_target_and_fallibility(row.target, row.fallibility)
+            else {
                 return Err(CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
                         "Builtin cast evidence row did not map to a registered core cast trait.",

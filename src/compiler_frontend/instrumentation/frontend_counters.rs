@@ -112,18 +112,8 @@ pub(crate) enum FrontendCounter {
     ConvergenceInitialBaseBorrowPasses,
     ConvergenceBaseBorrowPasses,
     ConvergenceGeneratedSidecarBorrowPasses,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    ConvergenceCompleteGeneratedSummaryMapBuilds,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    ConvergenceGeneratedSummaryMapClones,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    ConvergencePrivateSummaryMapRebuilds,
     ConvergenceSummaryComparisons,
     ConvergenceSummaryChanges,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    ConvergenceStableSidecarsRechecked,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    ConvergenceMaxIterations,
 
     // Implementation-pressure counters from shared frontend data structures.
     TypeEnvironmentFieldsForQueries,
@@ -324,13 +314,8 @@ mod detailed {
     static CONVERGENCE_INITIAL_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_BASE_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES: AtomicUsize = AtomicUsize::new(0);
-    static CONVERGENCE_COMPLETE_GENERATED_SUMMARY_MAP_BUILDS: AtomicUsize = AtomicUsize::new(0);
-    static CONVERGENCE_GENERATED_SUMMARY_MAP_CLONES: AtomicUsize = AtomicUsize::new(0);
-    static CONVERGENCE_PRIVATE_SUMMARY_MAP_REBUILDS: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_SUMMARY_COMPARISONS: AtomicUsize = AtomicUsize::new(0);
     static CONVERGENCE_SUMMARY_CHANGES: AtomicUsize = AtomicUsize::new(0);
-    static CONVERGENCE_STABLE_SIDECARS_RECHECKED: AtomicUsize = AtomicUsize::new(0);
-    static CONVERGENCE_MAX_ITERATIONS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_MERGE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static STRING_TABLE_DELTA_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
     static GENERATED_DECLARATION_INHERITED_ROW_COPIES: AtomicUsize = AtomicUsize::new(0);
@@ -543,13 +528,8 @@ mod detailed {
             FrontendCounter::ConvergenceInitialBaseBorrowPasses,
             FrontendCounter::ConvergenceBaseBorrowPasses,
             FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
-            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds,
-            FrontendCounter::ConvergenceGeneratedSummaryMapClones,
-            FrontendCounter::ConvergencePrivateSummaryMapRebuilds,
             FrontendCounter::ConvergenceSummaryComparisons,
             FrontendCounter::ConvergenceSummaryChanges,
-            FrontendCounter::ConvergenceStableSidecarsRechecked,
-            FrontendCounter::ConvergenceMaxIterations,
             FrontendCounter::TypeEnvironmentFieldsForQueries,
             FrontendCounter::TypeEnvironmentFieldsReturned,
             FrontendCounter::TypeEnvironmentVariantsForQueries,
@@ -799,27 +779,9 @@ mod detailed {
                 &CONVERGENCE_GENERATED_SIDECAR_BORROW_PASSES
             }
 
-            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds => {
-                &CONVERGENCE_COMPLETE_GENERATED_SUMMARY_MAP_BUILDS
-            }
-
-            FrontendCounter::ConvergenceGeneratedSummaryMapClones => {
-                &CONVERGENCE_GENERATED_SUMMARY_MAP_CLONES
-            }
-
-            FrontendCounter::ConvergencePrivateSummaryMapRebuilds => {
-                &CONVERGENCE_PRIVATE_SUMMARY_MAP_REBUILDS
-            }
-
             FrontendCounter::ConvergenceSummaryComparisons => &CONVERGENCE_SUMMARY_COMPARISONS,
 
             FrontendCounter::ConvergenceSummaryChanges => &CONVERGENCE_SUMMARY_CHANGES,
-
-            FrontendCounter::ConvergenceStableSidecarsRechecked => {
-                &CONVERGENCE_STABLE_SIDECARS_RECHECKED
-            }
-
-            FrontendCounter::ConvergenceMaxIterations => &CONVERGENCE_MAX_ITERATIONS,
 
             FrontendCounter::TypeEnvironmentFieldsForQueries => {
                 &TYPE_ENVIRONMENT_FIELDS_FOR_QUERIES
@@ -1145,27 +1107,9 @@ mod detailed {
                 "convergence_generated_sidecar_borrow_passes"
             }
 
-            FrontendCounter::ConvergenceCompleteGeneratedSummaryMapBuilds => {
-                "convergence_complete_generated_summary_map_builds"
-            }
-
-            FrontendCounter::ConvergenceGeneratedSummaryMapClones => {
-                "convergence_generated_summary_map_clones"
-            }
-
-            FrontendCounter::ConvergencePrivateSummaryMapRebuilds => {
-                "convergence_private_summary_map_rebuilds"
-            }
-
             FrontendCounter::ConvergenceSummaryComparisons => "convergence_summary_comparisons",
 
             FrontendCounter::ConvergenceSummaryChanges => "convergence_summary_changes",
-
-            FrontendCounter::ConvergenceStableSidecarsRechecked => {
-                "convergence_stable_sidecars_rechecked"
-            }
-
-            FrontendCounter::ConvergenceMaxIterations => "convergence_max_iterations",
 
             FrontendCounter::TypeEnvironmentFieldsForQueries => {
                 "type_environment_fields_for_queries"

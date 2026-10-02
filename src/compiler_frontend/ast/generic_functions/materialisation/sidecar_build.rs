@@ -121,20 +121,24 @@ impl ModuleMaterialisationPreparation {
             imported_choice_definitions: self.imported_choice_definitions.clone(),
             resolved_module_constants: Rc::new(resolved_module_constants),
             builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
-            resolved_struct_fields_by_path: Rc::new(self.resolved_struct_fields_by_path.clone()),
-            resolved_function_signatures_by_path: Rc::new(
-                self.resolved_function_signatures_by_path.clone(),
+            // Preparing sidecars inherit compatible type IDs and immutable lookup owners.
+            // Request-local templates and evidence remain independently owned; generated evidence
+            // installation writes each sidecar's evidence environment, so sharing one owner would
+            // only move the deep copy into that first write.
+            resolved_struct_fields_by_path: Rc::clone(&self.resolved_struct_fields_by_path),
+            resolved_function_signatures_by_path: Rc::clone(
+                &self.resolved_function_signatures_by_path,
             ),
             generic_function_templates_by_path: self.generic_function_templates_by_path.clone(),
-            resolved_type_aliases_by_path: Rc::new(self.resolved_type_aliases_by_path.clone()),
-            choice_variant_shells_by_path: Rc::new(self.choice_variant_shells_by_path.clone()),
-            declaration_semantics: Rc::new(self.declaration_semantics.clone()),
-            receiver_methods: Rc::new(self.receiver_methods.clone()),
-            trait_environment: Rc::new(self.trait_environment.clone()),
+            resolved_type_aliases_by_path: Rc::clone(&self.resolved_type_aliases_by_path),
+            choice_variant_shells_by_path: Rc::clone(&self.choice_variant_shells_by_path),
+            declaration_semantics: Rc::clone(&self.declaration_semantics),
+            receiver_methods: Rc::clone(&self.receiver_methods),
+            trait_environment: Rc::clone(&self.trait_environment),
             trait_evidence_environment: Rc::new(self.trait_evidence_environment.clone()),
-            generic_declarations_by_path: Rc::new(self.generic_declarations_by_path.clone()),
-            nominal_type_ids_by_path: Rc::new(self.nominal_type_ids_by_path.clone()),
-            source_nominal_paths: Rc::new(self.source_nominal_paths.clone()),
+            generic_declarations_by_path: Rc::clone(&self.generic_declarations_by_path),
+            nominal_type_ids_by_path: Rc::clone(&self.nominal_type_ids_by_path),
+            source_nominal_paths: Rc::clone(&self.source_nominal_paths),
             external_package_registry: Arc::clone(&self.external_package_registry),
             style_directives: self.style_directives.clone(),
             build_profile: self.build_profile,

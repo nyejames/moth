@@ -18,8 +18,7 @@ use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBodyValidationInput, GenericFunctionInstance, GenericFunctionInstanceKey,
     GenericFunctionInstantiationRequest, GenericInstantiationDiagnosticContext,
-    concrete_argument_mapping, recursive_generic_function_instantiation,
-    substitute_function_signature,
+    recursive_generic_function_instantiation, substitute_function_signature,
     validate_generic_function_body as validate_generic_body_template,
     with_generic_instantiation_context,
 };
@@ -746,10 +745,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .map_err(|error| self.error_messages(error, string_table))?;
         let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
-        let Some(mapping) = concrete_argument_mapping(
+        let Some(mapping) = self.environment.type_environment.build_parameter_mapping(
             template.generic_parameter_list_id,
             request.key.type_arguments.as_ref(),
-            &self.environment.type_environment,
         ) else {
             return Err(self.error_messages(
                 CompilerError::compiler_error(

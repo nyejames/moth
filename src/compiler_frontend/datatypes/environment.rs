@@ -391,7 +391,7 @@ impl TypeEnvironment {
         self.base.as_ref().map_or(0, |base| base.type_count())
     }
 
-    fn type_count(&self) -> usize {
+    pub(crate) fn type_count(&self) -> usize {
         self.inherited_type_count() + self.types.len()
     }
 
@@ -645,7 +645,9 @@ impl TypeEnvironment {
     // -----------------
 
     /// Builds a mapping from generic parameter IDs to concrete argument TypeIds.
-    fn build_parameter_mapping(
+    ///
+    /// Returns `None` when the parameter list is unknown or the argument count differs.
+    pub(crate) fn build_parameter_mapping(
         &self,
         param_list_id: GenericParameterListId,
         arguments: &[TypeId],
@@ -1014,10 +1016,7 @@ impl TypeEnvironment {
         base: NominalTypeId,
         arguments: Box<[TypeId]>,
     ) -> TypeId {
-        let key = GenericInstanceKey {
-            base,
-            arguments: arguments.clone(),
-        };
+        let key = GenericInstanceKey { base, arguments };
 
         if let Some(existing) = self.generic_instance_ids.get(&key).copied().or_else(|| {
             self.base
@@ -1027,18 +1026,18 @@ impl TypeEnvironment {
             return existing;
         }
 
+        // Register the definition and key before population: substituted members may
+        // re-enter with this same key (self-referencing nominals) and must hit.
         let id =
             self.insert_definition(TypeDefinition::GenericInstance(GenericInstanceDefinition {
                 base,
-                arguments,
+                arguments: key.arguments.clone(),
             }));
-
         self.generic_instance_ids.insert(key.clone(), id);
 
         // Eagerly compute substituted fields/variants so that later queries
         // can use &self only.
-        let arguments_slice: &[TypeId] = &key.arguments;
-        self.populate_generic_instance_substitutions(id, base, arguments_slice);
+        self.populate_generic_instance_substitutions(id, base, &key.arguments);
 
         id
     }

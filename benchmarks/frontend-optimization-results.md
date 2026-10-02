@@ -3909,3 +3909,357 @@ clean, warning, generic-heavy, diagnosed and early-malformed cases:
 
 Raw per-process output remains local-only under `/tmp/moth-r5-independent/`; allocator values
 remain baseline-relative proxies and are not substituted for owner attribution.
+
+## Performance and ownership checkpoint: activation (2026-10-01)
+
+Activation `A = 1ad94ef7edad379786552378ef392a40f91cd2c3` anchors the isolated
+`compiler-performance-ownership` branch and a separate unchanged baseline worktree.
+CLI measurements use each worktree's `target/release/moth`, built with
+`cargo build --release --features timers`. Frontend and scaling measurements
+use that worktree's `target/debug/xtask`, which links the timers-enabled Moth
+library under Cargo's dev profile and calls the frontend API with the Dev build
+profile. Cargo dev uses optimisation level 0 with optimisation level 3 for
+non-workspace dependencies. Both suite kinds use timing schema 2 and an unset
+`RAYON_NUM_THREADS`. Rust `1.98.1`, Node `26.10.0`
+and the existing macOS Apple Silicon host supply the execution controls. A temporary
+probe linked to the compiler's Rayon artefact observed ten host-default workers.
+The single-file preparation scheduler selects its serial path for these stress inputs.
+
+`just validate`, `just bench-report`, `just bench-check`, `just bench-frontend-check`
+and `just bench-scaling` all exited 0 at activation. The read-only screens exercised
+40 CLI cases, 42 frontend cases and all 11 scaling cases. CLI/frontend use one
+preflight warmup and ten measured iterations, while scaling uses five measured
+iterations. One scaling invocation fitted nominal `n^0.95`, constant `n^0.75`
+and generic `n^1.41`. These observations neither establish a five-pair comparison
+nor retire the previously accepted generic exception. Existing budgets stay unchanged.
+
+The stored CLI comparison spans `4fe75d0c` (2026-09-20) to `b8365bb3` (2026-10-01).
+Its fingerprints match for 28 cases and exclude 12 changed workloads. The local
+historical regression table ranks positive median deltas by absolute increase
+and keeps comparable improvements and changed workloads in separate inventories. The largest
+comparable increase, `collection_stress_check`, moved from 15.791 to 60.424 ms
+(+44.632 ms, +282.63%), with within-run standard deviations of 0.157 and 0.974 ms.
+Frontend semantic work accounts for 42.825 ms of that movement. Historical
+toolchain and effective worker counts were not recorded, so this comparison
+establishes a timing observation rather than a cause. Current docs inputs differ
+from the historical snapshot and support absolute-cost attribution only.
+
+Samply and its presymbolication retry failed with raw addresses despite matching
+dSYM UUIDs. Those profiles supply no function attribution. macOS `sample` captured
+late generic and docs stacks and a slower debug collection run. Separate detailed
+collection observations placed 20.522 ms in initial borrow analysis and 20.260 ms
+in convergence borrow analysis, against 44.803 ms of module semantic work.
+The debug stacks agree with that owner, but their sample fractions and timings
+are not release acceptance evidence. The docs sample points to template/TIR work,
+which remains with its existing owner rather than this checkpoint.
+
+Source history confirms that F1 map copies, F2 candidate copying, F3 borrowed
+folding refusals and both F4 mechanisms predate numerics. F5 expanded from the
+earlier static evidence table during numeric implementation. The generated
+type-environment fork shares the root snapshot and copies its preparation overlay
+per instance, rather than copying the full root for every request. Later slices
+must qualify each correction independently and preserve required validation.
+
+Raw controls, per-case history, source provenance, profiles and the F1-F5 ledger
+remain under `benchmarks/local-data/performance-ownership-checkpoint/`.
+
+## Performance and ownership checkpoint: generated ownership (2026-10-01)
+
+Slice 1 retains ten completed lookup tables through their existing `Rc` owners in
+the preparation and preparing sidecars. The generated type-environment fork keeps
+their local type identities compatible. Published materialisation still rebuilds
+consumer-local identities. Templates, evidence and imported executable contracts
+keep independent request-local ownership. Trait identity registration may copy
+its snapshot once during module preparation, rather than once per instance.
+
+The same slice borrows emitted signatures and fields for public-default joins,
+removes the discarded receiver-catalog copy and its secondary-index rewrites, and
+moves the finalizer's sole-owned builtin nodes after preparation captures its
+required snapshot. Private generic receiver defaults still pass the existing
+normalizer through temporary signatures, even when no call or public root uses
+them. The independent review caught that diagnostic effect before acceptance.
+The regression case now asserts `MOTH-SYNTAX-0022`, the escaped-helper reason and
+the authored default at line 5, column 52.
+
+Requester-prefix comparisons remain unchanged. The preparation and rebased
+requester boundaries haven't established a cheaper invariant for every caller.
+Coverage now includes valid extension, empty and truncated tables, and an
+equal-length table with different spellings. Constant reconstruction and the
+required independently owned vectors also remain unchanged.
+
+These changes qualify as Route S simplifications. One normal invocation per
+side and suite supplies the screening observations below, not five-pair gain
+acceptance. Every case matches its source and measurement fingerprints, runner
+and timing schema. The screens exercise 40 CLI, 42 frontend and 11 scaling cases,
+with no case more than 5% slower. Small positive deltas remain within the observed
+within-run variation and require the final repeated comparison.
+
+| Case and suite | A median / SD (ms) | C median / SD (ms) | Median movement |
+| --- | ---: | ---: | ---: |
+| Generic 160, CLI check | 154.639 / 2.084 | 136.339 / 2.409 | -11.83% |
+| Generic 160, frontend | 688.942 / 6.400 | 610.361 / 5.353 | -11.41% |
+| Generic 160, scaling | 685.909 / 6.206 | 607.890 / 6.001 | -11.37% |
+| Collection, CLI check | 50.618 / 2.556 | 50.523 / 2.873 | -0.19% |
+| Docs, CLI check | 199.692 / 3.737 | 193.536 / 1.033 | -3.08% |
+| Docs, frontend | 1284.003 / 10.434 | 1276.070 / 4.696 | -0.62% |
+
+The candidate scaling invocation fits nominal `n^0.96`, constant `n^0.77` and
+generic `n^1.36`, all within unchanged budgets. This screen doesn't retire the
+historical generic exception. Three alternating process pairs with one warmup
+per side measure neutral whole-process peak RSS: generic 160 medians
+261.188 MiB (A) and 261.156 MiB (C), and collection medians 25.391 MiB and
+25.375 MiB. Both release-timers binaries run with timing output disabled for
+that RSS measurement. These figures don't measure retained table bytes or
+cumulative allocation traffic.
+
+The ownership assertion fails on A and passes on C. Existing and strengthened
+tests cover concrete fields, signatures and evidence, local mutation isolation,
+nested identity/resource/span domains, failed transaction discard, prefix/rebase
+rejection and retained consumers after drops. `just validate` exits 0 with
+workspace tests `5631 + 17 + 44 + 846 + 1`, integration `2230/2230`, clean source,
+dependency and feature-coverage checks, and docs with no errors or warnings.
+The release compiler also executes the strengthened sibling-field runtime case,
+passes the new private-default diagnostic case and preserves acceptance of valid
+private generic defaults.
+
+Independent ownership and focused normalization reviews leave no required
+finding. The final five-pair performance comparison and full merge-readiness
+gate remain pending. Raw screens, compiler hashes, RSS samples and regression
+evidence stay under `benchmarks/local-data/performance-ownership-checkpoint/`.
+
+## Performance and ownership checkpoint: static-if retention (2026-10-01)
+
+Slice 2 retains the current authored/selected AST transaction. The unconditional
+candidate copy is present, including when no branch is selected. Normalising the
+authored tree before selecting it in place doesn't establish the same metadata
+boundary: reactive return collection seeds existing signature facts and unions
+both authored branches into them. Re-propagation on the selected tree seeds that
+union again rather than clearing inactive facts. The current candidate starts
+before authored annotation and retains its own exact template view contexts.
+No safe direct ownership replacement was established. Another discovery scan,
+retained decisions or metadata-reset protocol would need Route P evidence.
+
+A temporary release-timers probe separates candidate cloning, specialisation and
+disposal, with ordinary timer reporting disabled. One warmup and three invocations
+per workload give the following medians of cumulative candidate work:
+
+| Workload | Candidate calls / selected | Clone (ms) | Specialise (ms) | Candidate disposal (ms) | Authored disposal (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Runtime-only value if | 4 / 0 | 0.010417 | 0.006082 | 0.003209 | 0 |
+| Five static selections | 4 / 1 | 0.010625 | 0.006832 | 0.002126 | 0.001667 |
+| Collection | 1 / 0 | 0.061584 | 0.012500 | 0.013083 | 0 |
+| Generic 160 | 801 / 0 | 1.071289 | 0.134022 | 0.263664 | 0 |
+| Docs | 82 / 0 | 0.028664 | 0.043289 | 0.010002 | 0 |
+
+True and false source-config cases each produce one selection. Constant scope
+clones share the module `Rc` base and copy only local overlays: collection copies
+seven local rows across 102 scope clones, while generic 160 copies zero rows
+across 2,084 clones and docs zero across 170. The separate in-place generic-template
+specialisation isn't included in these candidate logs.
+
+These are attribution measurements, not uninstrumented performance acceptance,
+command wall-time fractions or retained-byte measurements. Three alternating
+unprobed/disabled/enabled probe triplets show enabled median changes of +9.44%
+for generic 160, +3.76% for docs and +5.84% for collection. The noisy 79.5145 ms
+collection observation remains recorded. Disabled probes still execute timestamp
+and state overhead. No speedup or negligible-cost claim follows from this probe.
+
+All seven direct workload checks succeed. The probed release compiler executes
+the selected `static_if_constant_bool_branch_selection` and runtime-only
+`value_if_assignment_rhs` output contracts, each with exit 0. Independent review
+accepts the retention rationale and evidence scope. Existing coverage limitations
+remain unchanged, including direct inactive-TIR and mid-selection failure
+injection through the full finalizer. No permanent compiler change or new test is
+retained. Raw observations, overhead controls and the temporary patch are under
+`benchmarks/local-data/performance-ownership-checkpoint/`.
+
+The probe is removed from the compiler sources. The unchanged parent release
+compiler builds the documentation with exit 0 and 77 output files. That required
+build refreshes the generated style-guide page's stale four-thread Rayon wording
+to match the already-current source policy: Rayon uses its host-selected default
+unless the caller sets `RAYON_NUM_THREADS`. This checkpoint changes no thread
+configuration or source policy.
+
+## Performance and ownership checkpoint: folding candidate rejected (2026-10-01)
+
+Slice 3 confirms that the single-item evaluator owns its operand but borrows it
+into the folder. No-op and refused casts copy the original payload. The candidate
+consumed that operand and returned refusals by move. One borrowed speculative
+core preserved outer-refusal subtrees, source-first diagnostics and string-table
+effects without a backup clone. Owned handled roots moved their payload through
+the existing wrapper normalisation.
+
+Seven temporary regression guards cover payload identity, nested refusal,
+diagnostic ordering, interning effects, optional recovery and handled metadata.
+Against the unchanged parent, four semantic guards pass and three ownership
+guards fail. The candidate passes all seven, routine validation with
+`5638 + 17 + 44 + 846 + 1` workspace tests and `2230/2230` integration cases,
+and seven rebuilt-release compiler/runtime scenarios. Independent semantic,
+ownership and focused dispatch reviews leave no required correctness finding.
+
+The first fresh paired comparison exposed several small repeatable slowdowns.
+Returning ordinary operands directly instead of entering speculative traversal
+removed most of that movement. Two further independent five-pair batches still
+show constant-chain-512 frontend slower in every pair:
+
+| Batch | P median (ms) | C median (ms) | Delta (ms) | Movement | P max-minus-min (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Corrected candidate | 23.099625 | 23.229063 | +0.129439 | +0.560% | 0.070896 |
+| Fresh confirmation | 23.071229 | 23.194500 | +0.123272 | +0.534% | 0.116917 |
+
+Each batch runs the complete 11 scaling, 42 frontend and 40 CLI cases through
+the supported non-recording commands, with alternating P/C order, unchanged
+inputs and host-default Rayon configuration. All commands exit 0 and all source,
+measurement, schema and runner identities match. CLI controls show mixed or
+neutral movement. A smaller repeatable regression still blocks Route S.
+
+Static arm64 inspection shows two 256-byte copies on the candidate's ordinary
+no-op path, compared with `Expression::to_owned` and one 256-byte copy in P.
+This doesn't measure clone cost or prove the cause of the elapsed-time change.
+A whole-value matching experiment leaves both no-op copies and adds another
+256-byte cast-input copy, so it was discarded before acceptance measurements.
+
+The owned-folding candidate and its temporary tests are rejected. The accepted
+borrowed implementation remains unchanged rather than retaining a regressing
+cleanup or adding a new ownership protocol. F3 finishes as `not justified`, with
+no performance gain claimed. Raw paired observations, binary/source identities
+and the rejected patch remain under
+`benchmarks/local-data/performance-ownership-checkpoint/`.
+
+Fresh independent rejection review confirms the complete three-file rollback and
+the measurement claims. The unchanged accepted parent compiler builds docs with
+exit 0 and 77 outputs. No new permanent compiler change or test ships in this
+slice. Final integrated performance and merge-readiness gates remain pending.
+
+## Performance and ownership checkpoint: generic-instance lookup key (2026-10-02)
+
+Slice 4a moves the owned argument list straight into `GenericInstanceKey`, so a
+local or inherited hit in `TypeEnvironment::intern_generic_instance` returns
+without copying. A miss still makes the two copies its definition and interning
+key need, and registration still precedes member population. A temporary probe
+counted 280, 560, 1,120 and 2,240 hit-path copies removed on generic scaling
+20 to 160, with miss copies unchanged. New environment tests cover local and
+inherited hits, distinct misses, two-argument order, distinct bases, recursive
+shells and generated-fork isolation.
+
+A first candidate also routed constructed, function and external interning
+through the recursive lookup helpers. It made `collection_stress_frontend`
++2.47% slower in all five pairs although that workload interns no generic
+instance, so it was removed. The retained change has no parent-envelope
+exceedance across scaling and frontend suites. Three flagged CLI cases perform
+zero generic interns, and a five-pair CLI confirmation has no exceedance. F4a
+ships as a neutral Route S simplification with no speedup claimed.
+
+## Performance and ownership checkpoint: substitution keys not justified (2026-10-02)
+
+Slice 4b measured `TypeSubstitutionKey` normalisation before changing it. Generic
+scaling 20, 40, 80 and 160 build 360, 720, 1,440 and 2,880 keys, carrying up to
+3,840 sorted pairs. The other counted workloads build none. An amplified probe
+(99 extra build-and-lookup operations per real one, 15 alternating runs per size)
+puts each at 39 to 56 ns, which is 0.020 to 0.125 ms per check or at most 0.19%
+of check time. That is below every parent repeatability envelope. Retained cache
+entries peak at 1,280 in one environment. Generated forks deep-copy the cache
+into their inherited snapshot.
+
+Reusing one prepared mapping across a same-mapping batch would need a second key
+form and borrowed lookup, so it is neither simpler nor measurably faster. F4b is
+`not justified` and the substitution code is unchanged. An adjacent duplicate
+was removed instead: `concrete_argument_mapping` copied
+`TypeEnvironment::build_parameter_mapping` exactly, and its three callers now use
+the environment method.
+
+## Performance and ownership checkpoint: cast-evidence registration (2026-10-02)
+
+Slice 5 first replaced the registration test that derived its expectation from
+the iterator under test. The new test enumerates every bounded builtin source,
+including `Error` and all fixed scalars, against every core cast trait. It
+expects a fact exactly when `lookup_builtin_evidence` proves the trait's target
+with its fallibility, compares exact facts under all four numeric profiles, and
+pins `I64 -> Int` and `F64 -> Float` as hard-coded profile anchors. Omitting one
+required row or duplicating one makes it fail. Two further tests keep missing
+core traits and a missing `Error` source as registration failures.
+
+Registration now builds only rows with a source-authorable trait target: 47 per
+profile instead of constructing and discarding fixed-target rows. Retained rows
+keep their order and evidence IDs. One catalogue scan,
+`core_cast_trait_for_target_and_fallibility`, now serves registration and cast
+resolution. Two five-pair batches against the parent, in opposite pair orders,
+show no envelope exceedance across 93 cases. Their batch-wide direction follows
+pair order (median -0.31% and -0.04%). Two rows slower in both batches,
+`nominal_scaling_80_frontend` (+0.75%, +0.86%) and `nominal_scaling_160_frontend`
+(+0.30%, +0.31%), stay within their envelopes on paths that now do equal or less
+work.
+F5 ships as a neutral Route S simplification. Five convergence counters with no
+recording site were deleted in the same screen.
+
+## Performance and ownership checkpoint: collection attribution (2026-10-02)
+
+Borrow validation is about 85% of instrumented `collection_stress_check` time,
+split almost evenly between `frontend.borrow.initial` and
+`frontend.borrow.converge` (about 20 ms each, warm). The fixture has no generated
+callees, so convergence installs no summaries. A temporary probe confirmed that
+all three HIR summary maps are unchanged before the convergence base pass and
+that its public summaries equal the bootstrap report. `borrow-stress` behaves the
+same. Generic scaling installs generated summaries, so its recheck has new inputs.
+
+The current dominant owner is therefore the unconditional base recheck in
+`run_generated_summary_convergence` for modules without generated callees.
+Skipping it is a borrow-pass elision, which needs its own decision covering HIR
+identity between passes, second-pass warnings, report publication, frozen
+identity handling and failure paths. It is deferred outside this checkpoint. The
+historical 15.791 to 60.424 ms movement has unknown toolchain and worker
+controls, so this mechanism is not claimed as its cause.
+
+## Performance and ownership checkpoint: integrated closeout (2026-10-02)
+
+The final tree `6c46024bd` was compared with activation A over five alternating
+whole-invocation pairs of the scaling, frontend and CLI suites (11, 42 and 40
+cases). Both sides use Rust `1.98.1`, `--features timers` release CLI binaries,
+dev-profile `xtask` frontend runners, native iteration counts and an unset
+`RAYON_NUM_THREADS`. Every case set, workload fingerprint and binary identity
+matches. One candidate scaling invocation was aborted by the tracked-file guard
+during a documentation edit, so the whole pair was rerun.
+
+Generic instantiation is the accepted improvement, faster in every pair at sizes
+80 and 160:
+
+| Case | A median (ms) | Final median (ms) | Movement | A envelope (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Generic 80, CLI check | 58.872 | 54.626 | -7.21% | 1.485 |
+| Generic 160, CLI check | 160.147 | 149.431 | -6.69% | 4.874 |
+| Generic 160, frontend | 680.369 | 631.779 | -7.14% | 51.878 |
+| Generic 160, scaling | 684.157 | 633.687 | -7.38% | 34.985 |
+
+The generic scaling fit is `n^1.39` to `n^1.40` on A and `n^1.34` to `n^1.38` on
+the final tree. Nominal fits stay between `n^0.95` and `n^0.98`
+and constant fits between `n^0.75` and `n^0.84` on both sides. Every fit stays
+within its existing budget.
+Scaling and frontend have no envelope exceedance. Their suite medians move +0.27%
+and -0.05%.
+
+This batch also flagged five CLI rows above A's envelope: `docs_check` +3.99%,
+`collection_stress_check` +3.14%, `constant_chain_32_check` +13.07%,
+`constant_chain_128_check` +10.28% and `deep_scope_churn_check` +6.62%. A
+follow-up ran six CLI rounds with A, P and the final binaries, each order
+appearing once. It reproduced none of them. The A-to-final suite median is
+-0.24% with no exceedance. The same five rows move -1.41%, +0.60%, +1.79%, +1.72%
+and -1.39%. The A-to-P and P-to-final medians are -0.41% and +0.17%. The single
+P-to-final flag, `module_graph_build` +3.21%, exceeds no envelope in any earlier
+screen.
+`--version` medians differ by less than 0.05 ms, so fixed startup cost doesn't
+explain the flags. They are recorded as a non-reproduced regression with no
+established cause. The balanced repeat doesn't support a compiler regression.
+
+Final dispositions: the generic improvement first appears with F1's shared
+completed lookups and removed finalizer copies. F2 static-if retention and F3
+owned folding leave production code unchanged. F4a, the F4b cleanup and F5 ship
+as neutral Route S simplifications. The F4b normalisation change is not
+justified. Collection borrow-pass elision stays deferred, and the historical
+collection regression has no established cause. Paired observations, the
+attribution rotation and binary identities are under
+`benchmarks/local-data/performance-ownership-checkpoint/` with the `closeout-`
+prefix.
+
+`just validate-full` exits 0 on the completion tree. It runs workspace tests
+`5636 + 17 + 44 + 846 + 1`, eight feature lanes, integration `2230/2230`, docs
+with no errors or warnings, and all three scaling series within budget.
