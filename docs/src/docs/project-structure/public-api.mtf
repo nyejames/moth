@@ -92,6 +92,19 @@ the `export:` block.
 - Private declarations in the module root file are not available to other modules.
 - A module root with no `export:` block exports nothing.
 
+### Closed exported error contracts
+
+Private functions without an error slot may infer and propagate implicit
+numeric failure within the same module, without postfix `!` at each internal
+call. Exported callables without an error slot must discharge that failure or
+receive a compiler diagnostic. Built-in `Error!` materialises it; a custom
+`E!` requires local recovery or explicit mapping. Traits and generic conformance
+cannot secretly widen an exported signature.
+
+This applies to public receiver methods as well as exported functions. See
+@../functions/#returns-and-multiple-values (Returns and multiple values) and
+@../progress (Progress) for the contract and current compiler support.
+
 ### Future migration
 
 The accepted `$export` direction belongs to the general directive family, but

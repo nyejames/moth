@@ -53,6 +53,12 @@ The `as` alias inside an export-block re-export defines the public API name. The
 
 Any bindable declaration can be re-exported: functions, structs, choices, type aliases, traits and compile-time constants.
 
+Re-exporting a callable exposes its closed error contract. A private callable
+without an error slot cannot leak inferred numeric failure through a re-export;
+it must discharge that failure or declare a compatible error slot. The same
+rule applies to package facades and exposed receiver methods. See
+@../project-structure/#public-api (Public API) and @../progress (Progress).
+
 ### Re-export does not make a local alias automatically public
 
 A private `@path Symbol as LocalName` clause outside the export block creates a file-local alias. It does not become public. Only a dependency clause inside the `export:` block creates a public re-export.

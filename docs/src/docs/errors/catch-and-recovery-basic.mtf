@@ -22,3 +22,22 @@ A short fallback can stay on one line:
 ]
 
 Use `then` to provide the value expected by the surrounding assignment.
+
+### Recovering a complete expression
+
+The accepted contract also lets `catch` handle checked numeric failure:
+
+[codeblock, $code("moth"):
+    value = left * right + offset catch then 0
+    amount = load_amount(left * right) catch then 0
+]
+
+The first handler covers both operators. The second covers argument evaluation
+and the call when `load_amount` returns `Error!`. Parentheses around the whole
+protected expression are not required. See @../progress (Progress) for current
+compiler support.
+
+Implicit failure and built-in `Error!` may share one handler. A bound `err` has
+type `Error`, and an existing typed error keeps its message, code and identity.
+A custom error cannot share that handler with implicit failure. Split the work
+or map it explicitly instead.

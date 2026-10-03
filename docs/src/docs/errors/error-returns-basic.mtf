@@ -1,4 +1,4 @@
-A function that can fail adds one final return marked with `!`.
+A function with an explicit typed error path adds one final return marked with `!`.
 
 [codeblock, $code("moth"):
     parse_number |text String| -> Int, Error!:
@@ -15,3 +15,11 @@ Normal `return` sends success values.
 `return!` sends one error value.
 
 The caller must handle that error by propagating it or catching it.
+
+Checked numeric work has a separate implicit built-in failure path. Under the
+accepted contract, `Error!` materialises that failure for callers. A custom error
+slot needs local recovery or explicit mapping with `catch` and `return!`.
+
+Private functions without an error slot may propagate implicit failure inside
+their module. Exported callables must declare `Error!` or handle that failure
+locally. See @../progress (Progress) for current compiler support.

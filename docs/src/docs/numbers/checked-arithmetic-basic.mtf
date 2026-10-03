@@ -17,10 +17,24 @@ error path:
     ;
 ]
 
-Outside that kind of function, an unexpected runtime numeric failure stops the
-current program path.
+Checked numeric failure is implicit built-in failure, not wrapping or an implicit
+panic. A private function without an error slot can pass it through internal calls
+in the same module without postfix `!`. A custom error return needs local recovery
+or explicit mapping. An exported function without an error slot must handle it.
+Entry code runs through `start` with `Error!`.
 
-A failure the compiler can prove in advance is reported during compilation.
+Use `catch` to recover the complete selected expression, including arithmetic
+and failures inside call arguments or cast operands:
+
+[codeblock, $code("moth"):
+    total = left * right + offset catch then 0
+]
+
+The handler can also receive builtin `Error!` from calls in that expression.
+See @../errors/#catch-and-recovery (Catch and recovery) for placement rules.
+
+A failure the compiler can prove in advance is reported during compilation,
+even inside `Error!` or an expression with `catch`.
 
 Each operation checks its own result type rather than the storage width of its
 operands. Fixed-width arithmetic typing and numeric constant folding are

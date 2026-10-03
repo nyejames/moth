@@ -27,6 +27,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     The compiler and memory design references may describe accepted end-state architecture that
     has not fully landed. This matrix determines what the compiler supports today.
 
+    The accepted implicit-failure and entry [$html:<code>Error!</code>] contract is not yet implemented.
+    Numeric failure modes and entry execution below describe current lowering, not the accepted target.
+    The separate gaps appear under Accepted deferred and incomplete surfaces.
+
     Use this together with `tests/cases/manifest.toml` when changing language features.
 
     ## How to read and edit this page
@@ -725,6 +729,34 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
     [styled_table:
         [header: [: Surface] [: Status] [: Coverage / diagnostic direction] [: Notes] ]
+
+        [data:
+            [: Expression-wide catch and private implicit propagation]
+            [: Deferred]
+            [: Not implemented.]
+            [: Accepted checked numeric failure follows the enclosing handler or function contract. Catch covers the complete selected expression. Private functions with no error slot infer and propagate implicit failure within the same module without postfix [$html:<code>!</code>] at each internal call.]
+        ]
+
+        [data:
+            [: Export and custom-error discharge diagnostics]
+            [: Deferred]
+            [: Not implemented.]
+            [: Accepted exported callables with no error slot must discharge implicit failure or receive a compiler diagnostic. Custom [$html:<code>E!</code>] contracts require local recovery or explicit mapping instead of an implicit adapter.]
+        ]
+
+        [data:
+            [: Start Error! and success-only HTML fragment publication]
+            [: Deferred]
+            [: Not implemented.]
+            [: Accepted [$html:<code>start</code>] has builtin [$html:<code>Error!</code>]. HTML publishes an invocation's runtime fragments only after success. Static HTML stays, and release failure uses a generic safe notice rather than the application Error message as HTML.]
+        ]
+
+        [data:
+            [: Dev entry-error reporting]
+            [: Deferred]
+            [: Not implemented.]
+            [: Accepted dev reporting shows a prominent hot-reload-preserving entry-error view, reports it in the browser and server terminal, and keeps three distinct categories without changing global build success. Not implemented.]
+        ]
 
         [data:
             [: Post-TIR template performance follow-ups]

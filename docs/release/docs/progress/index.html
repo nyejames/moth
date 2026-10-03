@@ -427,7 +427,7 @@ td {
     </div>
 </nav>
  <h1 style="font-size: 2em;text-align: center;"> PROGRESS MATRIX</h1>
-<section class="container"><p>This page tracks current implementation and target status for Moth&#39;s accepted core language, compiler, build-system and backend design. Package APIs and project-builder-specific behaviour are tracked separately in <a href="./packages-and-builders">Packages and Builders Progress</a>.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Permanent language exclusions live in <a href="../design-scope">Design scope</a>.</p><p>Invalid-form diagnostic coverage may appear inside the row for the intended feature. This page is not a full language reference, roadmap, exclusion inventory or test manifest.</p><p>The compiler and memory design references may describe accepted end-state architecture that has not fully landed. This matrix determines what the compiler supports today.</p><p>Use this together with <code>tests/cases/manifest.toml</code> when changing language features.</p><h2>How to read and edit this page</h2><ul><li>Keep rows focused on current compiler, core build-system and backend behavior.</li><li>Put package and project-builder status in <a href="./packages-and-builders">Packages and Builders Progress</a>.</li><li>Put user-facing explanations and examples in docs pages under <code>docs/src/docs/**</code>.</li><li>Put implementation sequencing, active project plans and proposals that have not been accepted as design in <code>docs/roadmap/roadmap.md</code>.</li><li>Put accepted end-state architecture in the relevant compiler, memory or language design reference even when the implementation is incomplete.</li><li>Put compiler architecture and stage ownership in <code>docs/compiler-design-overview.md</code>.</li><li>Put contributor workflow, benchmarking and tooling details in <code>CONTRIBUTING.md</code>.</li><li>Prefer short coverage summaries over long fixture lists unless fixture names identify a fragile surface.</li><li>Use the status labels from this page&#39;s legend. Put nuance such as removed, reserved, not Alpha or backend-specific in the notes column instead of inventing new status labels.</li></ul><h2>Alpha target</h2><p>The supported Alpha target is:</p><ul><li>frontend parsing and diagnostics</li><li>typed AST construction</li><li>HIR lowering</li><li>borrow validation</li><li>JavaScript backend</li><li>HTML project builder</li><li>docs-style static site generation</li></ul></section>
+<section class="container"><p>This page tracks current implementation and target status for Moth&#39;s accepted core language, compiler, build-system and backend design. Package APIs and project-builder-specific behaviour are tracked separately in <a href="./packages-and-builders">Packages and Builders Progress</a>.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Permanent language exclusions live in <a href="../design-scope">Design scope</a>.</p><p>Invalid-form diagnostic coverage may appear inside the row for the intended feature. This page is not a full language reference, roadmap, exclusion inventory or test manifest.</p><p>The compiler and memory design references may describe accepted end-state architecture that has not fully landed. This matrix determines what the compiler supports today.</p><p>The accepted implicit-failure and entry <code>Error!</code> contract is not yet implemented. Numeric failure modes and entry execution below describe current lowering, not the accepted target. The separate gaps appear under Accepted deferred and incomplete surfaces.</p><p>Use this together with <code>tests/cases/manifest.toml</code> when changing language features.</p><h2>How to read and edit this page</h2><ul><li>Keep rows focused on current compiler, core build-system and backend behavior.</li><li>Put package and project-builder status in <a href="./packages-and-builders">Packages and Builders Progress</a>.</li><li>Put user-facing explanations and examples in docs pages under <code>docs/src/docs/**</code>.</li><li>Put implementation sequencing, active project plans and proposals that have not been accepted as design in <code>docs/roadmap/roadmap.md</code>.</li><li>Put accepted end-state architecture in the relevant compiler, memory or language design reference even when the implementation is incomplete.</li><li>Put compiler architecture and stage ownership in <code>docs/compiler-design-overview.md</code>.</li><li>Put contributor workflow, benchmarking and tooling details in <code>CONTRIBUTING.md</code>.</li><li>Prefer short coverage summaries over long fixture lists unless fixture names identify a fragile surface.</li><li>Use the status labels from this page&#39;s legend. Put nuance such as removed, reserved, not Alpha or backend-specific in the notes column instead of inventing new status labels.</li></ul><h2>Alpha target</h2><p>The supported Alpha target is:</p><ul><li>frontend parsing and diagnostics</li><li>typed AST construction</li><li>HIR lowering</li><li>borrow validation</li><li>JavaScript backend</li><li>HTML project builder</li><li>docs-style static site generation</li></ul></section>
 <section class="container"><h2>Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
@@ -555,7 +555,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Default arguments and field defaults</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad function parameter default, struct field default, named-call default skipping, constructor default skipping and diagnostics coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad function parameter and struct field default coverage, including declared-type preservation, omission versus explicit optional overrides, profile-aware coercion, named and constructor default skipping and diagnostics.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML</td>
  <td style="padding: 0.1em 0.5em; "> Function parameters and struct fields can define defaults with <code>=</code>.</td>
         </tr>
@@ -613,7 +613,7 @@ td {
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Broad frontend, HIR, borrow, JS, backend-validation, diagnostics and integration coverage, including fixed-width integer/Byte key eligibility, exact typed lookup, duplicate-key rejection and unsupported float-key diagnostics on HTML-JS.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML / backend validation for other targets</td>
- <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered maps with <code>{K = V}</code> types and <code>I*/U*/Byte</code> source keys, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS canonicalizes every String-like key to canonical content, including template-backed keys, and supports canonical same-typed lookup and duplicate rejection for these source keys. <code>F*/Float/Dec</code> source keys remain unsupported. Map runtime lowering is JavaScript-only; non-JS map lowering remains the primary target gap, with Wasm map lowering still target-rejected.</td>
+ <td style="padding: 0.1em 0.5em; "> V1 supports insertion-ordered maps with <code>{K = V}</code> types and <code>I*/U*/Byte</code> source keys, map literals, compiler-owned map members, borrow validation and JS runtime lowering. HTML-JS canonicalizes every String-like key to canonical content, including template-backed keys, and supports canonical same-typed lookup and duplicate rejection for these source keys. Source currently types an empty <code>{}</code> as a map from an explicit or immediate contextual map type. The accepted empty-map design uses <code>{=}</code> as the only empty map and keeps <code>{}</code> a collection; this design is not yet implemented. <code>F*/Float/Dec</code> source keys remain unsupported. Map runtime lowering is JavaScript-only; non-JS map lowering remains the primary target gap, with Wasm map lowering still target-rejected.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1102,14 +1102,14 @@ td {
              <td style="padding: 0.1em 0.5em; "> MON standalone Rust codec</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Public Int/Float round trips cover all four numeric profiles with integer range checks, binary rounding and profile-independent I64/F64 values. Broad public API, focused codec and bounded hardening coverage includes bit-exact F16 subnormal/normal edges, both zero signs, signed-zero default expansion, exact scale 0/1/256 ingress and defaults, and large Integer/Decimal public round trips. Error-shaped U32 schemas cover default zero, 2147483648 and 4294967295 under both Int widths, with field-located negative/oversized rejection in <code>crates/moth-mon/tests/public_api/numeric.rs</code>. The real-source <code>src/compiler_tests/mon_syntax_parity/</code> suite asserts expected typed values and rejection reasons before comparing parsers across all four profiles. Its executable gap table distinguishes intentional data/source differences from undelivered source capabilities.</td>
- <td style="padding: 0.1em 0.5em; "> The standalone <code>moth_mon</code> crate implements the Rust-only codec without a compiler dependency. The supported <code>moth::mon</code> convenience re-export exposes the same API and Rust types. Owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling are delivered. Numeric support includes fixed widths, <code>Byte</code>, profile-selected <code>Int</code>/<code>Float</code> via <code>Schema::with_profile</code> (defaulting to <code>Int32</code>/<code>Float64</code>), fixed-integer/<code>Byte</code> map keys and exact decimal scales through <code>256</code>. Shared <code>moth-lexical</code> identifier/reservation and numeric policies serve both parsers. MON now rejects reserved user names, including fixed numeric names and Dec-family reservations, and requires the label and <code>=</code> on the same logical line. This Rust availability supplies no Moth source/runtime codec operations.</td>
+ <td style="padding: 0.1em 0.5em; "> The standalone <code>moth_mon</code> crate implements the Rust-only codec without a compiler dependency. The supported <code>moth::mon</code> convenience re-export exposes the same API and Rust types. Owned values, immutable prepared schemas/defaults, strict field/choice/map routing, semantic round trips, deterministic first errors and bounded failure handling are delivered. Numeric support includes fixed widths, <code>Byte</code>, profile-selected <code>Int</code>/<code>Float</code> via <code>Schema::with_profile</code> (defaulting to <code>Int32</code>/<code>Float64</code>), fixed-integer/<code>Byte</code> map keys and exact decimal scales through <code>256</code>. Shared <code>moth-lexical</code> identifier/reservation and numeric policies serve both parsers. MON now rejects reserved user names, including fixed numeric names and Dec-family reservations, and requires the label and <code>=</code> on the same logical line with horizontal whitespace before and whitespace after. Non-empty map entries require trivia before and whitespace after <code>=</code>, matching source; the MON-only <code>{=}</code> spelling remains the empty-map exception. This Rust availability supplies no Moth source/runtime codec operations.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Moth-native MON integration</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
- <td style="padding: 0.1em 0.5em; "> Separate accepted follow-up for compiler-owned <code>$mon</code> convenience, schemas derived from ordinary Moth types, checked anonymous-record generation, source/runtime encode/decode operations and the static <code>.mon</code> asset builder. Exact directive and command syntax remains undecided. Source <code>{=}</code> empty maps, Unicode escapes and contextual <code>::Variant</code> construction remain undelivered despite their availability in MON data.</td>
+ <td style="padding: 0.1em 0.5em; "> Separate accepted follow-up for compiler-owned <code>$mon</code> convenience, schemas derived from ordinary Moth types, checked anonymous-record generation, source/runtime encode/decode operations and the static <code>.mon</code> asset builder. Exact directive and command syntax remains undecided. Unicode escapes and contextual <code>::Variant</code> construction remain undelivered despite their availability in MON data.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1138,6 +1138,34 @@ td {
 
 
                 
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Expression-wide catch and private implicit propagation</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted checked numeric failure follows the enclosing handler or function contract. Catch covers the complete selected expression. Private functions with no error slot infer and propagate implicit failure within the same module without postfix <code>!</code> at each internal call.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Export and custom-error discharge diagnostics</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted exported callables with no error slot must discharge implicit failure or receive a compiler diagnostic. Custom <code>E!</code> contracts require local recovery or explicit mapping instead of an implicit adapter.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Start Error! and success-only HTML fragment publication</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted <code>start</code> has builtin <code>Error!</code>. HTML publishes an invocation's runtime fragments only after success. Static HTML stays, and release failure uses a generic safe notice rather than the application Error message as HTML.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Dev entry-error reporting</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted dev reporting shows a prominent hot-reload-preserving entry-error view, reports it in the browser and server terminal, and keeps three distinct categories without changing global build success. Not implemented.</td>
+        </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Post-TIR template performance follow-ups</td>

@@ -46,7 +46,9 @@ Unary minus is invalid on every `U*` value, including a known zero. Convert to a
 signed type first. `Byte` takes part in no arithmetic at all.
 
 A compound assignment such as `+=` computes in the promoted type and then checks
-that the result fits the left-hand type.
+that the result fits the left-hand type. It writes only after both checks succeed.
+A `catch` on the right-hand expression does not catch these later update checks.
+See @./#checked-arithmetic (Checked arithmetic) for failure delivery.
 
 Fixed-width promotion, compatibility checks and numeric constant folding are
 implemented in the frontend/HIR. HTML-JS executes fixed-width, `Byte` and

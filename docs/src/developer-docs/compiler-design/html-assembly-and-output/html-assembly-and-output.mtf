@@ -88,7 +88,11 @@ Assembly plans route and document metadata, then builds a shell.
 
 **Compile-time fragments** insert at recorded indexes first. They are already strings. The greeting's static paragraph wants this path when everything folded.
 
-**Runtime path:** invoke `start` once for the activated root, then fill the runtime fragments in source order. Dynamic pieces fill reserved slots without scrambling author order.
+**Runtime path:** invoke `start` once for the activated root and branch on its typed outcome. Its built-in `Error!` channel sits alongside the fragment-collection success slots. Stage that invocation's runtime fragment results and publish them, in source order, only after success. On error, discard unpublished results and never read undefined success slots.
+
+Failure leaves the static HTML in place and does not undo earlier explicit IO, title changes or host calls. Staging is not a transaction over the DOM or application state. There is no automatic retry. Release shows a fixed safe notice as escaped text, not the application's `Error` message as HTML, and that notice does not depend on the failed application template. A wholly static page does not gain mandatory runtime code merely because `start` may return `Error!`.
+
+Development presentation stays local to the failing invocation. It does not fail the completed compilation, change global build success or affect other entries. The dev view reuses the compiler-error presentation, keeps hot reload, and reports in the browser and the server terminal. Three categories stay distinct: an explicit `start` `Error!` outcome, a compiler-identified assertion failure, and an unexpected fault that escaped the owned startup wrapper. Assertion identity is compiler-owned, never message-text matching. The report protocol, including same-origin validation, deduplication and the prohibition on global build-state poisoning, lives in `docs/build-system-design.md` > `Development entry-error reports`. The @../../../docs/progress (Progress matrix) records current support.
 
 The result is a document anatomy: HTML shell, paragraph text, script tags, runtime references and whatever the entry needs to boot.
 

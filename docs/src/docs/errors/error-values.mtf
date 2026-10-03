@@ -32,7 +32,19 @@ provides construction, propagation and field access. See @../progress (Progress)
 create a panic path and it is not a separate ordinary value type.
 
 Custom structs and other compatible types may also be used as explicit error
-slot types. The builtin `Error` type is the common language-owned surface and
-the only automatic target for checked numeric recovery.
+slot types. Under the accepted implicit-failure contract, built-in `Error!`
+materialises escaping checked failure. A custom `E!` slot requires local
+recovery or explicit mapping instead.
+
+A bound catch for implicit failure receives `Error`. When implicit failure and
+built-in `Error!` share a catch, an existing typed error keeps its message, code
+and identity rather than being replaced by a generic numeric failure.
+Returning `Error` with code `0` is still an error, not success. An unbound catch
+need not construct an observable `Error` for implicit failure.
+
+Transparent aliases preserve `Error`'s built-in identity. A wrapper or an
+unrelated custom type does not gain automatic conversion. See
+@./#catch-and-recovery (Catch and recovery) for compatibility rules and
+@../progress (Progress) for current compiler support.
 
 Casts between `String` and `Error` are documented by @../casts (Casts).

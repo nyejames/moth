@@ -134,7 +134,12 @@ narrow.
 
 - The place and the right operand are evaluated once.
 - The store happens only after the arithmetic and the conversion both succeed.
+- A catch on the right-hand expression handles that expression only. The later compound arithmetic and conversion back to the left-hand type can still fail through the enclosing handler or function contract.
 - `/=` on an integer operand uses the `/` result, so it converts the `Float` result back to the left-hand type through the specified float-to-integer conversion. Use `//=` for integer division.
+
+To recover the complete update locally, put it in a private helper and catch its
+call, or compute and check the replacement before assigning it. See
+@./#checked-arithmetic (Checked arithmetic).
 
 ### Precedence and associativity
 

@@ -11,5 +11,9 @@ rejected, and an `Int` variable needs an explicit conversion.
 Use the message to explain the failure. Use the code when a stable category is
 useful to callers or tools.
 
+Code `0` does not mean success when a function returns the value as an error.
+Under the accepted contract, a bound catch for implicit numeric failure also
+receives `Error`. Typed errors keep their original message and code when caught.
+
 The compiler and HTML-JS backend support this `U32` contract. HTML-Wasm still
 rejects reachable `Error` values. See @../progress (Progress) for backend support.

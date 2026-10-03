@@ -6,6 +6,10 @@ Top-level runtime code in a selected module root becomes a dormant `start`. It
 runs once when that module becomes a page entry. Helper files provide
 declarations and never own an entry or an independent start.
 
+`start` has built-in `Error!`. Checked numeric failure and compatible top-level
+postfix `!` can propagate to the generated terminal handler. Custom errors still
+need explicit recovery. See @../progress (Progress) for current compiler support.
+
 ### Purpose and comments
 
 An unmarked root with authored runtime work or direct output needs a purpose,
@@ -32,3 +36,9 @@ Direct top-level templates in the selected root remain fragments:
 The builder keeps static and runtime fragments in source order. Assigned or
 returned templates are ordinary values, and helpers cannot create page
 fragments by themselves.
+
+Runtime fragments publish only after that startup invocation succeeds. Failure
+leaves static HTML in place and publishes none of the invocation's runtime
+fragments; other side effects do not roll back. The generated terminal handler
+shows a generic safe release notice rather than the application's `Error`
+message as HTML. Development presentation belongs to the build/dev docs.

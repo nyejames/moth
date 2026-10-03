@@ -267,13 +267,21 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
     ]
 ]
 
-All functions keep infallible Moth signatures. A non-finite result still fails
+The functions declare no typed error slot. A non-finite result still fails
 at the shared external `Float` boundary before ordinary Moth code observes it.
-The enclosing numeric failure mode decides what happens next: a function with
-builtin `Error!` recovers through that error channel, while a non-fallible
-function, a custom fallible channel or entry-selected root runtime code traps.
+This is implicit built-in failure, delivered by the enclosing handler or
+function contract. Private functions without an error slot propagate it within
+the same module without postfix `!` at each internal call. `Error!` materialises
+it; a custom error slot requires local recovery or explicit mapping. Exported
+callables without an error slot must discharge it. Entry-selected root runtime
+uses the generated `start` function's built-in `Error!` contract.
 `NaN`, positive infinity and negative infinity never become valid Moth
-`Float` values.
+`Float` values. See @../../../progress (Progress) for current compiler support.
+
+Moth's finite-value check at this shared boundary produces implicit failure,
+including code 304 for a non-finite result. This does not add a recoverable
+adapter for a foreign implementation that throws unexpectedly or otherwise
+violates its declared value contract.
 
 ### Numerical contract
 
@@ -341,7 +349,7 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 
 ### Deferred surfaces
 
-Deferred math surfaces include integer math helpers, checked overflow modes, broader numeric tower support and non-JS lowerings. See @../../../progress (progress matrix) for current status.
+Deferred math surfaces include integer math helpers, broader numeric tower support and non-JS lowerings. Explicit wrapping remains an open design question, not an accepted numeric mode. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 

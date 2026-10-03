@@ -66,6 +66,19 @@ That slot must be last.
 `return!`, postfix propagation and `catch` are documented by
 @../errors (Errors, options and assertions).
 
+Checked numeric failure is implicit built-in failure, not an undeclared custom
+error slot. Private functions without an error slot infer and propagate it
+within the same module, without postfix `!` at each internal call. Built-in
+`Error!` materialises that failure. A custom `E!` function must recover locally
+or map it explicitly.
+
+Exported callables have closed error contracts. An exported callable without an
+error slot must discharge implicit failure or receive a compiler diagnostic.
+Traits and generic conformance cannot secretly widen that signature. The
+generated entry `start` has built-in `Error!`; compatible top-level postfix `!`
+is legal, while custom errors still need explicit recovery. See
+@../progress (Progress) for current compiler support.
+
 ### Return contract
 
 Return slots contain types and channels only. Source code has no borrowed,

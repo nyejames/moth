@@ -597,9 +597,7 @@ source rule. These are ordinary invalid assignment targets, not compatibility di
 
   > Cannot assign through collection `get(...)`. Call `set(index, value)` with explicit `~` access on the collection instead, then recover with `catch` or propagate with `!` inside a compatible `Error!` function.
 
-- Render map access with the equivalent `set(key, value)` and explicit `~` access guidance. Do
-  not fabricate a receiver name that the diagnostic payload does not own. Keep the correction valid
-  at top level, where postfix `!` cannot propagate because there is no `Error!` return slot.
+- Render map access with the equivalent `set(key, value)` and explicit `~` access guidance. Do not fabricate a receiver name that the diagnostic payload does not own. Keep the correction valid at top level: `start` has built-in `Error!`, so compatible postfix `!` can propagate there.
 - Keep the read-only `length` message, but remove migration wording from its reason name.
 - Rename the integration fixture to describe current rejection rather than removal.
 - Preserve the existing stable diagnostic code and valid `set` coverage. Do not add a parser path
@@ -688,7 +686,7 @@ mechanical rename. No renderer title or message may call the source feature resu
 
 - `catch` on plain value:
 
-  > `catch` handles fallible `Error!` expressions, but this expression is not fallible.
+  > `catch` handles a fallible expression, including implicit numeric failure and a compatible typed error, but this expression has neither.
 
 - `catch` on optional:
 
@@ -704,11 +702,11 @@ mechanical rename. No renderer title or message may call the source feature resu
 
 - top-level `!`:
 
-  > Top-level code has no `Error!` return slot, so `!` cannot propagate here. Recover with `catch`, or call this from a function that returns `Error!`.
+  > This `!` does not match `start`'s built-in `Error!` slot. Recover with `catch`, map the error, or call this from a function with a compatible error slot.
 
 - `!` in a real non-fallible function:
 
-  > This function does not declare an `Error!` return slot. Add one or recover locally with `catch`.
+  > This function does not declare a compatible error slot for this `!`. Add builtin `Error!` when that is the contract, or recover locally with `catch`. Implicit numeric failure in a private function is a separate propagation path and does not make an unrelated typed `!` legal.
 
 Keep the stable `MOTH-RULE-0051` family unless a branch belongs to an existing more precise code.
 

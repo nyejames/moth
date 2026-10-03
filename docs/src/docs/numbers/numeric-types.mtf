@@ -161,14 +161,7 @@ values through ordinary copies, collections, options and generic instances.
 Same-scale comparisons stay exact, and templates and `String` share the exact
 Dec formatter.
 
-HTML-Wasm executes fixed integers, `Byte` and fixed binary floats through values,
-comparisons, checked trap-mode arithmetic and supported infallible numeric
-expression casts, including integer-to-`F16` and widening `F16`-to-`F32`/`F64`.
-It also converts profile `Int` and fixed integers to decimal `String` values.
-HTML-Wasm validates finite `Float` values after carrier conversion in trap mode.
-It formats runtime `Float` templates and `Float`/`F16`/`F32`/`F64`-to-`String`
-expression casts at their own precision in trap mode. Non-finite formatting and
-validation trap only in trap mode, while negative zero formats as `0`.
+Current HTML-Wasm coverage uses checked trap-mode delivery and is not the accepted failure contract. HTML-Wasm executes fixed integers, `Byte` and fixed binary floats through values, comparisons, checked trap-mode arithmetic and supported infallible numeric expression casts, including integer-to-`F16` and widening `F16`-to-`F32`/`F64`. It also converts profile `Int` and fixed integers to decimal `String` values. HTML-Wasm validates finite `Float` values after carrier conversion in trap mode. It formats runtime `Float` templates and `Float`/`F16`/`F32`/`F64`-to-`String` expression casts at their own precision in trap mode. Non-finite formatting and validation trap only in that current coverage, while negative zero formats as `0`. See @../progress (Progress).
 
 Source-level external `Float` calls still need Wasm import/metadata support.
 Reachable `ReturnError` `FormatFloat` and `ValidateFloat`, plus `String`-to-numeric

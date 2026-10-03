@@ -9,7 +9,9 @@ A fallible cast can propagate through builtin `Error!` or recover locally.
 ]
 
 `cast!` requires fallible cast evidence and a compatible builtin `Error!`
-return path.
+return path. It remains explicit propagation, including at the top level where
+`start` supplies that slot. A custom `E!` slot does not automatically convert
+the failure.
 
 ### Local recovery
 
@@ -27,24 +29,51 @@ return path.
 A recovery handler must produce the success value required by the receiving
 site or leave explicitly with `return` or `return!`.
 
-### Conversion failure is separate
+### Expression-wide recovery
 
-A cast failure is a conversion failure. An operand's own numeric failure stays a
-checked numeric failure and follows the enclosing function's failure mode. It is
-not caught by `cast ... catch`, which recovers only from the conversion.
+`cast expression catch` protects the complete operand evaluation and the
+conversion. Arithmetic, receivers, arguments and nested calls inside the operand
+belong to the same selected expression. Parentheses are not required:
 
-A compound assignment converts at its store site under the same separation.
+[codeblock, $code("moth"):
+    narrow |left U32, right U32| -> U8:
+        value U8 = cast left + right catch then 0
+        return value
+    ;
+]
+
+This handler recovers both `U32` addition overflow and failure to narrow the
+result to `U8`. The addition still computes in its own `U32` result domain.
+
+Implicit failure and builtin `Error!` from the operand or conversion may share
+the handler. A bound error name has type `Error`. A typed `Error` retains its
+message, code and identity, including code `0`. Compatible typed calls under
+the handler do not need per-call postfix `!`. Custom typed errors cannot share
+this handler with implicit failure or a conversion's builtin `Error!`.
+See @../errors/#catch-and-recovery (Catch and recovery) for compatibility and
+placement rules.
+
+A catch on a compound assignment's right-hand expression does not protect the
+later compound arithmetic or conversion back to the target type. Those remain
+separate implicit-failure checks, and the store happens only after success.
+See @../numbers/#checked-arithmetic (Checked arithmetic).
 
 ### Rules
 
 - `cast! expression catch:` is invalid.
 - Propagation and local recovery are mutually exclusive.
-- `cast!` and `cast ... catch:` handle only cast failures.
-- If the operand itself produces `Error!`, handle or propagate that operand before applying the cast.
+- The handler protects operand evaluation as well as the conversion.
+- An infallible conversion can use expression catch when its operand can fail.
 - Optional receiving contexts recover inner `T`, then wrap the successful or recovered value into `T?`.
 - `then none` is invalid in a cast recovery handler targeting `T?`.
-- Evidence is static. A compiler proof that a value is safe can fold a cast or remove its runtime check, but it never makes plain `cast` legal for a fallible type pair.
+- Evidence is static. A compiler proof that a value is safe can fold a cast or remove its runtime check, but it never makes an unhandled plain `cast` legal for a fallible type pair.
+- A catch does not legalise unsupported source-target pairs or invalid cast evidence.
+- Statically known invalid numeric work remains a source diagnostic, even with `catch` or builtin `Error!`.
 
-Plain `cast` is not a promise that every source-target pair is infallible. It
-requires infallible evidence for the selected pair. See @./#cast-evidence (Cast
-evidence) and @../numbers/#checked-arithmetic (Checked arithmetic).
+A plain `cast` without an enclosing handler requires infallible evidence for
+the selected pair. An eligible expression catch supplies local handling for
+fallible evidence, not evidence for an otherwise invalid conversion. See
+@./#cast-evidence (Cast evidence) and
+@../numbers/#checked-arithmetic (Checked arithmetic).
+
+@../progress (Progress) owns current compiler and backend support.

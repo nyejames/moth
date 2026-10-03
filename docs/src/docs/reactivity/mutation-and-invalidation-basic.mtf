@@ -17,4 +17,4 @@ Assigning to `count` updates the source. Anything subscribed to `count` will kno
     ~names.push("Rob")
 ]
 
-You need `~` to mutate the collection. Reactivity does not relax the access rules. Growable `push` cannot fail, but fallible operations like `get`, `set` and `remove` must still be handled with `catch` or propagated inside a compatible `Error!` function.
+You need `~` to mutate the collection. Reactivity does not relax the access rules. Growable `push` is infallible in source; allocation exhaustion remains fatal. Typed fallible operations like `get`, `set` and `remove` still need `catch` or propagation through a compatible error slot. Checked numeric failure follows the enclosing handler or function contract. Private functions without an error slot propagate that implicit failure within the module without postfix `!` at each internal call. The generated `start` has built-in `Error!`, so compatible top-level `!` is legal; custom errors need explicit recovery. See @../progress (Progress) for current support.

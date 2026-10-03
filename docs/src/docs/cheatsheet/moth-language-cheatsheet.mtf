@@ -346,7 +346,7 @@ Accepted numeric types:
 
 One compiler-owned numeric profile selects `Int` width and `Float` precision independently from 32 or 64 bits for the whole build. The default uses `Int32` with `Float64`. `Int` and `Float` keep distinct identities rather than aliasing fixed-width types. HTML-JS executes all four profiles, fixed-width numeric and `Byte` values and the exact `Dec` family.
 
-Experimental HTML-Wasm executes profile-selected `Int`/`Float`, fixed numeric scalars and `Byte`. Numeric arithmetic uses checked trap-mode operations. Supported infallible numeric expression casts include integer-to-`F16`, widening `F16`-to-`F32`/`F64` and `Byte <-> U8`. Profile `Int` and fixed integers format as decimal `String` values. `Float`/`F16`/`F32`/`F64` template and cast formatting works in trap mode.
+Experimental HTML-Wasm currently executes profile-selected `Int`/`Float`, fixed numeric scalars and `Byte` with checked trap-mode operations, not the accepted implicit-failure contract below. Supported infallible numeric expression casts include integer-to-`F16`, widening `F16`-to-`F32`/`F64` and `Byte <-> U8`. Profile `Int` and fixed integers format as decimal `String` values. `Float`/`F16`/`F32`/`F64` template and cast formatting currently works in trap mode. See @../progress (Progress) for current coverage.
 
 Wasm still rejects reachable `Dec` and `Error` values, recoverable numeric failures, fixed-scalar aggregates, source-level external `Float` calls, remaining fallible casts, conversions involving `Bool` or `Char` and statement-form casts. `F32`/`F64`-to-`F16` narrowing and numeric-to-numeric casts from `F16` other than widening to `F32`/`F64` remain gated. See @../progress (Progress) for exact target coverage.
 
@@ -393,11 +393,11 @@ Arithmetic rules:
 - unary minus on any `U*` value is a compile error; convert to a signed type first
 - fixed binary float arithmetic uses the wider operand precision with a minimum of `F32`, and `//` is unavailable on binary floats
 - `Byte` takes part in no arithmetic
-- compound assignment computes in the promoted domain and then performs a checked conversion back to the left-hand type
+- compound assignment computes in the promoted domain and then performs a separate checked conversion back to the left-hand type; it writes only after both checks succeed
 - `^` is right-associative
 
-Numeric operations are checked against the operation's own result type, not the storage width of its operands. Statically known failure is a diagnostic.
-Supported runtime failure enters builtin `Error!` only when that is the function's final error slot. Otherwise it traps.
+Numeric operations are checked against the operation's own result type, not the storage width of its operands. `U8 + U8` yielding `256` is valid `U32`. Statically known invalid numeric work remains a diagnostic, even inside `catch` or an `Error!` function.
+Runtime numeric failure is implicit built-in failure, delivered by the enclosing handler or function contract. It neither wraps nor implicitly panics. See @../progress (Progress) for compiler support.
 
 Precedence: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`.
 
@@ -441,7 +441,7 @@ Rules:
 
 - Plain `cast` requires infallible evidence.
 - `cast!` requires the enclosing function's final error slot to be builtin `Error!`.
-- `cast ... catch` handles only cast failure.
+- `cast ... catch` covers the complete operand expression and the conversion, not only cast failure.
 - `cast! ... catch` is invalid.
 - Builtin numeric evidence is decided by the static source and target types, not by values the compiler happens to know. An integer-to-integer conversion is infallible when the complete source range fits the target range, and fallible otherwise. Float-to-integer conversion is always fallible.
 - Binary-float evidence follows precision and range rather than integer range fitting alone. Integer-to-`F32` or `F64` is infallible and may round. Integer-to-`F16` is fallible unless the complete source range fits the `F16` finite range. Converting to a greater binary-float precision is infallible, while converting to a narrower one is fallible. Same-type casts are invalid.
@@ -547,7 +547,7 @@ An option match is exhaustive without `else =>` only when it contains both an un
 
 ## Errors, propagation and recovery
 
-A fallible function has one final `!` return slot:
+A function with an explicit typed failure path has one final `!` return slot:
 
 [codeblock, $code("moth"):
     MissingName #Error = Error("Missing name", 404)
@@ -586,6 +586,10 @@ Builtin `Error` exposes `message String` and `code U32 = 0`. Codes are unsigned:
 
 An error-only function may fall through successfully. Custom error slots use ordinary nominal types. Postfix `!` requires an exactly compatible caller error slot. Convert error types explicitly with `catch` and `return!`.
 
+Checked numeric failure can share one `catch` with built-in `Error!` calls. The handler covers the complete selected expression, including arithmetic, receivers, arguments and nested calls; parentheses are not required. A bound error name has type `Error`. Existing typed `Error` values keep their message, code and identity, including code `0`. A custom error type cannot mix with implicit failure, and two distinct typed error types cannot share a handler. One custom error type without implicit failure may share one.
+
+Private functions without an error slot infer and propagate implicit failure within the same module, without postfix `!` at each internal call. `Error!` materialises that failure. A custom `E!` function must recover locally or map it explicitly. Exported callables without an error slot must discharge implicit failure; traits and generic conformance cannot secretly widen their signatures. See @../errors (Errors) for handler placement limits and @../progress (Progress) for current support.
+
 `Error!` is not a first-class `Result`. Define a choice for explicit result-like domain values.
 
 ### Assertions
@@ -598,7 +602,7 @@ An error-only function may fall through successfully. Custom error slots use ord
 
 `assert` is statement-only and always checked. Parentheses are required. Failure is unrecoverable, and `assert(false)` is statically terminal.
 
-The optional message is a `String?` expression defaulting to `none`, and `none` selects the default text `"assertion failed"`. Moth does not implicitly stringify other types. The message is fully checked even when the condition folds to `true`, but is evaluated only on the failure edge, so it is not a reactive sink. Message construction cannot escape through `!`, `?`, `return`, `break` or `continue`; handle fallible work before the assertion and pass its infallible value.
+The optional message is a `String?` expression defaulting to `none`, and `none` selects the default text `"assertion failed"`. Moth does not implicitly stringify other types. The message is fully checked even when the condition folds to `true`, but is evaluated only on the failure edge, so it is not a reactive sink. Message construction cannot escape through implicit failure, `!`, `?`, `return`, `break` or `continue`; handle fallible work before the assertion and pass its infallible value.
 
 ## `if`, matching and value-producing blocks
 
@@ -1338,8 +1342,13 @@ output requires an explicit root purpose with an applicable consumer; `$page` is
 initial HTML purpose and remains queued. Current Alpha still uses activity-based
 entry selection and reserved `page_*` metadata. Top-level work becomes dormant
 `start` code and runs once only when that module is selected as an entry. Depending
-on a module never runs it. `start` has no `Error!` slot, so top-level fallible work
-uses `catch`.
+on a module never runs it. `start` has built-in `Error!`, so compatible top-level
+postfix `!` is legal. Custom errors still need explicit recovery. The generated
+entry boundary handles terminal failure. HTML publishes that invocation's runtime
+fragments only after success; static HTML remains after failure. Release shows a
+generic safe notice rather than inserting the application's `Error` message as HTML.
+See @../project-structure/#entry-runtime-and-fragments (Entry runtime and fragments)
+and @../progress (Progress) for current support.
 
 `export:` is the only cross-module public marker:
 
@@ -1566,6 +1575,8 @@ Do not infer forms for:
 - declared-region capacity, expression placement, extraction, adoption or declared-region transfer
 - broader anonymous-record storage in runtime values, collections and maps (compile-time const-record nesting itself is delivered)
 - final builder-selection or build-script syntax
+
+`$checked` is the separate borrow-proof budget, not a numeric check mode. Grouped `if:` handlers, rewind, richer effects, explicit wrapping and native-trap assertion optimisation remain unsettled; they reserve no syntax.
 
 Roadmaps and design drafts do not create accepted syntax.
 

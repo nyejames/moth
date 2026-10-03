@@ -9,29 +9,52 @@ or backend contracts change.
 Moth separates a computation that cannot produce its normal result from an
 execution environment that can no longer support the program.
 
-Checked arithmetic produces an implicit built-in failure. Private functions may
-propagate that failure within a module. An explicit `Error!` return channel
-converts escaping built-in failures into the corresponding built-in `Error`.
-A custom error channel requires explicit handling or conversion. Exported
-functions expose their failures through a declared error channel or handle them
-before returning. An unrepresented failure cannot cross that boundary.
+Checked numeric operations produce implicit built-in failure. Their enclosing
+handler or function contract delivers it, without wrapping or an implicit panic.
+Private functions with no error slot infer and propagate that failure within
+the same module, without postfix `!` at each internal call. An explicit built-in
+`Error!` return channel materialises escaping failure as the corresponding
+`Error`. A custom error channel requires local recovery or explicit mapping.
+Exported callables expose their failures through a declared error channel or
+handle them before returning. The compiler diagnoses any implicit failure left
+unrepresented at that boundary.
 
 Expression-wide `catch` handles the whole selected expression, including
-argument evaluation. Implicit failures and built-in `Error!` outcomes may share
-one catch. The same rule applies to `cast expression catch`, so its handler may
-receive an arithmetic failure from the operand as well as a conversion error.
-Custom error types do not gain automatic conversion. Split an expression when
-its failure sources need different handling.
+arithmetic, receivers, arguments and nested calls. Parentheses are not required.
+Implicit failures and built-in `Error!` outcomes may share one catch. The same
+rule applies to `cast expression catch`, so its handler may receive an arithmetic
+failure from the operand as well as a conversion error. A bound implicit-failure
+handler receives `Error`; an unbound handler need not construct an observable
+error value. Typed `Error` values keep their message, code and identity, including
+code `0`.
 
-The implicit `start` has a built-in `Error!` channel. Its generated caller
-reports an unsuccessful entry invocation. Returning that error is not a panic
-and does not publish successful runtime fragments. Handling an error does not
-undo earlier mutations or IO. Compile-time-known invalid numeric operations
-remain source diagnostics rather than runtime recovery opportunities.
+One custom error type without implicit failure may share a catch. Custom errors
+mixed with implicit failure and two distinct typed error types are rejected.
+Split an expression or map its errors explicitly when its sources need different
+handling. @./#catch-and-recovery (Catch and recovery) owns placement, boundary
+and explicit-propagation conflict rules.
+
+The implicit `start` uses the built-in `Error!` rule and its generated caller
+reports an unsuccessful entry invocation. HTML publishes that invocation's
+runtime fragments only after success. Static HTML stays after failure. Release
+uses a generic safe notice, not the application error message as HTML.
+@../project-structure/#entry-runtime-and-fragments (Entry runtime and fragments)
+owns top-level propagation and entry delivery. `docs/build-system-design.md`
+> `Development entry-error reports` owns development presentation, host status
+and the rule that a runtime report does not poison global build success.
+
+Handling an error does not undo earlier mutations or IO. Compile-time-known
+invalid numeric operations remain source diagnostics, including inside `Error!`
+functions and expressions followed by catch.
 
 `assert` is the only way to author a deliberate panic. A failed assertion is
 unrecoverable in Moth and remains checked in release builds. `catch` handles
 Moth failure channels, not arbitrary JavaScript exceptions or Wasm traps.
+
+An assertion's condition evaluates normally. Failure while computing it is not
+a false assertion result. The lazily evaluated message must not contain escaping
+implicit or typed failure, including inferred failure in a private call.
+@./#assertions (Assertions) owns the full condition and message contract.
 
 ### Termination outside assert
 
@@ -100,7 +123,7 @@ or a catalogue of exact generated instructions. Helpers and representations may
 differ. A backend must preserve Moth semantics wherever it supports the feature.
 
 Arithmetic checks the promoted result domain, not an operand's storage width.
-For example, `U8 + U8` produces `U32`, so crossing 255 is not itself overflow.
+For example, `U8 + U8` yielding `256` is valid `U32`, not overflow.
 Narrowing that result back into `U8` is a separate checked boundary. Moth `/`
 produces a binary floating-point result for integer operands, while `//` is
 integer division.
@@ -222,12 +245,13 @@ confidence is not an unchecked assumption available to the optimiser.
 
 Handling a checked failure with `assert(false, ...)` makes termination explicit.
 It does not automatically remove the original check. Wasm integer addition
-wraps rather than traps, so panic-on-overflow still needs detection. A future
-lowerer may use a native trap only when it preserves the full observable
-assertion contract, including required message work.
+wraps rather than traps, so panic-on-overflow still needs detection. Native-trap
+substitution for assertion handlers remains unsettled. Any accepted optimisation
+would need to preserve the full observable assertion contract, including
+required message work.
 
-Explicit wrapping operations and any other wrap-or-trap controls remain
-unsettled future design. This reference introduces no such syntax or guarantee
-that they will be added. It can later document accepted controls and their
-backend costs. Recoverable resource exhaustion is outside Moth's design scope,
-not another pending failure effect.
+Grouped `if:` handlers, rewind or rollback, richer effects, explicit wrapping
+and native-trap assertion optimisation remain unsettled. This reference reserves
+no syntax or guarantee that they will be added. `$checked` is the separate
+borrow-proof budget, not a numeric mode. Recoverable resource exhaustion is
+outside Moth's design scope, not another pending failure effect.

@@ -15,7 +15,13 @@ Read the first conversion as:
 Use:
 
 - `cast` when the conversion cannot fail
-- `cast!` when failure should leave through the function's error return
-- `cast ... catch:` when failure should be handled here
+- `cast!` when conversion failure should leave through a compatible builtin `Error!` return
+- `cast ... catch:` when failures in the operand or conversion should be handled here
+
+`catch` covers the complete cast expression, not only the conversion. It can
+handle arithmetic and builtin `Error!` calls inside the operand too. A cast
+cannot combine `cast!` and `catch`, and invalid conversions remain source errors.
+See @./#fallible-casts (Fallible casts) for recovery rules.
+@../progress (Progress) owns current support.
 
 Moth does not use `Int(value)` or `String(value)` as conversion syntax.

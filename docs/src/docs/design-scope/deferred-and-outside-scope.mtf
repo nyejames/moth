@@ -29,6 +29,7 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - an extensionless resource escape syntax
 - managed plain Markdown resource links and images
 - resource transforms and content-addressed output names
+- implicit built-in numeric failure, complete-expression `catch` and the built-in `Error!` entry boundary described at @../errors (Errors)
 
 ### MON syntax and format boundaries
 
@@ -81,11 +82,16 @@ Current open questions include:
 - lossy `Float`/`Dec` conversion helpers and explicit rounded `Dec` scale changes
 - source-level bitwise integer operations
 - speculative `Byte` buffer and text-encoding APIs
+- grouped `if:` handlers, rewind and richer effects
+- explicit numeric wrapping
+- native-trap assertion optimisation
 
-The `$checked:` spelling and compiler-owned direction do not make research
-obligations, deterministic limits or normal safety laws implemented or fully
-accepted. The safety rules, source meaning and runtime behaviour must remain
-the same inside and outside any eventual scope.
+`$checked` concerns a separate borrow-proof budget, not a numeric check mode.
+Its proposed `$checked:` spelling and compiler-owned direction do not make
+research obligations, deterministic limits or normal safety laws implemented
+or fully accepted. The safety rules, source meaning and runtime behaviour must
+remain the same inside and outside any eventual scope. The other open questions
+above reserve no syntax.
 
 Transparent aliases remain transparent regardless of whether a distinct
 primitive-backed nominal wrapper enters the language.
@@ -136,6 +142,11 @@ solver-heavy or harder to reason about.
 
 See @#excluded-language-families (Excluded language families) for the exact
 list.
+
+Allocation and stack exhaustion stay outside `catch`; resource recovery is
+excluded. Growable `push` stays infallible in source and fatal on allocation
+exhaustion. Assertions remain unrecoverable and checked in release. These
+boundaries do not turn checked numeric failure into a panic.
 
 ### How to tell the difference
 

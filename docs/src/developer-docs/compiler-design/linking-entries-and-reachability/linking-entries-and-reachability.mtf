@@ -16,10 +16,12 @@ The compiler synthesises an implicit **`start`** for a normal root. Properties t
 
 - non-exported
 - non-bindable
-- infallible as a function contract (no `Error!` return channel)
+- built-in `Error!` alongside the existing fragment-collection success slots, including for a synthetic single-file root
 - owner of dormant top-level runtime work and runtime fragment string production in source order
 
 Compilation never activates `start`. Entry assembly may activate it once after the module already compiled.
+
+Implicit checked failure materialises as `Error` in `start`. Typed `Error!` propagates with `!`; custom errors need explicit recovery. Builders consume that typed outcome without adding an error-fragment channel. The @../../../docs/progress (Progress matrix) records current support.
 
 Support roots and the project package facade have no implicit `start`.
 

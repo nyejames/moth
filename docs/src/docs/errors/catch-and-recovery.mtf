@@ -1,4 +1,55 @@
-`catch` handles a fallible value locally.
+`catch` handles the complete selected expression locally, including implicit
+built-in failure and compatible typed errors.
+
+The expression-wide rules below describe the accepted contract, not current
+compiler support. See @../progress (Progress).
+
+### Protected expression
+
+`catch` has lower precedence than the ordinary operators. Parentheses around
+the protected expression are not required.
+
+[codeblock, $code("moth"):
+    value = left * right + offset catch:
+        then 0
+    ;
+]
+
+This handler covers multiplication and addition, not only the last operand.
+It also covers receiver evaluation, arguments, nested calls and cast operands.
+
+[codeblock, $code("moth"):
+    amount = load_amount(left * right + offset) catch then 0
+]
+
+If `load_amount` returns `Int, Error!`, this handler covers its returned error
+and both arithmetic operations in its argument. Compatible typed calls inside
+the protected expression supply their success values without per-call `!`.
+
+Evaluate the protected work once in ordinary source order. The first failure
+skips the rest of the expression and enters the handler, which replaces the
+whole expression's success values. Earlier successful mutations and IO remain
+visible. A catch is not a transaction, and failure in its handler goes outward
+rather than entering the same handler again.
+
+### Compatible failures
+
+- Implicit built-in failure alone is accepted. A bound name has type `Error`.
+- One or more built-in `Error!` outcomes may share a catch with implicit failure.
+- Existing typed `Error` values keep their message, code and identity, including code `0`.
+- One custom error type `E` may share a catch when no implicit failure remains. The binding has type `E`.
+- A custom `E!` outcome mixed with implicit failure is rejected.
+- Two distinct typed error types are rejected, including custom `E` mixed with `Error`.
+
+Split incompatible work into separate handled expressions or map errors
+explicitly. An unbound catch need not construct an observable `Error` for an
+implicit failure. A bound catch materialises the corresponding built-in error.
+
+A checked operation, inferred-failure private call or typed error producer
+makes catch eligible. A literal or an ordinary infallible call alone does not.
+Later proof or optimisation removing the failure path does not invalidate an
+otherwise eligible catch. Statically known invalid numeric work remains a
+compile-time diagnostic, even inside a catch.
 
 ### Block forms
 
@@ -24,7 +75,7 @@ The error binding:
 - is immutable
 - is visible only inside the handler
 - must not shadow another visible name
-- has the fallible expression's declared error type
+- has the compatible error type described above
 
 ### Inline forms
 
@@ -52,6 +103,7 @@ them, every reachable handler path must:
 - produce the required values with `then`
 - leave the enclosing function with `return`
 - leave through its error channel with `return!`
+- end in a proven terminal assertion such as `assert(false, "cannot recover")`
 
 A handler that can fall through without producing or terminating is invalid.
 
@@ -83,11 +135,19 @@ A fallible operation with no success values does not need `then`.
 
 ### Context and conflicts
 
-- `catch` and postfix `!` are alternative handling paths.
-- One expression cannot use both.
-- `catch` handles only the selected fallible expression.
-- Catch bodies are statement-like and are rejected inside conditions, templates and constants.
+- `catch` and postfix `!`, `cast!` or optional `?` conflict on the same expression.
+- Explicit propagation still leaves the function. It does not target the nearest catch.
+- Catch bodies remain statement-like and are rejected inside conditions, templates and constants.
+- Comma, parenthesis, logical-line and statement boundaries still delimit the selected expression.
+- Grouping an operand without a catch inside it does not shrink an outer handler's scope.
 - First-class fallible carriers cannot be stored without handling.
+
+A catch on an assignment's right-hand expression protects that expression
+only. Compound arithmetic and conversion back to the target are separate
+checks, and the target is written only after all checks succeed. To recover a
+complete compound update locally, catch a private helper call or compute and
+check the replacement before assignment. Catch-after-loop and grouped handlers
+are not part of this contract.
 
 `then` and closed receiving sites are specified by
 @../branching/#value-producing-if (Value-producing if).
