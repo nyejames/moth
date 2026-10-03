@@ -776,7 +776,7 @@ fn html_escapes_dynamic_relative_source_paths() {
     let mut string_table = StringTable::new();
     let (source_database, source_id) = retained_source_database(
         temporary_directory.path(),
-        "bad<&.moth",
+        "bad&.moth",
         "value\n",
         &mut string_table,
     );
@@ -792,11 +792,11 @@ fn html_escapes_dynamic_relative_source_paths() {
         context,
     );
     assert!(
-        html.contains("src/bad&lt;&amp;.moth:1:1"),
+        html.contains("src/bad&amp;.moth:1:1"),
         "relative source paths must be HTML escaped in location text: {html}",
     );
     assert!(
-        !html.contains("src/bad<&.moth:1:1"),
+        !html.contains("src/bad&.moth:1:1"),
         "raw relative source path markup must never be emitted: {html}",
     );
 }

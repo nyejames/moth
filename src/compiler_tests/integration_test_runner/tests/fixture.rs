@@ -71,7 +71,9 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     fs::write(input_root.join("@page.moth"), "not valid Moth source\n")
         .expect("should write fixture source");
 
-    let expected_path = case_root.join(EXPECT_FILE_NAME);
+    // Production reports the canonical fixture root, so expectations derive from the same identity.
+    let canonical_case_root = fs::canonicalize(&case_root).expect("fixture root should resolve");
+    let expected_path = canonical_case_root.join(EXPECT_FILE_NAME);
     let Err(error) = load_canonical_case_specs(&case_root, None) else {
         panic!("fixture without an expectation file should be rejected");
     };
@@ -84,7 +86,9 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     assert!(
         error.message.contains("Canonical case 'case'")
             && error.message.contains("missing required expectation file")
-            && error.message.contains(&portable_path_text(&case_root))
+            && error
+                .message
+                .contains(&portable_path_text(&canonical_case_root))
             && error.message.contains(&portable_path_text(&expected_path)),
         "unexpected error: {error}"
     );

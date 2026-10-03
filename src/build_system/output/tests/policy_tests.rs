@@ -1,5 +1,8 @@
-use super::super::output_path::parse_relative_path;
-use super::super::policy::classify_output_folder;
+use super::super::output_path::{canonicalize_output_path, parse_relative_path};
+use super::super::policy::{
+    classify_output_folder, validate_directory_output_root_containment,
+    validate_output_folder_containment,
+};
 use crate::build_system::output::output_path::{
     is_lossless_portable_relative_path, normalize_relative_path, output_path_component_identities,
     percent_encode_url_segment,
@@ -7,6 +10,7 @@ use crate::build_system::output::output_path::{
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 fn project_root() -> PathBuf {
@@ -183,10 +187,8 @@ fn classifier_skips_entry_root_containment_in_transitional_root_form() {
 #[cfg(unix)]
 #[test]
 fn config_and_write_time_containment_share_canonical_classification() {
-    use std::fs;
     use std::os::unix::fs::symlink;
 
-    use super::super::policy::validate_output_folder_containment;
     use crate::build_system::output::manifest::validate_output_root_is_safe;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use crate::compiler_tests::test_diagnostics::assert_output_rejection;
@@ -207,11 +209,7 @@ fn config_and_write_time_containment_share_canonical_classification() {
         expected
     );
     assert_eq!(
-        super::super::policy::validate_directory_output_root_containment(
-            &folder.resolved_path,
-            &project_root,
-            None,
-        ),
+        validate_directory_output_root_containment(&folder.resolved_path, &project_root, None,),
         expected
     );
     let messages = validate_output_root_is_safe(
@@ -222,6 +220,136 @@ fn config_and_write_time_containment_share_canonical_classification() {
     )
     .expect_err("symlink output root should be rejected");
     assert_output_rejection(&messages, "output-root-not-inside-project");
+}
+
+// -------------------------
+//  Filesystem Containment
+// -------------------------
+
+/// Config bootstrap validates outputs against an `fs::canonicalize` project root, which carries
+/// the verbatim `\\?\` drive prefix on Windows. Ordinary project-local outputs must resolve inside
+/// that root whether they are absent, nested or already present.
+#[test]
+fn canonical_project_root_accepts_local_output_roots() {
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = fs::canonicalize(_project_temp.path()).expect("project root should resolve");
+    let entry_root = project_root.join("src");
+    fs::create_dir(&entry_root).expect("should create entry root");
+    fs::create_dir(project_root.join("existing")).expect("should create existing output");
+
+    assert_eq!(
+        canonicalize_output_path(&project_root.join("dev")),
+        Ok(project_root.join("dev")),
+        "an absent child of a canonical root must keep that root"
+    );
+
+    for relative in ["dev", "build/release", "existing"] {
+        let folder = classify_output_folder(Path::new(relative), &project_root, Some(&entry_root))
+            .expect("lexical output folder should classify");
+        assert_eq!(
+            validate_output_folder_containment(&folder, &project_root, Some(&entry_root)),
+            Ok(()),
+            "'{relative}' should resolve strictly inside the canonical project root"
+        );
+    }
+}
+
+#[test]
+fn canonical_project_root_rejects_root_outside_and_entry_root_outputs() {
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = fs::canonicalize(_project_temp.path()).expect("project root should resolve");
+    let entry_root = project_root.join("src");
+    fs::create_dir(&entry_root).expect("should create entry root");
+    let _outside_temp = tempfile::tempdir().expect("should create outside temp dir");
+    let outside_root = fs::canonicalize(_outside_temp.path()).expect("outside root should resolve");
+
+    for output_root in [project_root.clone(), outside_root.join("dev")] {
+        assert_eq!(
+            validate_directory_output_root_containment(&output_root, &project_root, None),
+            Err(InvalidOutputFolderReason::ResolvesOutsideProjectRoot),
+            "'{}' is not strictly inside the project root",
+            output_root.display()
+        );
+    }
+
+    for output_root in [entry_root.clone(), entry_root.join("dev")] {
+        assert_eq!(
+            validate_directory_output_root_containment(
+                &output_root,
+                &project_root,
+                Some(&entry_root)
+            ),
+            Err(InvalidOutputFolderReason::InsideOrEqualToEntryRoot),
+            "'{}' collides with the source entry root",
+            output_root.display()
+        );
+    }
+}
+
+/// A dangling alias could become resolvable after an earlier output is emitted, so it must never
+/// be mistaken for an ordinary absent output suffix.
+#[cfg(unix)]
+#[test]
+fn dangling_output_root_component_is_rejected() {
+    use super::super::output_path::DanglingSymlink;
+    use std::os::unix::fs::symlink;
+
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let project_root = fs::canonicalize(_project_temp.path()).expect("project root should resolve");
+    symlink(project_root.join("missing"), project_root.join("out"))
+        .expect("should create dangling output alias");
+    let output_root = project_root.join("out").join("dev");
+
+    assert_eq!(canonicalize_output_path(&output_root), Err(DanglingSymlink));
+    assert_eq!(
+        validate_directory_output_root_containment(&output_root, &project_root, None),
+        Err(InvalidOutputFolderReason::ResolvesOutsideProjectRoot)
+    );
+}
+
+/// Windows spells one directory as either an ordinary or a verbatim drive path. Containment must
+/// compare those spellings by filesystem identity in every combination.
+#[cfg(windows)]
+#[test]
+fn windows_disk_and_verbatim_disk_roots_share_containment() {
+    use crate::compiler_frontend::utilities::basic::normalize_path;
+    use std::path::{Component, Prefix};
+
+    fn prefix_kind(path: &Path) -> Option<Prefix<'_>> {
+        match path.components().next() {
+            Some(Component::Prefix(prefix)) => Some(prefix.kind()),
+            _ => None,
+        }
+    }
+
+    let _project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let verbatim_root =
+        fs::canonicalize(_project_temp.path()).expect("project root should resolve");
+    let disk_root = normalize_path(&verbatim_root);
+    assert!(matches!(
+        prefix_kind(&verbatim_root),
+        Some(Prefix::VerbatimDisk(_))
+    ));
+    assert!(matches!(prefix_kind(&disk_root), Some(Prefix::Disk(_))));
+
+    for (output_parent, project_root) in [
+        (&verbatim_root, &verbatim_root),
+        (&verbatim_root, &disk_root),
+        (&disk_root, &verbatim_root),
+        (&disk_root, &disk_root),
+    ] {
+        assert_eq!(
+            validate_directory_output_root_containment(
+                &output_parent.join("dev"),
+                project_root,
+                None
+            ),
+            Ok(()),
+            "'{}' should be inside '{}'",
+            output_parent.join("dev").display(),
+            project_root.display()
+        );
+    }
 }
 
 // -------------------------

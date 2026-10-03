@@ -9,8 +9,8 @@ fn create_mock_executable(path: &std::path::Path, exit_code: i32, stdout: &str, 
 
     let script = format!(
         r#"#!/bin/sh
-echo -n "{}"
-echo -n "{}" >&2
+printf '%s' "{}"
+printf '%s' "{}" >&2
 exit {}
 "#,
         stdout, stderr, exit_code
@@ -111,21 +111,20 @@ fn test_run_moth_command_failure() {
     #[cfg(windows)]
     let mock_moth = mock_moth.with_extension("bat");
 
-    create_mock_executable(&mock_moth, 1, "", "error output");
+    create_mock_executable(&mock_moth, 1, "failure stdout", "failure stderr");
 
-    let result = run_moth_command(
+    let run = run_moth_command(
         &mock_moth,
         temp_dir.path(),
         "check",
         &["test.moth".to_string()],
-    );
+    )
+    .expect("mock command should execute");
 
-    assert!(result.is_ok());
-    let run = result.unwrap();
     assert!(!run.status.success);
     assert_eq!(run.status.code, Some(1));
-    assert!(!run.stderr.is_empty());
-    assert!(run.stderr.contains("error output"));
+    assert_eq!(run.stdout, "failure stdout");
+    assert_eq!(run.stderr, "failure stderr");
 }
 
 #[test]

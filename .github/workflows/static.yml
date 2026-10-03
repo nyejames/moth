@@ -52,17 +52,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      # The checked-in toolchain selects Rust and its components. Avoid setup-action
-      # environment defaults that silently turn incremental compilation off in CI.
+      # rust-toolchain.toml owns the exact Rust release and components. Installing the active
+      # toolchain consumes that pin without advancing it. Avoid setup-action environment
+      # defaults that silently turn incremental compilation off in CI.
       - name: Install repository Rust toolchain
         shell: bash
         run: |
           set -euo pipefail
-          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
-          rustup update "$toolchain" --no-self-update
+          rustup toolchain install --no-self-update
           rustc -vV
           cargo clippy -V
           cargo fmt --version
+
+      # Only these gates execute rendered JavaScript through Node. .node-version owns the exact
+      # validation release; the compiler's own host requirement stays native Math.f16round.
+      - name: Install repository Node runtime
+        if: matrix.gate == 'unit-tests' || matrix.gate == 'feature-matrix' || matrix.gate == 'integration'
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Report Node runtime
+        if: matrix.gate == 'unit-tests' || matrix.gate == 'feature-matrix' || matrix.gate == 'integration'
+        shell: bash
+        run: node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5
@@ -91,6 +104,8 @@ jobs:
 
   deploy:
     # Deployment waits for every gate. A non-blocking Windows failure does not hold it back.
+    # Manual dispatches from feature branches are validation-only; only `main` publishes Pages.
+    if: github.ref == 'refs/heads/main'
     needs: gate
 
     concurrency:
@@ -111,8 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
-          rustup update "$toolchain" --no-self-update
+          rustup toolchain install --no-self-update
           rustc -vV
 
       - name: Cache Rust dependencies

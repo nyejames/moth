@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Portable validated relative-path components.
 ///
@@ -268,6 +268,14 @@ fn inspect_existing_path_components_from(
     let mut component_path = initial_path.to_path_buf();
     let mut contains_symlink = false;
     for component in path_suffix.components() {
+        // A prefix such as `\\?\C:` or `\\server\share` and the root separator anchor the path
+        // rather than naming a directory entry. Probing a bare verbatim drive prefix opens the
+        // volume device, which fails and would misclassify every canonical Windows root.
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
+            component_path.push(component.as_os_str());
+            continue;
+        }
+
         inspect_existing_path_component(
             &mut component_path,
             component.as_os_str(),

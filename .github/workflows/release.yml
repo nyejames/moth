@@ -23,15 +23,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # rust-toolchain.toml owns the exact Rust release; installing the active toolchain consumes
+      # that pin without advancing it.
       - name: Install repository Rust toolchain
         shell: bash
         run: |
           set -euo pipefail
-          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
-          rustup update "$toolchain" --no-self-update
+          rustup toolchain install --no-self-update
           rustc -vV
           cargo clippy -V
           cargo fmt --version
+
+      # validate-full executes rendered JavaScript, so it uses the Node release pinned by .node-version.
+      - name: Install repository Node runtime
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Report Node runtime
+        shell: bash
+        run: node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5
@@ -88,9 +99,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          toolchain="$(rustup show active-toolchain | cut -d ' ' -f1)"
-          rustup update "$toolchain" --no-self-update
-          rustup target add "${{ matrix.target }}" --toolchain "$toolchain"
+          rustup toolchain install --no-self-update
+          rustup target add "${{ matrix.target }}"
 
       - name: Cache Rust dependencies
         uses: actions/cache@v5

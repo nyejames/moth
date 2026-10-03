@@ -98,5 +98,6 @@ and build edges: `moth-lexical` depends on no workspace package and `moth-mon`
 may depend only on `moth-lexical`, never `moth` or `xtask`.
 
 [validation.mtf](docs/src/developer-docs/style-guide/validation.mtf) owns exact gate scope,
-shared Cargo defaults, cache safety and feature coverage. Rust uses the repository's
-unpinned stable channel. Environment overrides remain available.
+shared Cargo defaults, cache safety and feature coverage. `rust-toolchain.toml` pins the exact
+Rust release and `.node-version` pins the Node release used for validation; CI consumes both.
+Environment overrides remain available.

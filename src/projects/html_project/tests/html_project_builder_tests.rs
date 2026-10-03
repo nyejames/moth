@@ -911,7 +911,7 @@ fn directory_build_requires_homepage_at_entry_root() {
     };
     assert_eq!(
         err.string_table.resolve(*reported_entry_root),
-        entry_root.display().to_string()
+        portable_path_text(&entry_root)
     );
 }
 

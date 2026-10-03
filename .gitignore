@@ -17,9 +17,10 @@ benchmarks/**/release/
 # Ignore all hidden files
 .*
 
-# But allow project metadata and GitHub Actions
+# But allow project metadata, the validation Node pin and GitHub Actions
 !.gitignore
 !.gitattributes
+!/.node-version
 !.github/
 !.github/workflows/**
 

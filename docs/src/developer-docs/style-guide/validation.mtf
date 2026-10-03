@@ -122,13 +122,18 @@ Cargo from the repository root:
 
 ### Shared Cargo defaults
 
-`rust-toolchain.toml` selects the unpinned `stable` channel with Clippy and
-rustfmt. Recipes use plain Cargo commands, without a separate toolchain or
-version check. CI updates the channel selected by this file through rustup,
-without a setup action injecting a different incremental-compilation policy.
-An installed stable channel can still be older than another machine's. Record
+`rust-toolchain.toml` selects one exact Rust release with Clippy and rustfmt.
+Repository-local Rust commands use that pin regardless of the machine's default
+toolchain, and recipes use plain Cargo commands without a separate toolchain or
+version check. CI installs the same pin through rustup and never advances it
+independently, without a setup action injecting a different
+incremental-compilation policy.
+
+Moth tracks current stable Rust closely during alpha development. Advancing the
+pin is a deliberate repository change followed by normal validation, and
+returning to an earlier release is equally an explicit pin change. Environment
+and explicit rustup overrides remain the caller's responsibility. Record
 `rustc -vV`, `cargo clippy -V` and `cargo fmt --version` when comparing results.
-Explicit user toolchain overrides remain the caller's responsibility.
 
 `Cargo.toml` owns one dev profile, inherited by test: no debug information,
 incremental compilation enabled and the normal debug assertions and overflow
@@ -234,16 +239,23 @@ non-documentation implementation file.
 
 #### JavaScript runtime prerequisite
 
-The integration lane executes the emitted JavaScript with the `node`
-executable found on `PATH`. Emitted F16 values call native `Math.f16round`,
-which landed in Node 24, so validation needs Node 24 or newer as the selected
-runtime. The integration runner probes the runtime once and reports the
-executable and version as a fatal infrastructure failure instead of letting
-individual F16 fixtures crash with engine errors. The executable that wins
-`PATH` at validation time is the one that matters, so keep that installation
-current.
+Two contracts govern the JavaScript runtime. The language and backend
+requirement is Node 24 or newer, or another JavaScript host providing native
+`Math.f16round`, because emitted F16 values call that builtin directly. The
+repository validation environment is the exact Node release selected by
+`.node-version`. GitHub CI installs that release explicitly. For authoritative
+local validation, select the repository Node version through a version manager
+rather than relying on whichever `node` happens to be installed globally.
 
-Run the probe directly to check the selected runtime before a full gate:
+The integration lane executes the emitted JavaScript with the `node`
+executable found on `PATH`. The integration runner probes the runtime once and
+reports the executable and version as a fatal infrastructure failure when it
+lacks native `Math.f16round`, instead of letting individual F16 fixtures crash
+with engine errors. The probe enforces the capability requirement, not the
+exact `.node-version` release.
+
+Run the probe directly to diagnose `PATH` or version-manager mistakes before a
+full gate:
 
 [codeblock, $code("bash"):
     node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
@@ -657,8 +669,11 @@ another from reporting:
     ]
 ]
 
-Each gate runs on Linux, macOS and Windows. The workflow result is still failed when any blocking
-gate fails. The `integration`, `feature-matrix`, `first-party-deps` and `honesty-audit` gates
+Each gate runs on Linux, macOS and Windows. Every gate consumes the Rust release pinned by
+`rust-toolchain.toml`. The `unit-tests`, `feature-matrix` and `integration` gates execute rendered
+JavaScript and also install the Node release pinned by `.node-version`. The workflow result is still
+failed when any blocking gate fails. The `integration`, `feature-matrix`, `first-party-deps` and
+`honesty-audit` gates
 upload `target/test-reports/` whether they passed or failed, because a failed run's report is the
 evidence a reviewer needs most.
 

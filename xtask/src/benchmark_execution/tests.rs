@@ -8,7 +8,7 @@ use crate::bench_types::BenchmarkGroup;
 
 use super::{
     BenchmarkExecutionContext, BenchmarkFailureKind, average_case_observations, execute_case,
-    preflight_cases, validate_total_duration,
+    preflight_cases, process_failure, validate_total_duration,
 };
 use crate::bench_types::{BenchmarkCaseObservations, BenchmarkMetric};
 use crate::benchmark_manifest::{
@@ -18,6 +18,7 @@ use crate::benchmark_manifest::{
 };
 use crate::benchmark_status::BenchmarkDiagnosticStatus;
 use crate::benchmark_workspace::BenchmarkExecutionWorkspace;
+use crate::process_runner::{ProcessRun, ProcessStatus};
 
 static FRONTEND_EXECUTION_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -480,20 +481,35 @@ fn preflight_executes_every_case_once_and_aggregates_failures_in_manifest_order(
     );
 }
 
+// Subprocess capture is owned by `process_runner` tests. This test feeds a captured run straight
+// into failure classification so evidence bounding never depends on spawning a script.
 #[test]
 fn failure_evidence_keeps_stdout_and_stderr_separate_and_bounded() {
     let fixture = CliFixture::new();
-    let compiler = fixture.mock_path("bounded");
     let stdout = "o".repeat(2_500);
     let stderr = "e".repeat(2_500);
-    create_output_executable(&compiler, &stdout, &stderr, 1);
     let manifest = fixture.single_cli_manifest();
+    let unused_compiler = fixture.root().join("unused-compiler");
     let workspace =
         BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
-    let context = BenchmarkExecutionContext::new(&manifest, &compiler, &workspace);
+    let context = BenchmarkExecutionContext::new(&manifest, &unused_compiler, &workspace);
+    let run = ProcessRun {
+        duration_ms: 1.0,
+        status: ProcessStatus {
+            success: false,
+            code: Some(1),
+        },
+        stdout: stdout.clone(),
+        stderr: stderr.clone(),
+    };
 
-    let failure =
-        execute_case(&context, &manifest.cases[0]).expect_err("nonzero process should fail");
+    let failure = process_failure(
+        &context,
+        &manifest.cases[0],
+        BenchmarkFailureKind::NonZeroProcessStatus,
+        &run,
+        None,
+    );
     let stdout_evidence = failure
         .stdout_evidence
         .as_deref()

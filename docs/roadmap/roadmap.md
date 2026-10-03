@@ -35,8 +35,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 
-- [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
-
 - Improve the `tmp/test_brackets.mtf` error example.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner for general directives, explicit $config contracts and strict $project/$html_builder configuration

@@ -345,7 +345,7 @@ impl TimingMetricAccumulator {
     pub(crate) fn record(&self, duration: Duration) {
         let nanos = duration.as_nanos().min(u64::MAX as u128) as u64;
         self.total_nanos
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 Some(current.saturating_add(nanos))
             })
             .expect("the timing total update always returns a value");
