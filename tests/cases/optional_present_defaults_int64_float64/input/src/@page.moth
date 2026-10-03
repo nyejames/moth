@@ -1,0 +1,8 @@
+large_integer #Int = 16_777_217
+
+from_default |value Float = large_integer| -> Float:
+    return value
+;
+
+rendered_default String = cast from_default()
+[:int64-float64-default=[rendered_default]]

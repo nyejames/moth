@@ -21,8 +21,11 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
+    parse_single_file_ast, parse_single_file_ast_build_result,
+    parse_single_file_ast_build_result_with_profile, parse_single_file_ast_diagnostic,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn parse_function_diagnostic_payload(source: &str) -> DiagnosticPayload {
     parse_single_file_ast_diagnostic(source).payload
@@ -1266,5 +1269,284 @@ fn parses_valid_multiple_parameters_without_trailing_comma() {
             .component(signature.parameters[1].id)
             .map(|id| string_table.resolve(id)),
         Some("y")
+    );
+}
+
+#[test]
+fn optional_present_default_preserves_function_parameter_type() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "greet |name String? = \"guest\", required String?| -> String:\n    return \"ok\"\n;\n",
+    );
+    let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
+    let defaulted = &signature.parameters[0].value;
+    let required = &signature.parameters[1].value;
+    let string = ast.type_environment.builtins().string;
+
+    assert_eq!(
+        ast.type_environment.option_inner_type(defaulted.type_id),
+        Some(string),
+        "a present default must keep the declared String? parameter identity"
+    );
+    assert_eq!(
+        defaulted.diagnostic_type, required.diagnostic_type,
+        "declared spelling must survive a present default"
+    );
+    let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
+        panic!(
+            "present String default should be an explicit String -> String? coercion, got {defaulted:?}"
+        );
+    };
+    assert_eq!(*to_type, defaulted.type_id);
+    assert_eq!(value.type_id, string);
+    assert!(
+        matches!(value.kind, ExpressionKind::StringSlice(_)),
+        "coercion must keep the inner string payload, got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn optional_present_default_preserves_constant_function_parameter_type() {
+    let source = "FALLBACK_TEXT #= \"guest\"\n\
+greet |name String? = FALLBACK_TEXT, required String?| -> String:\n\
+    return \"ok\"\n\
+;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
+    let defaulted = &signature.parameters[0].value;
+    let required = &signature.parameters[1].value;
+    let string = ast.type_environment.builtins().string;
+
+    assert_eq!(
+        ast.type_environment.option_inner_type(defaulted.type_id),
+        Some(string),
+        "a constant-backed present default must keep the declared String? parameter identity"
+    );
+    assert_eq!(
+        defaulted.diagnostic_type, required.diagnostic_type,
+        "the declared String? spelling must survive a constant-backed default"
+    );
+
+    let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
+        panic!(
+            "present String default should retain its explicit String -> String? coercion, got {defaulted:?}"
+        );
+    };
+    assert_eq!(*to_type, defaulted.type_id);
+    assert_eq!(value.type_id, string);
+    assert!(
+        matches!(value.kind, ExpressionKind::StringSlice(_)),
+        "the constant should inline as a String payload, got {:?}",
+        value.kind
+    );
+}
+
+#[test]
+fn optional_present_default_preserves_body_local_function_parameter_type() {
+    let source = "FALLBACK_TEXT #= \"guest\"\n\
+outer || -> String:\n\
+    local_greet |name String? = FALLBACK_TEXT, required String?|:\n\
+        return\n\
+    ;\n\
+    return \"outer\"\n\
+;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let outer_body = function_body_by_name(&ast, &path_fork, &string_table, "outer");
+    let local_signature = outer_body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(path, signature, ..)
+                if path_fork
+                    .component(*path)
+                    .map(|id| string_table.resolve(id))
+                    == Some("local_greet") =>
+            {
+                Some(signature)
+            }
+            _ => None,
+        })
+        .expect("outer should retain its body-local function");
+    let defaulted = &local_signature.parameters[0].value;
+    let required = &local_signature.parameters[1].value;
+    let string = ast.type_environment.builtins().string;
+
+    assert_eq!(
+        ast.type_environment.option_inner_type(defaulted.type_id),
+        Some(string),
+        "a body-local function's present default must keep its declared String? identity"
+    );
+    assert_eq!(
+        defaulted.diagnostic_type, required.diagnostic_type,
+        "the body-local function must retain the declared String? spelling"
+    );
+}
+
+#[test]
+fn optional_present_default_preserves_receiver_method_parameter_type() {
+    let source = "FALLBACK_TEXT #= \"guest\"\n\
+Holder = |\n\
+    id Int = 0,\n\
+|\n\
+greet |this Holder, name String? = FALLBACK_TEXT, required String?| -> String:\n\
+    return \"ok\"\n\
+;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
+    let defaulted = &signature.parameters[1].value;
+    let required = &signature.parameters[2].value;
+    let string = ast.type_environment.builtins().string;
+
+    assert_eq!(
+        ast.type_environment.option_inner_type(defaulted.type_id),
+        Some(string),
+        "a receiver method's present default must keep its declared String? identity"
+    );
+    assert_eq!(
+        defaulted.diagnostic_type, required.diagnostic_type,
+        "the receiver method must retain the declared String? spelling"
+    );
+}
+
+#[test]
+fn optional_present_default_does_not_supply_generic_function_type_argument() {
+    let source = "FALLBACK_TEXT #= \"guest\"\n\
+choose type T |value T, label String? = FALLBACK_TEXT, required String?| -> T:\n\
+    return value\n\
+;\n\
+result = choose(7, required = none)\n";
+    let (mut build_result, path_fork, string_table) =
+        parse_single_file_ast_build_result(source).expect("generic default should resolve");
+    let int = build_result.ast.type_environment.builtins().int;
+    let string = build_result.ast.type_environment.builtins().string;
+
+    {
+        let templates = build_result
+            .materialisation_context
+            .as_mut()
+            .expect("module build should retain its generic templates")
+            .generic_function_templates_mut();
+        let template = templates
+            .values()
+            .find(|template| {
+                path_fork
+                    .component(template.function_path)
+                    .map(|id| string_table.resolve(id))
+                    == Some("choose")
+            })
+            .expect("the generic function template should be retained");
+        let defaulted = &template.signature.parameters[1].value;
+        let required = &template.signature.parameters[2].value;
+
+        assert_eq!(
+            build_result
+                .ast
+                .type_environment
+                .option_inner_type(defaulted.type_id),
+            Some(string),
+            "the generic function's independent default must remain String?"
+        );
+        assert_eq!(
+            defaulted.diagnostic_type, required.diagnostic_type,
+            "the generic function must retain the declared String? spelling"
+        );
+        let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
+            panic!(
+                "generic String? default should retain its receiving coercion, got {defaulted:?}"
+            );
+        };
+        assert_eq!(*to_type, defaulted.type_id);
+        assert_eq!(value.type_id, string);
+        assert!(
+            matches!(value.kind, ExpressionKind::StringSlice(_)),
+            "the generic default should keep its String payload, got {:?}",
+            value.kind
+        );
+    }
+
+    let [request] = build_result.deferred_generic_requests.as_slice() else {
+        panic!("the ordinary argument should produce one generic function request");
+    };
+    assert_eq!(
+        request.key.type_arguments.as_ref(),
+        &[int],
+        "the supplied ordinary value, not the independent optional default, must infer T"
+    );
+}
+
+#[test]
+fn optional_present_default_float_coercion_obeys_numeric_profile() {
+    let source = "LARGE #Int = 16_777_217\n\
+as_float |value Float = LARGE, required Float| -> Float:\n\
+    return value\n\
+;\n";
+
+    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+        for (float_precision, expected_value) in [
+            (FloatPrecision::Bits32, 16_777_216.0_f64),
+            (FloatPrecision::Bits64, 16_777_217.0_f64),
+        ] {
+            let profile = NumericProfile {
+                int_width,
+                float_precision,
+            };
+            let (build_result, path_fork, string_table) =
+                parse_single_file_ast_build_result_with_profile(source, profile)
+                    .expect("typed Int default should coerce to Float");
+            let signature = function_signature_by_name(
+                &build_result.ast,
+                &path_fork,
+                &string_table,
+                "as_float",
+            );
+            let defaulted = &signature.parameters[0].value;
+
+            assert_eq!(
+                defaulted.type_id,
+                build_result.ast.type_environment.builtins().float,
+                "the default should retain declared Float identity under {profile:?}"
+            );
+            let ExpressionKind::Float(value) = &defaulted.kind else {
+                panic!(
+                    "Int -> Float default should materialise as Float, got {:?}",
+                    defaulted.kind
+                );
+            };
+            assert_eq!(
+                value.to_bits(),
+                expected_value.to_bits(),
+                "Int -> {float_precision:?} should keep the existing boundary rounding"
+            );
+        }
+    }
+}
+
+#[test]
+fn mutable_float_operator_default_keeps_parameter_access_mode() {
+    let source = "\
+adjust |value ~Float = 1 + 1|:\n\
+    value = value + 1.0\n\
+;\n\
+\n\
+caller |input ~Float|:\n\
+    adjust(~input)\n\
+;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let signature = function_signature_by_name(&ast, &path_fork, &string_table, "adjust");
+    let parameter = &signature.parameters[0].value;
+
+    assert_eq!(
+        parameter.type_id,
+        ast.type_environment.builtins().float,
+        "the folded integer default must still carry the declared Float identity"
+    );
+    assert_eq!(
+        parameter.value_mode,
+        ValueMode::MutableOwned,
+        "numeric coercion must not replace the authored mutable parameter mode"
+    );
+    assert!(
+        matches!(parameter.kind, ExpressionKind::Float(_)),
+        "the operator default should materialise as Float, got {:?}",
+        parameter.kind
     );
 }

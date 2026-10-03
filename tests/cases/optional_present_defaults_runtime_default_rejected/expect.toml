@@ -1,0 +1,13 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["non-constant value", "Only reference constants"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.non_constant_reference_in_constant"
+path = "input/@page.moth"
+line = 5
+column = 33
+count = 1

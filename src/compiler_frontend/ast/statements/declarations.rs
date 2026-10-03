@@ -697,6 +697,7 @@ pub fn resolve_declaration_syntax(
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
                     path_fork,
+                    TypeMismatchContext::StructFieldDefault,
                 )?);
             }
 

@@ -1,0 +1,108 @@
+@profiles PackageProfile, package_greeting
+guest #= "guest"
+
+show_optional |value String?| -> String:
+    description = if value is:
+        none => then "ABSENT"
+        "" => then "EMPTY"
+        |text| => then text
+    ;
+    return description
+;
+
+constant_default |name String? = guest| -> String:
+    return show_optional(name)
+;
+
+DefaultProfile = |
+    name String? = guest,
+|
+
+InnerProfile = |
+    name String? = guest,
+|
+
+OuterProfile = |
+    inner InnerProfile,
+|
+
+render_generic type T |value T, name String? = guest| -> String:
+    return show_optional(name)
+;
+
+GenericProfile type T = |
+    value T,
+    name String? = guest,
+|
+
+NamedProfile = |
+    name String,
+|
+
+label |this NamedProfile, greeting String? = guest| -> String:
+    return [:[show_optional(greeting)]-[this.name]]
+;
+
+format_optional_u8 |value U8?| -> String:
+    text = if value is:
+        none => then "ABSENT"
+        |payload| => then cast payload
+    ;
+    return text
+;
+
+render_u8 |value U8? = 255| -> String:
+    return format_optional_u8(value)
+;
+
+format_optional_dec |value Dec2?| -> String:
+    text = if value is:
+        none => then "ABSENT"
+        |payload| => then cast payload
+    ;
+    return text
+;
+
+render_dec |value Dec2? = 1.20| -> String:
+    return format_optional_dec(value)
+;
+
+constant_guest = constant_default()
+constant_none = constant_default(none)
+constant_priya = constant_default("Priya")
+constant_empty = constant_default("")
+
+profile_default = DefaultProfile()
+profile_none = DefaultProfile(name = none)
+profile_rob = DefaultProfile(name = "Rob")
+
+outer_default = OuterProfile(inner = InnerProfile())
+
+generic_default = render_generic(42)
+generic_huw = render_generic(42, "Huw")
+generic_profile_default = GenericProfile(value = 42)
+generic_none = render_generic(42, none)
+generic_profile_none = GenericProfile(value = 42, name = none)
+generic_profile_priya = GenericProfile(value = 42, name = "Priya")
+
+person = NamedProfile("Huw")
+receiver_default = person.label()
+receiver_rob = person.label("Rob")
+
+
+package_emmy String? = "Emmy"
+package_function_default = package_greeting()
+package_function_none = package_greeting(none)
+package_function_emmy = package_greeting(package_emmy)
+package_profile_default = PackageProfile()
+package_profile_none = PackageProfile(name = none)
+package_profile_emmy = PackageProfile(name = package_emmy)
+generic_emmy = render_generic(42, package_emmy)
+generic_profile_emmy = GenericProfile(value = 42, name = package_emmy)
+
+u8_default = render_u8()
+u8_override = render_u8(7)
+dec_default = render_dec()
+dec_override = render_dec(2.30)
+
+[:constant-omit=[constant_guest]|constant-none=[constant_none]|constant-priya=[constant_priya]|constant-empty=[constant_empty]|field-omit=[show_optional(profile_default.name)]|field-none=[show_optional(profile_none.name)]|field-rob=[show_optional(profile_rob.name)]|nested-field=[show_optional(outer_default.inner.name)]|generic-fn-omit=[generic_default]|generic-fn-huw=[generic_huw]|generic-fn-none=[generic_none]|generic-fn-emmy=[generic_emmy]|generic-field-omit=[show_optional(generic_profile_default.name)]|generic-field-priya=[show_optional(generic_profile_priya.name)]|generic-field-none=[show_optional(generic_profile_none.name)]|generic-field-emmy=[show_optional(generic_profile_emmy.name)]|receiver-omit=[receiver_default]|receiver-rob=[receiver_rob]|package-fn-omit=[package_function_default]|package-fn-none=[package_function_none]|package-fn-emmy=[package_function_emmy]|package-field-omit=[show_optional(package_profile_default.name)]|package-field-none=[show_optional(package_profile_none.name)]|package-field-emmy=[show_optional(package_profile_emmy.name)]|u8-omit=[u8_default]|u8-override=[u8_override]|dec-omit=[dec_default]|dec-override=[dec_override]]

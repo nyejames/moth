@@ -1,0 +1,7 @@
+runtime_name || -> String?:
+    return "Emmy"
+;
+
+invalid_default |name String? = runtime_name()| -> String?:
+    return name
+;

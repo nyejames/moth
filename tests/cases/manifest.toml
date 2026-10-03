@@ -14012,3 +14012,87 @@ path = "generic_receiver_private_helper_default_rejected"
 tags = ["integration", "generics", "templates", "diagnostics"]
 contract = "language.templates.private_generic_receiver_default_helper_escape"
 role = "primary"
+
+[[case]]
+id = "optional_present_defaults"
+path = "optional_present_defaults"
+tags = ["integration", "language", "optionals", "defaults"]
+contract = "language.defaults.preserve_declared_optional_type"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_boundaries"
+path = "optional_present_defaults_boundaries"
+tags = ["integration", "language", "optionals", "defaults", "constants", "generics", "packages", "receivers", "numeric"]
+contract = "language.defaults.preserve_declared_optional_type"
+role = "boundary"
+
+[[case]]
+id = "optional_present_defaults_int32_float32"
+path = "optional_present_defaults_int32_float32"
+tags = ["integration", "language", "optionals", "defaults", "numeric", "profiles"]
+contract = "language.defaults.float_default_uses_numeric_profile"
+role = "boundary"
+
+[[case]]
+id = "optional_present_defaults_int64_float64"
+path = "optional_present_defaults_int64_float64"
+tags = ["integration", "language", "optionals", "defaults", "numeric", "profiles"]
+contract = "language.defaults.float_default_uses_numeric_profile"
+role = "boundary"
+
+[[case]]
+id = "optional_present_defaults_required_parameter_rejected"
+path = "optional_present_defaults_required_parameter_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.required_optional_parameter_remains_required"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_required_field_rejected"
+path = "optional_present_defaults_required_field_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.required_optional_field_remains_required"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_optional_type_mismatch_rejected"
+path = "optional_present_defaults_optional_type_mismatch_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.optional_type_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_none_to_string_rejected"
+path = "optional_present_defaults_none_to_string_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.none_rejected_for_required_string"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_runtime_default_rejected"
+path = "optional_present_defaults_runtime_default_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.runtime_default_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_present_defaults_parameter_default_rejected"
+path = "optional_present_defaults_parameter_default_rejected"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.parameter_reference_default_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_default_invalid_function"
+path = "optional_default_invalid_function"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.invalid_function_optional_default_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_default_invalid_struct"
+path = "optional_default_invalid_struct"
+tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
+contract = "language.defaults.invalid_struct_optional_default_rejected"
+role = "primary"

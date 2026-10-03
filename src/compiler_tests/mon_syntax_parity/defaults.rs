@@ -227,6 +227,81 @@ fn default_fixtures() -> Vec<ParityFixture> {
         );
     }
 
+    let optional_default_declarations = "Profile = | nickname String? = \"guest\" |\n";
+    let optional_default_schema = || {
+        Schema::record(vec![Field::required(
+            "profile",
+            SchemaType::Struct {
+                name: "Profile".into(),
+                fields: vec![Field::with_default(
+                    "nickname",
+                    SchemaType::Optional(Box::new(SchemaType::String)),
+                    Value::String("guest".into()),
+                )],
+            },
+        )])
+    };
+    for (name, literal, nickname) in [
+        (
+            "same_field_optional_default_omission_uses_present_default",
+            "profile = Profile()",
+            Value::String("guest".into()),
+        ),
+        (
+            "same_field_optional_default_explicit_none_remains_absent",
+            "profile = Profile(nickname = none)",
+            Value::None,
+        ),
+        (
+            "same_field_optional_default_present_string_replaces_default",
+            "profile = Profile(nickname = \"Priya\")",
+            Value::String("Priya".into()),
+        ),
+        (
+            "same_field_optional_default_empty_string_replaces_default",
+            "profile = Profile(nickname = \"\")",
+            Value::String("".into()),
+        ),
+    ] {
+        fixtures.push(
+            fixture(
+                name,
+                literal,
+                optional_default_declarations,
+                optional_default_schema(),
+                SourceExpectation::Accept,
+                MonExpectation::Accept(Value::Record(vec![(
+                    "profile".into(),
+                    Value::Record(vec![("nickname".into(), nickname)]),
+                )])),
+            )
+            .with_source_nominal_type("profile", "Profile")
+            .with_source_optional("profile.nickname"),
+        );
+    }
+
+    let rob_source_override = concat!(
+        "Profile = | nickname String? = \"guest\" |\n",
+        "rob #String? = \"Rob\"\n",
+        "data #= (profile = Profile(nickname = rob))\n",
+    );
+    fixtures.push(
+        fixture(
+            "same_field_optional_default_source_override_uses_typed_rob_binding",
+            "profile = Profile(nickname = \"Rob\")",
+            optional_default_declarations,
+            optional_default_schema(),
+            SourceExpectation::Accept,
+            MonExpectation::Accept(Value::Record(vec![(
+                "profile".into(),
+                Value::Record(vec![("nickname".into(), Value::String("Rob".into()))]),
+            )])),
+        )
+        .with_source_override(rob_source_override)
+        .with_source_nominal_type("profile", "Profile")
+        .with_source_optional("profile.nickname"),
+    );
+
     fixtures
 }
 

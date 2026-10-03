@@ -1,0 +1,66 @@
+show |value String?| -> String:
+    label = if value is:
+        none => then "ABSENT"
+        "" => then "EMPTY"
+        |text| => then text
+    ;
+    return label
+;
+
+greet |name String? = "guest", title String = "friend"| -> String:
+    return show(name)
+;
+
+quiet |name String? = none| -> String:
+    return show(name)
+;
+
+Outer = |
+    name String? = "guest",
+    title String = "friend",
+|
+
+QuietOuter = |
+    name String? = none,
+|
+
+rob String? = "Rob"
+supplied_absent String? = none
+
+fn_omit = greet()
+fn_none = greet(none)
+fn_priya = greet("Priya")
+fn_pos = greet("Priya", "friend")
+fn_rob = greet(rob)
+fn_bound_absent = greet(supplied_absent)
+fn_empty = greet("")
+fn_skip = greet(title = "later")
+fn_quiet_omit = quiet()
+fn_quiet_none = quiet(none)
+fn_quiet_priya = quiet("Priya")
+
+struct_omit = Outer()
+struct_none = Outer(name = none)
+struct_priya = Outer(name = "Priya")
+struct_pos = Outer("Priya", "friend")
+struct_rob = Outer(name = rob)
+struct_bound_absent = Outer(name = supplied_absent)
+struct_empty = Outer(name = "")
+struct_skip = Outer(title = "later")
+struct_quiet_omit = QuietOuter()
+struct_quiet_none = QuietOuter(name = none)
+struct_quiet_priya = QuietOuter(name = "Priya")
+
+st_omit = show(struct_omit.name)
+st_none = show(struct_none.name)
+st_priya = show(struct_priya.name)
+st_pos = show(struct_pos.name)
+st_rob = show(struct_rob.name)
+st_bound_absent = show(struct_bound_absent.name)
+st_empty = show(struct_empty.name)
+st_skip = show(struct_skip.name)
+st_quiet_omit = show(struct_quiet_omit.name)
+st_quiet_none = show(struct_quiet_none.name)
+st_quiet_priya = show(struct_quiet_priya.name)
+
+[:fn-omit=<[fn_omit]>|fn-none=<[fn_none]>|fn-priya=<[fn_priya]>|fn-pos=<[fn_pos]>|fn-rob=<[fn_rob]>|fn-bound-absent=<[fn_bound_absent]>|fn-empty=<[fn_empty]>|fn-skip=<[fn_skip]>|fn-quiet-omit=<[fn_quiet_omit]>|fn-quiet-none=<[fn_quiet_none]>|fn-quiet-priya=<[fn_quiet_priya]>|st-omit=<[st_omit]>|st-none=<[st_none]>|st-priya=<[st_priya]>|st-pos=<[st_pos]>|st-rob=<[st_rob]>|st-bound-absent=<[st_bound_absent]>|st-empty=<[st_empty]>|st-skip=<[st_skip]>|st-quiet-omit=<[st_quiet_omit]>|st-quiet-none=<[st_quiet_none]>|st-quiet-priya=<[st_quiet_priya]>]

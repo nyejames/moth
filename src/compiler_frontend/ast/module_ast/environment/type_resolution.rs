@@ -29,6 +29,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -1247,6 +1248,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                     fallback_policy,
                     self.path_fork,
+                    match member_context {
+                        MemberShellSemanticContext::StructField => {
+                            TypeMismatchContext::StructFieldDefault
+                        }
+                        MemberShellSemanticContext::ChoicePayloadField => {
+                            TypeMismatchContext::Declaration
+                        }
+                    },
                 )
                 .map_err(|error| match error {
                     ExpressionParseError::Diagnostic(diagnostic) => {

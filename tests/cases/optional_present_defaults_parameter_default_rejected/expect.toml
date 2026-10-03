@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0034"]
+message_contains = ["Unknown value name 'name'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+path = "input/@page.moth"
+line = 1
+column = 55
+count = 1

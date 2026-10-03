@@ -168,7 +168,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Default arguments and field defaults]
             [: Supported]
-            [: Broad function parameter default, struct field default, named-call default skipping, constructor default skipping and diagnostics coverage.]
+            [: Broad function parameter and struct field default coverage, including declared-type preservation, omission versus explicit optional overrides, profile-aware coercion, named and constructor default skipping and diagnostics.]
             [: Frontend / JS / HTML]
             [: Function parameters and struct fields can define defaults with [$html:<code>=</code>].]
         ]

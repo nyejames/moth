@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload, InvalidCollectionTypeReason,
-    NameNamespace,
+    NameNamespace, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -36,6 +36,7 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_dat
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -194,6 +195,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             string_table,
             fallback_policy,
             path_fork,
+            TypeMismatchContext::Declaration,
         )?;
         if declaration.value.type_id == builtin_type_ids::STRING {
             declaration.value.reactive_template =
@@ -222,6 +224,11 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
         returns,
     })
 }
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "signature lowering keeps the member, source cursor, scope, mutable interner/string/path state, fallback policy and diagnostic context as separate borrows"
+)]
 pub(crate) fn signature_member_to_declaration(
     member: &SignatureMemberSyntax,
     source_owner: &AstCursor,
@@ -230,6 +237,7 @@ pub(crate) fn signature_member_to_declaration(
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
     path_fork: &mut PathInternerFork,
+    mismatch_context: TypeMismatchContext,
 ) -> SignatureResult<Declaration> {
     let resolved = resolve_signature_type_annotation(
         member.type_annotation.clone(),
@@ -240,25 +248,33 @@ pub(crate) fn signature_member_to_declaration(
     )
     .map_err(|error| signature_member_error_with_span(error, member));
 
-    let (type_id, data_type) = match resolved {
-        Ok(annotation) => (
-            annotation.type_id.unwrap_or(builtin_type_ids::NONE),
-            annotation.diagnostic_type,
-        ),
+    // `builtin_type_ids::NONE` is the seeded `None` type, the same id as
+    // `builtins().none`. It is not an unresolved sentinel. `Option::None` means
+    // the annotation did not resolve; `Some(NONE)` means it resolved to `None`.
+    // The fallback arm maps an unresolved spelling onto that same id, so the id
+    // alone cannot separate a resolved `None` from a deferred destination.
+    // Coerce only when the annotation resolved to some other type. Treating every
+    // `Some` as a resolved destination would normalise a default against `None`.
+    // Generic names and unresolved capacities stay on the later resolution path.
+    let (type_id, data_type, destination_resolved) = match resolved {
+        Ok(annotation) => {
+            let type_id = annotation.type_id.unwrap_or(builtin_type_ids::NONE);
+            let destination_resolved =
+                annotation.type_id.is_some() && type_id != builtin_type_ids::NONE;
+            (type_id, annotation.diagnostic_type, destination_resolved)
+        }
         Err(ExpressionParseError::Diagnostic(diagnostic))
             if should_fallback_signature_type(&diagnostic, fallback_policy) =>
         {
-            // Signature parsing may encounter generic parameters that are not yet
-            // resolvable in the current context. Early nominal-member shell parsing
-            // may also see capacity constants before constants have been folded.
-            // Keep that fallback narrow so literal invalid capacities are still
-            // reported instead of being erased to growable collection types.
+            // `resolve_diagnostic_type_to_type_id` returns `builtins().none` when
+            // the spelling is unresolved. That is `builtin_type_ids::NONE`, so
+            // this arm stays unresolved even though the stored id is present.
             let data_type = parsed_ref_to_data_type(&member.type_annotation);
             let type_id = resolve_diagnostic_type_to_type_id(
                 &data_type,
                 type_interner.environment_mut_for_derived_types(),
             );
-            (type_id, data_type)
+            (type_id, data_type, false)
         }
         Err(diagnostic) => return Err(diagnostic),
     };
@@ -273,7 +289,7 @@ pub(crate) fn signature_member_to_declaration(
             member.value_mode.clone(),
         )
     } else {
-        parse_signature_default_expression(
+        let parsed = parse_signature_default_expression(
             member,
             source_owner,
             type_id,
@@ -282,7 +298,25 @@ pub(crate) fn signature_member_to_declaration(
             string_table,
             path_fork,
         )
-        .map_err(|error| signature_member_error_with_span(error, member))?
+        .map_err(|error| signature_member_error_with_span(error, member))?;
+        if destination_resolved {
+            // Defaults are normalised to the declared member boundary before the
+            // expression becomes the declaration's type carrier. Later resolution
+            // still re-derives TypeId from diagnostic_type, and a coercion node
+            // stores Inferred spelling, so the declared spelling has to stay
+            // aligned with the selected type. It is not a second type authority.
+            normalise_resolved_signature_default(
+                parsed,
+                type_id,
+                data_type,
+                expression_context,
+                type_interner,
+                member,
+                mismatch_context,
+            )?
+        } else {
+            parsed
+        }
     };
 
     if member.is_reactive {
@@ -297,6 +331,33 @@ pub(crate) fn signature_member_to_declaration(
         binding_span: member_span,
         config_qualifier: None,
     })
+}
+
+/// Coerce a parsed default to its resolved declared type and keep that spelling.
+fn normalise_resolved_signature_default(
+    expression: Expression,
+    declared_type_id: TypeId,
+    declared_spelling: DataType,
+    expression_context: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    member: &SignatureMemberSyntax,
+    mismatch_context: TypeMismatchContext,
+) -> SignatureResult<Expression> {
+    let mut value = coerce_expression_to_explicit_type_boundary(
+        expression,
+        declared_type_id,
+        type_interner.environment(),
+        expression_context.numeric_profile.float_precision,
+        mismatch_context,
+    )
+    .map_err(|diagnostic| {
+        signature_member_error_with_span(ExpressionParseError::Diagnostic(diagnostic), member)
+    })?;
+    value.diagnostic_type = declared_spelling;
+    // The member marker owns access mode. Numeric literal coercion rebuilds the
+    // node as immutable, so the authored mode has to be restored after that rewrite.
+    value.value_mode = member.value_mode.to_owned();
+    Ok(value)
 }
 
 /// Attach the authored member-name anchor to an AST diagnostic while its declaring source

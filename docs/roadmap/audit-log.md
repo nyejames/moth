@@ -46,7 +46,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `contract.mon_source_parity` | MON reader/schema in `crates/moth-mon` versus compiler tokenizer and parser source construction; shared lexical policy in `crates/moth-lexical` | Correctness 2026-10 AUD-0009 `partial`; Correctness 2026-10 AUD-0013 `partial` |
 | `tests.mon_syntax_parity` | `src/compiler_tests/mon_syntax_parity/**`, `crates/moth-mon/src/tests/**` and `xtask/src/first_party_deps/tests.rs` | Tests 2026-10 AUD-0010 `partial` |
 | `crates.moth_mon.reader` | `crates/moth-mon/src/reader.rs` trivia walking, payload lookahead and consumed-end state | Redundancy 2026-10 AUD-0011 `partial` |
-| `frontend.optional_defaults` | Optional parameters and fields with a present default; this audit inspected only the reproduced explicit-value override behavior | Correctness 2026-10 AUD-0012 `partial` |
+| `frontend.optional_defaults` | Optional parameters and fields with a present default; this audit inspected only the reproduced explicit-value override behavior | Correctness 2026-10 AUD-0012 `partial` `stale` |
 | `crates.moth_mon.schema` | Field validation and preparation in `crates/moth-mon/src/schema.rs`, including the `prepare_fields` to `prepare_field` handoff | Redundancy 2026-10 AUD-0015 `partial` |
 | `docs.empty_container_contract` | Accepted empty-map and empty-collection semantics across public references, status and related examples | Documentation 2026-10 AUD-0016 `partial` |
 

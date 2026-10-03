@@ -1,0 +1,15 @@
+
+export:
+    PackageProfile = |
+        name String? = "guest",
+    |
+
+    package_greeting |name String? = "guest"| -> String:
+        label = if name is:
+            none => then "ABSENT"
+            "" => then "EMPTY"
+            |text| => then text
+        ;
+        return label
+    ;
+;

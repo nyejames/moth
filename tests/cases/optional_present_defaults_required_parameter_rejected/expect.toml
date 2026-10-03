@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0054"]
+message_contains = ["missing an argument for parameter 'name'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0054"
+reason = "invalid_call_shape.missing_argument"
+path = "input/@page.moth"
+line = 5
+count = 1

@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "int64-float64-default=16777217"

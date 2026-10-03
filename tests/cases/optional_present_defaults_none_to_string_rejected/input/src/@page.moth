@@ -1,0 +1,5 @@
+accept_string |name String| -> String:
+    return name
+;
+
+accept_string(none)

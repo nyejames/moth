@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "fn-omit=<guest>|fn-none=<ABSENT>|fn-priya=<Priya>|fn-pos=<Priya>|fn-rob=<Rob>|fn-bound-absent=<ABSENT>|fn-empty=<EMPTY>|fn-skip=<guest>|fn-quiet-omit=<ABSENT>|fn-quiet-none=<ABSENT>|fn-quiet-priya=<Priya>|st-omit=<guest>|st-none=<ABSENT>|st-priya=<Priya>|st-pos=<Priya>|st-rob=<Rob>|st-bound-absent=<ABSENT>|st-empty=<EMPTY>|st-skip=<guest>|st-quiet-omit=<ABSENT>|st-quiet-none=<ABSENT>|st-quiet-priya=<Priya>"

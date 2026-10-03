@@ -37,6 +37,10 @@ pub mod builtin_type_ids {
     pub const STRING: TypeId = TypeId(3);
     pub const CHAR: TypeId = TypeId(4);
     pub const RANGE: TypeId = TypeId(5);
+    /// The seeded `None` type. This is not an unresolved-type sentinel: resolvers
+    /// that need a `TypeId` for every spelling also map an unresolved annotation
+    /// onto this same id. Callers must keep that deferred state separate from a
+    /// resolved `None`.
     pub const NONE: TypeId = TypeId(6);
 
     /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `None`.

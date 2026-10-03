@@ -20,8 +20,7 @@ None.
 
 Triaged and authorised. Not yet fixed.
 
-- [AUD-0012-F01: Optional receivers with present defaults reject explicit optional values](./audits/AUD-0012-optional-defaults-correctness.md#aud-0012-f01-optional-receivers-with-present-defaults-reject-explicit-optional-values)
-  - Correctness | `frontend.optional_defaults`
+None.
 
 ## In progress
 
@@ -36,6 +35,8 @@ Waiting on a design decision.
 None.
 
 ## Resolved in this branch
+- AUD-0012-F01 was accepted and resolved by normalising a resolved present default to its declared member type in `signature_member_to_declaration` before that expression becomes the declaration's type carrier. Omission still applies the default. Explicit absence, a present string, an empty string and a typed optional override remain distinct. MON semantics are unchanged. Focused semantic, parity and MON tests passed at `523bcf512`; the exact-tree `just validate-full` result stays outside this index. See the [AUD-0012-F01 report](./audits/AUD-0012-optional-defaults-correctness.md#aud-0012-f01-optional-receivers-with-present-defaults-reject-explicit-optional-values).
+
 - AUD-0013-F01 and AUD-0013-F02 were accepted and resolved by aligning source and MON named/map
   entries with the documented outer-spacing rule, including source line-boundary cases, and by
   enforcing adjacency around `::` in choice construction and patterns. Spaced choice declarations

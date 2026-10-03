@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "constant-omit=guest|constant-none=ABSENT|constant-priya=Priya|constant-empty=EMPTY|field-omit=guest|field-none=ABSENT|field-rob=Rob|nested-field=guest|generic-fn-omit=guest|generic-fn-huw=Huw|generic-fn-none=ABSENT|generic-fn-emmy=Emmy|generic-field-omit=guest|generic-field-priya=Priya|generic-field-none=ABSENT|generic-field-emmy=Emmy|receiver-omit=guest-Huw|receiver-rob=Rob-Huw|package-fn-omit=guest|package-fn-none=ABSENT|package-fn-emmy=Emmy|package-field-omit=guest|package-field-none=ABSENT|package-field-emmy=Emmy|u8-omit=255|u8-override=7|dec-omit=1.2|dec-override=2.3"

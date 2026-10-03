@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["String?", "Int"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 1
+column = 24

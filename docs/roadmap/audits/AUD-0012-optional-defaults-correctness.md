@@ -9,7 +9,7 @@
 
 ## What was inspected
 
-The nominal-field and function-parameter reproductions below, plus the optional-value contract example in `docs/src/docs/errors/options.mtf:7`. No compiler implementation path or broader optional-default test matrix was inspected, so the root cause remains open.
+The nominal-field and function-parameter reproductions below, plus the optional-value contract example in `docs/src/docs/errors/options.mtf:7`. That audit run inspected no compiler implementation path, so it did not establish the root cause. The later correction is recorded in AUD-0012-F01 and is not a new complete audit.
 
 ## Authorities read
 
@@ -23,7 +23,7 @@ The audit log and open-findings index were checked. The external review's handov
 
 ### AUD-0012-F01: Optional receivers with present defaults reject explicit optional values
 
-- State: `accepted`
+- State: `closed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -48,7 +48,9 @@ A caller cannot explicitly supply either supported optional state to a parameter
 
 #### Root owner
 
-Compiler signature/default handling is the root owner to investigate. The exact root cause and implementation path have not been established.
+The original audit named compiler signature/default handling as the owner to investigate and did not establish the implementation path. The later correction trace identifies `signature_member_to_declaration` in `src/compiler_frontend/ast/statements/functions.rs`.
+
+With a present default, that function stored the expression returned by `parse_signature_default_expression`. A present `"guest"` has natural type `String`. The expected `String?` guided parsing but did not insert the `String -> String?` coercion. Later resolution read `Declaration.value`'s type as the member type, so an explicit optional argument was checked against `String`. That is why `none` reported `MOTH-RULE-0053` and a `String?` binding reported `MOTH-TYPE-0001`, while omission still applied the default.
 
 #### Suggested correction
 
@@ -56,19 +58,32 @@ Trace how compiler signature/default handling applies a default when a caller su
 
 #### Fix scope and preserved invariants
 
-Open and unresolved. A later fix must cover both nominal fields and function parameters, and preserve the distinction between omitted, explicitly absent and explicitly present optional values.
+Production correction: `47f04024d`. Boundary regression expansion: `df85e38bc`. MON/source parity regression checkpoint: `523bcf512`. Closed on `optionals-fix` from baseline `a211991ba1e885f5255088f384f682799836aa77`. The correction is `normalise_resolved_signature_default`, called from `signature_member_to_declaration` only when the declared destination is resolved. It coerces the parsed default through the existing `coerce_expression_to_explicit_type_boundary`, stores the declared diagnostic spelling on that node, and restores the authored member access mode. Coercion nodes otherwise keep `DataType::Inferred` spelling, and later resolution still re-derives `TypeId` from `diagnostic_type`, so the retained spelling has to stay aligned with the selected type. It is not a second type authority. Numeric literal coercion rebuilds the node as immutable, which is why the member marker is restored after that rewrite.
+
+The three callers pass an existing `TypeMismatchContext` into that same function: function-signature lowering, struct-field declaration lowering, and member-shell rebuilding in `src/compiler_frontend/ast/module_ast/environment/type_resolution.rs`. They do not coerce the default again. Unresolved annotations stay on the existing deferred path. No-default `NoValue` and an already-typed `none` are unchanged. MON, argument routing and omission selection are unchanged.
+
+Regression evidence at that revision, toolchain `rustc 1.99.0`:
+
+- `cargo test -p moth --lib optional_present_default` passed 11 tests.
+- `cargo test -p moth --lib mon_syntax_parity` passed 30 tests.
+- `cargo test -p moth-mon` passed 99 tests.
+- Primary HTML case `optional_present_defaults` expects the exact rendered omission, absent, present, empty and typed-override states for both a function and a struct.
+- Invalid `String? = 42` function and struct cases expect `MOTH-TYPE-0001`.
+- A disposable skip of `normalise_resolved_signature_default`, restored before `523bcf512`, failed all 11 `optional_present_default` tests and exactly the five new same-field parity fixtures. Omission, `"Priya"` and `""` lost the optional layer and observed `String`. Explicit `none` was rejected with `MOTH-RULE-0053` `NoneLiteralRequiresOptionalTypeContext`. The typed `rob #String? = "Rob"` override was rejected with `MOTH-TYPE-0001` `ConstructorArgument`. Existing parity fixtures did not fail.
+
+The completion tree's `just validate-full` result is recorded outside this report so the tested tree is not edited to record its own result.
 
 #### Required validation
 
-Add paired regressions for nominal fields and function parameters: omission retains the present default, explicit `none` remains none, and an explicitly supplied present optional retains its optional type. Verify diagnostics or resulting values at the user-visible boundary and retain the `none`-default control case.
-
-#### Linked findings
-
-None. This is not a MON/source-parity finding and is not deferred work.
+The paired regressions now exist: semantic identity checks, the primary rendered-output case, boundary, import, numeric and rejection cases, and same-field MON/source parity. The exact-tree `just validate-full` gate remains the completion check and is not claimed here.
 
 #### Triage record
 
 2026-10-03 — **Accepted.** The implementer's real-file reproductions confirm that present optional defaults reject both explicit `none` and an explicitly present optional value for nominal fields and function parameters, while omission succeeds. Track the compiler signature/default owner as the investigation boundary, but do not claim a root cause. This is supported-semantics work, not deferred MON parity work; the paired validation must preserve omission, absent and present-value behavior.
+
+2026-10-03 — **Fixed.** `signature_member_to_declaration` now normalises a resolved present default to the declared member type before that expression becomes the declaration's type carrier. The production correction is `47f04024d`; boundary coverage is `df85e38bc`; the MON/source parity checkpoint is `523bcf512`. Independent verification is still required before closure.
+
+2026-10-03 — **Closed.** An independent read-only review, not the implementer, confirmed the root owner, the single normalisation boundary and the absence of a parallel default path. The finding leaves the unresolved index. The original audit coverage stays partial and is marked stale because the producer behaviour it recorded has changed. `just validate-full` remains the completion gate and is not claimed in this report.
 
 ## Checked and clean
 
@@ -76,4 +91,4 @@ The omission cases succeed, which bounds the defect to explicit overrides rather
 
 ## Limitations
 
-Coverage is limited to the reproductions above and the cited option contract. No signature/default implementation trace, root cause, compiler test suite or broader parameter/field matrix was inspected. The finding remains accepted and open; no fix or validation result is claimed.
+The original audit coverage remains the reproductions above and the cited option contract. It did not inspect the implementation, and this report does not claim a new complete structured audit of `frontend.optional_defaults`. The fix record in AUD-0012-F01 is later implementation evidence, verified and closed by a reviewer other than the implementer.
