@@ -4,7 +4,7 @@
 //! payloads stay in the canonical source owner and are read through checked [`TokenRef`] views.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::DiagnosticToken;
+use crate::compiler_frontend::compiler_messages::{ChoiceVariantSeparatorGap, DiagnosticToken};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntax, PathSyntaxId, PathSyntaxTable};
@@ -122,6 +122,24 @@ impl<'a> AstCursor<'a> {
     pub(crate) fn current(&self) -> Option<TokenRef<'a>> {
         let token = self.cursor.current()?;
         self.visible_at(self.cursor.parser_position(), token)
+    }
+
+    pub(crate) fn current_choice_variant_separator_gap(&self) -> Option<ChoiceVariantSeparatorGap> {
+        let token = self.current()?;
+        if token.tag() != TokenTag::DOUBLE_COLON {
+            return None;
+        }
+
+        let shape = token.shape();
+        match (
+            shape.double_colon_qualifier_attached(),
+            shape.double_colon_variant_attached(),
+        ) {
+            (true, true) => None,
+            (false, true) => Some(ChoiceVariantSeparatorGap::Before),
+            (true, false) => Some(ChoiceVariantSeparatorGap::After),
+            (false, false) => Some(ChoiceVariantSeparatorGap::Both),
+        }
     }
 
     pub(crate) fn previous(&self) -> Option<TokenRef<'a>> {

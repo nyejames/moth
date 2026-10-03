@@ -11,9 +11,9 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 
 #[test]

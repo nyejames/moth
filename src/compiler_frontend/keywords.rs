@@ -1,180 +1,73 @@
-//! Frontend keyword and identifier policy.
+//! Compiler-owned token mapping for neutral source-word identities.
 //!
-//! WHAT: owns the exact keyword-to-token mapping used by lexing and the identifier
-//! validation helpers shared with path and dependency parsing. The same direct match also
-//! supplies the neutral presentation classes consumed by the HTML code highlighter.
-//! WHY: keyword policy is user-visible and must not drift between the tokenizer,
-//! dependency alias validation, reserved-name diagnostics and code highlighting.
+//! WHAT: maps moth-lexical word identities to `TokenTag` and specializes attached-bang forms into
+//! compiler token identities.
+//! WHY: lexical spelling and presentation categories stay below the compiler, while token storage
+//! and its attached-bang tags remain compiler-owned.
 
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::words::{SourceWord, classify_source_word};
 
-/// Keywords that may not be shadowed by identifiers after case folding and
-/// stripping leading underscores.
-pub(crate) const RESERVED_KEYWORD_SHADOWS: [&str; 48] = [
-    "export", "if", "return", "yield", "else", "checked", "async", "cast", "as", "copy", "type",
-    "of", "must", "this", "catch", "then", "loop", "to", "by", "break", "continue", "is", "not",
-    "and", "or", "true", "false", "none", "fn", "float", "int", "string", "bool", "char", "assert",
-    "config", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f16", "f32", "f64", "byte",
-];
-
-/// Canonical reserved spelling of the exact-decimal `Dec` type family.
-///
-/// The family is not a tokenizer keyword: `Dec` and `DecN` lex as symbols and the
-/// type-annotation parser recognises the spellings. The reservation still lives in the
-/// identifier-shadow policy so declarations cannot shadow the family name or a numeric
-/// suffix spelling under any casing.
-pub(crate) const RESERVED_DEC_TYPE_SPELLING: &str = "Dec";
-
-/// Neutral presentation class for an exact Moth source word.
-///
-/// WHAT: shared by the tokenizer and the HTML code highlighter so one direct
-/// match owns both the token identity and the general word category.
-/// WHY: the highlighter must never maintain a second current Moth word list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SourceWordClass {
-    Keyword,
-    WordOperator,
-    Literal,
-    BuiltinType,
-}
-
-/// Exact source-word classification result.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ClassifiedSourceWord {
-    pub(crate) token_tag: TokenTag,
-    pub(crate) bool_value: Option<bool>,
-    pub(crate) class: SourceWordClass,
-}
-
-impl ClassifiedSourceWord {
-    fn keyword(token_tag: TokenTag) -> Self {
-        Self {
-            token_tag,
-            bool_value: None,
-            class: SourceWordClass::Keyword,
-        }
-    }
-
-    fn word_operator(token_tag: TokenTag) -> Self {
-        Self {
-            token_tag,
-            bool_value: None,
-            class: SourceWordClass::WordOperator,
-        }
-    }
-
-    fn literal(token_tag: TokenTag, bool_value: Option<bool>) -> Self {
-        Self {
-            token_tag,
-            bool_value,
-            class: SourceWordClass::Literal,
-        }
-    }
-
-    fn builtin_type(token_tag: TokenTag) -> Self {
-        Self {
-            token_tag,
-            bool_value: None,
-            class: SourceWordClass::BuiltinType,
-        }
+/// Returns the compiler token identity for a shared exact source word.
+pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
+    match word {
+        SourceWord::Export => TokenTag::EXPORT,
+        SourceWord::Type => TokenTag::TYPE,
+        SourceWord::Of => TokenTag::OF,
+        SourceWord::As => TokenTag::AS,
+        SourceWord::Copy => TokenTag::COPY,
+        SourceWord::If => TokenTag::IF,
+        SourceWord::Return => TokenTag::RETURN,
+        SourceWord::Catch => TokenTag::CATCH,
+        SourceWord::Then => TokenTag::THEN,
+        SourceWord::Else => TokenTag::ELSE,
+        SourceWord::Checked => TokenTag::CHECKED,
+        SourceWord::Cast => TokenTag::CAST,
+        SourceWord::Break => TokenTag::BREAK,
+        SourceWord::Continue => TokenTag::CONTINUE,
+        SourceWord::Must => TokenTag::MUST,
+        SourceWord::This => TokenTag::THIS,
+        SourceWord::ThisType => TokenTag::TRAIT_THIS,
+        SourceWord::Assert => TokenTag::ASSERT,
+        SourceWord::Async => TokenTag::ASYNC,
+        SourceWord::Yield => TokenTag::YIELD,
+        SourceWord::Loop => TokenTag::LOOP,
+        SourceWord::To => TokenTag::EXCLUSIVE_RANGE,
+        SourceWord::By => TokenTag::BY,
+        SourceWord::Is => TokenTag::IS,
+        SourceWord::Not => TokenTag::NOT,
+        SourceWord::And => TokenTag::AND,
+        SourceWord::Or => TokenTag::OR,
+        SourceWord::TrueLiteral | SourceWord::FalseLiteral => TokenTag::BOOL_LITERAL,
+        SourceWord::NoneLiteral => TokenTag::NONE_LITERAL,
+        SourceWord::IntType => TokenTag::DATATYPE_INT,
+        SourceWord::FloatType => TokenTag::DATATYPE_FLOAT,
+        SourceWord::BoolType => TokenTag::DATATYPE_BOOL,
+        SourceWord::StringType => TokenTag::DATATYPE_STRING,
+        SourceWord::CharType => TokenTag::DATATYPE_CHAR,
+        SourceWord::NoneType => TokenTag::DATATYPE_NONE,
+        SourceWord::TrueType => TokenTag::DATATYPE_TRUE,
+        SourceWord::FalseType => TokenTag::DATATYPE_FALSE,
+        SourceWord::I8Type => TokenTag::DATATYPE_I8,
+        SourceWord::I16Type => TokenTag::DATATYPE_I16,
+        SourceWord::I32Type => TokenTag::DATATYPE_I32,
+        SourceWord::I64Type => TokenTag::DATATYPE_I64,
+        SourceWord::U8Type => TokenTag::DATATYPE_U8,
+        SourceWord::U16Type => TokenTag::DATATYPE_U16,
+        SourceWord::U32Type => TokenTag::DATATYPE_U32,
+        SourceWord::U64Type => TokenTag::DATATYPE_U64,
+        SourceWord::F16Type => TokenTag::DATATYPE_F16,
+        SourceWord::F32Type => TokenTag::DATATYPE_F32,
+        SourceWord::F64Type => TokenTag::DATATYPE_F64,
+        SourceWord::ByteType => TokenTag::DATATYPE_BYTE,
     }
 }
 
-/// Returns the stable taxonomy tag and any typed literal payload for an exact source word.
-pub(crate) fn classify_source_word(text: &str) -> Option<ClassifiedSourceWord> {
-    match text {
-        "export" => Some(ClassifiedSourceWord::keyword(TokenTag::EXPORT)),
-        "type" => Some(ClassifiedSourceWord::keyword(TokenTag::TYPE)),
-        "of" => Some(ClassifiedSourceWord::keyword(TokenTag::OF)),
-        "as" => Some(ClassifiedSourceWord::keyword(TokenTag::AS)),
-        "copy" => Some(ClassifiedSourceWord::keyword(TokenTag::COPY)),
-        "if" => Some(ClassifiedSourceWord::keyword(TokenTag::IF)),
-        "return" => Some(ClassifiedSourceWord::keyword(TokenTag::RETURN)),
-        "catch" => Some(ClassifiedSourceWord::keyword(TokenTag::CATCH)),
-        "then" => Some(ClassifiedSourceWord::keyword(TokenTag::THEN)),
-        "else" => Some(ClassifiedSourceWord::keyword(TokenTag::ELSE)),
-        "checked" => Some(ClassifiedSourceWord::keyword(TokenTag::CHECKED)),
-        "cast" => Some(ClassifiedSourceWord::keyword(TokenTag::CAST)),
-        "break" => Some(ClassifiedSourceWord::keyword(TokenTag::BREAK)),
-        "continue" => Some(ClassifiedSourceWord::keyword(TokenTag::CONTINUE)),
-        "must" => Some(ClassifiedSourceWord::keyword(TokenTag::MUST)),
-        "this" => Some(ClassifiedSourceWord::keyword(TokenTag::THIS)),
-        "This" => Some(ClassifiedSourceWord::keyword(TokenTag::TRAIT_THIS)),
-        "assert" => Some(ClassifiedSourceWord::keyword(TokenTag::ASSERT)),
-        "async" => Some(ClassifiedSourceWord::keyword(TokenTag::ASYNC)),
-        "yield" => Some(ClassifiedSourceWord::keyword(TokenTag::YIELD)),
-        "loop" => Some(ClassifiedSourceWord::keyword(TokenTag::LOOP)),
-        "to" => Some(ClassifiedSourceWord::keyword(TokenTag::EXCLUSIVE_RANGE)),
-        "by" => Some(ClassifiedSourceWord::keyword(TokenTag::BY)),
-        "is" => Some(ClassifiedSourceWord::word_operator(TokenTag::IS)),
-        "not" => Some(ClassifiedSourceWord::word_operator(TokenTag::NOT)),
-        "and" => Some(ClassifiedSourceWord::word_operator(TokenTag::AND)),
-        "or" => Some(ClassifiedSourceWord::word_operator(TokenTag::OR)),
-        "true" => Some(ClassifiedSourceWord::literal(
-            TokenTag::BOOL_LITERAL,
-            Some(true),
-        )),
-        "false" => Some(ClassifiedSourceWord::literal(
-            TokenTag::BOOL_LITERAL,
-            Some(false),
-        )),
-        "none" => Some(ClassifiedSourceWord::literal(TokenTag::NONE_LITERAL, None)),
-        "Int" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_INT)),
-        "Float" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FLOAT)),
-        "Bool" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BOOL)),
-        "String" => Some(ClassifiedSourceWord::builtin_type(
-            TokenTag::DATATYPE_STRING,
-        )),
-        "Char" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_CHAR)),
-        "None" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_NONE)),
-        "True" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_TRUE)),
-        "False" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_FALSE)),
-        "I8" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I8)),
-        "I16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I16)),
-        "I32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I32)),
-        "I64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_I64)),
-        "U8" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U8)),
-        "U16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U16)),
-        "U32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U32)),
-        "U64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_U64)),
-        "F16" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F16)),
-        "F32" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F32)),
-        "F64" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_F64)),
-        "Byte" => Some(ClassifiedSourceWord::builtin_type(TokenTag::DATATYPE_BYTE)),
-        _ => None,
-    }
-}
-
-/// Returns the stable taxonomy tag for an exact source keyword spelling.
-#[cfg(test)]
-pub(crate) fn keyword_token_tag(text: &str) -> Option<TokenTag> {
-    classify_source_word(text).map(|classified| classified.token_tag)
-}
-
-/// Returns the stable taxonomy tag for a keyword form requiring an attached `!`.
+/// Returns the compiler token identity for an exact source word with an attached `!`.
 pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
-    match text {
-        "return" => Some(TokenTag::RETURN_BANG),
-        "cast" => Some(TokenTag::CAST_BANG),
+    match classify_source_word(text)? {
+        SourceWord::Return => Some(TokenTag::RETURN_BANG),
+        SourceWord::Cast => Some(TokenTag::CAST_BANG),
         _ => None,
     }
-}
-
-/// True when `text` is an exact source word with a dedicated tokenizer tag.
-#[cfg(test)]
-pub(crate) fn is_keyword(text: &str) -> bool {
-    classify_source_word(text).is_some()
-}
-
-/// True when a character can appear after the first character of an identifier.
-pub(crate) fn is_identifier_continue(char: char) -> bool {
-    char.is_alphanumeric() || char == '_'
-}
-
-/// True when a string is a source-level identifier spelling.
-pub(crate) fn is_valid_identifier(text: &str) -> bool {
-    text.chars()
-        .next()
-        .is_some_and(|char| char.is_alphabetic() || char == '_')
-        && text.chars().all(is_identifier_continue)
 }

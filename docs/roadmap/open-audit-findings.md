@@ -20,7 +20,8 @@ None.
 
 Triaged and authorised. Not yet fixed.
 
-None.
+- [AUD-0012-F01: Optional receivers with present defaults reject explicit optional values](./audits/AUD-0012-optional-defaults-correctness.md#aud-0012-f01-optional-receivers-with-present-defaults-reject-explicit-optional-values)
+  - Correctness | `frontend.optional_defaults`
 
 ## In progress
 
@@ -35,6 +36,57 @@ Waiting on a design decision.
 None.
 
 ## Resolved in this branch
+- AUD-0013-F01 and AUD-0013-F02 were accepted and resolved by aligning source and MON named/map
+  entries with the documented outer-spacing rule, including source line-boundary cases, and by
+  enforcing adjacency around `::` in choice construction and patterns. Spaced choice declarations
+  remain valid. The 32-case equals parity corpus, reader errors and choice-spacing parity/frontend
+  regressions passed with focused package tests and clippy. The exact-tree `just validate-full`
+  result is recorded in the closeout commit message. See the [AUD-0013-F01 report](./audits/AUD-0013-mon-source-parity-spacing-correctness.md#aud-0013-f01-source-and-mon-entries-bypass-the-outer-spacing-contract)
+  and [AUD-0013-F02 report](./audits/AUD-0013-mon-source-parity-spacing-correctness.md#aud-0013-f02-choice-variant-separator-spacing-differs-between-source-and-mon).
+
+- AUD-0014-F01 was accepted and resolved by routing `character_is_missing_rhs_boundary` through
+  the shared `moth_lexical::is_line_break` predicate while retaining its punctuation cases.
+  Focused `moth` tests and clippy passed; the exact-tree `just validate-full` result is recorded
+  in the closeout commit message. See the [AUD-0014 report](./audits/AUD-0014-tokenizer-line-break-redundancy.md#aud-0014-f01-lexer-boundary-helper-repeats-shared-line-break-policy).
+
+- AUD-0015-F01 was accepted and resolved by removing the unreachable duplicate choice-payload
+  default check from `prepare_field`; `prepare_fields` remains the single policy owner. Focused
+  `moth-mon` tests and clippy passed; the exact-tree `just validate-full` result is recorded in
+  the closeout commit message. See the [AUD-0015 report](./audits/AUD-0015-mon-schema-preparation-redundancy.md#aud-0015-f01-choice-payload-defaults-are-rejected-twice-in-schema-preparation).
+
+- AUD-0016-F01 was accepted and resolved by aligning empty-container references with the accepted
+  `{=}`-map / `{}`-collection design while keeping current implementation status separate. The
+  documentation gate passed; the exact-tree `just validate-full` result is recorded in the
+  closeout commit message. See the [AUD-0016 report](./audits/AUD-0016-empty-container-documentation.md#aud-0016-f01-empty-container-documentation-conflates-current-behavior-with-accepted-design).
+
+- AUD-0009-F01, AUD-0009-F02 and linked AUD-0010-F02 were accepted and resolved by sharing
+  the LF/CR logical-line rule, tightening MON constructor payload lookahead to the same logical
+  line, and reusing the MON reader's trivia walk under a cursor checkpoint. The lexer grammar
+  stayed unchanged; MON's acceptance tightening was recorded. The bounded parity matrix and
+  reader tests protect the whitespace and constructor boundaries, exact spans and keyword
+  openers; scoped package/parity tests and clippy passed; `just validate-full` passed. See the
+  [AUD-0009-F01 triage record](./audits/AUD-0009-mon-source-parity-correctness.md#aud-0009-f01-unicode-horizontal-whitespace-splits-mon-named-entries),
+  [AUD-0009-F02 triage record](./audits/AUD-0009-mon-source-parity-correctness.md#aud-0009-f02-mon-constructor-payload-lookahead-crosses-source-line-boundaries),
+  [AUD-0010-F02 triage record](./audits/AUD-0010-mon-syntax-parity-tests.md#aud-0010-f02-parity-tests-miss-decisive-token-boundaries-and-receivers)
+  and [AUD-0011-F01 triage record](./audits/AUD-0011-mon-reader-redundancy.md#aud-0011-f01-mon-payload-lookahead-duplicates-its-trivia-scanner).
+
+- AUD-0009-F03 was accepted and resolved by charging each rejected label, variant and
+  qualifier before copying it into a path or error detail, and charging each schema field once
+  before validation. Reserved-name budget regressions failed before the fix; an exact-budget
+  nested and payload schema remains accepted. Scoped MON tests and clippy passed; `just validate-full` passed. See the
+  [AUD-0009-F03 triage record](./audits/AUD-0009-mon-source-parity-correctness.md#aud-0009-f03-rejected-names-bypass-decoded-byte-accounting-in-diagnostics).
+
+- [AUD-0010-F01: Deferred-feature gap fixtures lack equivalent typed source receivers](./audits/AUD-0010-mon-syntax-parity-tests.md#aud-0010-f01-deferred-feature-gap-fixtures-lack-equivalent-typed-source-receivers) was accepted and resolved by giving the contextual-choice gap a typed `Holder` receiver and the source `{=}` gap a typed runtime binding.
+  The source `{=}` case remains a deferred-feature gap. `MapHolder(scores = {})` still reports
+  MOTH-TYPE-0002 on the current compiler; that observation is not a defect against the accepted
+  design, where `{}` is always a collection. Scoped parity tests and clippy passed;
+  `just validate-full` passed. See the [AUD-0016-F01 documentation finding](./audits/AUD-0016-empty-container-documentation.md#aud-0016-f01-empty-container-documentation-conflates-current-behavior-with-accepted-design).
+
+- AUD-0010-F03 was accepted and resolved by adding optional-renamed and inactive-target
+  forbidden-dependency fixtures to the existing guard tests. Both passed against unchanged
+  production code, so this remained coverage-only. Scoped xtask tests and clippy passed; `just validate-full` passed. See the
+  [AUD-0010-F03 triage record](./audits/AUD-0010-mon-syntax-parity-tests.md#aud-0010-f03-dependency-guard-lacks-optional-and-inactive-target-fixtures).
+
 - AUD-0007-F03 and linked AUD-0008-F03 were accepted and resolved by applying the shared
   safe-integer/profile-bound projection to standard external `Error.code` values before creating
   a Moth Error. Generated standard and Int64 fallible wrappers execute in Node: signed endpoints

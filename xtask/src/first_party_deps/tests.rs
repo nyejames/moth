@@ -3,11 +3,8 @@
 //! The fixture roots mirror only the production roots owned by the audit. Documentation, tests and
 //! benchmarks are deliberately created beside them in one test to prove they are outside scope.
 
-use super::{
-    FIRST_PARTY_DEPS_SCHEMA_VERSION, FirstPartyDepsRule, audit_first_party_deps,
-    audit_javascript_source, started_report,
-};
-use crate::report_file::ReportRunIdentity;
+use super::rust_dependencies::RustDependencyKind;
+use super::{FirstPartyDepsRule, audit_first_party_deps, audit_javascript_source};
 use moth::first_party_js::{InventoriedJsSource, inventoried_javascript_sources};
 use std::fs;
 use std::path::Path;
@@ -18,6 +15,19 @@ fn fixture_workspace() -> TempDir {
     for root in super::FIRST_PARTY_SOURCE_ROOTS {
         fs::create_dir_all(workspace.path().join(root)).expect("first-party root");
     }
+    write_fixture_file(
+        workspace.path(),
+        "Cargo.toml",
+        "[package]\nname = \"moth\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
+         [workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n",
+    );
+    write_fixture_file(workspace.path(), "src/lib.rs", "");
+    write_rust_package(workspace.path(), "moth-lexical", "");
+    write_rust_package(
+        workspace.path(),
+        "moth-mon",
+        "[dependencies]\nmoth-lexical = { path = \"../moth-lexical\" }\n",
+    );
     workspace
 }
 
@@ -29,10 +39,21 @@ fn write_fixture_file(workspace: &Path, relative: &str, contents: &str) {
     fs::write(path, contents).expect("fixture file");
 }
 
+fn write_rust_package(workspace: &Path, name: &str, dependencies: &str) {
+    write_fixture_file(
+        workspace,
+        &format!("crates/{name}/Cargo.toml"),
+        &format!(
+            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n{dependencies}"
+        ),
+    );
+    write_fixture_file(workspace, &format!("crates/{name}/src/lib.rs"), "");
+}
+
 fn findings_for(workspace: &TempDir) -> Vec<super::FirstPartyDepsFinding> {
-    let (_visited, _javascript, findings) =
-        audit_first_party_deps(workspace.path()).expect("fixture roots are readable");
-    findings
+    audit_first_party_deps(workspace.path())
+        .expect("fixture roots and Cargo workspace are readable")
+        .findings
 }
 
 fn assert_has_rule(findings: &[super::FirstPartyDepsFinding], rule: FirstPartyDepsRule) {
@@ -43,7 +64,7 @@ fn assert_has_rule(findings: &[super::FirstPartyDepsFinding], rule: FirstPartyDe
 }
 
 #[test]
-fn fixture_with_allowed_runtime_import_and_no_manifests_passes() {
+fn fixture_with_allowed_runtime_import_and_no_js_manifests_passes() {
     let workspace = fixture_workspace();
     write_fixture_file(
         workspace.path(),
@@ -231,32 +252,20 @@ fn missing_first_party_root_fails_closed() {
 }
 
 #[test]
-fn started_report_is_incomplete_until_the_walk_finishes() {
-    let report = started_report(ReportRunIdentity::started("first-party-deps", None));
-
-    assert_eq!(FIRST_PARTY_DEPS_SCHEMA_VERSION, 3);
-    assert_eq!(report.schema_version, FIRST_PARTY_DEPS_SCHEMA_VERSION);
-    assert!(!report.run.completed);
-    assert_eq!(report.visited_file_count, 0);
-    assert_eq!(report.javascript_source_count, 0);
-    assert!(report.findings.is_empty());
-}
-
-#[test]
 fn the_audit_inspects_the_compiler_owned_javascript_inventory() {
     let workspace = fixture_workspace();
 
-    let (_visited, javascript_sources, findings) =
-        audit_first_party_deps(workspace.path()).expect("fixture roots are readable");
+    let state = audit_first_party_deps(workspace.path()).expect("fixture roots are readable");
 
     assert_eq!(
-        javascript_sources,
+        state.javascript_source_count,
         inventoried_javascript_sources().len(),
         "empty roots leave only the compiler-owned inventory, which the audit must still inspect"
     );
     assert!(
-        findings.is_empty(),
-        "the shipped inventory must satisfy the first-party policy: {findings:?}"
+        state.findings.is_empty(),
+        "the shipped inventory must satisfy the first-party policy: {:?}",
+        state.findings
     );
 }
 
@@ -280,4 +289,233 @@ fn an_inventoried_source_with_a_forbidden_import_is_rejected_under_its_label() {
     let finding = &state.findings[0];
     assert_eq!(finding.rule, FirstPartyDepsRule::UnapprovedModuleImport);
     assert_eq!(finding.file, "moth::first_party_js::fixture");
+}
+
+#[test]
+fn rust_libraries_allow_only_the_forward_workspace_direction() {
+    let workspace = fixture_workspace();
+    write_rust_package(
+        workspace.path(),
+        "moth-mon",
+        "[dependencies]\nlexical = { package = \"moth-lexical\", path = \"../moth-lexical\" }\n",
+    );
+    write_fixture_file(
+        workspace.path(),
+        "Cargo.toml",
+        "[package]\nname = \"moth\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
+         [workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n\
+         [dependencies]\nmoth-mon = { path = \"crates/moth-mon\" }\n\
+         moth-lexical = { path = \"crates/moth-lexical\" }\n",
+    );
+
+    let state = audit_first_party_deps(workspace.path()).expect("legal Cargo direction");
+    assert!(state.findings.is_empty(), "{:?}", state.findings);
+    let cargo_roots: Vec<&str> = state
+        .audited_roots
+        .iter()
+        .filter(|root| root.ends_with("Cargo.toml"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        cargo_roots,
+        [
+            "Cargo.toml",
+            "crates/moth-lexical/Cargo.toml",
+            "crates/moth-mon/Cargo.toml",
+        ],
+        "the report must name manifests actually inspected by Cargo"
+    );
+}
+
+#[test]
+fn rust_libraries_reject_reverse_normal_dev_and_build_edges() {
+    for (section, kind) in [
+        ("dependencies", RustDependencyKind::Normal),
+        ("dev-dependencies", RustDependencyKind::Dev),
+        ("build-dependencies", RustDependencyKind::Build),
+    ] {
+        for (package, dependency, path) in [
+            ("moth-mon", "moth", "../.."),
+            ("moth-lexical", "moth", "../.."),
+            ("moth-lexical", "moth-mon", "../moth-mon"),
+        ] {
+            let workspace = fixture_workspace();
+            write_rust_package(workspace.path(), "moth-mon", "");
+            write_rust_package(
+                workspace.path(),
+                package,
+                &format!("[{section}]\n{dependency} = {{ path = \"{path}\" }}\n"),
+            );
+
+            let findings = findings_for(&workspace);
+            assert_eq!(findings.len(), 1, "{package}/{section}: {findings:?}");
+            let finding = &findings[0];
+            assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+            assert_eq!(finding.file, format!("crates/{package}/Cargo.toml"));
+            let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+            assert_eq!(edge.package, package);
+            assert_eq!(edge.dependency, dependency);
+            assert_eq!(edge.kind, kind);
+            assert_eq!(edge.rename, None);
+        }
+    }
+}
+
+#[test]
+fn renamed_compiler_dependency_retains_canonical_package_identity() {
+    let workspace = fixture_workspace();
+    write_rust_package(
+        workspace.path(),
+        "moth-mon",
+        "[dev-dependencies]\ncompiler_alias = { package = \"moth\", path = \"../..\" }\n",
+    );
+
+    let findings = findings_for(&workspace);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let finding = &findings[0];
+    assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+    assert_eq!(finding.file, "crates/moth-mon/Cargo.toml");
+    let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+    assert_eq!(edge.package, "moth-mon");
+    assert_eq!(edge.dependency, "moth");
+    assert_eq!(edge.kind, RustDependencyKind::Dev);
+    assert_eq!(edge.rename.as_deref(), Some("compiler_alias"));
+    assert!(finding.message.contains("'moth'"), "{finding}");
+}
+
+#[test]
+fn optional_renamed_compiler_dependency_retains_canonical_identity() {
+    let workspace = fixture_workspace();
+    write_rust_package(
+        workspace.path(),
+        "moth-mon",
+        "[dependencies]\ncompiler_alias = { package = \"moth\", path = \"../..\", optional = true }\n",
+    );
+
+    let findings = findings_for(&workspace);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let finding = &findings[0];
+    assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+    assert_eq!(finding.file, "crates/moth-mon/Cargo.toml");
+    let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+    assert_eq!(edge.package, "moth-mon");
+    assert_eq!(edge.dependency, "moth");
+    assert_eq!(edge.kind, RustDependencyKind::Normal);
+    assert_eq!(edge.rename.as_deref(), Some("compiler_alias"));
+    assert!(finding.message.contains("'moth'"), "{finding}");
+}
+
+#[test]
+fn inactive_target_dependency_is_still_rejected() {
+    let workspace = fixture_workspace();
+    write_rust_package(
+        workspace.path(),
+        "moth-lexical",
+        "[target.'cfg(any())'.dependencies]\nmoth-mon = { path = \"../moth-mon\" }\n",
+    );
+
+    let findings = findings_for(&workspace);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    let finding = &findings[0];
+    assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+    assert_eq!(finding.file, "crates/moth-lexical/Cargo.toml");
+    let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+    assert_eq!(edge.package, "moth-lexical");
+    assert_eq!(edge.dependency, "moth-mon");
+    assert_eq!(edge.kind, RustDependencyKind::Normal);
+    assert_eq!(edge.rename, None);
+    assert!(finding.message.contains("'moth-mon'"), "{finding}");
+}
+
+#[test]
+fn extracted_libraries_reject_other_first_party_workspace_packages() {
+    for package in ["moth-mon", "moth-lexical"] {
+        let workspace = fixture_workspace();
+        write_rust_package(workspace.path(), "utility", "");
+        write_rust_package(
+            workspace.path(),
+            package,
+            "[dependencies]\nutility = { path = \"../utility\" }\n",
+        );
+
+        let findings = findings_for(&workspace);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(
+            findings[0].rule,
+            FirstPartyDepsRule::RustDependencyDirection
+        );
+        let edge = findings[0]
+            .rust_dependency
+            .as_ref()
+            .expect("typed Cargo edge");
+        assert_eq!(edge.package, package);
+        assert_eq!(edge.dependency, "utility");
+    }
+}
+
+#[test]
+fn missing_extracted_workspace_packages_fail_closed() {
+    for package in ["moth-mon", "moth-lexical"] {
+        let workspace = fixture_workspace();
+        write_rust_package(workspace.path(), "moth-mon", "");
+        fs::remove_dir_all(workspace.path().join("crates").join(package))
+            .expect("remove configured package");
+
+        let error = audit_first_party_deps(workspace.path())
+            .expect_err("missing configured packages cannot pass the dependency audit");
+        assert!(
+            error.contains(&format!("missing configured workspace package '{package}'")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn cargo_metadata_failure_cannot_pass_the_dependency_audit() {
+    let workspace = fixture_workspace();
+    write_fixture_file(workspace.path(), "Cargo.toml", "[package\n");
+
+    let error = audit_first_party_deps(workspace.path())
+        .expect_err("failed Cargo metadata cannot produce a clean dependency report");
+    assert!(error.contains("cargo metadata"), "{error}");
+    assert!(error.contains("failed"), "{error}");
+}
+
+#[test]
+fn compiler_and_xtask_dependencies_are_forbidden_even_when_excluded_from_workspace_members() {
+    for forbidden in ["moth", "xtask"] {
+        let workspace = fixture_workspace();
+        write_fixture_file(
+            workspace.path(),
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"excluded\"]\nresolver = \"3\"\n",
+        );
+        write_fixture_file(
+            workspace.path(),
+            "excluded/Cargo.toml",
+            &format!(
+                "[package]\nname = \"{forbidden}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+            ),
+        );
+        write_fixture_file(workspace.path(), "excluded/src/lib.rs", "");
+        write_rust_package(
+            workspace.path(),
+            "moth-mon",
+            &format!("[dependencies]\n{forbidden} = {{ path = \"../../excluded\" }}\n"),
+        );
+
+        let findings = findings_for(&workspace);
+        assert_eq!(findings.len(), 1, "{forbidden}: {findings:?}");
+        assert_eq!(
+            findings[0].rule,
+            FirstPartyDepsRule::RustDependencyDirection
+        );
+        let edge = findings[0]
+            .rust_dependency
+            .as_ref()
+            .expect("typed Cargo edge");
+        assert_eq!(edge.package, "moth-mon");
+        assert_eq!(edge.dependency, forbidden);
+        assert_eq!(edge.kind, RustDependencyKind::Normal);
+    }
 }

@@ -1,8 +1,8 @@
 //! Focused tests for the project config to compiler-options projection.
 
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::projects::settings::Config;
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[test]
 fn frontend_options_use_the_configured_loop_limit() {

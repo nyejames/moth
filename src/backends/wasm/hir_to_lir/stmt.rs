@@ -11,8 +11,7 @@ use crate::backends::wasm::lir::instructions::{
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
@@ -21,6 +20,8 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 pub(crate) fn lower_statement(
     context: &mut WasmFunctionLoweringContext<'_, '_>,

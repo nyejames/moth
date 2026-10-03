@@ -8,7 +8,7 @@ use crate::backends::wasm::lir::types::{
 };
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 /// Integer operation domain resolved from canonical ranges, separate from scalar storage layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

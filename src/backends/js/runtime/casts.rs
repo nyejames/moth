@@ -11,7 +11,8 @@ use crate::backends::js::numeric_carrier::{
 use crate::compiler_frontend::builtins::casts::evidence::numeric_scalars;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use std::collections::HashSet;
 
 impl<'hir> JsEmitter<'hir> {

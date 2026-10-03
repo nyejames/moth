@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

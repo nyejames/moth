@@ -138,7 +138,7 @@ impl<'a> TokenRef<'a> {
     pub(crate) fn validate_payload(self) -> Result<(), TokenViewError> {
         match self.shape().tag().descriptor().payload() {
             TokenDescriptorPayload::Static => {
-                if self.shape().flags() == 0 && self.shape().data() == 0 {
+                if self.shape().data() == 0 {
                     Ok(())
                 } else {
                     Err(TokenViewError::MalformedNumericHandle)

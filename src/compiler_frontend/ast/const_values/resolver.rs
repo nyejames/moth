@@ -27,8 +27,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;

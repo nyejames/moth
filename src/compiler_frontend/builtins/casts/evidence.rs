@@ -15,12 +15,12 @@ use super::targets::{
     builtin_cast_target_for_builtin_type,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Static row describing a single initial builtin evidence entry.
 #[derive(Debug, Clone, Copy)]

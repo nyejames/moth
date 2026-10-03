@@ -1,0 +1,12 @@
+[package]
+name = "moth-lexical"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+ryu = "1.0.23"

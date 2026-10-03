@@ -1,13 +1,13 @@
 //! Runtime helper source and emitted behavior tests for JavaScript output.
 
 use super::support::*;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 use std::process::Command;
 
 // Runtime helper contract tests

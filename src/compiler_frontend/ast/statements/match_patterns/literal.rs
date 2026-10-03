@@ -14,19 +14,18 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::numeric_text::parse::{
-    literal_kind_initialises, materialize_fixed_scalar, materialize_float, materialize_int,
-    materialize_number,
+    materialize_fixed_scalar, materialize_float, materialize_int, materialize_number,
 };
-use crate::compiler_frontend::numeric_text::token::{
-    NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::parse::literal_kind_initialises;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use super::diagnostics::reject_deferred_pattern_lead_token;
 use super::relational::parse_relational_pattern;

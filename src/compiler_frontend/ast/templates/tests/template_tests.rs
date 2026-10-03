@@ -18,7 +18,6 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -36,6 +35,7 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;

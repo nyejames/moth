@@ -10,13 +10,13 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

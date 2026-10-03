@@ -36,7 +36,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidGenericInstantiationReason,
     InvalidTypeAnnotationReason, NameNamespace, NamespaceTypeValueMisuseKind,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType,
 };
@@ -52,6 +51,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 

@@ -155,8 +155,8 @@ impl<'a> HirBuilder<'a> {
         use crate::compiler_frontend::datatypes::definitions::{
             FieldDefinition, StructTypeDefinition,
         };
-        use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
         use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+        use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
         if let Some(existing) = self.test_builtin_error_type_id() {
             return existing;

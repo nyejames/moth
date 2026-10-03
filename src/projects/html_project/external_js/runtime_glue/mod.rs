@@ -17,11 +17,11 @@ pub(crate) use runtime_modules::emit_build_runtime_modules;
 use crate::backends::js::external_module_export_glue_function_name;
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 

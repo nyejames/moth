@@ -22,8 +22,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::source::SourceSpan;
+use moth_lexical::numeric::profile::FloatPrecision;
 
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,

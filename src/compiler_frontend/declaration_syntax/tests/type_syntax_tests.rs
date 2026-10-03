@@ -23,8 +23,6 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::datatypes::number::NumberScale;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
@@ -40,6 +38,8 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenTag,
 };
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;

@@ -329,7 +329,7 @@ Stage 0 belongs to the build system. It selects graphs, source sets, provider or
 
 Tokenization recognises lexical forms and records exact source locations, string/template delimiter context, numeric spelling, operator/assignment spacing and registered directive syntax. Retained tokens belong to their source. Later consumers use bounded ranges and typed handles rather than cloned token vectors.
 
-`numeric_text` owns numeric grammar, normalisation, separators, exponents and destination-aware materialisation helpers. Tokenization preserves numeric spelling rather than assigning every literal an `i32` or `f64` value.
+The neutral numeric spelling and destination-aware materialisation service belongs to `moth-lexical`. Tokenization retains source-local spelling so the compiler can select that service for its receiving type, rather than assigning every literal an `i32` or `f64` value early.
 
 Frontend directive names are always present. Builders extend one registry without overriding them. Tokenization and template parsing use that registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, signature, processing phase and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
 
@@ -738,8 +738,8 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 
 #### Numeric ownership
 
-- `numeric_text` owns lexical grammar, normalisation and materialisation helpers.
-- AST owns semantic types, receiving rules, promotion, constant evaluation and cast evidence.
+- `moth-lexical` owns shared numeric leaf facts: spelling grammar and classification, token-free materialisation, precision-aware formatting, fixed scalar identities, width/profile/precision vocabulary and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
+- `moth` owns semantic numeric typing, receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
 - HIR records canonical numeric domain, operator and failure mode, not backend helper names or one statement family per target.
 - Compile-time and runtime operations round/fail at the same semantic boundaries. `Dec` rounds at every language-level operation result.
 - `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and stamped with one `NumericProfile`. Each base executable and generated sidecar computes its own table from that executable's validated HIR before publication; facts stay paired with that exact immutable executable. Later summary convergence does not alter numeric statements.
@@ -901,13 +901,26 @@ Scalar metadata alone creates no allocation family and moves no aggregate-layout
 
 ## Rust-only MON service
 
-The MON codec is an isolated literal-data service exposed to Rust callers through `moth::mon`, with compiler internals kept private. It receives complete caller-supplied text/values and an explicit prepared schema, then returns owned data or encoded text. It performs no project discovery, filesystem IO, module compilation, expression evaluation or backend lowering.
+The standalone Rust crate `moth-mon` owns the isolated literal-data codec. Its allowed dependency direction is `moth` -> `moth-mon` -> `moth-lexical`, with a direct `moth` -> `moth-lexical` edge. Neither extracted crate depends on `moth` or `xtask`, including development and build dependencies. Independent Rust consumers depend on `moth-mon` without linking the compiler. The supported `pub use moth_mon as mon;` convenience re-export exposes the same API and Rust types, not a compatibility shim, wrapper or second implementation. Canonical Rust API documentation belongs to `moth-mon`. The codec receives complete caller-supplied text or values and a prepared schema, then returns owned data or encoded text. It performs no project discovery, file IO, module compilation, expression evaluation or backend lowering.
+
+`moth-lexical` also owns the shared identifier character rules, source-word
+inventory and reserved user-name predicate. Its numeric ownership appears
+under `Stage 5: HIR and validation` > `Numeric ownership`.
+
+`moth` retains `Token`/`TokenTag` mapping, token-store/materialisation
+adapters, `NumericScalar`/`TypeId` projections and `NumberValue` with its
+arbitrary-precision arithmetic. Compiler diagnostic codes, payload construction
+and renderers remain local, while the shared numeric-text reason vocabulary
+sits in `moth-lexical`. The compiler-local call-argument owner continues to
+serve source calls, constructors, directives and named records. The
+compiler-local declaration-shell owner continues to serve headers and
+body-local declarations. MON uses neither parser.
 
 `docs/src/docs/mon/mon-format.mtf` owns root/field grammar, qualifiers, maps, defaults, encoding and receiver validation. `docs/compiler-data-layout-design.md` > `MON data handoff` owns cursor/input lifetime, spans, bounded allocation and public error context. Rust API signatures and routine internal shapes belong in public doc comments and their implementations, not a second field catalogue here.
 
 ### Isolation and schema ownership
 
-The literal reader uses a bounded MON cursor, not AST expression parsing, compiler tokens, TIR or compiler identity tables. It shares `numeric_text` grammar/materialisation policy while retaining MON-local traversal and escape decoding. Syntax sharing never authorises expression evaluation or widens source-language escapes.
+The literal reader uses a bounded MON cursor, not AST expression parsing, compiler tokens, TIR or compiler identity tables. It consumes the token-free numeric service described under `Stage 5: HIR and validation` > `Numeric ownership`, while retaining MON-local traversal and escape decoding. Syntax sharing never authorises expression evaluation or widens source-language escapes.
 
 A caller prepares and validates its finite schema/default tree once, then reuses it immutably. Schema eligibility is transitive. Owned decoded values remain valid after the caller releases input, with no public borrowed document view, alias preservation or cyclic value graph. Internal borrowing during a call is permitted.
 

@@ -103,8 +103,15 @@ pub(super) fn parse_choice_construct(
         .into());
     }
 
+    if let Some(gap) = token_stream.current_choice_variant_separator_gap() {
+        return Err(CompilerDiagnostic::invalid_choice_variant_spacing(
+            gap,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
     token_stream.advance();
-    token_stream.skip_newlines();
 
     let variant_span = Some(token_stream.current_span());
     let variant_name = match token_stream.current_tag() {

@@ -42,7 +42,6 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -53,6 +52,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     HeaderBindingEnvironment, SourceDeclarationTarget, SourceFunctionTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::profile::NumericProfile;
 #[derive(Debug)]
 struct DummyJsImportProvider {
     calls: Arc<AtomicUsize>,

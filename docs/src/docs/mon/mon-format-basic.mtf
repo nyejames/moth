@@ -41,9 +41,19 @@ Strictness is the point. These inputs fail:
 
     -- INVALID: unknown record fields fail, even with defaults nearby
     titl = "Strategy",
+
+    -- INVALID: reserved user names also fail with underscores or different case
+    __LoOp = 1,
+
+    -- INVALID: the field label and `=` must share one logical line
+    title
+    = "Strategy",
 ]
 
-Availability is Rust-only. The implemented Rust caller surface is public as
-`moth::mon`, re-exported from `src/lib.rs` over the crate-private
-`src/compiler_frontend/mon/` owner. Moth-native operations remain deferred
-separately, and compiled Moth programs have no runtime codec support.
+Independent Rust callers use `moth_mon`. Compiler clients may use the same API
+and Rust types through the convenience re-export `moth::mon`. Prepare a schema
+once and reuse it across documents. The codec returns owned values or a
+structured `MonError` that supports ordinary Rust reporting and propagation.
+Moth-native operations, `$mon`, automatic schema extraction and the static
+project builder remain deferred. Compiled Moth programs have no runtime codec
+support.

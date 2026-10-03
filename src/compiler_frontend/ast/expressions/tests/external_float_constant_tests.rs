@@ -11,16 +11,14 @@ use crate::compiler_frontend::ast::expressions::external_namespace_members::proj
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantValue, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn numeric_profile(float_precision: FloatPrecision) -> NumericProfile {
     NumericProfile {

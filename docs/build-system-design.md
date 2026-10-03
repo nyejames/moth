@@ -50,7 +50,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 
 Bootstrap starts with a command selecting the artefact builder, build profile, tooling overlays, explicit inputs and target intent. Builder-selection source/CLI syntax and a Moth-native build-script design remain unsettled.
 
-The selected builder supplies the compiler-owned `NumericProfile` before command values or config numbers are materialised. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not semantic numeric precision or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Numeric model and profile` owns numeric values and compatibility.
+The selected builder supplies the boundary's `NumericProfile` before command values or config numbers are materialised. The shared profile vocabulary belongs to `moth-lexical`, while compiler and build services retain boundary-wide selection and propagation. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not semantic numeric precision or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Numeric model and profile` owns numeric values and compatibility.
 
 The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
 
@@ -115,7 +115,7 @@ Repeated `--input name=value` arguments are typed before contracts are discovere
 2. Recognise exact lowercase Bool, a complete signed whole-number literal, a complete decimal/exponent literal, a quoted Char or a quoted String, in that order.
 3. Treat other text, including empty text after `=`, as String.
 
-A quote-starting value must be a complete valid quoted literal. Malformed quotes are diagnostics, not String fallback. Shared `numeric_text` validation/materialisation enforces range and finite-value checks using the already selected profile.
+A quote-starting value must be a complete valid quoted literal. Malformed quotes are diagnostics, not String fallback. Shared `moth-lexical` numeric validation/materialisation enforces range and finite-value checks using the already selected profile.
 
 Bare `none` is String text. Optional absence comes from omission/default resolution. A concrete `T` may satisfy matching `T?` as present, with no other coercion. In particular, `Int` does not satisfy `Float`.
 
@@ -435,11 +435,13 @@ Check and LSP-style analysis overlay the selected builder's capabilities. They m
 
 ## MON tooling and static assets
 
-The Rust MON service is an isolated compiler-library codec, not a command, source compiler or tooling overlay. Its ownership, schema and error contracts live in the compiler design's `Rust-only MON service`.
+The standalone Rust crate `moth-mon` owns the MON literal-data codec, with `moth::mon` as a supported convenience re-export of the same API and types. It consumes the shared `moth-lexical` policies without depending on compiler or build services. Its ownership, schema and error contracts live in the compiler design's `Rust-only MON service`.
+
+Callers own input IO and supply complete text or values plus a prepared schema. Compiler/build callers pass their boundary's selected numeric profile into schema preparation. Independent Rust callers select a schema profile themselves or use the standard default. The codec returns owned results and performs no input/output writing. Crate extraction creates no new builder, command, tooling overlay or compilable source kind.
 
 A `.mon` file is literal data, not a compilable Moth source kind or semantic provider. It may be referenced as an ordinary resource under the explicit-extension resource rules. Parsing MON never discovers dependencies from its strings.
 
-The accepted static MON builder direction emits compile-time-known assets through ordinary resource planning, output records and manifest ownership. Exact command/directive and Moth-native integration contracts remain open. This direction creates no alternate parser, resource registry or output-writing path.
+The accepted static MON builder direction consumes the standalone codec and emits compile-time-known assets through ordinary resource planning, output records and manifest ownership. Exact command/directive and Moth-native integration contracts remain open. This direction creates no alternate parser, resource registry or output-writing path.
 
 ## Generated-function boundary
 

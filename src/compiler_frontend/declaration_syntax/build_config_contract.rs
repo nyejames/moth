@@ -12,25 +12,22 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticToken, InvalidConfigReason,
-    NumberLiteralErrorReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::numeric_text::parse::{
-    materialize_normalized_float, materialize_normalized_int,
-};
-use crate::compiler_frontend::numeric_text::token::{
-    NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRef, TokenTag,
 };
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::parse::{materialize_normalized_float, materialize_normalized_int};
+use moth_lexical::numeric::profile::NumericProfile;
 /// Syntax metadata retained for a declaration carrying `#Config of T`.
 ///
 /// The declaration's semantic type remains the parsed contract type. This value only preserves

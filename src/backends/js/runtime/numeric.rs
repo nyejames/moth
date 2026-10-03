@@ -13,7 +13,8 @@ use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::{JsNumericCarrier, binary_float_precision_bits};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits only numeric helper families used by reachable HIR and cast statements.

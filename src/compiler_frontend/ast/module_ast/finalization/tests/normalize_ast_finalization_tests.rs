@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[test]
 fn finalization_fold_composed_tir_root_folds_view_text() {

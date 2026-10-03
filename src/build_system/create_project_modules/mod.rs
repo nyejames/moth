@@ -92,13 +92,13 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::sync::Arc;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};

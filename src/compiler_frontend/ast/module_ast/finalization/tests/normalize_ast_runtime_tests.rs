@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::profile::NumericProfile;
 
 fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRuntimeTemplateHandoff {
     let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {

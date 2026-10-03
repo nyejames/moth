@@ -41,16 +41,16 @@ validate-full:
     just cache-maintain
 
 fmt:
-    cargo fmt
+    cargo fmt -p moth -p moth-lexical -p moth-mon
 
 fmt-check:
-    cargo fmt --check
+    cargo fmt --check -p moth -p moth-lexical -p moth-mon
 
 fmt-workspace-check:
     cargo fmt --all --check
 
 clippy:
-    cargo clippy
+    cargo clippy -p moth -p moth-lexical -p moth-mon
 
 # Broader coverage is named explicitly rather than hidden inside ordinary `cargo clippy`.
 # The manifest's shared warning policy applies here and to direct commands alike.
@@ -67,10 +67,10 @@ cache-maintain:
 # Explicit maintenance only. Stop editors/agents running Cargo in this target directory first.
 # This discards current workspace artifacts too, and therefore costs a subsequent rebuild.
 cache-evict-preview:
-    cargo clean --profile dev --package moth --package xtask --dry-run --verbose
+    cargo clean --profile dev --package moth --package moth-lexical --package moth-mon --package xtask --dry-run --verbose
 
 cache-evict:
-    cargo clean --profile dev --package moth --package xtask
+    cargo clean --profile dev --package moth --package moth-lexical --package moth-mon --package xtask
 
 ship:
     cargo fmt --all

@@ -11,9 +11,9 @@ use crate::compiler_frontend::builtins::casts::policies::{
     BuiltinCastLiteral, apply_builtin_cast_policy,
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::format::format_finite_float;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Attempts to coerce a constant expression kind to its string representation
 /// for use in template folding.

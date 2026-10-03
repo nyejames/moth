@@ -13,7 +13,6 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
     InvalidConfigReason, SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -32,6 +31,7 @@ use crate::projects::html_project::moth_template::{
     MothTemplateInput, MothTemplateSource, compile_moth_template,
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;

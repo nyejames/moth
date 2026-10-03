@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
@@ -61,6 +60,7 @@ use crate::compiler_frontend::{
     CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
+use moth_lexical::numeric::profile::NumericProfile;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};

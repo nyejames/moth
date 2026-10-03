@@ -13,10 +13,9 @@ use super::{
     InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
     InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
     InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, NumberLiteralErrorReason, PathKind,
-    ReceiverCallKind, RuleDiagnosticKind, SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    UnsupportedOperatorCategory, is_well_formed_reason_key,
+    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
+    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{
@@ -28,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{ModuleDiagnostics, PremergeDiagnosticBatch};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
@@ -36,6 +34,8 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;

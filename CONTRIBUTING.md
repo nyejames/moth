@@ -43,8 +43,22 @@ Use focused tests while working on a feature branch, for example:
 
 ```sh
 cargo test -p xtask cache::tests
+cargo test -p moth-lexical
+cargo test -p moth-mon
+cargo test -p moth --lib mon_syntax_parity
 cargo run --quiet -- tests --case <id>
 ```
+
+The independent codec suite lives in `crates/moth-mon/tests/`. Shared lexical
+and numeric tests live with `moth-lexical`. The real-source cross-parser suite
+at `src/compiler_tests/mon_syntax_parity/` compares expected typed values under
+equivalent receiving contexts and numeric profiles. Its `gaps.rs` records
+intentional data/source differences and the undelivered source `{=}`, Unicode
+escape and contextual `::Variant` cases. These gaps do not claim delivered
+Moth-native `$mon`, automatic schema extraction or static builder support.
+
+Run `cargo test -p moth-mon --doc` and `cargo test -p moth-lexical --doc` when
+changing the crate examples.
 
 Intermediate branch commits use the smallest checks that cover their changes.
 Run `just validate` at important boundaries. Reserve `just validate-full` for
@@ -62,8 +76,10 @@ of its resulting tree. The validation guide owns the exact evidence rules.
 - `cargo run --quiet -- tests --tag <tag> [--tag <tag>]` - logical AND tag selection
 - `cargo run --quiet -- tests --list [filters]` - list selected suite metadata without compiling
 - `cargo run --quiet -- tests --audit` - validate and write the complete suite inventory
-- `cargo clippy` or `just clippy` - ordinary linting with the same toolchain, scope and warning policy
-- `cargo fmt` or `just fmt` - ordinary formatting with the same formatter and scope
+- `cargo clippy` - lint the root package with Cargo's defaults
+- `just clippy` - lint `moth`, `moth-lexical` and `moth-mon` with default features and targets
+- `cargo fmt` - format with Cargo's default package selection
+- `just fmt` / `just fmt-check` - format or check the compiler and both extracted libraries
 - `just validate` - routine correctness at important feature-branch boundaries
 - `just validate-perf` - non-recording benchmark and scaling evidence when the change needs it
 - `just validate-full` - final merge preparation, every main commit and release readiness
@@ -73,6 +89,13 @@ of its resulting tree. The validation guide owns the exact evidence rules.
 - `just bench` - intentional benchmark-history recording (updates the benchmark log)
 - `just bench-report` - inspect local benchmark history
 - `just profile-case <case> [filter]` - profile a selected benchmark case
+
+Source audit, feature-lane coverage and the honesty audit include `src`,
+`crates/moth-lexical/src`, `crates/moth-mon/src`, `crates/moth-mon/tests` and
+`xtask/src`. Routine formatting and Clippy cover both extracted packages.
+The first-party dependency gate checks Cargo metadata, including development
+and build edges: `moth-lexical` depends on no workspace package and `moth-mon`
+may depend only on `moth-lexical`, never `moth` or `xtask`.
 
 [validation.mtf](docs/src/developer-docs/style-guide/validation.mtf) owns exact gate scope,
 shared Cargo defaults, cache safety and feature coverage. Rust uses the repository's

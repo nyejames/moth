@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -40,6 +39,7 @@ use crate::compiler_frontend::type_coercion::parse_context::{
     ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 use crate::compiler_frontend::value_mode::{ValueMode, ValueMode::MutableOwned};
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 /// Stage-local result for collection and map literal parsing.
 ///

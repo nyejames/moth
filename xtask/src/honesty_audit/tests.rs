@@ -61,6 +61,58 @@ fn in_a_test_file(body: &str) -> String {
     format!("#[test]\nfn a_case() {{\n{body}\n}}\n")
 }
 
+#[test]
+fn reports_hard_findings_in_extracted_crate_tests() {
+    let workspace = tempdir().expect("fixture workspace");
+    for root in super::SCANNED_SOURCE_ROOTS {
+        fs::create_dir_all(workspace.path().join(root)).expect("configured source root");
+    }
+
+    for relative in [
+        "crates/moth-lexical/src/tests/violation.rs",
+        "crates/moth-mon/src/tests/violation.rs",
+        "crates/moth-mon/tests/violation.rs",
+    ] {
+        let path = workspace.path().join(relative);
+        fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture directory");
+        fs::write(&path, "#[test]\n#[ignore]\nfn unowned_test() {}\n").expect("violation fixture");
+    }
+
+    let scan = super::scan_tree(workspace.path()).expect("fixture scan");
+    assert_eq!(scan.hard_findings.len(), 1);
+    assert_eq!(scan.hard_findings[0].code, "unowned_ignore");
+    let sites: Vec<_> = scan.hard_findings[0]
+        .sites
+        .iter()
+        .map(|site| (site.file.as_str(), site.line))
+        .collect();
+    assert_eq!(
+        sites,
+        [
+            ("crates/moth-lexical/src/tests/violation.rs", 2),
+            ("crates/moth-mon/src/tests/violation.rs", 2),
+            ("crates/moth-mon/tests/violation.rs", 2),
+        ]
+    );
+}
+
+#[test]
+fn a_missing_extracted_test_root_fails_the_scan() {
+    let workspace = tempdir().expect("fixture workspace");
+    for root in super::SCANNED_SOURCE_ROOTS {
+        if *root != "crates/moth-mon/tests" {
+            fs::create_dir_all(workspace.path().join(root)).expect("configured source root");
+        }
+    }
+
+    let error = match super::scan_tree(workspace.path()) {
+        Ok(_) => panic!("missing root must not be skipped"),
+        Err(error) => error,
+    };
+    assert!(error.contains("failed to read"));
+    assert!(error.contains("tests"));
+}
+
 // ---------------------------------------------------------------------------
 // Hard rules: the shape each one must find.
 // ---------------------------------------------------------------------------

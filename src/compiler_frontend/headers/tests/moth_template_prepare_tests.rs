@@ -16,7 +16,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
     DiagnosticLabelStyle, DiagnosticPayload, SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -60,6 +59,7 @@ use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
 };
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -19,7 +19,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
 };
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
@@ -30,6 +29,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 use std::sync::Arc;

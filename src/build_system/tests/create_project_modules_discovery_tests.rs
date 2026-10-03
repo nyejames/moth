@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn discover_modules_uses_reachable_files_only() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");

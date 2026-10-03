@@ -50,9 +50,8 @@ pub const MATRIX_RESULTS_REPORT_PATH: &str = "target/test-reports/feature_matrix
 /// Bump whenever a field is added, removed or re-meant, so a consumer can reject a report it
 /// cannot read instead of silently misreading it.
 ///
-/// Schema 3 separates standard and opt-in lane ownership and records each lane's class and owned
-/// command.
-pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 3;
+/// Schema 4 records the source roots actually scanned, including standalone package tests.
+pub const COVERAGE_REPORT_SCHEMA_VERSION: u32 = 4;
 
 /// Schema version of the lane-outcome report.
 pub const MATRIX_RESULTS_SCHEMA_VERSION: u32 = 2;
@@ -138,9 +137,9 @@ impl fmt::Display for FeatureLane {
 /// The curated lane table, in deterministic report order.
 ///
 /// The union of the `moth` lanes' features is exactly the set of features `Cargo.toml` declares;
-/// `run_feature_lane_check` fails when that stops being true, in either direction. `xtask` declares
-/// no features of its own: its lane exists because its tests are only reachable through its own
-/// package, and it pulls `moth` with `timers` by its own dependency declaration.
+/// `run_feature_lane_check` fails when that stops being true, in either direction. The standalone
+/// libraries and `xtask` have their own no-feature lanes so their tests execute without relying on
+/// workspace feature unification.
 pub const FEATURE_LANES: &[FeatureLane] = &[
     FeatureLane {
         name: "default",
@@ -200,6 +199,20 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
         owns: "the developer stage-dump branches, which no other lane compiles",
     },
     FeatureLane {
+        name: "moth-lexical",
+        package: "moth-lexical",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "standalone identifier, reserved-word and numeric-text policy tests",
+    },
+    FeatureLane {
+        name: "moth-mon",
+        package: "moth-mon",
+        features: &[],
+        kind: FeatureLaneKind::Standard,
+        owns: "standalone codec invariants, public integration tests and doctests",
+    },
+    FeatureLane {
         name: "xtask",
         package: "xtask",
         features: &[],
@@ -226,10 +239,23 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
     },
 ];
 
-/// Package manifests scanned for declared features, paired with the source tree they own.
-const PACKAGE_SOURCES: &[(&str, &str, &str)] = &[
-    ("moth", "Cargo.toml", "src"),
-    ("xtask", "xtask/Cargo.toml", "xtask/src"),
+/// Package manifests and the Rust source/test roots scanned for their `cfg` names.
+///
+/// Nested `src/tests` owners are covered recursively. Every configured root is required so a
+/// missing extracted test tree cannot silently reduce coverage.
+const PACKAGE_SOURCES: &[(&str, &str, &[&str])] = &[
+    ("moth", "Cargo.toml", &["src"]),
+    (
+        "moth-lexical",
+        "crates/moth-lexical/Cargo.toml",
+        &["crates/moth-lexical/src"],
+    ),
+    (
+        "moth-mon",
+        "crates/moth-mon/Cargo.toml",
+        &["crates/moth-mon/src", "crates/moth-mon/tests"],
+    ),
+    ("xtask", "xtask/Cargo.toml", &["xtask/src"]),
 ];
 
 /// Why one lane failed.
@@ -494,6 +520,8 @@ pub struct LaneReport {
 pub struct CoverageReport {
     pub schema_version: u32,
     pub run: ReportRunIdentity,
+    /// Workspace-relative roots successfully scanned, in package and root inventory order.
+    pub scanned_source_roots: Vec<String>,
     pub lanes: Vec<LaneReport>,
     pub features: Vec<FeatureCoverage>,
     /// Feature names a `cfg` attribute uses that the owning package does not declare.
@@ -728,10 +756,11 @@ fn build_coverage_report(
     let mut features: Vec<FeatureCoverage> = Vec::new();
     let mut undeclared: Vec<CfgSite> = Vec::new();
     let mut findings: Vec<String> = Vec::new();
+    let mut scanned_source_roots = Vec::new();
 
     validate_opt_in_lane_ownership(workspace_root, &mut findings)?;
 
-    for (package, manifest_relative, source_relative) in PACKAGE_SOURCES {
+    for (package, manifest_relative, source_roots) in PACKAGE_SOURCES {
         let manifest_path = workspace_root.join(manifest_relative);
         let manifest = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("failed to read '{}': {error}", manifest_path.display()))?;
@@ -739,7 +768,8 @@ fn build_coverage_report(
             format!("failed to read features from '{manifest_relative}': {error}")
         })?;
 
-        let sites = scan_cfg_features(workspace_root, &workspace_root.join(source_relative))?;
+        let sites = scan_cfg_features(workspace_root, source_roots)?;
+        scanned_source_roots.extend(source_roots.iter().map(|root| (*root).to_string()));
 
         for feature in &declared {
             let lane_coverage = lanes_enabling(package, feature);
@@ -791,6 +821,7 @@ fn build_coverage_report(
         // whole of the work it describes.
         run: run.completed(),
         lanes: FEATURE_LANES.iter().map(lane_report).collect(),
+        scanned_source_roots,
         features,
         undeclared_cfg_features: undeclared,
         findings,
@@ -835,6 +866,11 @@ fn print_coverage(report: &CoverageReport) {
     println!("=== feature lanes ===");
     for lane in &report.lanes {
         println!("  {:<16} {:<8} {}", lane.name, lane.lane_kind, lane.command);
+    }
+
+    println!("\n=== scanned source roots ===");
+    for root in &report.scanned_source_roots {
+        println!("  {root}");
     }
 
     println!("\n=== feature coverage ===");
@@ -888,14 +924,19 @@ fn declared_features(manifest: &str) -> Result<BTreeSet<String>, String> {
     Ok(table.keys().cloned().collect())
 }
 
-/// Every feature name a `cfg` attribute in `root` mentions, by feature, in path order.
+/// Every feature name a `cfg` attribute in the package's required roots mentions, in path order.
 fn scan_cfg_features(
     workspace_root: &Path,
-    root: &Path,
+    source_roots: &[&str],
 ) -> Result<BTreeMap<String, Vec<CfgSite>>, String> {
     let mut sites: BTreeMap<String, Vec<CfgSite>> = BTreeMap::new();
+    let mut paths = Vec::new();
+    for root in source_roots {
+        paths.extend(walk_rust_files(&workspace_root.join(root))?);
+    }
+    paths.sort();
 
-    for path in walk_rust_files(root)? {
+    for path in paths {
         let content = fs::read_to_string(&path)
             .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
 

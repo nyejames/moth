@@ -20,7 +20,6 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
@@ -33,6 +32,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::Config;

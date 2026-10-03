@@ -98,7 +98,7 @@ impl DiagnosticToken {
         match tag.descriptor().payload() {
             TokenDescriptorPayload::Static => {
                 let shape = token.shape();
-                if shape.flags() != 0 || shape.data() != 0 {
+                if shape.data() != 0 {
                     return Err(TokenViewError::MalformedNumericHandle);
                 }
                 Ok(Self::static_token(tag))

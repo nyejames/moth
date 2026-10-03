@@ -9,8 +9,8 @@ use super::named_value_or_default;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
+use moth_lexical::numeric::profile::NumericProfile;
 
 pub(crate) fn invalid_template_slot_message(
     reason: InvalidTemplateSlotReason,

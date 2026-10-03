@@ -17,7 +17,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
     PremergeFailure,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::{
@@ -37,6 +36,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::projects::settings::Config;
 

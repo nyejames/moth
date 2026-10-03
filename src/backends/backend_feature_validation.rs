@@ -23,8 +23,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
@@ -43,6 +42,8 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 

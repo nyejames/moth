@@ -10,11 +10,8 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticOperator, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::keywords::{
-    attached_bang_keyword_token_tag, classify_source_word, is_identifier_continue,
-    is_valid_identifier,
+    attached_bang_keyword_token_tag, token_tag_for_source_word,
 };
-use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
@@ -34,6 +31,11 @@ use crate::compiler_frontend::tokenizer::tokens::{
 };
 use crate::projects::settings;
 use crate::token_log;
+use moth_lexical::identifier::{is_identifier, is_identifier_continue};
+use moth_lexical::is_line_break;
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+use moth_lexical::numeric::parse::parse_numeric_literal;
+use moth_lexical::words::classify_source_word;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -143,6 +145,35 @@ fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<To
         .emit_static(tag)
         .map_err(|error| map_token_emit_error(error, source))
 }
+
+fn emit_double_colon(
+    stream: &mut TokenStream<'_>,
+    qualifier_attached: bool,
+    variant_attached: bool,
+) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_double_colon(qualifier_attached, variant_attached)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
+fn next_character_starts_comment_or_whitespace(stream: &mut TokenStream<'_>) -> bool {
+    if stream
+        .peek()
+        .is_some_and(|character| character.is_whitespace())
+    {
+        return true;
+    }
+
+    if stream.peek() != Some(&'-') {
+        return false;
+    }
+
+    let mut characters = stream.chars.clone();
+    characters.next();
+    characters.next() == Some('-')
+}
+
 fn emit_symbol(
     stream: &mut TokenStream<'_>,
     value: crate::compiler_frontend::symbols::string_interning::StringId,
@@ -293,7 +324,7 @@ fn consume_line_horizontal_whitespace(chars: &mut Peekable<Chars<'_>>) -> bool {
     let mut consumed = false;
 
     while let Some(&character) = chars.peek() {
-        if matches!(character, '\n' | '\r') || !character.is_whitespace() {
+        if is_line_break(character) || !character.is_whitespace() {
             break;
         }
 
@@ -364,7 +395,7 @@ fn consume_match_guard_comment(chars: &mut Peekable<Chars<'_>>) -> bool {
     chars.next();
     while chars
         .peek()
-        .is_some_and(|character| !matches!(character, '\n' | '\r'))
+        .is_some_and(|character| !is_line_break(*character))
     {
         chars.next();
     }
@@ -418,7 +449,7 @@ fn line_contains_match_arm_arrow(chars: &mut Peekable<Chars<'_>>) -> bool {
     let mut nesting = MatchGuardNesting::default();
 
     while let Some(&character) = chars.peek() {
-        if matches!(character, '\n' | '\r') {
+        if is_line_break(character) {
             return false;
         }
 
@@ -468,7 +499,7 @@ fn consume_match_guard_string(chars: &mut Peekable<Chars<'_>>, delimiter: char) 
     let mut escaped = false;
 
     for character in chars.by_ref() {
-        if matches!(character, '\n' | '\r') {
+        if is_line_break(character) {
             return false;
         }
 
@@ -491,7 +522,9 @@ fn consume_match_guard_string(chars: &mut Peekable<Chars<'_>>, delimiter: char) 
 }
 
 fn character_is_missing_rhs_boundary(character: Option<char>) -> bool {
-    character.is_none_or(|character| matches!(character, '\n' | '\r' | ',' | ')' | ']' | '}' | ';'))
+    character.is_none_or(|character| {
+        is_line_break(character) || matches!(character, ',' | ')' | ']' | '}' | ';')
+    })
 }
 
 fn symbolic_spacing_error(
@@ -801,8 +834,10 @@ fn get_token_tag(
             if let Some(&next_char) = stream.peek()
                 && next_char == ':'
             {
+                let qualifier_attached = !context.has_leading_whitespace(whitespace_before_current);
                 stream.next();
-                return emit_static(stream, TokenTag::DOUBLE_COLON);
+                let variant_attached = !next_character_starts_comment_or_whitespace(stream);
+                return emit_double_colon(stream, qualifier_attached, variant_attached);
             }
 
             if stream.mode == TokenizeMode::TemplateHead {
@@ -880,17 +915,21 @@ fn get_token_tag(
             if stream.peek() != Some(&'=') {
                 let previous_is_mutable_marker =
                     context.previous_token_tag == Some(TokenTag::MUTABLE);
+                // A line break before `=` is leading whitespace, so the entry still needs its
+                // right-hand spacing (for example a map key whose `=` starts the next line).
                 let previous_can_start_assignment = context
                     .previous_token_tag
-                    .is_some_and(TokenTag::can_end_expression);
+                    .is_some_and(|tag| tag.can_end_expression() || tag == TokenTag::NEWLINE);
 
                 if !previous_is_mutable_marker
                     && previous_can_start_assignment
                     && context.previous_token_tag != Some(TokenTag::BANG)
-                    && !next_char_is_missing_rhs_boundary(stream)
                 {
+                    // Like symbolic operators, a missing right-hand side keeps its own
+                    // diagnostic, but the left side is always checked.
                     let missing_left = !context.has_leading_whitespace(whitespace_before_current);
-                    let missing_right = !next_char_is_whitespace_or_end(stream);
+                    let missing_right = !next_char_is_missing_rhs_boundary(stream)
+                        && !next_char_is_whitespace_or_end(stream);
 
                     if let Some(missing) = missing_whitespace_side(missing_left, missing_right) {
                         let diagnostic = symbolic_spacing_error(
@@ -953,7 +992,7 @@ fn get_token_tag(
                 stream.next();
 
                 while let Some(ch) = stream.peek() {
-                    if ch == &'\n' || ch == &'\r' {
+                    if is_line_break(*ch) {
                         break;
                     }
 
@@ -1449,11 +1488,15 @@ pub(crate) fn tokenize_identifier_or_keyword(
             return emit_static(stream, tag);
         }
 
-        if let Some(classified) = classify_source_word(token_value.as_str()) {
-            return emit_keyword(stream, classified.token_tag, classified.bool_value);
+        if let Some(word) = classify_source_word(token_value.as_str()) {
+            return emit_keyword(
+                stream,
+                token_tag_for_source_word(word),
+                word.bool_literal_value(),
+            );
         }
 
-        if is_valid_identifier(token_value) {
+        if is_identifier(token_value) {
             let interned_symbol = string_table.intern(token_value);
             return emit_symbol(stream, interned_symbol);
         }

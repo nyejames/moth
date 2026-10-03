@@ -1,11 +1,9 @@
 //! Runtime memory planning structures.
 
 use crate::backends::wasm::lir::types::WasmAbiType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 /// Physical Wasm scalar-memory representation, separate from semantic identity.
 ///

@@ -1,14 +1,8 @@
-//! Shared numeric text grammar for the Moth frontend.
+//! Compiler-owned numeric token storage and `StringTable` adapters.
 //!
-//! WHAT: classifies and parses numeric literal text, and owns the binary16 rounding `F16`
-//!       destinations need, without depending on AST, HIR, or backend concepts.
-//! WHY: source literals and future string casts must agree on separator, exponent,
-//!      sign, and digit-count rules.
+//! Numeric spelling, normalized fixed-width parsing, neutral scalar facts and float formatting
+//! live in `moth_lexical`; this module keeps the token payload and compiler-specific adapters.
 
-pub mod format;
 pub mod parse;
 pub mod store;
 pub mod token;
-
-pub(crate) mod binary16;
-pub(crate) mod grammar;

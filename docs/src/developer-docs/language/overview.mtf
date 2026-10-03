@@ -271,12 +271,16 @@ and hidden runtime nominal types into one semantic representation. Moth MON sour
 syntax allows ordinary expressions according to the receiving context; MON serialised
 data is self-contained literal data only, and a MON reader never evaluates Moth
 expressions, including foldable ones. The literal-data format and implemented
-Rust API/ownership contract are available now at `moth::mon`, re-exported from
-`src/lib.rs` over the crate-private `src/compiler_frontend/mon/` owner. The
-service is executable from another Rust crate and returns owned values, but
-compiled Moth programs have no runtime codec support. Its exact public
-operations and types are documented in the compiler boundary; no Moth-native
-`$mon`, automatic schema extraction, or static project builder is implied.
-Source `{=}` empty-map enforcement, source Unicode escapes beyond the existing
-five, and contextual `::Variant` construction remain deferred source parity
-gaps; sharing the Rust codec does not implement them.
+Rust API/ownership contract are available at `moth_mon`, also deliberately
+re-exported as `moth::mon` from `src/lib.rs` with the same API and Rust types.
+The standalone owner is `crates/moth-mon/`. The service is executable from
+another Rust crate and returns owned values, but compiled Moth programs have no
+runtime codec support. Its exact public operations and types are documented in
+the standalone crate. `crates/moth-lexical/` owns shared identifier, reserved-word
+and numeric-text facts without compiler tokens, type lookup or arithmetic.
+Source call-argument and declaration parsers remain compiler-local. The real-source
+suite at `src/compiler_tests/mon_syntax_parity/` checks the common notation under
+equivalent receiving types and numeric profiles.
+The codec does not imply Moth-native `$mon`, automatic schema extraction or a
+static project builder. Source `{=}`, Unicode escapes beyond the existing five
+and contextual `::Variant` construction remain named undelivered parity gaps.

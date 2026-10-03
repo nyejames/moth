@@ -15,6 +15,8 @@ use crate::compiler_frontend::tokenizer::newline_handling::{
     consume_pending_carriage_return_newline, normalize_consumed_carriage_return_newline,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
+use moth_lexical::is_line_break;
+
 fn emit_static(stream: &mut TokenStream<'_>, tag: TokenTag) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
@@ -102,7 +104,7 @@ pub(super) fn tokenize_string(
 
             // A physical newline after a backslash is a line-continuation attempt, not a
             // supported escape. LF and CRLF continuation are the same source mistake.
-            if escaped_char == '\n' || escaped_char == '\r' {
+            if is_line_break(escaped_char) {
                 return Err(CompilerDiagnostic::invalid_string_escape(
                     InvalidStringEscapeReason::PhysicalNewline,
                     Some(escape_span(stream, span_start_byte, after_backslash_byte)?),

@@ -9,9 +9,7 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::fs;
 use std::path::PathBuf;
 

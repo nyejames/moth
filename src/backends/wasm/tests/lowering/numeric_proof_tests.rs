@@ -22,10 +22,8 @@ use crate::backends::wasm::lir::instructions::{
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::compiler_frontend::analysis::numeric_proofs::{NumericProofs, analyse_numeric_proofs};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -40,6 +38,8 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Fixture statement-local identifiers the two lanes share, keying the analysis queries.
 ///

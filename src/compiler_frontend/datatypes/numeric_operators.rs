@@ -10,9 +10,9 @@
 //! operation runs, except `Dec ^ Int` keeps its exponent in the profile `Int` domain.
 //! `Byte` is outside `NumericScalar` and never reaches this policy.
 
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 
 /// One backend-neutral numeric operator.
 ///

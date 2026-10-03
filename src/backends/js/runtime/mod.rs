@@ -59,9 +59,9 @@ pub(crate) struct NumericRuntimeHelperUsage {
 impl NumericRuntimeHelperUsage {
     pub(crate) fn require_float_formatter(
         &mut self,
-        precision: crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision,
+        precision: moth_lexical::numeric::precision::BinaryFloatPrecision,
     ) {
-        use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+        use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
         match precision {
             BinaryFloatPrecision::Binary16 => self.format_binary16 = true,

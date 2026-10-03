@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
@@ -68,6 +67,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use std::path::PathBuf;
 use std::sync::Arc;

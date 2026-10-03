@@ -5,8 +5,6 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::number::NumberScale;
 
 // -------------------------------
 //  Diagnostic Payload Supporting Types
@@ -543,35 +541,6 @@ impl InvalidConfigReason {
             | Self::FileValuePathUnsupported => {}
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NumberLiteralErrorReason {
-    SeparatorNotBetweenDigits,
-    MultipleDecimalPoints,
-    DecimalPointNotAfterDigit,
-    EndsWithSeparator,
-    MissingFractionalDigits,
-    UppercaseExponentMarker,
-    MissingExponentDigits,
-    InvalidExponentSignPlacement,
-    InvalidSeparatorPlacement,
-    OutsideIntRange,
-    /// A literal is outside the inclusive range of the fixed scalar it initialises.
-    OutsideFixedScalarRange(FixedScalar),
-    /// A negative literal cannot initialise an unsigned fixed scalar or `Byte`.
-    NegativeUnsignedLiteral(FixedScalar),
-    /// A fixed binary float literal rounded to a non-finite value at its destination.
-    NonFiniteFixedFloat(FixedScalar),
-    NonFiniteFloat,
-    /// A literal's exact decimal value does not fit the receiving `Dec` scale.
-    ///
-    /// WHAT: the literal's smallest exact scale exceeds the destination scale, so a checked
-    ///       exact receiving boundary rejects it instead of rounding or trimming digits.
-    /// WHY: the scale stays structured so the renderer names the receiving `Dec` identity
-    ///      exactly like the fixed-scalar range reasons name their destination.
-    InexactNumberScale(NumberScale),
-    ParseOverflow,
 }
 
 /// WHAT: structured reason for an invalid quoted-string escape.
@@ -1930,11 +1899,19 @@ pub enum MissingWhitespace {
     Both,
 }
 
-/// WHAT: structured facts for a symbolic spacing diagnostic.
+/// Structured facts for a symbolic spacing diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SymbolicSpacingError {
     pub construct: SymbolicSpacingConstruct,
     pub missing: MissingWhitespace,
+}
+
+/// Which gap separates `::` from a qualified choice name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChoiceVariantSeparatorGap {
+    Before,
+    After,
+    Both,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1960,6 +1937,7 @@ pub enum CommonSyntaxMistakeReason {
     InvalidMutableBindingSpacing,
     InvalidReactiveBindingSpacing,
     InvalidSymbolicSpacing { error: SymbolicSpacingError },
+    InvalidChoiceVariantSpacing { gap: ChoiceVariantSeparatorGap },
     InvalidUnaryNegationSpacing,
     UnsupportedUnaryPlus,
 }
@@ -1990,6 +1968,7 @@ impl CommonSyntaxMistakeReason {
             | CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing
             | CommonSyntaxMistakeReason::InvalidMutableBindingSpacing
             | CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing
+            | CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. }
             | CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. }
             | CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing
             | CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {}

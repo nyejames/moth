@@ -1,201 +1,23 @@
-//! Canonical `Dec` scales, immutable values, exact arithmetic and conversions.
+//! Immutable `Dec` values, exact arithmetic and conversions.
 //!
-//! WHAT: owns validated scales `0..=256`, arbitrary-precision decimal coefficients, Dec
-//!       arithmetic and the exact integer/rescaling conversions shared by frontend consumers.
+//! WHAT: owns arbitrary-precision decimal coefficients, Dec arithmetic and the exact
+//!       integer/rescaling conversions shared by frontend consumers.
 //! WHY: AST, casts and MON receiving paths must use one coefficient owner without a bounded or
 //!      floating-point intermediate.
 //!
-//! Exclusions: source numeric syntax and lexical validation belong to `numeric_text`; MON budgets,
-//! spans and error context belong to the MON codec; runtime/backend representation does not belong
-//! here. [`effective_decimal_scale`] consumes an already validated normalized spelling and
-//! performs no syntax decision of its own.
+//! Exclusions: numeric syntax, `NumberScale` and normalized-decimal facts belong to
+//! `moth-lexical`; MON budgets, spans and error context belong to the MON codec;
+//! runtime/backend representation does not belong here.
 
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use moth_lexical::numeric::decimal::{NormalizedDecimalFacts, NumberScale};
+use moth_lexical::numeric::grammar::NumericLiteralSign;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{One, ToPrimitive, Zero};
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
-
-/// One validated canonical `Dec` scale.
-///
-/// A `NumberScale` is the internal carried form of a scale in `0..=256`; the public MON schema
-/// still spells scales as `u16` and preparation converts it here or rejects it. Construction is
-/// the single validation point, so a prepared Decimal node can never hold an unvalidated scale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NumberScale(u16);
-
-impl NumberScale {
-    /// The canonical scale capacity, shared with the `Dec0`..`Dec256` source identities.
-    pub const MAX: u16 = 256;
-
-    /// Scale-zero identity shared by `Dec` and `Dec0`.
-    pub const ZERO: Self = Self(0);
-
-    /// Validate a declared scale against the canonical capacity.
-    pub(crate) const fn new(scale: u16) -> Option<Self> {
-        if scale <= Self::MAX {
-            Some(Self(scale))
-        } else {
-            None
-        }
-    }
-
-    /// Parse only canonical source type spellings, without allocating.
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
-        if name == "Dec" {
-            return Some(Self::ZERO);
-        }
-
-        let digits = name.strip_prefix("Dec")?;
-        if digits.is_empty()
-            || (digits.len() > 1 && digits.starts_with('0'))
-            || !digits.bytes().all(|byte| byte.is_ascii_digit())
-        {
-            return None;
-        }
-
-        Self::new(digits.parse().ok()?)
-    }
-
-    /// The validated scale value.
-    pub const fn get(self) -> u16 {
-        self.0
-    }
-}
-
-impl Display for NumberScale {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        if *self == Self::ZERO {
-            formatter.write_str("Dec")
-        } else {
-            write!(formatter, "Dec{}", self.get())
-        }
-    }
-}
-
-/// Effective scale of an already validated unsigned normalized decimal spelling.
-///
-/// The spelling is the `numeric_text` normalized form: unsigned, underscore-free, lowercase `e`
-/// exponent with an optional `+`/`-` marker. The effective scale is the untrimmed fractional
-/// scale (fraction digits plus a negative exponent magnitude) less the coefficient's trailing
-/// zero digits, clamped at zero. An all-zero coefficient fits any scale at zero regardless of
-/// exponent, and extremely large exponents saturate at host `usize` bounds instead of allocating
-/// arbitrary precision.
-///
-/// Callers keep their own span, error code and detail context; this returns the bare fact.
-///
-/// WHY: MON receiving and schema-default validation must apply one exact-decimal scale policy.
-///      The input borrows the normalized text, so scanning is allocation-free and copies nothing.
-pub(crate) fn effective_decimal_scale(normalized: &str) -> usize {
-    NormalizedDecimalFacts::new(normalized).effective_scale()
-}
-
-/// Borrowed facts shared by MON's exact-fit check and Dec coefficient materialization.
-///
-/// The normalized spelling has already passed the numeric grammar. This analysis only splits its
-/// retained coefficient/exponent facts; it does not validate another numeric syntax.
-struct NormalizedDecimalFacts<'a> {
-    integer_part: &'a str,
-    fractional_part: &'a str,
-    trailing_zeroes: usize,
-    coefficient_is_zero: bool,
-    exponent_magnitude: Option<usize>,
-    negative_exponent: bool,
-}
-
-impl<'a> NormalizedDecimalFacts<'a> {
-    fn new(normalized: &'a str) -> Self {
-        let (coefficient, exponent) = match normalized.split_once('e') {
-            Some((coefficient, exponent)) => (coefficient, Some(exponent)),
-            None => (normalized, None),
-        };
-        let (integer_part, fractional_part) = match coefficient.split_once('.') {
-            Some((integer_part, fractional_part)) => (integer_part, fractional_part),
-            None => (coefficient, ""),
-        };
-
-        // Scanning backward finds both the trailing-zero count and the zero fast path without
-        // reading exponent digits or walking the whole coefficient after a nonzero tail.
-        let mut trailing_zeroes = 0usize;
-        let mut coefficient_is_zero = true;
-        for digit in integer_part.bytes().chain(fractional_part.bytes()).rev() {
-            if digit == b'0' {
-                trailing_zeroes += 1;
-            } else {
-                coefficient_is_zero = false;
-                break;
-            }
-        }
-
-        // Signed zero ignores its exponent magnitude and sign.
-        if coefficient_is_zero {
-            return Self {
-                integer_part,
-                fractional_part,
-                trailing_zeroes,
-                coefficient_is_zero,
-                exponent_magnitude: Some(0),
-                negative_exponent: false,
-            };
-        }
-
-        let (exponent_magnitude, negative_exponent) = match exponent {
-            Some(exponent) => {
-                let negative_exponent = exponent.starts_with('-');
-                let digits = exponent
-                    .strip_prefix('+')
-                    .or_else(|| exponent.strip_prefix('-'))
-                    .unwrap_or(exponent);
-                (checked_decimal_usize(digits), negative_exponent)
-            }
-            None => (Some(0), false),
-        };
-
-        Self {
-            integer_part,
-            fractional_part,
-            trailing_zeroes,
-            coefficient_is_zero,
-            exponent_magnitude,
-            negative_exponent,
-        }
-    }
-
-    fn effective_scale(&self) -> usize {
-        if self.coefficient_is_zero {
-            return 0;
-        }
-
-        let exponent_magnitude = self.exponent_magnitude.unwrap_or(usize::MAX);
-        let untrimmed_scale = if self.negative_exponent {
-            self.fractional_part
-                .len()
-                .saturating_add(exponent_magnitude)
-        } else {
-            self.fractional_part
-                .len()
-                .saturating_sub(exponent_magnitude)
-        };
-        let trailing_zeroes = self.trailing_zeroes.min(untrimmed_scale);
-        untrimmed_scale.saturating_sub(trailing_zeroes)
-    }
-}
-
-/// Parse a validated exponent magnitude once, returning `None` if it exceeds `usize`.
-///
-/// The normalized spelling has already been grammar-validated; overflow is retained as a missing
-/// exact magnitude so MON can derive its saturated scale view without a second exponent scan.
-fn checked_decimal_usize(digits: &str) -> Option<usize> {
-    let mut value = 0usize;
-    for byte in digits.bytes() {
-        let digit = usize::from(byte.saturating_sub(b'0'));
-        value = value.checked_mul(10)?.checked_add(digit)?;
-    }
-    Some(value)
-}
 
 /// One failure to materialize an exact `Dec` literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -278,7 +100,7 @@ impl std::error::Error for NumberArithmeticError {}
 ///      identity; backends own the runtime representation.
 ///
 /// `normalized` passed to [`NumberValue::from_normalized`] is already grammar-validated by
-/// `numeric_text`. This type consumes that retained fact but does not own or repeat its syntax.
+/// the shared lexical parser. This type consumes those facts but does not own or repeat syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NumberValue {
     coefficient: Arc<BigInt>,
@@ -296,8 +118,8 @@ impl NumberValue {
         sign: NumericLiteralSign,
         scale: NumberScale,
     ) -> Result<Self, NumberMaterializationError> {
-        let facts = NormalizedDecimalFacts::new(normalized);
-        if facts.coefficient_is_zero {
+        let facts = NormalizedDecimalFacts::analyze(normalized);
+        if facts.coefficient_is_zero() {
             return Ok(Self::new(BigInt::zero(), scale));
         }
 
@@ -308,11 +130,11 @@ impl NumberValue {
         }
 
         let exponent_magnitude = facts
-            .exponent_magnitude
+            .exponent_magnitude()
             .ok_or(NumberMaterializationError::Capacity)?;
-        let negative_exponent = facts.negative_exponent;
-        let integer_part = facts.integer_part;
-        let fractional_part = facts.fractional_part;
+        let negative_exponent = facts.negative_exponent();
+        let integer_part = facts.integer_part();
+        let fractional_part = facts.fractional_part();
 
         // `scale + exponent - fractional length` is the decimal shift applied to the
         // coefficient. Separate addition and removal keep it non-negative and checked.
@@ -341,7 +163,7 @@ impl NumberValue {
             .len()
             .checked_add(fractional_part.len())
             .ok_or(NumberMaterializationError::Capacity)?;
-        if removed_zeroes > facts.trailing_zeroes {
+        if removed_zeroes > facts.trailing_zeroes() {
             // The shared exact-scale check should make this impossible. Preserve a safe
             // failure if the scale policy and transformation ever drift apart.
             return Err(NumberMaterializationError::InexactScale);

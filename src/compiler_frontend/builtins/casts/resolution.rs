@@ -20,13 +20,13 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Diagnostic result for resolved casts.
 ///

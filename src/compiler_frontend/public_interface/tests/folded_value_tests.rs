@@ -34,7 +34,6 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -56,6 +55,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use rustc_hash::FxHashMap;
 use std::rc::Rc;

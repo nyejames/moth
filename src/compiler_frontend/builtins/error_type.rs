@@ -11,13 +11,13 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, type_id_hint_for_diagnostic_type,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub(crate) const ERROR_TYPE_NAME: &str = "Error";

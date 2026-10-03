@@ -6,9 +6,6 @@ use super::runtime_modules::emit_build_runtime_modules;
 use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
 use super::*;
 use crate::build_system::build::FileKind;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
@@ -20,6 +17,7 @@ use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExter
 use crate::projects::html_project::tests::test_support::{
     create_test_module, js_runtime_asset_import,
 };
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;

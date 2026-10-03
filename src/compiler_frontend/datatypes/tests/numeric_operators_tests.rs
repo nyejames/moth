@@ -1,13 +1,13 @@
 //! Numeric operator promotion policy tests.
 
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, common_fixed_integer, comparison_supported,
     negation_domain,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
+use moth_lexical::numeric::profile::NumericProfile;
 
 use FixedScalar::*;
 

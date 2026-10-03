@@ -6,13 +6,13 @@ use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::identifier::is_identifier;
 
 #[test]
 fn imported_nominal_paths_preserve_package_origin_and_root_role() {
@@ -61,7 +61,7 @@ fn imported_nominal_paths_preserve_package_origin_and_root_role() {
             .expect("test path fits");
     }
     assert_ne!(normal_path, formerly_colliding_authored_path);
-    assert!(!is_valid_identifier("<imported>"));
+    assert!(!is_identifier("<imported>"));
 
     let mut type_environment = TypeEnvironment::new();
     let normal_type_id = register_struct(&mut type_environment, normal_path);

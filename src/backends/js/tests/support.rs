@@ -20,7 +20,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor,
 };
-pub(super) use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
@@ -40,6 +39,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
     bool_expression, expression, int_expression, string_expression, unit_expression,
 };
+pub(super) use moth_lexical::numeric::profile::NumericProfile;
 
 pub(super) fn statement(id: u32, kind: HirStatementKind) -> HirStatement {
     HirStatement {

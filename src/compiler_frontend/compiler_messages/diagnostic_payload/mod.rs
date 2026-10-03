@@ -10,8 +10,10 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::profile::NumericProfile;
 mod reason_keys;
+use self::reason_keys::StableReasonKey;
 mod remap;
 mod types;
 

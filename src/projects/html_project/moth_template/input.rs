@@ -7,11 +7,11 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, SourceSpanCapacityResource};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};

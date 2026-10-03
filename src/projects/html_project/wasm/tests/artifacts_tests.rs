@@ -1,7 +1,6 @@
 //! Tests for HTML+Wasm artifact planning and emission.
 
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
@@ -12,6 +11,7 @@ use crate::projects::html_project::resource_output_plan::{
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{create_test_module, expect_js_output};
+use moth_lexical::numeric::profile::NumericProfile;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

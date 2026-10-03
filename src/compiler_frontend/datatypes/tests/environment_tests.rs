@@ -8,7 +8,6 @@ use crate::compiler_frontend::datatypes::display::display_type;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericInstanceKey, GenericParameterId, NominalTypeId,
@@ -21,6 +20,7 @@ use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
 
 fn single_generic_parameter_list(name: StringId) -> [(TypeParameterId, StringId); 1] {

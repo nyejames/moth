@@ -20,7 +20,6 @@ use crate::compiler_frontend::build_config::{
     BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
@@ -35,6 +34,7 @@ use crate::projects::command_status::{
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
+use moth_lexical::numeric::profile::NumericProfile;
 use saying::say;
 use std::path::{Path, PathBuf};
 

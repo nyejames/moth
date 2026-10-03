@@ -17,7 +17,6 @@ use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
@@ -25,6 +24,7 @@ use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseError, Sour
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use std::path::Path;
 

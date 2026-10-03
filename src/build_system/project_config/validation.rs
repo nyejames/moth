@@ -27,13 +27,13 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
 };
-use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{
     Config, HtmlSectionConfig, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
+use moth_lexical::identifier::is_identifier;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -339,7 +339,7 @@ fn assign_project_name(
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
-    if value.is_empty() || !is_valid_identifier(&value) {
+    if value.is_empty() || !is_identifier(&value) {
         return Err(config_diagnostic(
             Some(string_table.intern("name")),
             InvalidConfigReason::InvalidProjectSettingValue {

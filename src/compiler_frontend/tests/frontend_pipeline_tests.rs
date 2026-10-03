@@ -17,7 +17,6 @@
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
@@ -44,6 +43,7 @@ use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEntryMode};
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;

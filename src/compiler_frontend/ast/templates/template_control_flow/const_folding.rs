@@ -16,17 +16,16 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::{
-    FixedScalar, FixedScalarClass, FixedScalarValue,
-};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::FloatPrecision;
 
 /// One binding introduced by const template folding.
 ///

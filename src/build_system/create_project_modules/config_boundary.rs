@@ -19,7 +19,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
     PremergeDiagnosticBatch, PremergeFailure,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     SourceBuildConfigContract, SourceConfigDefault, build_input_type_name,
 };
@@ -34,6 +33,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::projects::settings::{Config, ProjectMetadataField};
+use moth_lexical::numeric::profile::NumericProfile;
 
 use rustc_hash::FxHashSet;
 use std::hash::{Hash, Hasher};

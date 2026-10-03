@@ -21,13 +21,13 @@ use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, Bu
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::NumericProfile;
 
 fn member(
     class: SyntheticInterfaceClass,

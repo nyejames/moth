@@ -33,7 +33,6 @@ use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::{IntWidth, NumericProfile};
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -47,6 +46,7 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::{IntWidth, NumericProfile};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;

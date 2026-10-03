@@ -7,10 +7,10 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidStringEscapeReason,
-    MissingWhitespace, NumberLiteralErrorReason, SourceSpanCapacityResource,
-    SymbolicSpacingConstruct, SymbolicSpacingError, SyntaxDiagnosticKind,
+    MissingWhitespace, SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
+    SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 use crate::compiler_frontend::source::{
@@ -27,6 +27,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
     TokenTag, token_store_append_fits, token_store_length_fits,
 };
 use crate::compiler_tests::test_support::frontend_test_style_directives;
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 fn full_token_range(lexed: &LexedSource) -> TokenRange {
     lexed

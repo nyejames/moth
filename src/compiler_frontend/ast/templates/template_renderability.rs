@@ -6,8 +6,8 @@
 //!      `TypeEnvironment`, not parse-time `DataType` representations.
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarClass;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use moth_lexical::numeric::fixed_scalar::FixedScalarClass;
 
 /// Returns `true` if `type_id` is a scalar or textual type that can be
 /// rendered directly into template output.

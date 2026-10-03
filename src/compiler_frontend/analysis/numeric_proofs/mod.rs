@@ -32,7 +32,6 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
@@ -42,6 +41,7 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[cfg(test)]
 mod tests;

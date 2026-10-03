@@ -25,9 +25,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};

@@ -63,7 +63,13 @@ pub const HONESTY_INVENTORY_SCHEMA_VERSION: u32 = 1;
 const SUITE_INVENTORY_PATH: &str = "target/test-reports/integration_suite_inventory.json";
 
 /// Source trees the audit scans, in scan order.
-const SCANNED_SOURCE_ROOTS: &[&str] = &["src", "xtask/src"];
+const SCANNED_SOURCE_ROOTS: &[&str] = &[
+    "src",
+    "crates/moth-lexical/src",
+    "crates/moth-mon/src",
+    "crates/moth-mon/tests",
+    "xtask/src",
+];
 
 /// Files exempt from every scan rule because they are the audit's own implementation.
 ///
@@ -1403,6 +1409,7 @@ fn print_inventory(report: &HonestyInventoryReport) {
         "=== honesty audit: {} files scanned, {} own tests ===",
         report.scanned_file_count, report.test_owning_file_count
     );
+    println!("honesty-audit roots: {}", report.scanned_roots.join(", "));
 
     println!("\nhard findings: {}", report.gate.scan_hard_finding_count);
     for finding in &report.hard_findings {

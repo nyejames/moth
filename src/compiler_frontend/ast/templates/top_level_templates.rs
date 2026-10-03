@@ -12,11 +12,11 @@ use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::profile::NumericProfile;
 
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;

@@ -19,14 +19,14 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use super::definitions::TypeDefinition;
 use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
-use super::fixed_scalar::FixedScalar;
 use super::generic_identity_bridge::display_generic_instantiation_key;
 use super::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType, GenericInstantiationKey,
 };
 use super::generic_parameters::TypeParameterId;
 use super::ids::{self, GenericParameterId, TypeId};
-use super::number::NumberScale;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use super::{BuiltinScalarReceiver, ReceiverKey};
 #[derive(Debug, Clone)]

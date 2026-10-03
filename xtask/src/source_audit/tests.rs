@@ -4,10 +4,11 @@
 //! contain, so a rule keeps its meaning when the tree changes.
 
 use super::{
-    AUDIT_IMPLEMENTATION_FILES, AUDITED_SOURCE_ROOTS, SOURCE_AUDIT_SCHEMA_VERSION, SourceRule,
-    audit_source_fragment, audit_sources, started_report,
+    AUDIT_IMPLEMENTATION_FILES, AUDITED_SOURCE_ROOTS, SourceRule, audit_source_fragment,
+    audit_sources, started_report,
 };
 use crate::report_file::ReportRunIdentity;
+use std::fs;
 use std::path::Path;
 
 /// The banned name, assembled so this file does not contain it either.
@@ -127,13 +128,59 @@ fn the_audit_skips_only_its_own_implementation_files() {
 }
 
 #[test]
-fn the_audit_walks_both_workspace_source_trees() {
-    assert_eq!(AUDITED_SOURCE_ROOTS, ["src", "xtask/src"]);
+fn reports_violations_in_extracted_crate_sources_and_tests() {
+    let workspace = tempfile::tempdir().expect("fixture workspace");
+    for root in AUDITED_SOURCE_ROOTS {
+        fs::create_dir_all(workspace.path().join(root)).expect("configured source root");
+    }
+
+    for relative in [
+        "crates/moth-lexical/src/tests/violation.rs",
+        "crates/moth-mon/src/tests/violation.rs",
+        "crates/moth-mon/tests/violation.rs",
+    ] {
+        let path = workspace.path().join(relative);
+        fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture directory");
+        fs::write(&path, format!("fn {}() {{}}\n", removed_conversion_name()))
+            .expect("violation fixture");
+    }
+
+    let (_, findings) = audit_sources(workspace.path()).expect("fixture scan");
+    let observed: Vec<_> = findings
+        .iter()
+        .map(|finding| (finding.file.as_str(), finding.rule))
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            (
+                "crates/moth-lexical/src/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+            (
+                "crates/moth-mon/src/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+            (
+                "crates/moth-mon/tests/violation.rs",
+                SourceRule::RemovedLegacyConversionName,
+            ),
+        ]
+    );
 }
 
 #[test]
-fn the_report_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(SOURCE_AUDIT_SCHEMA_VERSION, 1);
+fn a_missing_extracted_test_root_fails_the_scan() {
+    let workspace = tempfile::tempdir().expect("fixture workspace");
+    for root in AUDITED_SOURCE_ROOTS {
+        if *root != "crates/moth-mon/tests" {
+            fs::create_dir_all(workspace.path().join(root)).expect("configured source root");
+        }
+    }
+
+    let error = audit_sources(workspace.path()).expect_err("missing root must not be skipped");
+    assert!(error.contains("failed to read"));
+    assert!(error.contains("tests"));
 }
 
 #[test]

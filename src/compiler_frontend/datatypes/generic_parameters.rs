@@ -6,14 +6,13 @@
 
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::identifier_policy::{
-    is_camel_case_type_name, reserved_dec_family_spelling, strip_leading_underscores,
-};
+use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use moth_lexical::identifier::is_reserved_dec_family_name;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Diagnostic result for generic-parameter scope validation.
@@ -291,5 +290,5 @@ fn is_reserved_generic_parameter_name(name: &str) -> bool {
         // The reserved `Dec` family shares the identifier-shadow reservation: any casing,
         // leading-underscore and digit-suffix spelling would shadow the builtin exact-decimal
         // type, so it is rejected through the same family predicate the shadow policy uses.
-        || reserved_dec_family_spelling(strip_leading_underscores(name))
+        || is_reserved_dec_family_name(name)
 }

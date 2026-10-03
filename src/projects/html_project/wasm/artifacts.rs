@@ -9,7 +9,6 @@ use crate::backends::wasm::backend::lower_hir_to_wasm_module;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::build_system::build::{FileKind, OutputFile};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
@@ -27,6 +26,7 @@ use crate::projects::html_project::wasm::export_plan::{
 use crate::projects::html_project::wasm::js_bootstrap::generate_wasm_bootstrap_js;
 use crate::projects::html_project::wasm::request::build_wasm_backend_request;
 use crate::timing_scope;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;

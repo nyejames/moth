@@ -10,9 +10,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
-use crate::compiler_frontend::datatypes::number::NumberScale;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Backend-agnostic classification of a HIR type.
 ///

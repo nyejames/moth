@@ -30,20 +30,19 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
-use crate::compiler_frontend::numeric_text::format::format_finite_float;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::binary16::round_f64_to_f16;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::format::format_finite_float;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use rustc_hash::FxHashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};

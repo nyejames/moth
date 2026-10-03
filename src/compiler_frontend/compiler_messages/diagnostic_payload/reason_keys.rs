@@ -723,6 +723,10 @@ macro_rules! define_reasoned_diagnostic_registry {
     };
 }
 
+pub(super) trait StableReasonKey {
+    fn stable_reason_key(&self) -> &'static str;
+}
+
 macro_rules! define_stable_reason_keys {
     (
         $(
@@ -733,8 +737,8 @@ macro_rules! define_stable_reason_keys {
         ),+ $(,)?
     ) => {
         $(
-            impl $reason_type {
-                pub(super) fn stable_reason_key(&self) -> &'static str {
+            impl StableReasonKey for $reason_type {
+                fn stable_reason_key(&self) -> &'static str {
                     match self {
                         $($delegate_pattern => $delegate_expression,)*
                         $($pattern => $key,)*
@@ -1562,6 +1566,7 @@ define_stable_reason_keys! {
     &CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
     &CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing => "common_syntax_mistake.invalid_reactive_binding_spacing",
     &CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. } => "common_syntax_mistake.invalid_symbolic_spacing",
+    &CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. } => "common_syntax_mistake.invalid_choice_variant_spacing",
     &CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing => "common_syntax_mistake.invalid_unary_negation_spacing",
     &CommonSyntaxMistakeReason::UnsupportedUnaryPlus => "common_syntax_mistake.unsupported_unary_plus",
     },

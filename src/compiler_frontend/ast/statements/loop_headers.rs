@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain,
@@ -44,6 +43,7 @@ use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::{ExpressionBoundaryDepth, NestingDepth};
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 
 #[derive(Debug, Clone)]
 struct ParsedBindingName {

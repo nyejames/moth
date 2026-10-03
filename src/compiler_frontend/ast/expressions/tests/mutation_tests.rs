@@ -13,13 +13,13 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticOperator, DiagnosticPayload, InvalidAssignmentTargetReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn rejects_assignment_value_type_mismatch_with_specific_details() {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::profile::NumericProfile;
 
 // ------------------------------
 //  Slot-bearing template classification uses effective view

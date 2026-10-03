@@ -12,12 +12,10 @@ use crate::compiler_frontend::builtins::casts::evidence::{
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::number::NumberScale;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn fixed_target(scalar: FixedScalar) -> BuiltinCastTarget {
     BuiltinCastTarget::Fixed(scalar)

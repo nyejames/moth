@@ -1,0 +1,12 @@
+[package]
+name = "moth-mon"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+moth-lexical = { path = "../moth-lexical" }

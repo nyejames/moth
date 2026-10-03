@@ -39,10 +39,16 @@ Coverage is not quality. An audited area may still have open findings.
 | `tests.cases` | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture | — |
 | `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` `stale` |
 | `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
-| `frontend.tokenizer` | `src/compiler_frontend/tokenizer/**` - lexer, tokens, numeric scanning, text modes, line scanning, newline handling, and the tokenizer test files | Correctness 2026-08 AUD-0005 `stale` |
+| `frontend.tokenizer` | `src/compiler_frontend/tokenizer/**` - lexer, tokens, numeric scanning, text modes, line scanning, newline handling, and the tokenizer test files | Correctness 2026-10 AUD-0005 `stale`; Redundancy 2026-10 AUD-0014 `partial` |
 | `frontend.symbols` | `src/compiler_frontend/symbols/**` - string interning with fork/merge/freeze, complete-path interning (`PathId`, `PathInternerBuilder`, `PathTable`), `InternedPath`, identifier and reserved-name policy, compiler-owned symbol preseeding, dependency identities, and the symbols test files | Correctness 2026-09 AUD-0006 `stale` |
 | `contract.numeric_profile.frontend_runtime` | Numeric-profile and folded-value handoff across frontend, build/config/template services, HTML-JS lowering, foreign Error projection and integration evidence. Excludes full Wasm scalar execution and unmodified consumers. | Correctness 2026-09 AUD-0007 `partial` `stale` |
 | `contract.numeric_profile.regression_tests` | Template fixed-scalar, const-template range and external-JS fallible wrapper regression cases and Rust generated-wrapper tests. Excludes the remainder of `tests.cases` and backend tests. | Tests 2026-09 AUD-0008 `partial` `stale` |
+| `contract.mon_source_parity` | MON reader/schema in `crates/moth-mon` versus compiler tokenizer and parser source construction; shared lexical policy in `crates/moth-lexical` | Correctness 2026-10 AUD-0009 `partial`; Correctness 2026-10 AUD-0013 `partial` |
+| `tests.mon_syntax_parity` | `src/compiler_tests/mon_syntax_parity/**`, `crates/moth-mon/src/tests/**` and `xtask/src/first_party_deps/tests.rs` | Tests 2026-10 AUD-0010 `partial` |
+| `crates.moth_mon.reader` | `crates/moth-mon/src/reader.rs` trivia walking, payload lookahead and consumed-end state | Redundancy 2026-10 AUD-0011 `partial` |
+| `frontend.optional_defaults` | Optional parameters and fields with a present default; this audit inspected only the reproduced explicit-value override behavior | Correctness 2026-10 AUD-0012 `partial` |
+| `crates.moth_mon.schema` | Field validation and preparation in `crates/moth-mon/src/schema.rs`, including the `prepare_fields` to `prepare_field` handoff | Redundancy 2026-10 AUD-0015 `partial` |
+| `docs.empty_container_contract` | Accepted empty-map and empty-collection semantics across public references, status and related examples | Documentation 2026-10 AUD-0016 `partial` |
 
 ## Never audited
 

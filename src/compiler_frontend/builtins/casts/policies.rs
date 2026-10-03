@@ -16,20 +16,20 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
-use crate::compiler_frontend::datatypes::fixed_scalar::{
-    FixedScalar, FixedScalarClass, FixedScalarValue,
-};
 use crate::compiler_frontend::datatypes::number::{
-    NumberIntegerConversionError, NumberMaterializationError, NumberScale, NumberValue,
+    NumberIntegerConversionError, NumberMaterializationError, NumberValue,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
-use crate::compiler_frontend::numeric_text::format::format_finite_float;
-use crate::compiler_frontend::numeric_text::parse::{
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::numeric_text::parse::parse_numeric_text_to_number;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::format::format_finite_float;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::parse::{
     parse_numeric_text_to_fixed_scalar, parse_numeric_text_to_float, parse_numeric_text_to_int,
-    parse_numeric_text_to_number,
 };
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// A literal scalar value in policy space.
 ///

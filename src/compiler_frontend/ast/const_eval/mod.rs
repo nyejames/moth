@@ -49,24 +49,22 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::{
-    FixedScalar, FixedScalarClass, FixedScalarValue,
-};
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::number::{
-    NumberArithmeticError, NumberScale, NumberValue,
-};
+use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, comparison_supported, negation_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_power;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {

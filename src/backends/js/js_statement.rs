@@ -13,7 +13,8 @@ use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
@@ -1120,7 +1121,7 @@ impl<'hir> JsEmitter<'hir> {
 /// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
 fn js_numeric_helper_for_op(
     op: HirNumericOp,
-    numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+    numeric_profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> Result<(String, Option<(String, String)>), CompilerError> {
     let carrier = JsNumericCarrier::for_scalar(op.domain, numeric_profile).ok_or_else(|| {
         CompilerError::compiler_error(format!(

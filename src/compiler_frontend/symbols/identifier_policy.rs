@@ -1,72 +1,22 @@
-//! Shared identifier naming and reserved-keyword policy helpers.
+//! Compiler-local identifier naming and diagnostic helpers.
 //!
-//! WHAT: centralizes naming-style warnings and keyword-shadow reservation checks used by
-//! header parsing and AST binding creation.
-//! WHY: identifier rules should not drift between frontend stages; one module keeps policy
-//! and diagnostics consistent.
+//! WHAT: owns naming-style checks, warning policy and structured diagnostic construction for
+//! identifiers; shared character and reserved-name rules come from moth-lexical.
+//! WHY: compiler presentation and diagnostics must remain local without duplicating neutral name
+//! policy across frontend stages.
 
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, NamingConvention, ReservedNameOwner,
 };
-use crate::compiler_frontend::keywords::{RESERVED_DEC_TYPE_SPELLING, RESERVED_KEYWORD_SHADOWS};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::identifier::is_reserved_user_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum IdentifierNamingKind {
     TypeLike,
     ValueLike,
     TopLevelConstant,
-}
-
-/// Returns `name` without leading underscore characters.
-pub(crate) fn strip_leading_underscores(name: &str) -> &str {
-    name.trim_start_matches('_')
-}
-
-/// Returns the canonical keyword matched by this identifier shadow, if any.
-///
-/// Example shadows: `_true`, `FALSE`, `__LoOp`. The reserved `Dec` type family matches as
-/// `Dec` for bare spellings and every digit-suffixed form, including invalid scale
-/// spellings such as `dec01` or `dec257`.
-pub(crate) fn keyword_shadow_match(name: &str) -> Option<&'static str> {
-    let stripped = strip_leading_underscores(name);
-    if stripped.is_empty() {
-        return None;
-    }
-
-    let keyword_shadow = RESERVED_KEYWORD_SHADOWS
-        .iter()
-        .copied()
-        .find(|keyword| stripped.eq_ignore_ascii_case(keyword));
-    if keyword_shadow.is_some() {
-        return keyword_shadow;
-    }
-
-    // The exact-decimal `Dec` family reserves its case-folded spellings even where they are
-    // invalid type spellings, so a declaration can never shadow or dilute the family.
-    reserved_dec_family_spelling(stripped).then_some(RESERVED_DEC_TYPE_SPELLING)
-}
-
-/// True when the underscore-stripped identifier is a reserved `Dec` family spelling.
-///
-/// WHAT: bare `Dec` and any `Dec<ascii digits>` suffix, matched case-insensitively.
-///       Trailing-letter spellings such as `DecBox` never match and stay ordinary names.
-/// WHY: shares the exact reservation predicate with `keyword_shadow_match` so the type-spelling
-///      grammar and the identifier policy agree on which names belong to the Dec family.
-pub(crate) fn reserved_dec_family_spelling(stripped: &str) -> bool {
-    let Some(prefix) = stripped.get(..RESERVED_DEC_TYPE_SPELLING.len()) else {
-        return false;
-    };
-
-    prefix.eq_ignore_ascii_case(RESERVED_DEC_TYPE_SPELLING)
-        && stripped[RESERVED_DEC_TYPE_SPELLING.len()..]
-            .bytes()
-            .all(|byte| byte.is_ascii_digit())
-}
-
-pub(crate) fn is_keyword_shadow_identifier(name: &str) -> bool {
-    keyword_shadow_match(name).is_some()
 }
 
 /// Returns true for CamelCase-style type identifiers with an uppercase first character followed by
@@ -188,7 +138,7 @@ pub(crate) fn ensure_not_keyword_shadow_identifier(
     string_table: &StringTable,
 ) -> IdentifierPolicyResult<()> {
     let identifier = string_table.resolve(name);
-    if is_keyword_shadow_identifier(identifier) {
+    if is_reserved_user_name(identifier) {
         return Err(reserved_keyword_shadow_error(name, span));
     }
 

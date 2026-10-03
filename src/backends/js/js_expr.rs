@@ -11,7 +11,6 @@ use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{
@@ -19,6 +18,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Clone, Copy)]
 enum OptionComparisonSide {
     Option { inner_type: TypeId },
@@ -764,7 +764,7 @@ pub(crate) fn escape_js_string(value: &str) -> String {
 pub(super) fn js_cast_expression_for_policy(
     policy: BuiltinCastPolicyId,
     value: &str,
-    numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+    numeric_profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> Result<String, CompilerError> {
     match policy {
         BuiltinCastPolicyId::NumericConversion { source, target } => {

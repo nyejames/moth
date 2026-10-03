@@ -18,12 +18,12 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor, TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn diagnostic_render_context_renders_builtin_type_names() {

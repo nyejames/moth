@@ -28,7 +28,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue,
@@ -43,6 +42,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
 use crate::projects::settings::{Config, HtmlSectionConfig};
+use moth_lexical::numeric::profile::NumericProfile;
 use std::path::{Path, PathBuf};
 
 // -------------------------

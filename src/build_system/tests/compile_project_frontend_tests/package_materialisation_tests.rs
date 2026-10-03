@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

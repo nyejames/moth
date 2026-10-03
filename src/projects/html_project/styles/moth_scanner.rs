@@ -10,10 +10,9 @@ use super::{
 };
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
 use crate::compiler_frontend::external_packages::IO_NAMESPACE_NAME;
-use crate::compiler_frontend::keywords::{
-    SourceWordClass, attached_bang_keyword_token_tag, classify_source_word,
-};
+use crate::compiler_frontend::keywords::attached_bang_keyword_token_tag;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
+use moth_lexical::words::{SourceWordClass, classify_source_word};
 
 /// Contract-list kind for the Moth heuristic.
 ///
@@ -99,7 +98,7 @@ impl<'source> CodeScanner<'source> {
         end
     }
 
-    /// Classifies one Moth word through the compiler-owned classes and the
+    /// Classifies one Moth word through the shared `moth_lexical` word classes and the
     /// bounded lexical heuristics.
     pub(super) fn moth_word_role(
         &mut self,
@@ -118,8 +117,8 @@ impl<'source> CodeScanner<'source> {
             return Some(CodeHighlightRole::Keyword);
         }
 
-        if let Some(classified) = classify_source_word(word) {
-            let role = match classified.class {
+        if let Some(source_word) = classify_source_word(word) {
+            let role = match source_word.class() {
                 SourceWordClass::Keyword => CodeHighlightRole::Keyword,
                 SourceWordClass::WordOperator => CodeHighlightRole::Operator,
                 SourceWordClass::Literal => CodeHighlightRole::Literal,

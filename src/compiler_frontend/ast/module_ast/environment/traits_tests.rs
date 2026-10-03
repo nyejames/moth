@@ -23,10 +23,6 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTraitConformanceReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -44,6 +40,8 @@ use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 #[test]
 fn register_builtin_cast_evidence_matches_lookup_policy_across_profiles() {

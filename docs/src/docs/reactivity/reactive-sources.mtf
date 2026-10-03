@@ -6,8 +6,9 @@ A reactive source is stable mutation-capable runtime storage declared with `$Typ
     count $Int = 0
     enabled $= true
     names ${String} = {"Priya"}
-    scores ${String = Int} = {}
+    scores ${String = Int} = {=}
 ]
+Source `{=}` is accepted empty-map syntax but is not implemented yet; see @../progress (Progress) for current support.
 
 ### Exact contract
 

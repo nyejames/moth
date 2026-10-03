@@ -11,7 +11,7 @@ use crate::backends::wasm::lir::types::{
 use crate::backends::wasm::runtime::memory::WasmScalarStorageKind;
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use rustc_hash::FxHashMap;
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 

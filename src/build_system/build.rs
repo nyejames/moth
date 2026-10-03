@@ -36,7 +36,6 @@ use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
@@ -51,6 +50,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};

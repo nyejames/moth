@@ -5,10 +5,10 @@
 //! WHY: unresolved names, inferred positions, and source spelling must not
 //!      be confused with resolved semantic type identity.
 
-use super::fixed_scalar::FixedScalar;
-use super::number::NumberScale;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // Parsed syntax retains exact global spans when authored source identity is available. Generated
 // or synthetic references remain spanless rather than carrying a second line/column provenance.

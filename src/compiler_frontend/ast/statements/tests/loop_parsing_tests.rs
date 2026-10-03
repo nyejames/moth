@@ -13,13 +13,13 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::sync::Arc;
 
 #[test]

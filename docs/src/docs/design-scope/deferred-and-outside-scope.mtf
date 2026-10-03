@@ -42,17 +42,22 @@ Moth MON source syntax allows ordinary expressions according to the receiving
 Moth context. MON serialised data is self-contained literal data only, and a MON
 reader never evaluates Moth expressions, including foldable ones.
 
-The Rust-only `moth::mon` codec is implemented; see @../progress (Progress)
-for current support. Moth-native `$mon`, automatic schema extraction and the
-static project builder remain deferred separately. That direction does not make
-the format Moth-native or give every MON-syntax value a serialisation guarantee.
-Engine and application schemas remain separate from the format contract.
+The standalone Rust `moth-mon` codec is implemented, with the same API and Rust
+types available through the supported `moth::mon` convenience re-export.
+See @../progress (Progress) for current support. Moth-native `$mon`, automatic
+schema extraction, source/runtime operations and the static project builder
+remain deferred separately. Source `{=}` empty maps, Unicode escapes and
+contextual `::Variant` construction also remain undelivered. Rust availability
+does not make the format Moth-native or give every MON-syntax value a
+serialisation guarantee. Engine and application schemas remain separate from
+the format contract.
 
 Accepted late Moth integration covers compiler-owned `$mon` convenience,
 automatic schemas from ordinary Moth types, checked anonymous-record
 generation, explicit source encode/decode operations and the static `.mon`
-asset builder, reusing the delivered codec and shared MON syntax notation.
-Literal traversal and escape decoding remain local to MON. Dynamic schema
+asset builder, consuming the standalone `moth-mon` codec, shared
+`moth-lexical` identifier/reservation and numeric policies, and MON syntax
+notation. Literal traversal and escape decoding remain local to MON. Dynamic schema
 construction and loading, public borrowed views, streaming, binary formats,
 graph identity preservation, automatic migrations, custom serialisation
 traits, field-transformation frameworks and byte-canonical output remain

@@ -4,10 +4,10 @@
 //! WHY: keeping one explicit request object preserves stage separation and makes option growth
 //! predictable as HTML/Wasm integration and richer Wasm features are added.
 use crate::backends::structural_string::StructuralStringUrlMap;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 #[derive(Debug, Clone, Default)]

@@ -24,13 +24,13 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 

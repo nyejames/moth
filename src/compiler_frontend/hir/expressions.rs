@@ -13,7 +13,6 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
@@ -21,6 +20,7 @@ use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 /// Shared carrier tag for variant construction in HIR.
 ///

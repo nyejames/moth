@@ -50,7 +50,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
@@ -64,6 +63,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -25,13 +25,13 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::FloatPrecision;
 
 /// Input bundle for `parse_produced_values_typed`.
 ///

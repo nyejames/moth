@@ -6,7 +6,6 @@
 
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstantDef,
@@ -19,6 +18,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn import_path(
     components: &[&str],

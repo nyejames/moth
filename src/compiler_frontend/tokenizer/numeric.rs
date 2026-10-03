@@ -1,24 +1,26 @@
 //! Numeric literal tokenization.
 //!
 //! WHAT: consumes numeric literal text and delegates grammar validation to the shared
-//!       `numeric_text` module.
+//!       `moth_lexical` numeric service.
 //! WHY: keeping the grammar in one place makes separator, exponent, and sign rules
 //!      consistent between source literals and future string casts.
 
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NumberLiteralErrorReason};
-use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{
     TokenizeResult, current_source_span, map_token_emit_error,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::parse::parse_numeric_literal;
 
 /// Tokenize an integer or float literal starting with `first_digit`.
 ///
-/// WHAT: consumes the full literal run, then asks `numeric_text` to validate it and
+/// WHAT: consumes the full literal run, then asks `moth_lexical` to validate it and
 ///       build the lexical token payload.
-/// WHY: the tokenizer owns source-location tracking, while `numeric_text` owns the
+/// WHY: the tokenizer owns source-location tracking, while `moth_lexical` owns the
 ///      grammar; this boundary avoids leaking stream state into the grammar module.
 pub(super) fn tokenize_numeric_literal(
     first_digit: char,

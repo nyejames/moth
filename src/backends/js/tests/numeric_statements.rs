@@ -3,7 +3,6 @@
 use super::support::*;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpression;
@@ -14,6 +13,7 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use moth_lexical::numeric::profile::NumericProfile;
 
 // FormatFloat and ValidateFloat statement lowering tests [float]
 // ---------------------------------------------------------------------------

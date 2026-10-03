@@ -30,13 +30,13 @@ pub(crate) use runtime::collection_javascript_helpers;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
 
 use crate::backends::structural_string::StructuralStringUrlMap;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

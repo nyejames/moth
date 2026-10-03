@@ -50,7 +50,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
@@ -59,6 +58,7 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 
 pub(crate) fn malformed_template_message(
     reason: MalformedTemplateReason,

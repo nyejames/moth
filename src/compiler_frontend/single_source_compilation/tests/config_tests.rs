@@ -12,11 +12,7 @@ use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_sourc
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, NumberLiteralErrorReason,
-    TypeAnnotationContext,
-};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
+    CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
@@ -26,6 +22,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::path::Path;
 
 fn compile_project_source(

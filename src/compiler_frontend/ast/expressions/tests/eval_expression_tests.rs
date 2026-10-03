@@ -14,13 +14,11 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidBuiltinCallReason,
-    NumberLiteralErrorReason, TypeDiagnosticKind, TypeMismatchContext,
+    TypeDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -30,6 +28,9 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -662,7 +663,7 @@ fn direct_fixed_literal_materialises_f16_and_f32_bits() {
     assert!(
         matches!(
             half.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value.to_bits() == crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16(0.1).to_bits())
+            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value.to_bits() == moth_lexical::numeric::binary16::round_f64_to_f16(0.1).to_bits())
         ),
         "expected F16(0.1) bits, got {:?}",
         half.kind

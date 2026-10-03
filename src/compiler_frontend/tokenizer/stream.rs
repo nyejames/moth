@@ -12,7 +12,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use super::schema::{TokenTag, numeric_kind_flags};
+use super::schema::{TokenShape, TokenTag, numeric_kind_flags};
 use super::storage::{SourceTokensBuilder, TokenEmitError};
 /// Entry policy for one tokenizer invocation.
 ///
@@ -259,6 +259,18 @@ impl<'a> TokenStream<'a> {
 
     pub(crate) fn emit_static(&mut self, tag: TokenTag) -> Result<TokenTag, TokenEmitError> {
         self.emit_payload(tag, 0, 0)
+    }
+
+    pub(crate) fn emit_double_colon(
+        &mut self,
+        qualifier_attached: bool,
+        variant_attached: bool,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::DOUBLE_COLON,
+            TokenShape::double_colon_adjacency_flags(qualifier_attached, variant_attached),
+            0,
+        )
     }
 
     pub(crate) fn emit_symbol(&mut self, value: StringId) -> Result<TokenTag, TokenEmitError> {

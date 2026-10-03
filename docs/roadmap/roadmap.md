@@ -19,8 +19,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [MON crate better visibility boundaries and structure](./plans/mon-crate-extraction-and-syntax-parity-plan.md)
-
 - [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
 
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
@@ -63,7 +61,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
-- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Reuse the Rust codec and its expanded numeric schemas for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work, and none of this is part of Rust tooling v1.
+- TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
 
 - [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
 
@@ -91,18 +89,18 @@ This is a bunch of notes for work that will likely be picked up in the future, b
 
 ## MON language integration and static builder
 
-MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format is literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The initial format and Rust compiler-library codec were delivered immediately after the syntax checkpoint; they are not deferred with language integration.
+MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format contains literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The format and standalone Rust `moth-mon` codec, also available through `moth::mon`, are delivered separately from deferred language integration.
 
 The final roadmap follow-up adds Moth-native usage and the static MON project
-builder. It reuses the delivered codec, MON syntax notation and ordinary Moth
-types. MON literal traversal and escape decoding remain local; this follow-up
-does not add a second MON parser, depend on the Moth expression parser for
-literal reading, or introduce explicit serialisation traits or a second schema
-language. Compiler-owned `$mon` convenience is accepted direction, but its exact
-invocation syntax is not defined. Source typing, automatic schema extraction,
-backend operations and builder commands are not delivered by the Rust-only v1
-delivery. Consume the numeric checkpoint's fixed-width, profile-aware and exact
-Dec schema support without reimplementing numeric materialisation.
+builder. It consumes `moth-mon`, the shared `moth-lexical` identifier/reservation
+and numeric policies, MON syntax notation and ordinary Moth types. MON literal
+traversal and escape decoding remain local to the codec. This follow-up adds no
+second MON parser, Moth-expression dependency for literal reading, explicit
+serialisation traits or second schema language. Compiler-owned `$mon`
+convenience remains accepted direction, but its exact invocation syntax stays
+undefined. Source typing, automatic schema extraction, backend operations and
+builder commands remain undelivered. Consume the fixed-width, profile-aware
+and exact Dec schema support without reimplementing numeric materialisation.
 
 Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
 a collection even at a map receiving context, and `::Variant(...)` uses a known

@@ -1,9 +1,10 @@
 use super::*;
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralToken};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::grammar::NumericLiteralKind;
 use std::sync::Arc;
 
 fn canonical_tokens_for_all_tags() -> Arc<SourceTokens> {
@@ -111,7 +112,7 @@ fn schema_has_all_explicit_tags_once() {
     }
     assert_eq!(
         tags.iter()
-            .filter(|tag| **tag != TokenTag::NUMERIC_LITERAL)
+            .filter(|tag| !matches!(**tag, TokenTag::NUMERIC_LITERAL | TokenTag::DOUBLE_COLON))
             .filter(|tag| tag.allowed_flags() != 0)
             .count(),
         0
@@ -135,8 +136,15 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
     assert_eq!(TokenTag::NUMERIC_LITERAL.allowed_flags(), 0b11);
     assert!(TokenTag::NUMERIC_LITERAL.flags_are_valid(0b11));
     assert!(!TokenTag::NUMERIC_LITERAL.flags_are_valid(0b100));
+    assert_eq!(TokenTag::DOUBLE_COLON.allowed_flags(), 0b11);
+    assert!(TokenTag::DOUBLE_COLON.flags_are_valid(0b11));
+    assert!(!TokenTag::DOUBLE_COLON.flags_are_valid(0b100));
     assert_eq!(TokenTag::SYMBOL.allowed_flags(), 0);
     assert!(!TokenTag::SYMBOL.flags_are_valid(1));
+    assert_eq!(
+        TokenShape::from_raw_parts(TokenTag::DOUBLE_COLON.raw(), 0b100, 0),
+        None
+    );
 
     let shape = TokenShape::new(TokenTag::NUMERIC_LITERAL, 0b11, 7).expect("valid shape");
     assert_eq!(shape.tag(), TokenTag::NUMERIC_LITERAL);

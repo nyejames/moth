@@ -6,8 +6,8 @@
 use super::CoreJsHelper;
 use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::profile::FloatPrecision;
 
 const RANDOM_INT_HELPER_NAME: &str = "__moth_random_int";
 const RANDOM_FLOAT_HELPER_NAME: &str = "__moth_random_float";

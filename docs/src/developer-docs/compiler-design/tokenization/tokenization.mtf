@@ -127,7 +127,7 @@ Some mistakes die at the first cut:
 - symbolic spacing rules for operators, assignments and mutable declarations
 - numeric text that fails shared lexical grammar
 
-`numeric_text` owns shared numeric grammar, normalisation, separators and exponents. Lexical numeric failure is not yet a semantic `Dec` versus `Byte` debate. Semantic numeric types arrive later. Keep those layers separate when you read diagnostics.
+`moth-lexical::numeric` owns shared numeric grammar, normalisation, separators and exponents. Its identifier and source-word modules also own the shared shape and reservation law. The compiler tokenizer maps neutral word identities to its own token tags and diagnostics. Lexical numeric failure is not yet a semantic `Dec` versus `Byte` debate. Semantic numeric types arrive later. Keep those layers separate when you read diagnostics.
 
 ## Boundary of ownership
 
@@ -164,7 +164,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 ## Roadmap and current status
 
 - **Accepted design:** located tokens and retained source preparation.
-- **Current implementation:** progress rows for source-kind coverage. The numeric surface includes `Dec`, `DecN` and `Byte`. `numeric_text` owns lexical grammar, AST owns semantic typing and HIR owns numeric domains and failure.
+- **Current implementation:** progress rows for source-kind coverage. The numeric surface includes `Dec`, `DecN` and `Byte`. `moth-lexical` owns lexical facts shared with MON, AST owns semantic typing and HIR owns numeric domains and failure.
 - **Queued work:** `general-directives-and-project-config-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 

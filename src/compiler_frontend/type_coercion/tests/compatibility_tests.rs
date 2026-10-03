@@ -3,7 +3,6 @@
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -12,6 +11,7 @@ use crate::compiler_frontend::type_coercion::compatibility::{
     TypeCompatibilityCache, TypeCompatibilityMode, is_declaration_compatible,
     is_postfix_error_compatible, is_type_compatible,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn type_compatibility_int_vs_float_is_incompatible() {

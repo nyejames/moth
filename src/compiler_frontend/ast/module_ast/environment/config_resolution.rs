@@ -25,7 +25,6 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCon
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     build_input_type_from_parsed, parsed_type_span,
@@ -36,6 +35,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use moth_lexical::numeric::profile::NumericProfile;
 /// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
 ///
 /// Top-level declarations are the bootstrap owner. The declaration-boundary path records the

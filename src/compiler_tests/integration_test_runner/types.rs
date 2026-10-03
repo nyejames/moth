@@ -5,7 +5,7 @@
 use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::profile::NumericProfile;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

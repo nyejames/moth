@@ -25,7 +25,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
@@ -34,6 +33,7 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 // ===========================================================================
 //  Owned folded-value vocabulary

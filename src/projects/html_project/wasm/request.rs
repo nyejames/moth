@@ -6,9 +6,9 @@
 use crate::backends::wasm::request::{
     WasmBackendRequest, WasmExportPolicy, WasmFunctionEmissionPolicy, WasmHelperExportPolicy,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::projects::html_project::wasm::export_plan::HtmlWasmExportPlan;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 
 /// Builds the generic backend request from HTML builder export planning.

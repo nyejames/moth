@@ -9,14 +9,14 @@
 use super::DataType;
 use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
-use super::fixed_scalar::FixedScalar;
 use super::ids::{TypeId, builtin_type_ids};
-use super::number::NumberScale;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork, PathTable,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // -----------------------------------------------------------
 //  Identity Keys (HIR / Diagnostic Bridge)

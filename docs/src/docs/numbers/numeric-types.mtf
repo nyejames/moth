@@ -186,7 +186,11 @@ the whole existing numeric grammar exactly; HTML-JS formats Dec canonically.
 
 ### MON data boundary
 
-MON literal data reuses the source numeric spelling but keeps whole-number and
-decimal or exponent categories lossless until the receiving schema is known.
-Its conversion rules, profile handling and scale limits belong to the MON format
-contract. See @../mon/#mon-format (MON format).
+MON literal data consumes the shared numeric facts from `moth-lexical` and keeps
+whole-number and decimal or exponent categories lossless until the receiving
+schema is known. Standalone Rust callers select a profile through
+`moth_mon::Schema::with_profile`. The convenience re-export `moth::mon` exposes
+the same API and Rust types to compiler clients. `SchemaType::Integer` and
+`SchemaType::Decimal` name Rust data families, not additional Moth source types.
+Current source syntax uses `Dec` and `DecN`. MON conversion, profile handling
+and scale limits belong to @../mon/#mon-format (MON format).

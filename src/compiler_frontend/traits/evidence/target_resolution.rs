@@ -14,13 +14,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
-use crate::compiler_frontend::symbols::identifier_policy::{
-    reserved_dec_family_spelling, strip_leading_underscores,
-};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -28,6 +24,8 @@ use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
+use moth_lexical::identifier::is_reserved_dec_family_name;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
 
 /// Result for the connected conformance-target resolution family.
@@ -196,7 +194,7 @@ fn is_builtin_scalar_target(name: StringId, string_table: &StringTable) -> bool 
         // The reserved `Dec` family is builtin type territory as well, so user-authored
         // conformance on its spellings is rejected through the shared family predicate
         // instead of falling through to the unknown-type path.
-        || reserved_dec_family_spelling(strip_leading_underscores(resolved))
+        || is_reserved_dec_family_name(resolved)
 }
 
 pub(super) fn resolve_trait_reference(

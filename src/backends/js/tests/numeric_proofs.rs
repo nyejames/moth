@@ -19,7 +19,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -36,6 +35,7 @@ use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
 
 /// The builtin `Error` type id, registered through the same canonical-identity dance the

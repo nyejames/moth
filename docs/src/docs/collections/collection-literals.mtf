@@ -49,4 +49,4 @@ Collection items and map entries cannot be mixed.
 
 ### MON data boundary
 
-Source `{}` keeps its implemented contextual behaviour: an empty literal needs an explicit collection type, and a non-empty `=` entry selects the map form. MON data keeps a distinct contract: `{}` is always an empty collection and `{=}` is always an empty map. That explicit empty-map spelling is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format). Shared notation is owned by @../language-overview/#mon-syntax (MON syntax).
+Source and MON data share the empty-container distinction: `{}` is always a collection and `{=}` is always a map; a receiving type or schema cannot change the container's kind. Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support. See @../mon/#mon-format (MON format) for the Rust-only MON literal-data contract. Shared notation is owned by @../language-overview/#mon-syntax (MON syntax).

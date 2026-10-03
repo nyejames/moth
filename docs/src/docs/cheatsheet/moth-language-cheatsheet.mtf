@@ -13,8 +13,10 @@
     `$test` and custom metadata remain future work. For more detailed breakdowns, see
     the @../ (Moth documentation).
     The literal MON data format contract is documented separately at @../mon/#mon-format (MON format).
-    The Rust-only `moth::mon` codec is implemented and executable from Rust; it is not implemented Moth source or runtime behaviour: source `{=}` enforcement,
-    source Unicode escapes beyond the five below, contextual `::Variant` construction and `$mon` remain deferred.
+    The standalone Rust-only `moth_mon` codec is implemented, with the same API and Rust types
+    available to compiler clients through `moth::mon`. It adds no Moth source or runtime behaviour:
+    source `{=}`, Unicode escapes beyond the five below, contextual `::Variant` construction,
+    `$mon`, automatic schema extraction and the static project builder remain deferred.
 
 ## Rules to internalise first
 
@@ -851,8 +853,9 @@ Growable `push` and `length()` are infallible. `get`, `set`, fixed `push` and `r
     ~scores.clear()
 ]
 
-- `{Key = Value}` is a map type. `{key = value}` is a map literal.
-- Empty maps need an explicit map type. Source `{=}` empty-map enforcement is not implemented; the `{=}` spelling belongs to the documented MON literal-data contract only.
+- `{Key = Value}` is a map type. `{key = value}` is a non-empty map literal.
+- An empty map uses `{=}` and needs an explicit or immediate contextual map type. `{}` always remains an empty collection, even at a map receiving site.
+- Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support.
 - Maps preserve insertion order. Replacing a value does not move its entry.
 - Builtin keys are `String`, `Int`, `Bool`, `Char`, every fixed-width integer and `Byte`. Each map has one declared key type. Floats, `Dec` and `DecN` are not key types.
 - `get`, `set` and `remove` are fallible.

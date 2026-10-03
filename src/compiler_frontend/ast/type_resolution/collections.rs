@@ -14,9 +14,9 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::{IntWidth, NumericProfile};
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::source::SourceSpan;
+use moth_lexical::numeric::profile::{IntWidth, NumericProfile};
 
 pub(crate) type CollectionCapacityResult<T> = Result<T, CollectionCapacityDiagnostic>;
 

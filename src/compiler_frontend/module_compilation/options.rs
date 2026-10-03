@@ -6,7 +6,7 @@
 //!       Callers translate their own configuration and their boundary's numeric profile into this
 //!       value, so only settings the compiler actually uses cross the boundary.
 
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Default iteration ceiling for a compile-time template loop.
 ///

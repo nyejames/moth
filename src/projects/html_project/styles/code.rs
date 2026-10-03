@@ -11,8 +11,8 @@
 //! The shared template formatter pipeline owns whitespace normalization before code reaches this
 //! module. This module owns presentation and the `<code>` wrapper; HTML character escaping is
 //! shared with `$escape_html` through `styles/escape_html.rs`. Exact Moth source-word classification
-//! comes from the compiler-owned keyword module; this module never keeps a second current Moth word
-//! list.
+//! comes from the shared `moth_lexical::words` inventory; this module never keeps a second current
+//! Moth word list.
 //!
 //! The production scanner is one byte-indexed pass over borrowed source slices. It batches plain
 //! runs, escapes directly into one owned output string per text piece and uses maximal munch for

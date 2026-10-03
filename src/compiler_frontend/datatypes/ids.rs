@@ -8,8 +8,8 @@
 //  Compact Type Identifiers
 // -----------------------------------------------------------
 
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::number::NumberScale;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Dense module-local type identifier.
 ///

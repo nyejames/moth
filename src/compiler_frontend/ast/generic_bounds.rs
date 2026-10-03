@@ -12,12 +12,12 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;

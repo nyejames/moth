@@ -25,12 +25,12 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::AstBuildResult;
 #[cfg(test)]
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use artefact_emit::ModuleMaterialisationContext;

@@ -18,11 +18,10 @@ use crate::build_system::create_project_modules::{
     FrontendCompilationMode, ProjectFrontendCompilation, compile_project_frontend_with_inputs,
 };
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, NumberLiteralErrorReason};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::projects::settings::CONFIG_FILE_NAME;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::fs;
 use std::path::PathBuf;
 

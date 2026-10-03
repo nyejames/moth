@@ -25,7 +25,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
@@ -35,6 +34,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use rustc_hash::FxHashMap;
 
 #[cfg(test)]

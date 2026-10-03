@@ -57,15 +57,25 @@ precedence, place access, postfix operations and immediate cast-target rules.
 
 ### Entries and layout
 
-Every anonymous entry has a unique identifier and an explicit `= expression`.
-Its type is inferred from that expression. Entries have no type annotation,
-declaration qualifier, default, omitted value or field-level mutable declaration.
-There are no positional anonymous fields or implicit name shorthands.
+Every anonymous entry has a unique identifier and an explicit
+`label = expression` entry. It requires at least one horizontal whitespace
+character before `=` and whitespace immediately after it. Its type is inferred
+from the expression. Entries have no type annotation, declaration qualifier,
+default, omitted value or field-level mutable declaration. There are no
+positional anonymous fields or implicit name shorthands.
 
 Use commas between entries. One trailing comma is allowed. Blank lines and
-comments may separate entries, and a value may start on the line after `=`.
-The field label and `=` use the ordinary named-argument boundary. Newlines do
-not replace commas or join an incomplete label to a later assignment.
+comments may separate entries. The label and `=` must share one logical line.
+LF and CR are the only line breaks, with CRLF counting as one break; every
+other Unicode whitespace character is horizontal whitespace and may separate
+them. At least one whitespace character must immediately follow `=`, and it
+may be a line break, so the value can start on the next line. The same
+named-entry boundary applies to MON, including implicit and explicit roots,
+nested records and qualified payloads. Newlines do not replace commas or join
+an incomplete label to a later assignment.
+
+Map entry `=` also requires whitespace on both sides. MON's `{=}` empty-map
+spelling is the exception because it is not a non-empty map entry.
 
 A field label does not bind a local name. Every initializer resolves names in
 the surrounding scope. Earlier fields are not bare names visible to later fields.
@@ -137,6 +147,50 @@ Ordinary `f()` is a zero-argument call. The accepted directive contract uses
 bare `$name` when no arguments are supplied and rejects `$name()`. Template
 labels, indices and helper wrappers retain their specialised meanings.
 
+### Shared construction parity
+
+For a supported common literal form in the same language and format revision,
+equivalent receiving types or schemas and the same numeric profile require both
+parsers to accept the form and produce the same typed value. Source and MON keep
+independent parsers: compiler-local owners parse calls and declarations, while
+`moth-mon` parses literal data. Both consume identifier, reserved-word and numeric
+text facts from `moth-lexical`. The real-source conformance suite at
+`src/compiler_tests/mon_syntax_parity/` checks each expected outcome before
+comparing typed values.
+
+Nominal constructor names and choice variant names take a payload only when
+`(` follows on the same logical line with only horizontal whitespace between.
+LF, CR or a line comment between the head and `(` means there is no payload;
+the following input fails through ordinary parsing. Source and MON share this
+head rule. Newlines inside argument lists and after `=` remain valid, and the
+existing adjacency restriction between `::` and its variant name is unchanged.
+
+Common invalid forms must fail in both parsers for the expected reason.
+Intentional data/source differences include:
+- MON frames one root record, including implicit and empty roots. Source
+  receivers also accept expression fragments.
+- A MON schema supplies field and nominal shape. Source infers anonymous
+  records and requires explicit nominal constructors.
+- MON contains literal values only. Expressions, bindings, imports, mutable
+  access and declarations remain source syntax.
+- MON preserves raw quoted text and uses its own bounded escapes. Source quoted
+  slices have separate escape and line-ending rules.
+- MON applies codec text, nesting, node and materialisation budgets. These are
+  not source grammar limits.
+
+Accepted but undelivered source capabilities remain named test gaps and
+progress/roadmap items. See @../progress (Progress) for current support.
+
+Moth-source `{=}` empty-map literals, Unicode escapes and contextual
+`::Variant` construction remain undelivered. MON's corresponding data forms do
+not deliver those source capabilities.
+
+This contract does not make an arbitrary MON document pasteable anywhere in
+Moth. Document framing, supplied schema information and legal source receiving
+contexts still matter. An anonymous source record does not implicitly construct
+a nominal struct just because a MON schema can receive that record as struct
+data.
+
 ### MON format boundary
 
 Moth MON source syntax allows ordinary expressions according to the receiving
@@ -149,10 +203,11 @@ defaults and bounded first errors. This reference owns the shared notation and
 the distinction between grouping, supplied arguments and anonymous
 construction.
 
-The Rust-only `moth::mon` codec is implemented; see @../progress (Progress)
-for current support. Moth-native `$mon`, automatic schema extraction and the
-static project builder remain deferred separately. The engine or application
-validates its own schema over that data.
+The standalone `moth_mon` codec serves independent Rust callers. Compiler
+clients can use the same API and Rust types through the convenience re-export
+`moth::mon`. See @../progress (Progress) for current support. Moth-native
+`$mon`, automatic schema extraction and the static project builder remain
+deferred separately. The engine or application supplies its own data schema.
 
 Full compile-time Moth authoring expressions and the self-contained serialised
 representation are distinct surfaces.

@@ -10,9 +10,6 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::project_globals::{
     ProjectGlobalsFieldInput, ProjectGlobalsInterface,
@@ -23,6 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 fn source_span_at(_path: &str, _string_table: &mut StringTable) -> SourceSpan {
     SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
@@ -472,7 +470,7 @@ fn resolution_rejects_a_value_outside_the_numeric_profile() {
     assert_eq!(text, "3000000000");
     assert_eq!(
         *reason,
-        crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange
+        moth_lexical::numeric::parse::NumberLiteralErrorReason::OutsideIntRange
     );
 
     // The same value resolves under a profile whose Int width contains it.

@@ -8,18 +8,18 @@
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, InvalidTypeAnnotationReason};
-use crate::compiler_frontend::datatypes::number::NumberScale;
-use crate::compiler_frontend::datatypes::numeric_profile::IntWidth;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::parse::materialize_int;
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
     TokenRef, TokenTag, TokenViewError,
 };
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::profile::IntWidth;
 
 /// Two-lane result for type-annotation parsing.
 ///

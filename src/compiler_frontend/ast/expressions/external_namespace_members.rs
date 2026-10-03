@@ -18,8 +18,6 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
     ExternalFunctionId, ExternalSignatureType,
@@ -29,6 +27,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Input bundle for external namespace function member parsing.
 ///

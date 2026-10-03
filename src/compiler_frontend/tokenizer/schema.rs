@@ -1,9 +1,9 @@
 //! Stable token taxonomy and compact payload shapes.
 
 use crate::compiler_frontend::numeric_text::store::NumericLiteralId;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 /// How a diagnostic or source-token shape obtains its user-facing spelling.
 ///
@@ -342,6 +342,10 @@ macro_rules! token_schema {
 }
 
 const TOKEN_NUMERIC_FLAGS: u16 = 0b11;
+const TOKEN_DOUBLE_COLON_LEFT_ATTACHED: u16 = 1 << 0;
+const TOKEN_DOUBLE_COLON_RIGHT_ATTACHED: u16 = 1 << 1;
+const TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS: u16 =
+    TOKEN_DOUBLE_COLON_LEFT_ATTACHED | TOKEN_DOUBLE_COLON_RIGHT_ATTACHED;
 
 token_schema! {
     (ModuleStart, MODULE_START, 1, "module start", Static, 0, 0, None),
@@ -508,7 +512,7 @@ token_schema! {
         24,
         "`::`",
         Static,
-        0,
+        TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS,
         TOKEN_CLASS_DELIMITER,
         None
     ),
@@ -1125,7 +1129,8 @@ impl TokenShape {
 
     fn payload_is_valid(tag: TokenTag, flags: u16, data: u32) -> bool {
         match tag.descriptor().payload() {
-            TokenDescriptorPayload::Static => flags == 0 && data == 0,
+            // Flags are already checked against the descriptor's allowed bits.
+            TokenDescriptorPayload::Static => data == 0,
             TokenDescriptorPayload::Path => {
                 flags == 0 && PathSyntaxId::try_from_raw(data).is_some()
             }
@@ -1209,8 +1214,31 @@ impl TokenShape {
         self.tag
     }
 
+    #[cfg(test)]
     pub(crate) const fn flags(self) -> u16 {
         self.flags
+    }
+
+    pub(crate) const fn double_colon_adjacency_flags(
+        qualifier_attached: bool,
+        variant_attached: bool,
+    ) -> u16 {
+        let mut flags = 0;
+        if qualifier_attached {
+            flags |= TOKEN_DOUBLE_COLON_LEFT_ATTACHED;
+        }
+        if variant_attached {
+            flags |= TOKEN_DOUBLE_COLON_RIGHT_ATTACHED;
+        }
+        flags
+    }
+
+    pub(crate) fn double_colon_qualifier_attached(self) -> bool {
+        self.tag == TokenTag::DOUBLE_COLON && self.flags & TOKEN_DOUBLE_COLON_LEFT_ATTACHED != 0
+    }
+
+    pub(crate) fn double_colon_variant_attached(self) -> bool {
+        self.tag == TokenTag::DOUBLE_COLON && self.flags & TOKEN_DOUBLE_COLON_RIGHT_ATTACHED != 0
     }
 
     pub(crate) const fn data(self) -> u32 {

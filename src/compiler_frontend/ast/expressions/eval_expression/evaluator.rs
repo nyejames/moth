@@ -21,20 +21,15 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::numeric_text::parse::{
-    literal_kind_initialises, materialize_fixed_scalar, materialize_float, materialize_int,
-    materialize_number,
+    materialize_fixed_scalar, materialize_float, materialize_int, materialize_number,
 };
-use crate::compiler_frontend::numeric_text::token::{
-    NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -42,6 +37,10 @@ use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compa
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::eval_log;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::parse::literal_kind_initialises;
 
 use super::ordering;
 use super::result_type::resolve_expression_result_type;

@@ -543,7 +543,7 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
 
 #[test]
 fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();

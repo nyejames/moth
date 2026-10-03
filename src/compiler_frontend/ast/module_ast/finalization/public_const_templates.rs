@@ -26,7 +26,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicConstTemplateSlot, PublicTemplateSlotKey,
@@ -35,6 +34,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Stable const-template projections consumed by generated materialisation.

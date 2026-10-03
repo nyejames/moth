@@ -6,37 +6,37 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
-    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
-    DiagnosticIdentity, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
-    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
-    GenericApplicationErrorReason, GenericInferenceSubject, ImportDiagnosticKind,
-    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
-    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
-    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
-    InvalidExternalModuleReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
-    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
+    BorrowAccessKind, BorrowDiagnosticKind, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
+    ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
+    DependencyClauseKind, DiagnosticBag, DiagnosticIdentity, DiagnosticKind, DiagnosticLabel,
+    DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
+    DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason, GenericInferenceSubject,
+    ImportDiagnosticKind, ImportPublicSurfaceType, IncompatibleChoiceComparisonReason,
+    InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
+    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
+    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
+    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
     InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
     InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
     InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, NamingConvention, NumberLiteralErrorReason,
-    OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
-    RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    UnsupportedOperatorCategory,
+    NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
+    ProjectContextEscapeReason, RangeOperandKind, RuleDiagnosticKind, SourceSpanCapacityResource,
+    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
+    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::{
     FrozenIdentityHandle, SourceId, SourceSpan, SpanCapacityError, SpanCapacityReason,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::profile::NumericProfile;
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -1202,6 +1202,16 @@ impl CompilerDiagnostic {
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::CommonSyntaxMistake),
             span,
             DiagnosticPayload::CommonSyntaxMistake { reason },
+        )
+    }
+
+    pub(crate) fn invalid_choice_variant_spacing(
+        gap: ChoiceVariantSeparatorGap,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::common_syntax_mistake(
+            CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
+            span,
         )
     }
 

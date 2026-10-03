@@ -45,18 +45,30 @@ The complete no-shadowing contract is documented by
 @../bindings/#shadowing (Values and bindings). Dependency aliases and module API
 names have additional collision rules in the Packages documentation.
 
-### Reserved numeric type spellings
+### Identifier validity and reserved names
 
-`Dec` is a reserved numeric type spelling. The family covers bare `Dec`, the
-`Dec0` spelling alias of the same scale-zero identity and `Dec1` through `Dec256`
-with a declared decimal scale. These spellings follow the usual
-keyword-shadow policy: they reserve case-insensitive variants with leading
-underscores, so `dec`, `DEC`, `_Dec` and `__dec` cannot be declared either, and
-digit-suffixed shadows such as `dec01` or `DEC257` stay reserved while remaining
-invalid type spellings. A trailing letter keeps an ordinary name, so `DecBox` is
-a valid `PascalCase` user name. The type spelling itself stays exact
-`PascalCase`: only `Dec` and the `Dec0` through `Dec256` forms name the type,
-and `Dec257`, `Dec01` and lowercase spellings report unknown-type diagnostics.
+Identifiers start with `_` or a Unicode alphabetic character and continue with
+`_` or a Unicode alphanumeric character. Exact source-word recognition remains
+case-sensitive, including `this` and `This`. `moth-lexical` owns one shared
+source-word inventory and user-name predicate for Moth and MON, including
+reserved-only names such as `fn`. The predicate strips leading underscores and
+matches reserved words without regard to ASCII case. It applies no Unicode
+normalisation or XID substitution. Naming conventions above describe style, not
+lexical validity: a style mismatch can produce a warning without making an
+otherwise valid identifier invalid.
+
+The shared policy reserves the numeric names `Int`, `Float`, `I8`, `I16`, `I32`,
+`I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and `Byte`. It also
+reserves the Dec family: bare `dec` and any ASCII-digit suffix match after
+leading underscores are removed, without regard to case. This includes invalid
+type spellings such as `dec01` and `dec257`. `DecBox` remains an ordinary name.
+Type recognition stays stricter: only canonical `Dec` and `Dec0` through
+`Dec256` spellings name Dec types.
+
+Any reservation change alters which MON documents and schemas pass, so it is a
+MON format compatibility change. Such a change updates the shared rule, the
+cross-parser conformance tests and the release-facing documentation together.
+See @../mon/#mon-format (MON format).
 
 The former `Number` spellings are not reserved. `Number`, `number`, `Number2`
 and `NumberBox` are ordinary user names again, and `Number`-family spellings no
@@ -77,7 +89,8 @@ path and package semantics.
 **Current support and cutover.** The Alpha compiler still supports `#Config` and
 currently reserves its case-insensitive, leading-underscore keyword-shadow names.
 Identifier reclamation is pending until the cutover to `$config`; code targeting
-the current compiler must follow its current reservation policy.
+the current compiler must follow its current reservation policy. Until then the
+shared name law also rejects `config` names in MON.
 
 `import` is not a keyword. `Import` is an ordinary valid PascalCase user name:
 

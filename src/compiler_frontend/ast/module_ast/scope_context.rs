@@ -51,7 +51,6 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalFunctionDef, ExternalFunctionId,
@@ -71,6 +70,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;

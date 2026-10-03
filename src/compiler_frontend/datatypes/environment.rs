@@ -31,7 +31,6 @@ use super::definitions::{
     FieldDefinition, FunctionParameterDefinition, FunctionTypeDefinition,
     GenericInstanceDefinition, GenericParameterDefinition, StructTypeDefinition, TypeDefinition,
 };
-use super::fixed_scalar::FixedScalar;
 use super::generic_bindings::{BindingConflict, GenericTypeBindings};
 use super::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
@@ -42,9 +41,10 @@ use super::ids::{
     GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
     TypeId, builtin_type_ids,
 };
-use super::number::NumberScale;
 use super::queries::TypeKind;
 use super::{BuiltinScalarReceiver, ReceiverKey};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // -----------------------------------------------------------
 //  Supporting Types

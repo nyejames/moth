@@ -24,7 +24,6 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -32,6 +31,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[cfg(feature = "timers")]
 use crate::timing::TimingMetric;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;

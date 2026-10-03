@@ -18,13 +18,13 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;

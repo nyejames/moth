@@ -74,7 +74,8 @@ ties-to-even. Inexact values such as `0.1` are valid.
 
 ### MON data boundary
 
-MON literal data reuses the same lexical spelling but keeps whole-number and
-decimal or exponent categories lossless until the receiving schema is known. Its
-strict category conversion is documented with the MON format contract. See
-@../mon/#mon-format (MON format).
+MON literal data and source receivers share numeric grammar and materialisation
+facts from `moth-lexical`. Their independent parsers select the destination from
+a MON schema or the source receiving context. MON keeps whole-number and decimal
+or exponent categories lossless until that selection. Its strict category
+conversion belongs to @../mon/#mon-format (MON format).

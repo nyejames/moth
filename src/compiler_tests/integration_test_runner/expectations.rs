@@ -15,11 +15,9 @@ use super::{
 };
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

@@ -5,10 +5,10 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
 
 fn int_literal(value: i64) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)

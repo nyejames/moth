@@ -13,7 +13,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
@@ -21,6 +20,7 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub(super) fn is_comparison_operator(op: &Operator) -> bool {
     matches!(

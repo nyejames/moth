@@ -4,11 +4,11 @@
 //! WHY: constants are backend/tooling metadata, not ordinary runtime statements.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::ids::HirConstId;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 #[derive(Debug, Clone)]
 pub struct HirConstField {

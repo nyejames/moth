@@ -23,12 +23,12 @@ use crate::compiler_frontend::headers::module_symbols::{
 };
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
-use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::identifier::is_identifier;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Result for namespace binding registration and record construction.
@@ -546,7 +546,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .into());
         };
 
-        if !is_valid_identifier(self.string_table.resolve(local_name)) {
+        if !is_identifier(self.string_table.resolve(local_name)) {
             return Err(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path,
                 namespace_span,

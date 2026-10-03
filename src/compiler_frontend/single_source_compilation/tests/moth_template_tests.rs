@@ -9,7 +9,6 @@
 //!       request, no builder and no filesystem.
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -35,6 +34,7 @@ use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
+use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
 use std::path::Path;
 use std::sync::Arc;
 

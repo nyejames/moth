@@ -25,10 +25,10 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::normalize_ast::TemplateNormalizationError;

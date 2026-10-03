@@ -14,13 +14,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::number::{NumberScale, NumberValue};
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
@@ -42,6 +38,9 @@ use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::hir_fixture_support::{expression, local};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 const PROFILE: NumericProfile = NumericProfile {
     int_width: IntWidth::Bits32,

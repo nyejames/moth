@@ -65,10 +65,9 @@ fn source_config_numeric_defaults_are_retained_until_a_profile_materialises_them
         crate::compiler_frontend::build_config::PrimitiveBuildInputType::Int
     );
 
-    let wide = crate::compiler_frontend::datatypes::numeric_profile::NumericProfile {
-        int_width: crate::compiler_frontend::datatypes::numeric_profile::IntWidth::Bits64,
-        float_precision:
-            crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision::Bits64,
+    let wide = moth_lexical::numeric::profile::NumericProfile {
+        int_width: moth_lexical::numeric::profile::IntWidth::Bits64,
+        float_precision: moth_lexical::numeric::profile::FloatPrecision::Bits64,
     };
     assert_eq!(
         default.materialize(wide),
@@ -76,12 +75,12 @@ fn source_config_numeric_defaults_are_retained_until_a_profile_materialises_them
     );
 
     let error = default
-        .materialize(crate::compiler_frontend::datatypes::numeric_profile::NumericProfile::STANDARD)
+        .materialize(moth_lexical::numeric::profile::NumericProfile::STANDARD)
         .expect_err("the standard Int width must reject the wider value");
     assert_eq!(error.text, "4_000_000_000");
     assert!(matches!(
         error.reason,
-        crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason::OutsideIntRange
+        moth_lexical::numeric::parse::NumberLiteralErrorReason::OutsideIntRange
     ));
 }
 

@@ -9,7 +9,8 @@
 //!       source text cannot prove.
 //!
 //! # What this module owns
-//! - The single walk of `src` and `xtask/src`, failing closed on unreadable paths
+//! - The single walk of `src`, `xtask/src` and the extracted crate sources, failing closed on
+//!   unreadable paths
 //! - Rule dispatch, typed findings and the JSON report
 //! - The architecture bans that have no other owner
 //!
@@ -36,7 +37,13 @@ pub const SOURCE_AUDIT_REPORT_PATH: &str = "target/test-reports/source_audit.jso
 pub const SOURCE_AUDIT_SCHEMA_VERSION: u32 = 1;
 
 /// Source trees the audit walks, in scan order.
-const AUDITED_SOURCE_ROOTS: &[&str] = &["src", "xtask/src"];
+const AUDITED_SOURCE_ROOTS: &[&str] = &[
+    "src",
+    "crates/moth-lexical/src",
+    "crates/moth-mon/src",
+    "crates/moth-mon/tests",
+    "xtask/src",
+];
 
 /// Files exempt from every rule because they are the audit's own implementation.
 ///
@@ -142,6 +149,7 @@ pub fn run_source_audit() -> Result<(), String> {
         report.audited_file_count,
         report.findings.len()
     );
+    println!("source-audit roots: {}", report.audited_roots.join(", "));
 
     if report.findings.is_empty() {
         return Ok(());

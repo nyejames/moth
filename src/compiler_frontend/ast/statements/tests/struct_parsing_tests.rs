@@ -20,7 +20,6 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFieldAccessReason, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
 use crate::compiler_frontend::source::SourceSpan;
@@ -30,6 +29,7 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn body_local_struct_default_preserves_missing_template_authority() {

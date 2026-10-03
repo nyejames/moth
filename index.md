@@ -5,13 +5,27 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 ## Root
 
 - [moth CLI entry](src/main.rs)
-- [crate module surface](src/lib.rs), including the public `moth::mon` service re-exported over the crate-private [MON owner](src/compiler_frontend/mon/) (owned values, prepared schemas, literal-only encode/decode)
+- [crate module surface](src/lib.rs), including the public convenience re-export `moth::mon` for the standalone [moth-mon crate](crates/moth-mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
     - [@html Builder package](packages/html/@mod.moth): HTML helper templates (`canvas`, `p`, `h1`-`h6`, `div`, `table`, etc.) and the `Canvas`/`get_canvas` wrapper. Internal helpers live in [packages/html/private_helpers.moth](packages/html/private_helpers.moth).
     - [Core binding packages](src/builder_surface/core_packages/): compiler-owned operations and prelude visibility policy.
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
+
+## Standalone lexical and MON crates
+
+- [moth-lexical entry](crates/moth-lexical/src/lib.rs): compiler-independent identifier, source-word and numeric leaf facts.
+    - [identifier.rs](crates/moth-lexical/src/identifier.rs): Unicode identifier shape and reserved user-name checks.
+    - [words.rs](crates/moth-lexical/src/words.rs): shared source-word identities, presentation categories and reservation inventory.
+    - [numeric module map](crates/moth-lexical/src/numeric/mod.rs): [grammar.rs](crates/moth-lexical/src/numeric/grammar.rs) spelling and normalisation, [parse.rs](crates/moth-lexical/src/numeric/parse.rs) destination materialisation, [format.rs](crates/moth-lexical/src/numeric/format.rs) precision-aware formatting and [binary16.rs](crates/moth-lexical/src/numeric/binary16.rs) finite F16 conversion.
+    - [profile.rs](crates/moth-lexical/src/numeric/profile.rs), [precision.rs](crates/moth-lexical/src/numeric/precision.rs), [fixed_scalar.rs](crates/moth-lexical/src/numeric/fixed_scalar.rs) and [decimal.rs](crates/moth-lexical/src/numeric/decimal.rs): width/profile/precision vocabulary, fixed scalar identities and borrowed Dec scale/text facts. Compiler typing and arbitrary-precision arithmetic stay in `moth`.
+- [moth-mon entry](crates/moth-mon/src/lib.rs): standalone literal-data codec and canonical Rust API documentation, depending on `moth-lexical` rather than the compiler.
+    - [reader.rs](crates/moth-mon/src/reader.rs), [writer.rs](crates/moth-mon/src/writer.rs): caller-borrowed text decoding and complete owned-text encoding.
+    - [model.rs](crates/moth-mon/src/model.rs), [schema.rs](crates/moth-mon/src/schema.rs): owned values, immutable prepared schemas, defaults and receiving validation.
+    - [numeric.rs](crates/moth-mon/src/numeric.rs), [map_keys.rs](crates/moth-mon/src/map_keys.rs): codec-specific scalar conversion and typed map-key validation.
+    - [budget.rs](crates/moth-mon/src/budget.rs), [error.rs](crates/moth-mon/src/error.rs): resource accounting, exact input byte spans and public `MonError` projection.
+    - [public API tests](crates/moth-mon/tests/public_api.rs), [numeric cases](crates/moth-mon/tests/public_api/numeric.rs) and [resource cases](crates/moth-mon/tests/public_api/resources.rs): external Rust API coverage. Focused reader, schema and writer tests live in [src/tests/](crates/moth-mon/src/tests/).
 
 ## Project/build shell
 
@@ -59,7 +73,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [declaration_syntax](src/compiler_frontend/declaration_syntax/): shared declaration/type shell parsers. kw: signatures, ParsedTypeRef.
 - [module_dependencies.rs](src/compiler_frontend/module_dependencies.rs): topological header ordering. kw: dependency edges, cycles.
 - [compiler_messages](src/compiler_frontend/compiler_messages/): plain `CompilerDiagnostic` diagnosed values, typed `CompilerError` infrastructure failures and rendering, plus the self-contained [ModuleDiagnostics](src/compiler_frontend/compiler_messages/module_diagnostics.rs) owner. kw: diagnostic codes, labels, module outcomes.
-- [symbols](src/compiler_frontend/symbols/): StringId, PathId, compiler symbols, naming policy.
+- [symbols](src/compiler_frontend/symbols/): StringId, PathId, compiler symbols and compiler-local naming diagnostics over shared lexical policy.
   - [path_interner](src/compiler_frontend/symbols/path_interner/): four-byte `PathId` handles into one parent-linked table, embedded in the source database during registration and borrowed for lookup.
 - [paths](src/compiler_frontend/paths/): file-owned path syntax plus path normalization, formatting and resolution. kw: PathSyntaxTable, dependency paths, source roots.
   - [file_references.rs](src/compiler_frontend/paths/file_references.rs): prepared non-dependency path classification and the keyed, remappable Stage 0 resolved-reference handoff consumed by module semantics.
@@ -75,16 +89,16 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
 - [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
-    - [number.rs](src/compiler_frontend/datatypes/number.rs): canonical `NumberScale` and immutable `NumberValue`, exact receiving materialisation, exact arithmetic and integer/rescale conversion, and the allocation-free decimal scale-fit policy shared with MON receivers.
+    - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
     - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.
 - [value_mode.rs](src/compiler_frontend/value_mode.rs): access modes (frontend root, shared by coercion and lowering).
 - [traits](src/compiler_frontend/traits/): trait definitions, evidence, syntax helpers.
-- [numeric_text](src/compiler_frontend/numeric_text/): numeric literal text parsing.
+- [numeric_text](src/compiler_frontend/numeric_text/): compiler-owned numeric token storage and `StringTable` materialisation adapters over `moth-lexical`.
 - [plain_markdown.rs](src/compiler_frontend/plain_markdown.rs): plain-markdown source handling outside template pipeline.
 - [syntax_errors](src/compiler_frontend/syntax_errors/): shared syntax error construction.
 - [utilities](src/compiler_frontend/utilities/): small frontend-local helpers.
-- [keywords.rs](src/compiler_frontend/keywords.rs): reserved-word tables.
+- [keywords.rs](src/compiler_frontend/keywords.rs): compiler `TokenTag` mapping over the shared `moth-lexical` source-word inventory.
 - [arena](src/compiler_frontend/arena/): AST/HIR allocation arenas and capacity budgeting.
 - [instrumentation](src/compiler_frontend/instrumentation/): compile-time counters and frontend stats.
 - [const_eval](src/compiler_frontend/ast/const_eval/): AST-stage const expression folding (RPN stack evaluator).
@@ -191,6 +205,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/). Production code, not `#[cfg(test)]`.
 - [configuration input-origin tests](src/compiler_tests/config_input_origin_tests.rs): structured profile and input-origin diagnostics from independent real project builds.
 - [frontend stage-boundary tests](src/compiler_frontend/tests/frontend_pipeline_tests.rs): one stage at a time, for handoffs a stage-local test cannot see. Not the canonical sequence — that is `compile_module`.
+- [source/MON syntax parity](src/compiler_tests/mon_syntax_parity/mod.rs): actual compiler-source and public codec fixtures with expected typed values, rejection reasons and all four numeric profiles. [gaps.rs](src/compiler_tests/mon_syntax_parity/gaps.rs) owns executable intentional differences and undelivered source-capability cases.
 - [architecture boundary rules](xtask/src/architecture_boundary.rs): the compiler/build dependency direction the source audit enforces.
 - [first-party package dependency audit](xtask/src/first_party_deps.rs): scoped first-party implementation-root validation for manifests, vendored roots and lexically classified JavaScript module imports, using [first-party JavaScript inventory](src/first_party_js/mod.rs).
 - [integration fixtures](tests/cases/): expect.toml backend matrices.

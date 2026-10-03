@@ -12,15 +12,15 @@ use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_datatypes::{HirTypeClass, classify_hir_type};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 use rustc_hash::FxHashMap;
 
 pub(crate) struct WasmLirLoweringContext<'a> {

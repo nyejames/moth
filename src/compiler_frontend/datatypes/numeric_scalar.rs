@@ -20,11 +20,11 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::number::NumberScale;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
-use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// One canonical numeric scalar domain.
 ///
@@ -172,72 +172,7 @@ impl NumericScalar {
         match self {
             NumericScalar::Int | NumericScalar::Number(_) => None,
             NumericScalar::Float => Some(profile.float_precision.into()),
-            NumericScalar::Fixed(FixedScalar::F16) => Some(BinaryFloatPrecision::Binary16),
-            NumericScalar::Fixed(FixedScalar::F32) => Some(BinaryFloatPrecision::Binary32),
-            NumericScalar::Fixed(FixedScalar::F64) => Some(BinaryFloatPrecision::Binary64),
-            NumericScalar::Fixed(_) => None,
+            NumericScalar::Fixed(scalar) => scalar.binary_float_precision(),
         }
     }
 }
-
-/// IEEE binary-float precision, ordered narrowest to widest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum BinaryFloatPrecision {
-    Binary16,
-    Binary32,
-    Binary64,
-}
-
-impl From<FloatPrecision> for BinaryFloatPrecision {
-    /// Maps the profile-selected `Float` precision onto its binary-float precision.
-    ///
-    /// WHY: formatters and callers that only carry the boundary's `Float` precision need the same
-    ///      precision vocabulary the numeric domains use, without duplicating the two-arm mapping.
-    fn from(precision: FloatPrecision) -> Self {
-        match precision {
-            FloatPrecision::Bits32 => BinaryFloatPrecision::Binary32,
-            FloatPrecision::Bits64 => BinaryFloatPrecision::Binary64,
-        }
-    }
-}
-
-impl BinaryFloatPrecision {
-    /// Rounds a finite `f64` once to this precision, ties-to-even.
-    ///
-    /// WHAT: returns the rounded value in its `f64` carrier; a magnitude beyond the precision's
-    ///       finite range becomes a signed infinity for the caller to reject.
-    /// WHY: every binary-float value is exact in `f64`, so rounding straight from the source
-    ///      carrier is the single rounding step (`F64 -> F16` never passes through `F32`).
-    pub(crate) fn round(self, value: f64) -> f64 {
-        match self {
-            BinaryFloatPrecision::Binary16 => round_f64_to_f16(value),
-            BinaryFloatPrecision::Binary32 => f64::from(value as f32),
-            BinaryFloatPrecision::Binary64 => value,
-        }
-    }
-
-    /// Rounds an integer once to this precision, ties-to-even.
-    ///
-    /// WHAT: `Binary32`/`Binary64` convert directly from the integer. `Binary16` rounds the exact
-    ///       `f64` form for magnitudes below its overflow threshold and returns a signed infinity
-    ///       otherwise.
-    /// WHY: converting through a wider float first could round twice.
-    pub(crate) fn round_integer(self, value: i128) -> f64 {
-        match self {
-            BinaryFloatPrecision::Binary16 => {
-                // Every magnitude below the threshold is exact in `f64`, so the only rounding is
-                // the binary16 one. Anything at or above it rounds past the largest finite value.
-                if value.unsigned_abs() < BINARY16_OVERFLOW_THRESHOLD {
-                    round_f64_to_f16(value as f64)
-                } else {
-                    f64::INFINITY.copysign(value as f64)
-                }
-            }
-            BinaryFloatPrecision::Binary32 => f64::from(value as f32),
-            BinaryFloatPrecision::Binary64 => value as f64,
-        }
-    }
-}
-
-/// Smallest integer magnitude that rounds to infinity in binary16 (the midpoint above `65504`).
-const BINARY16_OVERFLOW_THRESHOLD: u128 = 65_520;

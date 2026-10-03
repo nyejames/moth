@@ -4,7 +4,7 @@ Hash maps form insertion-ordered key/value groups.
 
 [codeblock, $code("moth"):
     scores ~= {"Priya" = 10, "Rob" = 12}
-    empty_scores ~{String = Int} = {}
+    empty_scores ~{String = Int} = {=}
 ]
 
 - A map type is `{Key = Value}`.
@@ -12,13 +12,13 @@ Hash maps form insertion-ordered key/value groups.
 - Any top-level `=` entry makes a non-empty brace literal a map literal.
 - Every entry must then be a key/value pair.
 - Collection items and map entries cannot be mixed.
-- An empty map literal needs an explicit or immediate contextual map type.
+- An empty map literal is written `{=}`; `{}` remains an empty collection at a map-typed receiving site.
 - A bare identifier in key position is a variable reference, not string shorthand.
 - Map values follow the same runtime-storable rules as collection elements.
 
 ### MON data boundary
 
-Source maps keep their implemented behaviour: `{}` with an explicit or immediate contextual map type is the empty map, and a bare identifier in key position is a variable reference. MON data uses a distinct explicit form: `{=}` is always an empty map and `{}` is always an empty collection, and schema context never changes a container's kind. MON map keys use the same scalar families, including every fixed-width integer and `Byte`, and follow the schema's declared key type. Insertion order is preserved, bare names are invalid keys and duplicate keys fail. That contract is Rust-only serialised-data documentation; source `{=}` parity is deferred. See @../mon/#mon-format (MON format).
+Source and MON data share the empty-container forms: `{}` is a collection and `{=}` is a map, regardless of receiving type or schema. Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support. A bare identifier in a source key position is a variable reference, not string shorthand. MON map keys use the same scalar families, including fixed-width integers and `Byte`, follow the schema's declared key type, preserve insertion order, and reject bare names and duplicate keys. The MON literal-data contract is Rust-only; see @../mon/#mon-format (MON format).
 
 ### Key contract
 
@@ -198,7 +198,7 @@ Consider a map whose key and value point to the same allocation family:
 
 [codeblock, $code("moth"):
     text = [: large value]
-    values ~{String = String} = {}
+    values ~{String = String} = {=}
 
     ~values.set(text, text)! -- final use of text
     removed = ~values.remove("large value")!

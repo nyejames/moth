@@ -5,7 +5,8 @@
 @styles navbar,
     section,
     language_theme_head,
-    doc_level
+    doc_level,
+    codeblock
 
 page_title #= "MON format"
 page_description #= "The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."
@@ -26,11 +27,62 @@ page_head #= language_theme_head
     Serialised MON is literal data only. A MON reader never evaluates Moth
     expressions, including foldable ones. Availability is Rust-only: the
     bounded decoder and deterministic document/nested-value writers are
-    implemented and public at `moth::mon`, re-exported from `src/lib.rs`, over
-    the crate-private `src/compiler_frontend/mon/` owner. Another Rust crate
-    can execute the service, but compiled Moth programs have no runtime codec
-    support. Moth-native operations, automatic schema extraction and the static
-    project builder remain deferred separately.
+    implemented and public in the standalone `moth-mon` crate, imported in Rust
+    as `moth_mon`. Compiler clients may use the convenience re-export `moth::mon`
+    with the same API and Rust types. Compiled Moth programs have no runtime
+    codec support. Moth-native operations, `$mon`, automatic schema extraction
+    and the static project builder remain deferred separately.
+    Source `{=}`, Unicode escapes and contextual `::Variant` construction also
+    remain undelivered. MON's data forms do not implement those source features.
+]
+
+#[section, $md:
+    ## Use MON from Rust
+
+    Supply a schema rather than a compiler type or a file path. This example
+    selects Int64/Float32, checks the typed result and reuses the prepared
+    schema for a second document. Add a dependency on `moth-mon` for an
+    independent application. Existing compiler clients can change the import
+    to `moth::mon` without changing the API.
+
+    [codeblock, $code("rust"):
+        use moth_mon::{
+            Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, Schema,
+            SchemaType, Value, decode_document,
+        };
+
+        fn main() -> Result<(), Box<dyn std::error::Error>> {
+            let schema = Schema::record(vec![
+                Field::required("count", SchemaType::Int),
+                Field::required("ratio", SchemaType::Float),
+            ])
+            .with_profile(NumericProfile {
+                int_width: IntWidth::Bits64,
+                float_precision: FloatPrecision::Bits32,
+            })
+            .prepare()?;
+
+            let value = decode_document("count = 3_000_000_000, ratio = 0.5", &schema)?;
+            assert_eq!(
+                value,
+                Value::Record(vec![
+                    ("count".into(), Value::Int(3_000_000_000)),
+                    ("ratio".into(), Value::Float(0.5)),
+                ]),
+            );
+
+            let error = decode_document("__LoOp = 1", &schema)
+                .expect_err("reserved labels fail");
+            assert_eq!(error.code, MonErrorCode::InvalidIdentifier);
+            println!("{error}");
+            Ok(())
+        }
+    ]
+
+    Successful values own their data and outlive the input. `MonError` keeps
+    structured code, path, span and detail while supporting `Display` and
+    `std::error::Error`. The `moth-mon` crate documentation contains the full
+    executable example with defaults, fixed-width values and encoding.
 ]
 
 #[section:

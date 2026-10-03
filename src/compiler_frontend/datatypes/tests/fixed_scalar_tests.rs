@@ -12,14 +12,14 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
 };
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, NominalTypeId, TypeId};
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn seeded_builtin_key(environment: &TypeEnvironment, type_id: TypeId) -> BuiltinTypeKey {
     match environment.get(type_id) {

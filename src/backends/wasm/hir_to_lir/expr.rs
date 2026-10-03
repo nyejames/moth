@@ -13,14 +13,15 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarClass};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, IntWidth};
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 /// Result of lowering a single HIR expression into LIR statements and a destination local.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ExprLoweringOutput {
@@ -876,7 +877,7 @@ fn scalar_comparison_types(
 
 fn comparison_type(
     scalar: NumericScalar,
-    profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+    profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> WasmScalarComparisonType {
     match scalar {
         NumericScalar::Int => WasmScalarComparisonType::SignedInteger(match profile.int_width {

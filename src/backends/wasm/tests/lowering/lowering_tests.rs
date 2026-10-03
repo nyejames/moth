@@ -18,18 +18,17 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;

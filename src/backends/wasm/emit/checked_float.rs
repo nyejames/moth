@@ -15,7 +15,7 @@ use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirLocalId};
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::datatypes::numeric_scalar::BinaryFloatPrecision;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use wasm_encoder::{BlockType, Function, Instruction};
 
 pub(super) fn emit_validate_float(

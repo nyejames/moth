@@ -14,7 +14,6 @@ use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -47,6 +46,7 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use crate::projects::settings::Config;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -828,12 +828,13 @@ kinds, allowed flags and classification facts. It supplies the checked 8-byte `T
 schema-owned classification/precedence accessors. Every production and test parser consumer reads
 `TokenTag`, `TokenRef` and typed payload facts; no wide token enum or compatibility taxonomy remains.
 `DiagnosticToken` remains a separate 8-byte projection over the same `TokenTag` and descriptor
-payload facts. Dynamic values are extracted only at that projection boundary. Lexical spelling
-ownership remains in `keywords.rs` and the typed cold stores.
+payload facts. Dynamic values are extracted only at that projection boundary. Exact source-word
+spellings live in `moth-lexical`'s `words.rs`; `keywords.rs` maps them to `TokenTag`, and the typed
+cold stores retain dynamic spellings.
 
 **Slice 3C cold stores (2026-09-14, completed in 3H):** `NumericLiteralStore` in
 `src/compiler_frontend/numeric_text/store.rs` retains numeric lexical records outside the fixed
-token word and reuses the shared `numeric_text` grammar. Its one-based `NumericLiteralId` and the
+token word and reuses the shared `moth-lexical` grammar. Its one-based `NumericLiteralId` and the
 existing source-owned `PathSyntaxTable`'s one-based `PathSyntaxId` reject zero, out-of-range and
 foreign ownership at checked boundaries. The canonical path tag carries only that dense handle.
 Symbols, strings, booleans and scalar characters use validated direct `TokenShape` payloads.
@@ -955,13 +956,14 @@ Rules:
 
 ### Numeric token side store
 
-`NumericLiteralStore` in `src/compiler_frontend/numeric_text/store.rs` is the
-one lexical owner for every authored number. It retains the facts later semantic
-parsing and diagnostics need and never widens the common token word:
+`NumericLiteralStore` in `src/compiler_frontend/numeric_text/store.rs` owns
+the compiler's retained lexical records for authored numbers. Shared grammar
+belongs to `moth-lexical`. The store retains the facts later semantic parsing
+and diagnostics need and never widens the common token word:
 
 - the authored spelling, kept losslessly, with whole-number and decimal or
   exponent spellings distinguishable until a destination is known
-- the numeric lexical kind and the validation facts the shared `numeric_text`
+- the numeric lexical kind and the validation facts the shared `moth-lexical`
   grammar produced
 - normalised digits, separator positions and exponent facts only where that
   grammar already owns them; the store must not re-derive them
@@ -1488,26 +1490,25 @@ not require a globally contended string interner.
 
 ## MON data handoff
 
-This section owns the one MON snapshot, cursor, span and owned-result handoff.
-The implemented service is publicly available as `moth::mon`, re-exported by
-`src/lib.rs`; its crate-private owner is `src/compiler_frontend/mon/`. Exact
-public operation and type names are defined by `docs/compiler-design-overview.md`
-> `Rust-only MON service`.
-Compiler-retained numeric text remains owned by the numeric token side store.
-The MON reader borrows original token spelling from caller input and retains a
-bounded owned normalized string until the schema selects a destination. The
-prepared schema records the numeric profile its `Int` and `Float` entries use,
-defaulting to the standard profile for a standalone Rust caller, and the
-reader materialises every supported fixed width and `Byte` through the same
-shared numeric policies. The delivered codec captures the profile through
-`Schema::with_profile`, offers every fixed-width and `Byte` schema variant,
-accepts a declared decimal scale of 0 through 256 and fixes unprofiled live
-`Int` and `Float` entries at `Int32` and `Float64`, so `Dec`'s scales need no
-second parser and no value routes through a binary float. The normalized
-buffer's decoded-byte accounting is described below. Compiler
-diagnostic storage stays in the compact diagnostic architecture, and MON never
-becomes source compilation. The MON literal-data format itself is owned by
-`docs/src/docs/mon/mon-format.mtf`.
+This section owns the MON snapshot, cursor, span and owned-result handoff.
+The standalone codec owner lives in `crates/moth-mon/src/`: `reader.rs` owns
+the caller-borrowed cursor, `schema.rs` owns preparation and validation,
+`budget.rs` owns allocation accounting and `error.rs` owns the public error
+projection. `lib.rs` exposes `moth_mon`, with the same API and Rust types
+deliberately re-exported as `moth::mon` from `src/lib.rs`.
+Rust API signatures and routine type shapes belong to the codec's doc comments.
+
+Compiler-retained numeric text stays in the compiler's numeric token side store.
+The MON reader borrows original spelling from caller input and retains a bounded
+owned normalised string until the schema selects a destination. The prepared
+schema records the numeric profile its `Int` and `Float` entries use,
+defaulting to `Int32` and `Float64` for a standalone caller that selects no
+profile. Fixed widths and `Byte` follow shared `moth-lexical` materialisation
+rules, while exact decimal scales cover 0 through 256 without a second parser
+or a binary-float intermediate. The buffer's decoded-byte accounting appears
+below. Compiler diagnostic storage keeps its compact architecture, and MON
+never becomes source compilation. `docs/src/docs/mon/mon-format.mtf` owns the
+literal-data format.
 
 ### Caller-owned input snapshot and cursor lifetime
 
@@ -1560,13 +1561,14 @@ rendering boundary and is never stored in the span.
 
 Whole-number and decimal or exponent spellings stay distinguishable through a
 lossless numeric literal representation until the destination is known. The
-accepted lexical owner is `numeric_text` grammar, normalisation, separator and
-exponent validation with text materialisation; MON performs only the bounded
-literal normalisation, range and scale checks the codec needs and adds no second
-arithmetic runtime. Compiler-retained numeric text stays in the source-owned
-numeric token side store, while MON's bounded normalised buffer is private to one
-call and never becomes a compiler token or source record. Exact `Integer` and
-`Decimal` values retain their text without routing through `f64` or display
+shared lexical owner in `moth-lexical` supplies grammar, normalisation,
+separator/exponent validation and destination-aware materialisation. MON
+performs only the bounded literal conversion, range and scale checks the codec
+needs and adds no second arithmetic runtime. Compiler-retained numeric text stays
+in the source-owned numeric token side store, while MON's bounded normalised
+buffer is private to one call and never becomes a compiler token or source record.
+Exact `Integer` and `Decimal` values retain their text without routing through
+`f64` or display
 formatting. `Float` materialisation follows the numeric authority and rejects
 non-finite source values and conversion results, emitting `-0.0` for negative
 zero and `0` for positive zero while decoding preserves the sign bit.
@@ -1587,11 +1589,18 @@ facts. Exact reader `Integer` and `Decimal` values transfer the normalized
 buffer into the result instead of cloning it; a negative sign is charged before
 it is inserted. Schema validation charges its caller-owned output clone
 separately from normalization scratch.
+Each schema-supplied name is charged once by byte length when the schema is
+prepared. Input-derived names are charged before the reader or validator copies
+them into an owned path segment or error detail, and this includes rejected
+names: a reserved label, qualifier or variant, or a reserved schema field,
+reports `DecodedBudget` instead of copying a spelling that exceeds the remaining
+budget. Borrowed name recognition that copies nothing is not charged.
 Reader and schema validation share one allocation-free borrowed effective-scale
 rule; each path keeps its own span, error code and detail context. These are
 logical byte charges against `max_decoded_bytes`, not exact allocator-resident
 memory measurements: allocator rounding, excess capacity and deallocation
-timing are not represented.
+timing are not represented. Bounded codec policy and checked arithmetic do not
+promise process-wide out-of-memory recovery or a custom allocator.
 
 MON string and character escapes are decoded by a bounded literal reader owned
 by the MON format; no Moth source escape owner is shared. MON's Unicode
@@ -1631,6 +1640,10 @@ and Unicode, resource, each budget kind and internal invariant failures each
 have their own codes. A missing field points at its containing record rather
 than fabricated source text; duplicate map-key errors point at the duplicate
 key. Messages render only at the caller's diagnostic boundary.
+
+`MonError` implements `Display` and `std::error::Error` for ordinary Rust error
+propagation. Its owned code, detail and value path remain usable after input
+release. Source excerpts still require the original input for its byte span.
 
 This projection stays beside, not inside, the compiler failure architecture. It
 does not create a `DiagnosticRecord`, side store, `InfrastructureFailure` or
@@ -2243,12 +2256,11 @@ src/compiler_frontend/context/
     tests/
 ```
 
-The implemented MON handoff lives beside this map without changing it: a
-crate-private `src/compiler_frontend/mon/` owner holds the caller-borrowed input
-cursor, `Span` byte ranges, retained numeric text handling, immutable prepared
-schema and owned `Value` results, reporting through the public `MonError`
-projection at `moth::mon`. It owns no source database, identity table, token
-store, diagnostic store or frozen context.
+The MON handoff moved out of this module map into `crates/moth-mon/`. Its
+reader owns the caller-borrowed input cursor, `Span` byte ranges, retained
+numeric text handling, immutable prepared schema and owned `Value` results,
+reporting through the public `MonError` projection. It owns no source database,
+identity table, token store, diagnostic store or frozen context.
 
 Core pipeline and `mod.rs` files remain orchestration maps. Bit codecs, capacity formulas, schema
 internals and benchmark-only accounting do not accumulate in broad pipeline files.

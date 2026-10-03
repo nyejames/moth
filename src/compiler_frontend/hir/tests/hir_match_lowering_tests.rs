@@ -13,7 +13,6 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::hir::expressions::{
@@ -25,6 +24,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{

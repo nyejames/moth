@@ -1,69 +1,138 @@
 //! Self-tests for the feature-lane matrix.
 //!
-//! These prove the scanner reads the tree the way the check claims, and that the lane table and
-//! the workspace manifests agree. The lane-table tests are the gate itself: if the union of lane
-//! features stops matching the declared features, a feature-gated test silently stops running.
+//! Complete temporary inventories exercise the actual coverage builder, including extracted
+//! source/test owners and required-root failures. Scanner fixtures protect lexical boundaries.
 
 use super::{
-    COVERAGE_REPORT_SCHEMA_VERSION, FEATURE_LANES, FeatureLane, FeatureLaneKind, LaneFailure,
-    LaneOutcome, LaneResult, MATRIX_RESULTS_SCHEMA_VERSION, MatrixResultsReport, cfg_feature_names,
-    declared_features, lane_report, lanes_enabling, standard_execution_lanes,
+    FEATURE_LANES, FeatureLane, FeatureLaneKind, LaneFailure, LaneOutcome, LaneResult,
+    MATRIX_RESULTS_SCHEMA_VERSION, MatrixResultsReport, build_coverage_report_for_audit,
+    cfg_feature_names, declared_features, lane_report, lanes_enabling, standard_execution_lanes,
 };
 use crate::report_file::ReportRunIdentity;
+use crate::source_tree::relative_display_path;
+use crate::test_fs::assert_path_missing;
 use std::collections::BTreeSet;
+use std::fs;
+use tempfile::{TempDir, tempdir};
 
-/// The manifests the lane table must agree with, read at compile time so the test cannot drift
-/// from the tree it claims to check.
+// These manifests and recipes are parser inputs, not source-text assertions.
 const MOTH_MANIFEST: &str = include_str!("../../../Cargo.toml");
-const XTASK_MANIFEST: &str = include_str!("../../Cargo.toml");
 const ROOT_JUSTFILE: &str = include_str!("../../../justfile");
 
-fn lane_features(package: &str) -> BTreeSet<String> {
-    FEATURE_LANES
-        .iter()
-        .filter(|lane| lane.package == package)
-        .flat_map(|lane| lane.features.iter().map(|name| (*name).to_string()))
-        .collect()
+fn fixture_workspace() -> TempDir {
+    let workspace = tempdir().expect("temporary coverage workspace");
+    fs::write(workspace.path().join("justfile"), ROOT_JUSTFILE).expect("fixture recipes");
+
+    for (package, manifest, roots) in super::PACKAGE_SOURCES {
+        for root in *roots {
+            fs::create_dir_all(workspace.path().join(root)).expect("required fixture source root");
+        }
+
+        let contents = if *package == "moth" {
+            MOTH_MANIFEST.to_string()
+        } else {
+            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n")
+        };
+        fs::write(workspace.path().join(manifest), contents).expect("fixture package manifest");
+    }
+
+    workspace
 }
 
 #[test]
-fn every_declared_moth_feature_is_enabled_by_a_lane() {
-    let declared = declared_features(MOTH_MANIFEST).expect("the moth manifest should parse");
+fn extracted_source_and_test_owners_report_exact_undeclared_cfg_features() {
+    let workspace = fixture_workspace();
+    let violations = [
+        (
+            "moth-lexical",
+            "crates/moth-lexical/src/identifier.rs",
+            "identifer_policy",
+        ),
+        (
+            "moth-lexical",
+            "crates/moth-lexical/src/tests/numeric.rs",
+            "numeric_texxt",
+        ),
+        ("moth-mon", "crates/moth-mon/src/reader.rs", "mon_decodde"),
+        (
+            "moth-mon",
+            "crates/moth-mon/src/tests/schema.rs",
+            "schema_defaullt",
+        ),
+        (
+            "moth-mon",
+            "crates/moth-mon/tests/public_api.rs",
+            "public_coddec",
+        ),
+    ];
 
-    let uncovered: Vec<&String> = declared
+    for (_, file, feature) in violations {
+        let path = workspace.path().join(file);
+        fs::create_dir_all(path.parent().expect("fixture file parent"))
+            .expect("fixture source directory");
+        let source = format!("#[cfg(feature = \"{feature}\")]\n#[test]\nfn gated() {{}}\n");
+        fs::write(path, source).expect("misspelled cfg fixture");
+    }
+
+    let report =
+        build_coverage_report_for_audit(workspace.path()).expect("complete inventory should scan");
+    let mut expected_findings: Vec<String> = violations
         .iter()
-        .filter(|feature| lanes_enabling("moth", feature).is_empty())
+        .map(|(package, file, feature)| {
+            format!(
+                "{file}: cfg names feature '{feature}', which package '{package}' does not declare"
+            )
+        })
         .collect();
+    expected_findings.sort();
+    let mut findings = report.findings;
+    findings.sort();
+    assert_eq!(findings, expected_findings);
 
-    assert!(
-        uncovered.is_empty(),
-        "features with no executing lane: {uncovered:?}"
+    let expected_files: BTreeSet<&str> = violations.iter().map(|(_, file, _)| *file).collect();
+    let actual_files: BTreeSet<&str> = report
+        .undeclared_cfg_features
+        .iter()
+        .map(|site| {
+            assert_eq!(site.occurrences, 1);
+            assert!(site.has_test_items);
+            site.file.as_str()
+        })
+        .collect();
+    assert_eq!(actual_files, expected_files);
+    assert_eq!(
+        report.scanned_source_roots,
+        [
+            "src",
+            "crates/moth-lexical/src",
+            "crates/moth-mon/src",
+            "crates/moth-mon/tests",
+            "xtask/src",
+        ]
     );
 }
 
 #[test]
-fn no_lane_enables_a_feature_the_package_does_not_declare() {
-    let declared = declared_features(MOTH_MANIFEST).expect("the moth manifest should parse");
+fn coverage_fails_closed_when_any_configured_root_is_missing() {
+    for (_, _, roots) in super::PACKAGE_SOURCES {
+        for root in *roots {
+            let workspace = fixture_workspace();
+            let missing = workspace.path().join(root);
+            fs::remove_dir_all(&missing).expect("remove required fixture root");
+            assert_path_missing(&missing);
 
-    let unknown: Vec<&&str> = FEATURE_LANES
-        .iter()
-        .filter(|lane| lane.package == "moth")
-        .flat_map(|lane| lane.features.iter())
-        .filter(|feature| !declared.contains(**feature))
-        .collect();
-
-    assert!(
-        unknown.is_empty(),
-        "lanes name undeclared features: {unknown:?}"
-    );
-}
-
-#[test]
-fn the_xtask_package_declares_no_features_for_a_lane_to_select() {
-    let declared = declared_features(XTASK_MANIFEST).expect("the xtask manifest should parse");
-
-    assert_eq!(declared, BTreeSet::new());
-    assert_eq!(lane_features("xtask"), BTreeSet::new());
+            let error = build_coverage_report_for_audit(workspace.path())
+                .expect_err("a missing configured root must fail coverage");
+            let portable_error = error.replace('\\', "/");
+            let missing_display = relative_display_path(workspace.path(), &missing)
+                .expect("missing root has a portable path");
+            assert!(
+                portable_error.contains(&format!("/{missing_display}'")),
+                "failure must name the missing root: {error}"
+            );
+            assert!(error.starts_with("failed to read '"));
+        }
+    }
 }
 
 #[test]
@@ -74,38 +143,6 @@ fn lane_names_are_unique() {
     names.dedup();
 
     assert_eq!(names.len(), total, "duplicate lane names in the matrix");
-}
-
-#[test]
-fn a_lane_without_features_runs_its_package_unconfigured() {
-    let lane = FeatureLane {
-        name: "default",
-        package: "moth",
-        features: &[],
-        kind: FeatureLaneKind::Standard,
-        owns: "the shipped configuration",
-    };
-
-    assert_eq!(
-        lane.command_line(),
-        "cargo test -p moth --quiet -- --format terse"
-    );
-}
-
-#[test]
-fn a_lane_command_names_every_feature_it_enables() {
-    let lane = FeatureLane {
-        name: "timers-counters",
-        package: "moth",
-        features: &["timers", "benchmark_counters", "data_layout_memory_probe"],
-        kind: FeatureLaneKind::Standard,
-        owns: "collector-backed counters",
-    };
-
-    assert_eq!(
-        lane.command_line(),
-        "cargo test -p moth --quiet --features timers,benchmark_counters,data_layout_memory_probe -- --format terse"
-    );
 }
 
 #[test]
@@ -545,42 +582,6 @@ fn scanner_ignores_an_identifier_that_merely_ends_in_cfg() {
     let source = "let value = build_cfg(feature_flag);\n";
 
     assert!(cfg_feature_names(source).is_empty());
-}
-
-#[test]
-fn the_coverage_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(COVERAGE_REPORT_SCHEMA_VERSION, 3);
-}
-
-#[test]
-fn the_matrix_results_schema_version_is_the_one_consumers_are_told_to_expect() {
-    assert_eq!(MATRIX_RESULTS_SCHEMA_VERSION, 2);
-}
-
-/// The coverage map must not be able to state a lane outcome.
-///
-/// `feature-lane-check` writes this report without running a lane, so any outcome field on it
-/// would be a value no run had measured. Keeping the two reports apart is what makes that
-/// impossible rather than merely unlikely.
-#[test]
-fn the_coverage_report_states_lane_coverage_and_never_lane_outcomes() {
-    let serialised = serde_json::to_value(lane_report(&FEATURE_LANES[0]))
-        .expect("a lane report should serialise");
-    let lane = serialised.as_object().expect("a lane is an object");
-
-    let mut fields: Vec<&str> = lane.keys().map(String::as_str).collect();
-    fields.sort_unstable();
-    assert_eq!(
-        fields,
-        vec![
-            "command",
-            "features",
-            "lane_kind",
-            "name",
-            "owns",
-            "package"
-        ]
-    );
 }
 
 /// A matrix that stops partway must report the lanes it never reached.

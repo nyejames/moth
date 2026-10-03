@@ -36,7 +36,6 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -71,6 +70,7 @@ use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

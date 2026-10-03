@@ -213,6 +213,41 @@ Each behavior should have one primary owner. Secondary coverage is justified onl
 - Do not create broad shared test utility modules for one or two callers.
 - Split cross-stage test support only when actual ownership boundaries justify it.
 
+### MON and shared lexical coverage
+
+`crates/moth-lexical/src/tests/` and `crates/moth-lexical/src/numeric/tests/`
+own shared identifier, word and numeric leaf invariants.
+`crates/moth-mon/src/tests/` owns codec-local invariants.
+`crates/moth-mon/tests/` owns the public standalone API, numeric profiles,
+defaults, limits and errors. The compiler keeps only focused convenience
+re-export identity coverage rather than a second copy of the public codec suite.
+
+The cross-parser harness at `src/compiler_tests/mon_syntax_parity/` tokenises
+and parses real Moth source and independently reads MON with equivalent
+receiving types/schemas and the same numeric profile. Common accepted cases
+assert expected typed values in both parsers before comparing them. Common
+invalid cases assert each parser's intended rejection reason and source span.
+Do not substitute fabricated source tokens or helper-return comparisons.
+
+`gaps.rs` names the supported differences and checks both outcomes independently:
+document framing, schema versus source nominal identity, literal data versus
+expressions, quoted text and resource limits. Its accepted but undelivered
+source cases cover `{=}`, Unicode escapes and contextual `::Variant`.
+Keep these gaps linked to the progress matrix and roadmap, not silently skipped
+or treated as permanent grammar divergence. Moth-native `$mon`, automatic
+schema extraction and the static builder remain separate undelivered work.
+
+Use package-scoped commands so standalone tests don't depend on compiler feature
+unification:
+
+[codeblock, $code("bash"):
+    cargo test -p moth-lexical
+    cargo test -p moth-mon
+    cargo test -p moth-mon --doc
+    cargo test -p moth-lexical --doc
+    cargo test -p moth --lib mon_syntax_parity
+]
+
 ### Unit tests
 
 Retain unit tests for:
@@ -724,6 +759,18 @@ opt-in lane with its own named command:
     ]
 
     [td:
+        [: `moth-lexical`]
+        [: none]
+        [: standalone shared lexical and numeric-text tests without compiler feature unification]
+    ]
+
+    [td:
+        [: `moth-mon`]
+        [: none]
+        [: standalone codec unit, public consumer and documentation tests]
+    ]
+
+    [td:
         [: `boracle`]
         [: `boracle`]
         [: the reference-solver developer gate, owned by `just boracle` and excluded from the
@@ -751,16 +798,21 @@ Feature coverage is checked mechanically, without running a lane:
     just feature-lane-check
 ]
 
-The check reads `Cargo.toml` and every `cfg` attribute in `src` and `xtask/src`, then fails when a
-declared feature has no lane, when a lane names a feature its package does not declare, or when a
-`cfg` names a feature that does not exist. A misspelled feature name in a `cfg` is a test that can
-never compile and never reports, which is why the check reads the tree instead of a list in prose.
-It writes `target/test-reports/feature_lane_coverage.json`, which names, for every feature, its
-standard lanes, opt-in lanes and the files whose `cfg` attributes mention it. That report is a
-coverage map and states no lane outcome, because the check that writes it runs no lane. Running the
-standard lanes is `just test-feature-matrix`, which writes their outcomes to
-`target/test-reports/feature_matrix_results.json`. The opt-in `boracle` and `boracle-campaign` lanes
-run only through their named `just boracle` and `just boracle-campaign` commands, not through the
+The check reads the manifests for `moth`, `moth-lexical`, `moth-mon` and `xtask`.
+It scans every `cfg` attribute in `src`, `crates/moth-lexical/src`,
+`crates/moth-mon/src`, `crates/moth-mon/tests` and `xtask/src`, including nested
+subsystem test directories. It fails when a declared feature has no lane, when
+a lane names a feature its package does not declare, or when a `cfg` names a
+feature that does not exist. Missing configured roots fail closed. A misspelled
+feature name can never compile and never reports, which is why the check reads
+the tree instead of a list in prose.
+It writes `target/test-reports/feature_lane_coverage.json`, which names the actual
+scanned source roots and, for every feature, its standard lanes, opt-in lanes
+and files whose `cfg` attributes mention it. The console prints the same roots.
+That report is a coverage map and states no lane outcome. Running standard lanes
+is `just test-feature-matrix`, which writes outcomes to
+`target/test-reports/feature_matrix_results.json`. The opt-in `boracle` and
+`boracle-campaign` lanes run only through their named commands, not through the
 standard lane set.
 
 Adding a Cargo feature means adding it to a standard or opt-in lane in the same change. The gate

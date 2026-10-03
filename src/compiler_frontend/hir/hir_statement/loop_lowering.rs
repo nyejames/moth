@@ -15,9 +15,6 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::{
-    FixedScalar, FixedScalarClass, FixedScalarValue,
-};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::{
@@ -38,6 +35,7 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 
 /// Jump targets of the range-loop CFG pipeline. These are destinations only. The module header
 /// explains why the source of each edge is read live instead of stored here.

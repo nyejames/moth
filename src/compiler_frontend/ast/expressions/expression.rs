@@ -32,15 +32,15 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarValue;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;

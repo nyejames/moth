@@ -13,9 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
@@ -33,6 +31,8 @@ use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, node, reference_expr_with_type_id,

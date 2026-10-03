@@ -37,7 +37,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing_in_cursor;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -63,6 +62,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use std::collections::HashMap;
 use std::path::Path;

@@ -15,9 +15,9 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticPayload, InvalidConfigReason, PremergeFailure,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 fn exact_span(source_index: usize, start: u32, length: u32) -> SourceSpan {
     let mut builder = ExtendedSpanBuilder::new();

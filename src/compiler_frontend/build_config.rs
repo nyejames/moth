@@ -13,7 +13,7 @@
 //!
 //! Command-input value inference lives here so build, check and dev share one immediate
 //! primitive-inference path. [`PrimitiveBuildValue::from_command_text`] composes the ordinary
-//! Moth literal grammar and the shared `numeric_text` materialisation helpers under one boundary
+//! Moth literal grammar and the shared `moth_lexical` materialisation helpers under one boundary
 //! [`NumericProfile`] — it never consults a project or source contract and never re-implements a
 //! literal grammar.
 //!
@@ -32,13 +32,7 @@
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
-use crate::compiler_frontend::keywords::is_valid_identifier;
-use crate::compiler_frontend::numeric_text::parse::{
-    parse_numeric_text_to_float, parse_numeric_text_to_int,
-};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
@@ -46,6 +40,10 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
+use moth_lexical::identifier::is_identifier;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::parse::{parse_numeric_text_to_float, parse_numeric_text_to_int};
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use rustc_hash::FxHashMap;
@@ -314,7 +312,7 @@ impl PrimitiveBuildValue {
     /// WHY:  a command value's primitive type is decided immediately from the authored text,
     ///       never by waiting for a project or source contract, and the selected builder has
     ///       already settled the profile the command will compile under. Numeric materialisation
-    ///       and quoted literal parsing compose the compiler's existing `numeric_text` and
+    ///       and quoted literal parsing compose the shared `moth_lexical` numeric service and
     ///       ordinary literal-grammar owners, so no second grammar exists, and whole-number Int
     ///       overflow and non-finite Float results are diagnostics rather than fallbacks.
     pub(crate) fn from_command_text(
@@ -711,7 +709,7 @@ impl BuildInputName {
     /// source declaration identifier; keyword-shadow reservation is owned separately by the
     /// canonical keyword policy.
     pub(crate) fn new(text: &str) -> Result<Self, BuildInputNameError> {
-        if is_valid_identifier(text) && is_lowercase_with_underscores_name(text) {
+        if is_identifier(text) && is_lowercase_with_underscores_name(text) {
             Ok(Self {
                 text: text.to_owned(),
             })

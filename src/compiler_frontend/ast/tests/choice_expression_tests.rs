@@ -5,7 +5,10 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidChoiceVariantReason};
+use crate::compiler_frontend::compiler_messages::{
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticPayload,
+    InvalidChoiceVariantReason, NameNamespace,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
@@ -135,14 +138,71 @@ fn reports_unknown_choice_variant_with_targeted_diagnostic() {
 }
 
 #[test]
-fn reports_missing_variant_name_after_choice_separator() {
-    let diagnostic = parse_single_file_ast_diagnostic(
-        "Status :: Ready, Busy;\n\
-         value = Status::\n",
+fn reports_spacing_after_choice_separator_without_variant_text() {
+    assert_choice_separator_gap(
+        "Status :: Ready, Busy;\nvalue = Status::\n",
+        ChoiceVariantSeparatorGap::After,
     );
+}
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken { .. }
-    ));
+#[test]
+fn rejects_line_break_or_comment_before_choice_separator() {
+    for reference in ["Status\n::Ready", "Status -- note\n::Ready"] {
+        let source = format!("Status :: Ready;\nvalue = {reference}\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0037");
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::NamespaceMisuse {
+                expected: NameNamespace::Value,
+                found: NameNamespace::Type,
+                ..
+            }
+        ));
+    }
+}
+
+fn assert_choice_separator_gap(source: &str, expected_gap: ChoiceVariantSeparatorGap) {
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    assert_eq!(diagnostic.identity().code, "MOTH-SYNTAX-0031");
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::CommonSyntaxMistake {
+                reason: CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
+            } if *gap == expected_gap
+        ),
+        "{:?}",
+        diagnostic.payload
+    );
+}
+
+#[test]
+fn rejects_choice_separator_gaps_in_expressions() {
+    for (constructor, expected_gap) in [
+        ("Status ::Ready", ChoiceVariantSeparatorGap::Before),
+        ("Status:: Ready", ChoiceVariantSeparatorGap::After),
+        ("Status :: Ready", ChoiceVariantSeparatorGap::Both),
+        ("Status::\nReady", ChoiceVariantSeparatorGap::After),
+        (
+            "Status:: -- comment\nReady",
+            ChoiceVariantSeparatorGap::After,
+        ),
+    ] {
+        let source = format!("Status :: Ready;\nvalue = {constructor}\n");
+        assert_choice_separator_gap(&source, expected_gap);
+    }
+}
+
+#[test]
+fn rejects_newline_after_choice_separator_in_function_body() {
+    assert_choice_separator_gap(
+        "Status :: Ready;\n\
+         make || -> Status:\n\
+             return Status::\n\
+                 Ready\n\
+         ;\n",
+        ChoiceVariantSeparatorGap::After,
+    );
 }

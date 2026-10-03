@@ -7,8 +7,8 @@
 use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCaseSpec};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

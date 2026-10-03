@@ -25,7 +25,6 @@ use crate::compiler_frontend::build_config::{
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::{
@@ -40,6 +39,7 @@ use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
 #[cfg(feature = "timers")]
 use crate::timing::start_benchmark_collection;
+use moth_lexical::numeric::profile::NumericProfile;
 #[cfg(feature = "boracle")]
 use std::collections::BTreeSet;
 use std::fs;

@@ -283,7 +283,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-        numeric_profile: crate::compiler_frontend::datatypes::numeric_profile::NumericProfile,
+        numeric_profile: moth_lexical::numeric::profile::NumericProfile,
     ) -> Result<(), CompilerMessages> {
         use crate::compiler_frontend::traits::evidence::environment::{
             TraitEvidenceDefinition, TraitEvidenceKind,

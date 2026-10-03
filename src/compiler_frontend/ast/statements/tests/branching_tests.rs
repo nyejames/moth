@@ -18,9 +18,9 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, InvalidControlFlowStatementReason, InvalidMatchArmReason,
-    InvalidMatchPatternReason, NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind,
-    TypeMismatchContext,
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticKind, DiagnosticPayload,
+    InvalidControlFlowStatementReason, InvalidMatchArmReason, InvalidMatchPatternReason,
+    NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -565,6 +565,36 @@ fn rejects_choice_match_arm_qualifier_for_other_choice() {
         "{:?}",
         diagnostic.payload
     );
+}
+
+#[test]
+fn rejects_choice_separator_gaps_in_qualified_match_patterns() {
+    for (pattern, expected_gap) in [
+        ("Status ::Ready", ChoiceVariantSeparatorGap::Before),
+        ("Status:: Ready", ChoiceVariantSeparatorGap::After),
+    ] {
+        let source = format!(
+            "Status :: Ready, Busy;\ncurrent Status = Status::Ready\nif current is:\n    {pattern} => io.line([: [\"ready\"]])\n;\n",
+        );
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+
+        assert_eq!(
+            diagnostic.identity().code,
+            "MOTH-SYNTAX-0031",
+            "source: {source:?}; diagnostic: {:?}",
+            diagnostic.payload
+        );
+        assert!(
+            matches!(
+                &diagnostic.payload,
+                DiagnosticPayload::CommonSyntaxMistake {
+                    reason: CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap },
+                } if *gap == expected_gap
+            ),
+            "{:?}",
+            diagnostic.payload
+        );
+    }
 }
 
 #[test]

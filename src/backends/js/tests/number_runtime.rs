@@ -4,10 +4,10 @@ use super::support::*;
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::module::HirModule;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::process::Command;
 
 fn emit_cast_helpers(policies: &[BuiltinCastPolicyId]) -> String {

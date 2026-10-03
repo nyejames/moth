@@ -25,12 +25,12 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMapTypeReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub(crate) use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
 

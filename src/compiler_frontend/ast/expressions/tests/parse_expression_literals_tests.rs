@@ -11,13 +11,8 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::numeric_text::token::{
-    NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -25,6 +20,8 @@ use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, Token
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::rc::Rc;
 use std::sync::Arc;
 

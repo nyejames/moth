@@ -1,15 +1,15 @@
-//! Exact canonical-scale and decimal-value boundary tests.
+//! Exact decimal-value boundary tests.
 //!
-//! WHAT: protects strict Dec scale spellings, exact exponent materialization, immutable value
-//!       handoff, and canonical arbitrary-precision formatting.
+//! WHAT: protects exact exponent materialization, immutable value handoff, and canonical
+//!       arbitrary-precision formatting.
 //! WHY: consumers need one exact decimal value without profile-sized or floating-point intermediates.
 
 use crate::compiler_frontend::datatypes::number::{
-    NumberArithmeticError, NumberIntegerConversionError, NumberMaterializationError, NumberScale,
-    NumberValue,
+    NumberArithmeticError, NumberIntegerConversionError, NumberMaterializationError, NumberValue,
 };
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::grammar::NumericLiteralSign;
 
 fn materialize(
     normalized: &str,
@@ -22,34 +22,6 @@ fn materialize(
 
 fn decimal(normalized: &str, sign: NumericLiteralSign, scale: u16) -> NumberValue {
     materialize(normalized, sign, scale).expect("test decimal must fit its Number scale")
-}
-
-#[test]
-fn canonical_scale_names_accept_only_boundaries() {
-    for (spelling, expected_scale) in [("Dec", 0), ("Dec0", 0), ("Dec1", 1), ("Dec256", 256)] {
-        assert_eq!(
-            NumberScale::from_name(spelling).map(NumberScale::get),
-            Some(expected_scale)
-        );
-    }
-
-    // Invalid spellings stay named types: leading zeroes, above the canonical capacity,
-    // non-digit suffixes and trailing-letter names never parse as a scale.
-    for invalid in ["Dec01", "Dec00", "Dec257", "Dec+1", "DecBox", "decimal"] {
-        assert_eq!(NumberScale::from_name(invalid), None);
-    }
-
-    // The retired `Number` family spellings are ordinary named types now.
-    for retired in [
-        "Number",
-        "Number0",
-        "Number1",
-        "Number2",
-        "Number256",
-        "NumberBox",
-    ] {
-        assert_eq!(NumberScale::from_name(retired), None, "{retired:?}");
-    }
 }
 
 #[test]

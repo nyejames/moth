@@ -7,12 +7,13 @@ casts, field projections, variables and constant references are rejected even
 when the compiler could fold them. Rejection happens before expression
 evaluation, not after evaluating and inspecting a result.
 
-Availability is Rust-only. The implemented Rust caller surface is public as
-`moth::mon`, re-exported from `src/lib.rs` over the crate-private
-`src/compiler_frontend/mon/` owner. Another Rust crate can execute the service,
-but compiled Moth programs have no runtime codec support. Moth-native
-operations, automatic schema extraction and the static project builder remain
-deferred separately. See @../progress (Progress) for current support.
+The standalone Rust crate `moth_mon` owns the codec. The compiler provides the
+same API and Rust types through the convenience re-export `moth::mon`. Full
+standalone-use examples belong in the crate documentation rather than this
+format reference. Compiled Moth programs have no runtime codec support.
+Moth-native operations, automatic schema extraction and the static project
+builder remain deferred separately. See @../progress (Progress) for current
+support.
 
 ### One root record
 
@@ -53,6 +54,17 @@ They are named-only and carry no annotations, declaration qualifiers, mutable
 markers or shorthand initialisers. `()` is an empty record, never a tuple or
 unit value.
 
+For every named entry, including implicit and explicit roots, nested records
+and qualified payloads, the label and `=` must appear on the same logical line
+with at least one horizontal whitespace character before `=`. LF and CR are
+the only line breaks; CRLF counts as one break. Every other Unicode whitespace
+character is horizontal whitespace and may separate the label from `=`. At
+least one whitespace character must also follow `=`; the value may start after
+a newline. A comment cannot replace either required whitespace character, and
+a line comment cannot bridge the label to an `=` on a later line. This format
+tightening rejects missing `=` spacing and label-to-`=` line breaks that an
+earlier reader accepted.
+
 MON collections may contain different literal kinds and different record
 shapes. The receiving schema enforces its element type. Heterogeneous text
 changes no Moth collection typing rule and adds no `Any` type to Moth.
@@ -62,6 +74,12 @@ Maps preserve insertion order. Keys use the supported Moth map-key families:
 and `Byte`. Bare names are references, not key shorthand, and are invalid as
 MON map keys. The schema checks the declared key and value types. Map entries
 and collection items cannot be mixed.
+
+Every non-empty map entry requires trivia between its key and `=` and at least
+one whitespace character immediately after `=`. The key-to-`=` gap accepts
+whitespace and comments; comments do not replace the required whitespace
+after `=`. This format tightening rejects non-empty entries missing spacing
+on either side.
 
 Duplicate keys are rejected rather than keeping the first or last value. Keys
 compare as decoded values under the receiving key contract, so different escape
@@ -73,7 +91,8 @@ a record.
 
 The empty forms never change kind:
 
-- `{=}` is always an empty map and `{}` is always an empty collection.
+- `{=}` is always an empty map and the spacing exception for non-empty map
+  entries; `{}` is always an empty collection.
 - A map schema rejects `{}` and a collection schema rejects `{=}`. Schema
   context never changes a container's kind.
 
@@ -83,6 +102,22 @@ The empty forms never change kind:
     empty_items = {},
     empty_record = (),
 ]
+
+### Reserved user names
+
+Moth and MON apply the shared name law from
+@../language-overview/#comments-and-naming (Comments and naming) to user names.
+It covers record labels, named arguments and nominal qualifiers. It also
+covers choice and variant names plus schema field and payload names. Schema
+preparation and text reading enforce the rule. Validation and encoding also
+enforce it for programmatic values and defaults.
+This format tightening rejects formerly accepted names such as `__LoOp`,
+`_U64`, `dec01` and `dec257`.
+Invalid supplied names report `InvalidIdentifier`. Preparation projects invalid
+schema names to `InvalidSchema` and invalid default names to `InvalidDefault`.
+
+`true`, `false` and `none` remain literal values, not user names. Quoted String
+data and string map keys remain unrestricted by reserved-name matching.
 
 ### Strings and characters
 
@@ -138,11 +173,14 @@ Conversion is strict about categories:
   round-trips each supported typed value, including `F16`, `F32` and signed
   zero: negative zero writes `-0.0` and positive zero writes `0`.
 
-`Int` and `Float` destinations are profile-dependent, and fixed-width schemas are
-profile-independent. The public schema selects its numeric profile with
-`Schema::with_profile`: schemas that never select a profile materialise `Int`
-at `Int32` and `Float` at `Float64` for standalone Rust callers, and a declared
-decimal scale covers `0` through `256`.
+`Int` and `Float` destinations are profile-dependent, and fixed-width schemas
+are profile-independent. `Schema::with_profile` selects any of the four
+combinations of 32/64-bit Int width and 32/64-bit Float precision. Preparation
+captures that profile immutably. Schemas without an explicit selection
+materialise `Int` at Int32 and `Float` at Float64 for standalone Rust callers.
+The declared decimal scale covers `0` through `256`. `moth-lexical` owns the
+shared numeric grammar and materialisation facts. The compiler's receiving
+context and MON's schema independently select the destination.
 
 Large integer and exact decimal data are retained and round-tripped without a
 second arithmetic runtime. Unsupported concrete adapters fail explicitly
@@ -165,11 +203,12 @@ follows the shared constructor argument rules without invoking user code.
 
 A qualifier is one identifier: Unicode alphabetic or underscore start,
 Unicode alphanumeric or underscore continuation, case-sensitive. Dotted paths,
-aliases, registry lookup and whitespace-separated `::` are invalid. The
-receiving schema determines the expected nominal type. An explicit qualifier
-is an additional checked assertion, never ignored and never used to select
-another schema. Matching payload shapes do not make unrelated nominal types
-interchangeable.
+aliases and registry lookup are invalid. As in Moth source, a qualified variant
+is one lexical header: write `Choice::Variant` with no whitespace, line break
+or comment on either side of `::`. The receiving schema determines the
+expected nominal type. An explicit qualifier is an additional checked
+assertion, never ignored and never used to select another schema. Matching
+payload shapes do not make unrelated nominal types interchangeable.
 
 Choice data uses Moth-shaped variants rather than an invented tagged-record
 mapping:
@@ -183,6 +222,12 @@ mapping:
 ]
 
 A unit variant has no parentheses and a payload variant requires them.
+
+For both nominal and choice payloads, `(` must follow the constructor name or
+variant on the same logical line, with only horizontal whitespace between.
+A line break or `--` comment means the head has no payload; the remaining input
+fails through ordinary parsing. This intentionally tightens MON's earlier
+acceptance of payload openers after line breaks or comments.
 `::Text(...)` uses the expected choice from the receiving schema, while an
 explicit `Widget` qualifier must name that same expected choice. An unknown
 or mismatching explicit name fails.
@@ -227,6 +272,11 @@ at the exact missing field. A supplied `none` is validated as `none` and
 never replaced by a default. A supplied nested record is validated as that
 record, not deep-merged with the parent's default record.
 
+Invalid default values report `InvalidDefault` during preparation, including
+an exact decimal that cannot fit its declared scale. The same inexact supplied
+decimal reports `NumericScale`. Resource-budget failures retain their budget
+codes in either context.
+
 For a parent field `layout` with no default, omission fails even when every
 field inside the Layout schema has a default. Supplying `layout = ()`
 permits those inner defaults to apply. If `layout` itself has a default,
@@ -268,10 +318,11 @@ syntax and schema errors.
 
 Both operations publish only complete successful results. On failure, partial
 values and output buffers are discarded and no partial public result exists.
-Each failure is a structured first error with a stable reason and a field or
-element path where available; decode errors include the original input byte
-range when available. Messages are rendered only at the caller's diagnostic
-boundary.
+Each failure carries a stable `MonErrorCode`, a field or element path and an
+original-input half-open byte span where available. `MonError` implements
+`Display` and `std::error::Error` for ordinary Rust reporting and propagation
+without retaining input text or compiler context. Callers can still inspect
+the structured code, path, span and detail independently of rendered text.
 
 ### Deterministic writing
 

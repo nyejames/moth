@@ -10,8 +10,8 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[cfg(test)]
 fn compile_single_file_for_filesystem_test(

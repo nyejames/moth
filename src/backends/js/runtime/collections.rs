@@ -31,8 +31,8 @@
 use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// One emitted JavaScript helper implementing the compiler-owned `@core/collections` package.
 #[derive(Debug, Clone, PartialEq, Eq)]

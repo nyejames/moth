@@ -26,12 +26,12 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{
     materialize_float, materialize_int, materialize_number,
 };
-use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 
 pub(super) struct LiteralParseState<'a> {
     /// The expected type from surrounding context, if known.

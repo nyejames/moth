@@ -35,7 +35,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
 };
@@ -43,6 +42,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::numeric::profile::FloatPrecision;
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.
 pub struct FunctionCallParseInput<'a, 'b, 'tokens> {

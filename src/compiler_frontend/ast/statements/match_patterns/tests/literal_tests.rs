@@ -13,20 +13,18 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     literal::{parse_literal_pattern, parse_non_choice_pattern},
     option::parse_option_pattern,
 };
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, NumberLiteralErrorReason, TypeMismatchContext,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::numeric_text::token::{
-    NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use moth_lexical::numeric::profile::NumericProfile;
 
 type LiteralPatternTestResult<T> = Result<T, ExpressionParseError>;
 

@@ -18,10 +18,10 @@ use crate::compiler_frontend::ast::templates::tir::{
     prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 

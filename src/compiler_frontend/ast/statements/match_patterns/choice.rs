@@ -357,6 +357,14 @@ fn parse_variant_name(
             token_stream.advance();
 
             if token_stream.current_tag() == TokenTag::DOUBLE_COLON {
+                if let Some(gap) = token_stream.current_choice_variant_separator_gap() {
+                    return Err(CompilerDiagnostic::invalid_choice_variant_spacing(
+                        gap,
+                        current_span(token_stream),
+                    )
+                    .into());
+                }
+
                 let expected_choice_name = path_fork.component(*choice_nominal_path);
                 if expected_choice_name.is_some_and(|expected| first_name != expected)
                     && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
@@ -371,7 +379,6 @@ fn parse_variant_name(
                 }
 
                 token_stream.advance();
-                token_stream.skip_newlines();
 
                 if token_stream.current_tag() != TokenTag::SYMBOL {
                     return Err(CompilerDiagnostic::invalid_match_pattern(

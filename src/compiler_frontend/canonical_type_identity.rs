@@ -25,18 +25,18 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId,
 };
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolPath;
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
     StableModuleOriginIdentity, StablePackageIdentity,
 };
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // ---------------------------------------------------------------------------
 //  Canonical type identity vocabulary

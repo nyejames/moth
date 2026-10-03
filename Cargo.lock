@@ -249,6 +249,8 @@ dependencies = [
 name = "moth"
 version = "0.1.12"
 dependencies = [
+ "moth-lexical",
+ "moth-mon",
  "notify",
  "num-bigint",
  "num-integer",
@@ -256,7 +258,6 @@ dependencies = [
  "pulldown-cmark",
  "rayon",
  "rustc-hash",
- "ryu",
  "saying",
  "serde",
  "serde_json",
@@ -266,6 +267,20 @@ dependencies = [
  "wasm-encoder",
  "wasmparser",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "moth-lexical"
+version = "0.1.0"
+dependencies = [
+ "ryu",
+]
+
+[[package]]
+name = "moth-mon"
+version = "0.1.0"
+dependencies = [
+ "moth-lexical",
 ]
 
 [[package]]

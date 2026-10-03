@@ -11,13 +11,11 @@ use crate::backends::js::{
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageId, ExternalSignatureType,
 };
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 

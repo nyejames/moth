@@ -19,7 +19,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
 use crate::compiler_frontend::paths::resource_identity::{
@@ -31,6 +30,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::path::Path;
 
 // ------------------------------------

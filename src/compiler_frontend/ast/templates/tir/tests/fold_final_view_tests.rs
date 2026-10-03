@@ -51,7 +51,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::numeric_profile::{FloatPrecision, NumericProfile};
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
@@ -65,6 +64,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
 use std::path::Path;
 
 use std::cell::RefCell;

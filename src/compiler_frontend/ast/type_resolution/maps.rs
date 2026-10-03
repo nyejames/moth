@@ -19,10 +19,10 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMapTypeReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalarClass;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::source::SourceSpan;
+use moth_lexical::numeric::fixed_scalar::FixedScalarClass;
 
 /// Computes the maximum inline map nesting depth for a parsed type reference.
 ///

@@ -11,13 +11,12 @@ use crate::compiler_frontend::builtins::casts::policies::{
 };
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-use crate::compiler_frontend::datatypes::number::{NumberScale, NumberValue};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
+use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn number_value(text: &str, scale: u16) -> NumberValue {
     let scale = NumberScale::new(scale).expect("test scale is valid");
@@ -702,7 +701,7 @@ fn const_foldable_policy_marker_excludes_error_materialization_policies() {
 
 #[test]
 fn u64_to_f32_rounds_once_above_f64_double_rounding_midpoint() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     // One above the F32 midpoint rounds up directly; F64 drops the final +1 and makes it a tie.
     let value = (1_u64 << 60) + (1_u64 << 36) + 1;
@@ -734,7 +733,7 @@ fn u64_to_f32_rounds_once_above_f64_double_rounding_midpoint() {
 
 #[test]
 fn two_pow_53_plus_one_to_f64_rounds_to_two_pow_53() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let value = (1u64 << 53) + 1;
     let source = BuiltinCastLiteral::Fixed(
@@ -756,7 +755,7 @@ fn two_pow_53_plus_one_to_f64_rounds_to_two_pow_53() {
 
 #[test]
 fn integer_to_integer_rejects_out_of_range_with_dedicated_code() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let error = apply_builtin_cast_policy(
         BuiltinCastPolicyId::NumericConversion {
@@ -787,7 +786,7 @@ fn integer_to_integer_rejects_out_of_range_with_dedicated_code() {
 
 #[test]
 fn float64_to_f32_rejects_non_finite_result() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let error = apply_builtin_cast_policy(
         BuiltinCastPolicyId::NumericConversion {
@@ -805,8 +804,8 @@ fn float64_to_f32_rejects_non_finite_result() {
 
 #[test]
 fn integer_to_f16_checks_finite_magnitude() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let policy = BuiltinCastPolicyId::NumericConversion {
         source: NumericScalar::Int,
@@ -837,8 +836,8 @@ fn integer_to_f16_checks_finite_magnitude() {
 
 #[test]
 fn float_to_f16_rounds_once_and_rejects_non_finite() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let policy = BuiltinCastPolicyId::NumericConversion {
         source: NumericScalar::Fixed(FixedScalar::F64),
@@ -873,8 +872,8 @@ fn float_to_f16_rounds_once_and_rejects_non_finite() {
 
 #[test]
 fn float64_to_f16_rounds_directly_without_f32_intermediate() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-    use crate::compiler_frontend::numeric_text::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::binary16::round_f64_to_f16;
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     // Deterministic witness: 1.000488281251 sits just above the F16
     // midpoint between 1.0 and 1.0009765625. The hair (~1e-12) survives the
@@ -909,7 +908,7 @@ fn float64_to_f16_rounds_directly_without_f32_intermediate() {
 
 #[test]
 fn float_to_int_boundary_cases() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let i64_policy = BuiltinCastPolicyId::NumericConversion {
         source: NumericScalar::Fixed(FixedScalar::F64),
@@ -972,7 +971,7 @@ fn float_to_int_boundary_cases() {
 
 #[test]
 fn byte_u8_round_trip_preserves_value() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let byte = BuiltinCastLiteral::Fixed(
         FixedScalarValue::unsigned(FixedScalar::Byte, 255).expect("255 fits Byte"),
@@ -1001,7 +1000,7 @@ fn byte_u8_round_trip_preserves_value() {
 
 #[test]
 fn numeric_to_string_formats_each_domain_at_its_own_precision() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     // Integers use exact decimal text, including values above the `Int` range and the signed
     // minimum, which no `Int` or `Float` intermediate could carry.
@@ -1068,7 +1067,7 @@ fn numeric_to_string_formats_each_domain_at_its_own_precision() {
 
 #[test]
 fn string_to_numeric_parses_fixed_destinations_at_their_own_ranges() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let scalar = NumericScalar::Fixed(FixedScalar::U8);
     let result = apply_builtin_cast_policy(
@@ -1121,7 +1120,7 @@ fn string_to_numeric_parses_fixed_destinations_at_their_own_ranges() {
 
 #[test]
 fn string_to_binary_float_rounds_at_the_destination_and_reports_its_own_failures() {
-    use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     let f16 = NumericScalar::Fixed(FixedScalar::F16);
     let result = apply_builtin_cast_policy(

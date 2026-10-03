@@ -27,7 +27,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
-use crate::compiler_frontend::numeric_text::token::NumericLiteralKind;
+use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,

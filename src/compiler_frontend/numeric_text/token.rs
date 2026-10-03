@@ -7,46 +7,7 @@
 //!      interpret them.
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
-
-/// Lexical classification of a numeric literal token.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NumericLiteralKind {
-    /// A whole-number literal such as `42` or `1_000`.
-    WholeNumber,
-    /// A decimal-point literal such as `3.14`.
-    DecimalPoint,
-    /// An exponent literal such as `1e6` or `1.0e-21`.
-    Exponent,
-}
-
-/// Sign attached to a numeric literal token.
-///
-/// WHY: the tokenizer front-loads attached `-` for numeric literals, while normalized text stays
-/// unsigned so materialization can apply range checks with the sign as explicit metadata.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NumericLiteralSign {
-    /// The literal is positive (no leading `-`).
-    Positive,
-    /// The literal has an attached leading `-` sign.
-    ///
-    /// WHY: the tokenizer front-loads the `-` operator into the numeric token so
-    ///      materialization can apply range checks with the sign as explicit metadata.
-    Negative,
-}
-
-/// Sign explicitly written on an exponent, if any.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NumericExponentSign {
-    /// No explicit sign marker on the exponent (e.g. `1e6`).
-    None,
-    /// Explicit `+` after the exponent marker (e.g. `1e+21`).
-    ///
-    /// WHY: the normalized text preserves explicit exponent signs so materialization
-    ///      can reconstruct the value from text alone.
-    Positive,
-    /// Explicit `-` after the exponent marker (e.g. `1e-21`).
-    Negative,
-}
+use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
 
 /// The tokenizer's numeric-literal payload.
 ///
@@ -130,7 +91,7 @@ impl NumericLiteralToken {
         source: &str,
         string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
     ) -> Self {
-        use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
+        use moth_lexical::numeric::parse::parse_numeric_literal;
 
         let parsed = parse_numeric_literal(source).unwrap_or_else(|reason| {
             panic!("test numeric literal '{source}' is invalid: {reason:?}")

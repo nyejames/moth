@@ -24,10 +24,10 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use moth_lexical::numeric::profile::NumericProfile;
 
 /// Build profile selector for frontend benchmarks.
 ///

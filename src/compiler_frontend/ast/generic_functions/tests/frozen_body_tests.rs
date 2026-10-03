@@ -44,15 +44,12 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
 };
-use crate::compiler_frontend::numeric_text::token::{
-    NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
-};
+use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
@@ -80,6 +77,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
+use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
+use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::path::Path;

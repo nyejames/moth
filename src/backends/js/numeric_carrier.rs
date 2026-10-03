@@ -12,10 +12,12 @@
 use crate::compiler_frontend::builtins::casts::evidence::numeric_conversion_fallibility;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalarClass, FixedScalarValue};
-use crate::compiler_frontend::datatypes::number::{NumberScale, NumberValue};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::NumericProfile;
 
 const MAX_EXACT_JS_INTEGER: i128 = 9_007_199_254_740_991;
 

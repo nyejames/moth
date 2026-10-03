@@ -215,9 +215,11 @@ Maps retain both stored keys and stored values. Replacing an existing key keeps 
 
 Consider a map whose key and value point to the same allocation family:
 
+Source `{=}` is accepted empty-map syntax but is not implemented yet; see @../../../docs/progress (Progress matrix) for current support.
+
 [codeblock, $code("moth"):
     text = [: large value]
-    values ~{String = String} = {}
+    values ~{String = String} = {=}
 
     ~values.set(text, text)! -- final use of text
     removed = ~values.remove("large value")!

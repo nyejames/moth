@@ -1,11 +1,10 @@
 //! The first-party package dependency audit.
 //!
-//! WHAT: walks the explicitly owned first-party package roots, rejects package-manager metadata
-//!       and vendored dependency directories, and applies the moth first-party JavaScript import
-//!       policy to physical `.js` assets plus the compiler-owned JavaScript inventory.
-//! WHY: first-party packages promise zero third-party runtime dependencies. That promise needs one
-//!      narrow source owner rather than a repository-wide text search that mistakes documentation,
-//!      tests or benchmarks for package implementations.
+//! WHAT: audits extracted Rust library dependency direction through Cargo metadata, walks the
+//!       first-party package roots for package-manager metadata and vendored dependencies, and
+//!       applies the JavaScript import policy to assets and compiler-owned JavaScript inventory.
+//! WHY: independent libraries must not depend back on the compiler, while first-party packages
+//!      promise zero third-party runtime dependencies. Both need explicit owned inventories.
 //!
 //! # What this module owns
 //! - The scoped walk of first-party package implementation roots.
@@ -16,11 +15,15 @@
 //!   and `RuntimeModuleRegistry`. `moth::first_party_js` maps scanner diagnostics onto this audit's
 //!   two rules.
 //! - User-owned or future dependency packages and their manifests.
-//! - Package declarations, aliases, resolution or package-graph design.
-//! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
+//! - Moth package declarations, aliases, resolution or package-graph design.
+//! - Generated HTML runtime glue, documentation, tests and benchmarks.
 //! - Host-driven script loading: `importScripts`, `new Worker(url)`, injected `script` elements and
 //!   specifiers reaching `eval`, `new Function` or a `fetch` response. Those are runtime behaviour
 //!   rather than a declared dependency, so the scoped roots and review defend them, not this scan.
+
+mod rust_dependencies;
+
+use self::rust_dependencies::RustDependencyEdge;
 
 use crate::report_file::{ReportRunIdentity, write_report_atomically};
 use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
@@ -37,7 +40,7 @@ use std::path::Path;
 pub const FIRST_PARTY_DEPS_REPORT_PATH: &str = "target/test-reports/first_party_deps.json";
 
 /// Schema version of the first-party dependency report.
-pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 3;
+pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 4;
 
 /// First-party implementation roots, in deterministic scan order.
 ///
@@ -81,6 +84,8 @@ pub enum FirstPartyDepsRule {
     UnapprovedModuleImport,
     /// A registered runtime module was imported with an unknown name or unsupported form.
     InvalidRuntimeImport,
+    /// An extracted Rust library depends on a forbidden first-party workspace package.
+    RustDependencyDirection,
     /// A path could not be read, decoded, or inspected as a regular file or directory.
     UnreadablePath,
 }
@@ -92,6 +97,7 @@ impl FirstPartyDepsRule {
             Self::VendoredDependencyRoot => "vendored-dependency-root",
             Self::UnapprovedModuleImport => "unapproved-module-import",
             Self::InvalidRuntimeImport => "invalid-runtime-import",
+            Self::RustDependencyDirection => "rust-dependency-direction",
             Self::UnreadablePath => "unreadable-path",
         }
     }
@@ -104,6 +110,8 @@ pub struct FirstPartyDepsFinding {
     pub file: String,
     pub rule: FirstPartyDepsRule,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rust_dependency: Option<RustDependencyEdge>,
 }
 
 impl fmt::Display for FirstPartyDepsFinding {
@@ -137,15 +145,14 @@ pub fn run_first_party_deps() -> Result<(), String> {
 
     write_first_party_deps_report(&report_path, &started_report(run.clone()))?;
 
-    let (visited_file_count, javascript_source_count, findings) =
-        audit_first_party_deps(&workspace_root)?;
+    let state = audit_first_party_deps(&workspace_root)?;
     let report = FirstPartyDepsReport {
         schema_version: FIRST_PARTY_DEPS_SCHEMA_VERSION,
         run: run.completed(),
-        audited_roots: audited_roots(),
-        visited_file_count,
-        javascript_source_count,
-        findings,
+        audited_roots: state.audited_roots,
+        visited_file_count: state.visited_file_count,
+        javascript_source_count: state.javascript_source_count,
+        findings: state.findings,
     };
 
     write_first_party_deps_report(&report_path, &report)?;
@@ -156,6 +163,9 @@ pub fn run_first_party_deps() -> Result<(), String> {
         report.javascript_source_count,
         report.findings.len()
     );
+    for root in &report.audited_roots {
+        println!("  inspected root: {root}");
+    }
 
     if report.findings.is_empty() {
         return Ok(());
@@ -170,45 +180,35 @@ pub fn run_first_party_deps() -> Result<(), String> {
     ))
 }
 
-/// Audit the first-party roots and the compiler-owned JavaScript inventory.
+/// Audit Rust workspace dependency direction, first-party roots and the JavaScript inventory.
 ///
-/// Root traversal errors return `Err`; unreadable files become typed findings so a completed report
-/// still records exactly which paths prevented inspection.
-pub(crate) fn audit_first_party_deps(
-    workspace_root: &Path,
-) -> Result<(usize, usize, Vec<FirstPartyDepsFinding>), String> {
+/// Metadata and root traversal errors return `Err`; unreadable files become typed findings so a
+/// completed report still records exactly which paths prevented inspection.
+pub(crate) fn audit_first_party_deps(workspace_root: &Path) -> Result<ScanState, String> {
     let mut state = ScanState::default();
+    rust_dependencies::audit_rust_dependencies(workspace_root, &mut state)?;
 
     for root in FIRST_PARTY_SOURCE_ROOTS {
         scan_first_party_root(workspace_root, root, &mut state)?;
+        state.audited_roots.push((*root).to_owned());
     }
 
     scan_inventoried_javascript(&inventoried_javascript_sources(), &mut state);
-    Ok((
-        state.visited_file_count,
-        state.javascript_source_count,
-        state.findings,
-    ))
+    state
+        .audited_roots
+        .push(INVENTORIED_JS_ROOT_LABEL.to_owned());
+    Ok(state)
 }
 
 fn started_report(run: ReportRunIdentity) -> FirstPartyDepsReport {
     FirstPartyDepsReport {
         schema_version: FIRST_PARTY_DEPS_SCHEMA_VERSION,
         run,
-        audited_roots: audited_roots(),
+        audited_roots: Vec::new(),
         visited_file_count: 0,
         javascript_source_count: 0,
         findings: Vec::new(),
     }
-}
-
-fn audited_roots() -> Vec<String> {
-    let mut roots: Vec<String> = FIRST_PARTY_SOURCE_ROOTS
-        .iter()
-        .map(|root| (*root).to_owned())
-        .collect();
-    roots.push(INVENTORIED_JS_ROOT_LABEL.to_owned());
-    roots
 }
 
 fn write_first_party_deps_report(path: &Path, report: &FirstPartyDepsReport) -> Result<(), String> {
@@ -218,8 +218,9 @@ fn write_first_party_deps_report(path: &Path, report: &FirstPartyDepsReport) -> 
     write_report_atomically(path, json.as_bytes())
 }
 
-#[derive(Default)]
-struct ScanState {
+#[derive(Debug, Default)]
+pub(crate) struct ScanState {
+    audited_roots: Vec<String>,
     visited_file_count: usize,
     javascript_source_count: usize,
     findings: Vec<FirstPartyDepsFinding>,
@@ -261,6 +262,7 @@ fn scan_first_party_root(
                 file: relative.clone(),
                 rule: FirstPartyDepsRule::PackageManagerManifest,
                 message: format!("forbidden package-manager file '{name}'"),
+                rust_dependency: None,
             });
         }
 
@@ -270,6 +272,7 @@ fn scan_first_party_root(
                     file: relative,
                     rule: FirstPartyDepsRule::VendoredDependencyRoot,
                     message: format!("forbidden vendored dependency directory '{name}'"),
+                    rust_dependency: None,
                 });
                 return Ok(WalkDecision::SkipDescendants);
             }
@@ -288,6 +291,7 @@ fn scan_first_party_root(
                             file: relative,
                             rule: FirstPartyDepsRule::UnreadablePath,
                             message: format!("unreadable file ({error})"),
+                            rust_dependency: None,
                         });
                         return Ok(WalkDecision::Continue);
                     }
@@ -304,6 +308,7 @@ fn scan_first_party_root(
                         file: relative,
                         rule: FirstPartyDepsRule::UnreadablePath,
                         message: format!("JavaScript source is not valid UTF-8 ({error})"),
+                        rust_dependency: None,
                     }),
                 }
             }
@@ -316,6 +321,7 @@ fn scan_first_party_root(
             file: relative,
             rule: FirstPartyDepsRule::UnreadablePath,
             message: "path is neither a regular file nor a directory".to_owned(),
+            rust_dependency: None,
         });
         Ok(WalkDecision::Continue)
     })
@@ -351,6 +357,7 @@ fn audit_javascript_source(file: &str, source: &str) -> Vec<FirstPartyDepsFindin
                 }
             },
             message: finding.message,
+            rust_dependency: None,
         })
         .collect()
 }

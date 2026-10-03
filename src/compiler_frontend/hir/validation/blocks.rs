@@ -14,12 +14,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, negation_domain,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
@@ -29,6 +27,8 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::NumericProfile;
 
 #[derive(Clone, Copy)]
 enum FallibleReturnSlot {

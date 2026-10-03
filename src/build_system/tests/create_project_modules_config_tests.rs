@@ -1,6 +1,6 @@
 use super::*;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn parses_config_constant_declarations() {
     let _temp = tempfile::tempdir().expect("should create temp dir");

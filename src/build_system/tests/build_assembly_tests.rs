@@ -26,7 +26,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, ProjectContextEscapeReason, RuleDiagnosticKind,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -66,6 +65,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use moth_lexical::numeric::profile::NumericProfile;
 
 fn assert_project_context_diagnostic(
     error: ProjectAssemblyError,

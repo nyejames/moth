@@ -23,7 +23,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
     SourceSpanCapacityResource,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -39,6 +38,7 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_mo
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 

@@ -1,10 +1,9 @@
 use crate::backends::js::numeric_carrier::{JsNumericCarrier, JsNumericConversion};
 use crate::compiler_frontend::builtins::casts::evidence::numeric_scalars;
-use crate::compiler_frontend::datatypes::fixed_scalar::{FixedScalar, FixedScalarValue};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 #[test]
 fn carrier_selection_follows_profile_and_complete_scalar_range() {

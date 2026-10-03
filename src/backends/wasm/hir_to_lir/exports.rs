@@ -9,7 +9,7 @@ use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirBlockId, WasmLirFunctionId, WasmLirLocal, WasmLirLocalId, WasmLocalRole,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 
 pub(crate) fn synthesize_export_wrappers(

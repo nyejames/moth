@@ -20,16 +20,9 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::TypeEnvironment;
-use crate::compiler_frontend::datatypes::fixed_scalar::{
-    FixedScalar, FixedScalarClass, FixedScalarValue,
-};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::number::{NumberScale, NumberValue};
-use crate::compiler_frontend::datatypes::numeric_profile::{
-    FloatPrecision, IntWidth, NumericProfile,
-};
-use crate::compiler_frontend::datatypes::numeric_scalar::{BinaryFloatPrecision, NumericScalar};
-use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use crate::compiler_frontend::datatypes::number::NumberValue;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -38,6 +31,11 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 };
 use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn test_template_ir_store() -> Rc<RefCell<TemplateIrStore>> {
     Rc::new(RefCell::new(TemplateIrStore::new()))

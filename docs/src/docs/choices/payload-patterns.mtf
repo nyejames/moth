@@ -8,6 +8,9 @@ Pattern matching inspects choice payloads.
     ;
 ]
 
+Qualified patterns such as `Status::Ready` use the same lexical header rule:
+no whitespace, line break or comment may appear on either side of `::`.
+
 ### Capture contract
 
 - A payload pattern must include every declared field.

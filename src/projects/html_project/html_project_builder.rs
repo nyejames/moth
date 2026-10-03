@@ -22,7 +22,6 @@ use crate::builder_surface::config_schema::{
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -59,6 +58,7 @@ use crate::projects::html_project::wasm::artifacts::{
 };
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
+use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

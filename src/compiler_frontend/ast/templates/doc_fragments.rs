@@ -25,9 +25,9 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 

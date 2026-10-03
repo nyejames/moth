@@ -6,14 +6,14 @@
 
 use super::{DiagnosticRenderContext, diagnostic_type_name, token_kind_name};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, InvalidLoopHeaderReason, InvalidMatchArmReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidThisUsageReason, InvalidTypeAnnotationReason, MissingWhitespace,
-    NumberLiteralErrorReason, OperatorOperandPosition, SymbolicSpacingConstruct,
-    SymbolicSpacingError,
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, InvalidLoopHeaderReason,
+    InvalidMatchArmReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
+    MissingWhitespace, OperatorOperandPosition, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
-use crate::compiler_frontend::datatypes::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
     match reason {
@@ -251,6 +251,16 @@ pub(crate) fn common_syntax_mistake_message(
         CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
             "Invalid `#Config` qualifier spacing. Write `name #Config of Type = value` with no space between `#` and `Config`.".to_string()
         }
+        CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap } => {
+            let gap_description = match gap {
+                ChoiceVariantSeparatorGap::Before => "before it",
+                ChoiceVariantSeparatorGap::After => "after it",
+                ChoiceVariantSeparatorGap::Both => "on both sides",
+            };
+            format!(
+                "Qualified choice separator `::` must touch both names; remove the gap {gap_description}."
+            )
+        }
         CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => {
             "Invalid mutable binding syntax. Use `name ~= value` for inferred mutable bindings or `name ~Type = value` for explicit mutable types. For collection types, attach `~` to the first token of the type: `values ~{String} = ...`.".to_string()
         }
@@ -363,7 +373,11 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
         CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
             "Write the qualifier as `#Config of Type` without spaces inside `#Config`".to_owned()
         }
-    }
+        CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. } => {
+            "Write qualified choices as `Choice::Variant`, with no whitespace, line break, or comment around `::`."
+                .to_owned()
+        }
+}
 }
 
 pub(crate) fn missing_operator_operand_message(

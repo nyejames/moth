@@ -8,7 +8,6 @@ use crate::build_system::build::ProjectEntry;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::numeric_profile::NumericProfile;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirReachability;
@@ -19,6 +18,7 @@ use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
+use moth_lexical::numeric::profile::NumericProfile;
 use std::sync::Arc;
 
 /// Module-level inputs shared by all HTML builder compilation paths.

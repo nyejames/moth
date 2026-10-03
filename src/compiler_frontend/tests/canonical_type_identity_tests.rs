@@ -29,7 +29,6 @@ use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, GenericParameterId, GenericParameterListId, NominalTypeId,
     TypeConstructor, TypeId,
 };
-use crate::compiler_frontend::datatypes::number::NumberScale;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageRegistry, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
     IO_INPUT_EXTERNAL_TYPE_ID,
@@ -40,6 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::decimal::NumberScale;
 
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;

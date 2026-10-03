@@ -134,7 +134,7 @@ Numbers look simple until every layer invents its own rules.
 
 Accepted ownership splits cleanly:
 
-- **`numeric_text`** owns lexical grammar and materialisation helpers
+- **`moth-lexical::numeric`** owns shared lexical grammar and destination materialisation facts for the compiler and MON. Compiler adapters retain type lookup, arithmetic and allocation-heavy decimal values.
 - **AST** owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence
 - **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
 - compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
