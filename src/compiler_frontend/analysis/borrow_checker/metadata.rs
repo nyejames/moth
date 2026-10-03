@@ -202,6 +202,7 @@ impl<'a> BorrowChecker<'a> {
                 PublicCallSummary {
                     parameters,
                     return_alias: FunctionReturnAliasSummary::Fresh,
+                    escapes_builtin_failure: false,
                 },
             );
         }

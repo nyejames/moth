@@ -1,26 +1,24 @@
 //! Shared helpers for receiver-call dispatch submodules.
 //!
-//! WHAT: result-type construction, trait-requirement signature lowering, and small
-//!       declaration-building utilities used by multiple dispatch paths.
-//! WHY: call-argument resolution and result handling are structurally similar across
-//!      source and generic-bound calls; extracting the
-//!      common pieces prevents drift and keeps each dispatch file focused on its
-//!      lookup logic.
+//! WHAT: result-type construction, pending typed producer completion, trait-requirement signature
+//!       lowering and declaration-building utilities shared by receiver dispatch paths.
+//! WHY: explicit propagation stays at the postfix owner, while pending receiver calls expose success
+//!      types until whole-expression catch completion chooses their error delivery.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{
+    Expression, FallibleExpressionHandling,
+};
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     call_success_is_optional, non_fallible_handler_reason,
-    token_stream_starts_fallible_handling_suffix,
+    token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -40,45 +38,12 @@ pub(super) struct TraitSurfaceReceiverMethod {
     pub(super) receiver_mutable: bool,
 }
 
-fn fallible_receiver_result_type_ids(
-    success_return_type_ids: Vec<TypeId>,
-    error_return_type_id: TypeId,
-    type_interner: &mut AstTypeInterner<'_>,
-) -> Vec<TypeId> {
-    let success_type_id = match success_return_type_ids.as_slice() {
-        [] => type_interner.builtins().none,
-        [single] => *single,
-        multiple => type_interner
-            .environment_mut_for_derived_types()
-            .intern_tuple(multiple.to_vec()),
-    };
-
-    vec![type_interner.intern_fallible_carrier(success_type_id, error_return_type_id)]
-}
-
 pub(super) fn receiver_result_type_ids_for_call(
     success_return_type_ids: Vec<TypeId>,
-    error_return_type_id: Option<TypeId>,
     token_stream: &mut AstCursor<'_>,
     type_interner: &mut AstTypeInterner<'_>,
 ) -> Result<Vec<TypeId>, ExpressionParseError> {
-    if let Some(error_return_type_id) = error_return_type_id {
-        if !token_stream_starts_fallible_handling_suffix(token_stream) {
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
-                InvalidFallibleHandlingReason::UnhandledErrorReturn,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        return Ok(fallible_receiver_result_type_ids(
-            success_return_type_ids,
-            error_return_type_id,
-            type_interner,
-        ));
-    }
-
-    if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
+    if token_stream.current_tag() == TokenTag::BANG {
         let operand_is_optional = call_success_is_optional(
             success_return_type_ids.as_slice(),
             type_interner.environment(),
@@ -91,6 +56,41 @@ pub(super) fn receiver_result_type_ids_for_call(
     }
 
     Ok(success_return_type_ids)
+}
+
+/// Retains typed receiver producers until the whole selected expression completes.
+///
+/// The existing carrier stays inside the handled node for HIR's error-channel lowering. The outer
+/// node exposes only success types, so receiver and argument typing never sees a first-class result.
+pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_call_expression(
+    mut expression: Expression,
+    token_stream: &AstCursor<'_>,
+    type_interner: &mut AstTypeInterner<'_>,
+) -> Expression {
+    if token_stream_starts_typed_propagation_suffix(token_stream) {
+        return expression;
+    }
+
+    let Some((success_type_id, error_type_id)) = type_interner
+        .environment()
+        .fallible_carrier_slots(expression.type_id)
+    else {
+        return expression;
+    };
+
+    let span = expression.span;
+    let pending_facts = std::mem::take(&mut expression.failure_facts);
+    let diagnostic_type =
+        diagnostic_type_spelling(success_type_id, type_interner.environment());
+    let mut expression = Expression::handled_result_with_type_id(
+        expression,
+        FallibleExpressionHandling::Recover,
+        success_type_id,
+        diagnostic_type,
+        span,
+    );
+    expression.failure_facts = pending_facts;
+    expression.with_typed_error_producer(error_type_id)
 }
 
 pub(super) fn replace_trait_this_type(

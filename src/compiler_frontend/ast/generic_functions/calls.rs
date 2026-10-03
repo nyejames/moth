@@ -18,7 +18,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     resolve_call_arguments_shape_and_access,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{
+    Expression, FallibleExpressionHandling,
+};
 use crate::compiler_frontend::ast::generic_bounds::{
     BoundEvidenceSelection, evidence_for_type, evidence_target_is_visible,
     generated_evidence_pair_is_selected, generic_parameter_declares_bound,
@@ -34,13 +36,12 @@ use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     FallibleCallSite, HandledFallibleCall, call_success_is_optional, non_fallible_handler_reason,
     parse_fallible_handling_suffix_for_call_expression,
+    token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
@@ -82,6 +83,7 @@ struct GenericFunctionCallFinishInput<'a, 'b, 'tokens> {
     token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     call: HandledFallibleCall,
+    declaration_path: PathId,
     error_return_type_id: Option<TypeId>,
     value_required: bool,
     allow_boundary_catch: bool,
@@ -177,6 +179,7 @@ fn parse_generic_function_call(
         token_stream,
         context,
         call,
+        declaration_path: template.function_path,
         error_return_type_id: inference.signature.error_return_type_id(),
         value_required,
         allow_boundary_catch,
@@ -278,6 +281,7 @@ fn validate_generic_function_template_call(
         token_stream,
         context,
         call,
+        declaration_path: template.function_path,
         error_return_type_id: inference.signature.error_return_type_id(),
         value_required,
         allow_boundary_catch,
@@ -301,6 +305,7 @@ fn finish_generic_function_call(
         token_stream,
         context,
         call,
+        declaration_path,
         error_return_type_id,
         value_required,
         allow_boundary_catch,
@@ -311,7 +316,7 @@ fn finish_generic_function_call(
     } = input;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
+        if token_stream.current_tag() == TokenTag::BANG {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
@@ -323,14 +328,17 @@ fn finish_generic_function_call(
             .into());
         }
 
-        return Ok(call.into_plain_expression(type_interner.environment_mut_for_derived_types()));
+        let call_path = call.name;
+        let expression =
+            call.into_plain_expression(type_interner.environment_mut_for_derived_types());
+        return Ok(if context.source_call_has_private_failure_lane(declaration_path) {
+            expression.with_private_call_failure_candidate(call_path)
+        } else {
+            expression
+        });
     };
 
-    if token_stream.current_tag() == TokenTag::BANG
-        || token_stream.current_tag() == TokenTag::CATCH
-        || (token_stream.current_tag() == TokenTag::SYMBOL
-            && token_stream.peek_next_tag() == Some(TokenTag::BANG))
-    {
+    if token_stream_starts_typed_propagation_suffix(token_stream) {
         return parse_fallible_handling_suffix_for_call_expression(
             token_stream,
             context,
@@ -347,11 +355,15 @@ fn finish_generic_function_call(
         );
     }
 
-    Err(CompilerDiagnostic::invalid_fallible_handling(
-        InvalidFallibleHandlingReason::UnhandledErrorReturn,
-        Some(token_stream.current_span()),
+    Ok(Expression::handled_fallible_function_call_with_typed_arguments(
+        call.name,
+        call.args,
+        call.result_type_ids,
+        FallibleExpressionHandling::Recover,
+        type_interner.environment_mut_for_derived_types(),
+        call.call_span,
     )
-    .into())
+    .with_typed_error_producer(error_return_type_id))
 }
 
 pub(crate) struct GenericFunctionInferenceInput<'a> {

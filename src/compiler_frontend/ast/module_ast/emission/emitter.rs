@@ -64,7 +64,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -213,6 +213,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+    known_infallible_functions: Rc<RefCell<FxHashSet<PathId>>>,
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
@@ -238,6 +239,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             const_templates_by_path: FxHashMap::default(),
             compatibility_cache: TypeCompatibilityCache::new(),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
+            known_infallible_functions: Rc::new(RefCell::new(FxHashSet::default())),
             generic_function_instances_by_key: FxHashMap::default(),
             deferred_generic_requests: Vec::new(),
             validated_generic_template_bodies: Vec::new(),
@@ -314,6 +316,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_generic_function_instantiation_sink(Rc::clone(
             &self.generic_function_instantiation_requests,
         ))
+        .with_known_infallible_functions(Rc::clone(&self.known_infallible_functions))
         .with_receiver_methods(Rc::clone(&self.environment.lookups.receiver_methods))
         .with_lookups(Rc::clone(&self.environment.lookups))
         .with_generated_evidence_pairs(Rc::clone(&self.environment.generated_evidence_pairs))

@@ -416,6 +416,13 @@ fn diagnostic_label_message_text(
         DiagnosticLabelMessage::ImmutableBindingDeclaration => {
             "immutable binding declared here".to_owned()
         }
+        DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => {
+            let error_type = diagnostic_type_name(*error_type_id, context);
+            format!("`{error_type}!` failure produced here")
+        }
+        DiagnosticLabelMessage::ImplicitFailureProducer => {
+            "implicit built-in failure may escape here".to_owned()
+        }
     }
 }
 

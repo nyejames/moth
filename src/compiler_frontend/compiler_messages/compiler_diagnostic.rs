@@ -14,7 +14,8 @@ use crate::compiler_frontend::compiler_messages::{
     ImportDiagnosticKind, ImportPublicSurfaceType, IncompatibleChoiceComparisonReason,
     InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
+    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleHandlingReason,
+    InvalidFallibleOperandReason,
     InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
     InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
     InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
@@ -1829,14 +1830,70 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_fallible_handling(
-        reason: crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason,
+        reason: InvalidFallibleHandlingReason,
         span: Option<SourceSpan>,
     ) -> Self {
+        let producer_labels = match reason {
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id,
+                second_error_type_id,
+                first_producer_span,
+                second_producer_span,
+            } => [
+                (
+                    first_producer_span,
+                    Some(DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: first_error_type_id,
+                    }),
+                ),
+                (
+                    second_producer_span,
+                    Some(DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: second_error_type_id,
+                    }),
+                ),
+            ],
+
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id,
+                typed_producer_span,
+                implicit_producer_span,
+            } => [
+                (
+                    typed_producer_span,
+                    Some(DiagnosticLabelMessage::TypedFailureProducer { error_type_id }),
+                ),
+                (
+                    implicit_producer_span,
+                    Some(DiagnosticLabelMessage::ImplicitFailureProducer),
+                ),
+            ],
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                implicit_producer_span,
+                ..
+            } => [
+                (
+                    implicit_producer_span,
+                    Some(DiagnosticLabelMessage::ImplicitFailureProducer),
+                ),
+                (None, None),
+            ],
+
+            _ => [(None, None), (None, None)],
+        };
+        let labels = producer_labels
+            .into_iter()
+            .filter(|(producer_span, _)| producer_span.is_some())
+            .map(|(producer_span, message)| DiagnosticLabel::secondary(producer_span, message))
+            .collect();
+
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFallibleHandling),
             span,
             DiagnosticPayload::InvalidFallibleHandling { reason },
         )
+        .with_labels(labels)
     }
 
     pub(crate) fn invalid_template_slot(

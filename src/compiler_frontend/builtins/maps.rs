@@ -54,14 +54,6 @@ impl MapBuiltinOp {
         )
     }
 
-    /// Whether the operation is fallible and must be handled.
-    pub fn is_fallible(self) -> bool {
-        matches!(
-            self,
-            MapBuiltinOp::Get | MapBuiltinOp::Set | MapBuiltinOp::Remove
-        )
-    }
-
     /// Whether this operation is parsed as a property (no parentheses).
     pub fn is_property(self) -> bool {
         // Length is accessed field-like, without call parentheses.

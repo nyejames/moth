@@ -34,7 +34,8 @@ use crate::compiler_frontend::ast::field_access::{
 };
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::statements::fallible_handling::{
-    CastCatchSite, fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
+    CastCatchSite, compatible_expression_error_type, complete_catch_failure_fact,
+    fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
     parse_fallible_handling_suffix_for_expression, wrap_catch_expression,
 };
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_starts_match_arm_header;
@@ -51,7 +52,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
     InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidTemplateStructureReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, InvalidTemplateStructureReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
@@ -215,7 +216,6 @@ fn push_expression_after_suffixes(
     // ----------------------------
     let expression_after_fallible = if token_stream.position() < token_stream.length()
         && (token_stream.current_tag() == TokenTag::BANG
-            || token_stream.current_tag() == TokenTag::CATCH
             || (token_stream.current_tag() == TokenTag::SYMBOL
                 && token_stream.peek_next_tag() == Some(TokenTag::BANG)))
     {
@@ -452,6 +452,17 @@ pub(super) fn dispatch_expression_token(
     // This state machine is intentionally flat: each token either appends one AST node, advances
     // past a nested parse, or signals the caller that the surrounding grammar owns the delimiter.
     match token {
+        // Recovery selects the completed ordinary expression, never the last primary.
+        TokenTag::CATCH => {
+            if !state.allow_boundary_catch || !fallible_catch_allowed_in_context(context) {
+                return Err(CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::CatchOutsideBoundary,
+                    Some(token_stream.current_span()),
+                ).into());
+            }
+            Ok(ExpressionTokenStep::Break)
+        }
+
         TokenTag::CLOSE_CURLY
         | TokenTag::COMMA
         | TokenTag::EOF
@@ -1155,27 +1166,11 @@ fn parse_cast_expression(
         .into());
     }
 
-    // Determine the handling form. Catch handlers need the cast failure error type, which
-    // is always the builtin `Error` type for the supported cast evidence catalogue.
-    let mut catch_handler = None;
+    // Evidence owns conversion fallibility; the completed operand owns other producers.
+    let has_catch = token_stream.current_tag() == TokenTag::CATCH;
     let handling = if propagate {
         CastHandling::Propagate
-    } else if token_stream.current_tag() == TokenTag::CATCH {
-        let error_type_id =
-            resolve_builtin_error_type_typed(context, operand.span, string_table)?.type_id;
-        catch_handler = Some(parse_cast_catch_handling_suffix(
-            token_stream,
-            context,
-            type_interner,
-            CastCatchSite {
-                success_type_id: target_type_id,
-                error_type_id,
-                value_required_span: operand.span,
-                allow_boundary_catch: state.allow_boundary_catch,
-            },
-            string_table,
-            path_fork,
-        )?);
+    } else if has_catch {
         CastHandling::Recover
     } else {
         CastHandling::Infallible
@@ -1226,8 +1221,37 @@ fn parse_cast_expression(
         span: cast_span,
     })?;
 
-    if let Some(handler) = catch_handler {
+    if has_catch {
+        if matches!(&cast_expression.kind, ExpressionKind::Cast(cast)
+            if matches!(cast.handling, CastHandling::Recover))
+        {
+            let error_type_id =
+                resolve_builtin_error_type_typed(context, cast_expression.span, string_table)?.type_id;
+            cast_expression = cast_expression.with_typed_error_producer(error_type_id);
+        }
+        let error_type_id =
+            compatible_expression_error_type(
+                &cast_expression, context, type_interner.environment(), string_table,
+                Some(token_stream.current_span()),
+            )?;
+        let handler = parse_cast_catch_handling_suffix(
+            token_stream,
+            context,
+            type_interner,
+            CastCatchSite {
+                success_type_id: target_type_id,
+                error_type_id,
+                value_required_span: cast_expression.span,
+                allow_boundary_catch: state.allow_boundary_catch
+                    && fallible_catch_allowed_in_context(context),
+            },
+            string_table,
+            path_fork,
+        )?;
         cast_expression = wrap_catch_expression(cast_expression, handler, vec![target_type_id]);
+        complete_catch_failure_fact(
+            &mut cast_expression, error_type_id, context,
+        )?;
     }
 
     state

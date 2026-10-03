@@ -37,6 +37,7 @@ fn empty_public_call_summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: vec![],
         return_alias: FunctionReturnAliasSummary::Fresh,
+        escapes_builtin_failure: false,
     }
 }
 
@@ -71,6 +72,7 @@ fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCa
             reactive_effect,
         }],
         return_alias: FunctionReturnAliasSummary::Fresh,
+        escapes_builtin_failure: false,
     }
 }
 

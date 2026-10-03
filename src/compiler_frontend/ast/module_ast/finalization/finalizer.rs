@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::const_values::body_local::insert_body_local_c
 use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
@@ -32,8 +33,9 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
+use crate::compiler_frontend::canonical_type_identity::{CanonicalBuiltinType, CanonicalTypeIdentity};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidFallibleHandlingReason};
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -312,6 +314,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &emitted.warnings,
             string_table,
         )?;
+        self.validate_generic_builtin_failure_boundaries(
+            &emitted.validated_generic_template_bodies,
+            &emitted.warnings,
+            string_table,
+        )?;
 
         // ----------------------------
         //  Publish active reactive metadata
@@ -562,6 +569,64 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 self.error_messages(*error, warnings, string_table)
             }
         }
+    }
+
+    /// Dormant generic declarations never reach HIR. Validate pending contributors after static
+    /// specialization, before their temporary typed bodies are dropped. Unresolved private calls
+    /// remain possible failure at a published/custom-error template boundary, never proof of safety.
+    fn validate_generic_builtin_failure_boundaries(
+        &self,
+        nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        warnings: &[CompilerDiagnostic],
+        string_table: &StringTable,
+    ) -> Result<(), CompilerMessages> {
+        let builtin_error_type = self.environment.type_environment.type_id_for_canonical_identity(
+            &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+        );
+        let template_ir_store = self.context.template_ir_store.borrow();
+        for node in nodes {
+            let NodeKind::Function(path, signature, body) = &node.kind else {
+                continue;
+            };
+            let pending = pending_function_failure_facts(body, &template_ir_store)
+                .map_err(|error| self.error_messages(error, warnings, string_table))?;
+            if let Some(contributor) = pending.assertion_message_calls.first() {
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    CompilerDiagnostic::invalid_fallible_handling(
+                        InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+                        contributor.span.or(node.span),
+                    ),
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+            }
+            let custom_error = match signature.error_return_type_id() {
+                Some(error_type) if Some(error_type) == builtin_error_type => continue,
+                Some(error_type) => Some(error_type),
+                None if self.environment.lookups.exported_callable_paths.contains(path) => None,
+                None => continue,
+            };
+            let Some(contributor) = pending.body.implicit.first() else {
+                continue;
+            };
+            let reason = match custom_error {
+                Some(error_type_id) => {
+                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                        error_type_id,
+                        implicit_producer_span: contributor.span,
+                    }
+                }
+                None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+            };
+            return Err(CompilerMessages::from_diagnostic_with_warnings(
+                CompilerDiagnostic::invalid_fallible_handling(reason, node.span.or(contributor.span)),
+                warnings.to_owned(),
+                string_table,
+            )
+            .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+        }
+        Ok(())
     }
 
     fn validate_specialized_function_terminality(

@@ -54,6 +54,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
+use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRootKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -1192,13 +1193,22 @@ fn discard_inactive_assertion_messages_in_loop_header(header: &mut TemplateLoopH
 /// WHY: a compile-time-true assertion remains frontend-valid but publishes no message value or
 ///      downstream executable fact. The existing resolved optional type identity is retained.
 fn replace_inactive_assertion_message(message: &mut Expression) {
-    let inert_message = Expression::new(
+    let mut inert_message = Expression::new(
         ExpressionKind::OptionNone,
         message.span,
         message.type_id,
         message.diagnostic_type.clone(),
         ValueMode::ImmutableOwned,
     );
+    // Inactive execution publishes no message value, but unresolved private-call validation
+    // still needs its expression-owned candidates until semantic summary convergence.
+    inert_message.failure_facts.implicit = std::mem::take(&mut message.failure_facts.implicit);
+    inert_message.failure_facts.implicit.retain(|contributor| {
+        matches!(
+            contributor.source,
+            ImplicitFailureSource::PrivateCall(_)
+        )
+    });
     *message = inert_message;
 }
 

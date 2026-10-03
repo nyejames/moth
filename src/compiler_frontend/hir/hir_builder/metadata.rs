@@ -8,8 +8,21 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    ImplicitFailureContributor, ImplicitFailureSource,
+};
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::failure_facts::{
+    HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
+    HirFunctionFailureFacts,
+};
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::module_metadata::{ModuleDocFragment, ModuleDocFragmentKind};
@@ -73,6 +86,18 @@ impl<'a> HirBuilder<'a> {
 
             match origin {
                 HirStableFunctionOrigin::Public(origin) => {
+                    let facts = self
+                        .module
+                        .function_failure_facts
+                        .get_mut(&function.id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "HIR function-origin lowering is missing projected failure facts",
+                            )
+                        })?;
+                    if facts.boundary == HirBuiltinFailureBoundary::InferPrivate {
+                        facts.boundary = HirBuiltinFailureBoundary::ExportedNoSlot;
+                    }
                     if self.module.function_ids_by_origin.contains_key(&origin) {
                         return Err(CompilerError::compiler_error(format!(
                             "HIR function-origin lowering received duplicate stable origin {:?}",
@@ -113,6 +138,71 @@ impl<'a> HirBuilder<'a> {
         }
 
         Ok(())
+    }
+
+    /// Freeze expression-owned failure facts while the completed AST is still available.
+    /// Exact exportedness is joined by origin assignment after this body projection.
+    pub(super) fn project_function_failure_facts(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+        let builtin_error_type = self
+            .type_environment
+            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::Error,
+            ));
+        // Completed AST contains owned runtime handoffs, never unresolved TIR references.
+        let template_ir_store = TemplateIrStore::new();
+
+        for node in &ast.nodes {
+            let NodeKind::Function(path, signature, body) = &node.kind else {
+                continue;
+            };
+            let function_id = self.resolve_function_id_or_error(path, &node.span)?;
+            let boundary = match signature.error_return_type_id() {
+                _ if self.module.start_function == Some(function_id) => {
+                    HirBuiltinFailureBoundary::BuiltinErrorSlot
+                }
+                Some(error_type) if Some(error_type) == builtin_error_type => {
+                    HirBuiltinFailureBoundary::BuiltinErrorSlot
+                }
+                Some(error_type) => HirBuiltinFailureBoundary::CustomErrorSlot(error_type),
+                None => HirBuiltinFailureBoundary::InferPrivate,
+            };
+            let pending = pending_function_failure_facts(body, &template_ir_store)?;
+            let contributors = self.project_failure_contributors(pending.body.implicit)?;
+            let assertion_message_calls =
+                self.project_failure_contributors(pending.assertion_message_calls)?;
+            self.module.function_failure_facts.insert(
+                function_id,
+                HirFunctionFailureFacts {
+                    span: node.span,
+                    boundary,
+                    contributors,
+                    assertion_message_calls,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn project_failure_contributors(
+        &self,
+        pending: Vec<ImplicitFailureContributor>,
+    ) -> Result<Vec<HirBuiltinFailureContributor>, CompilerError> {
+        let mut contributors = Vec::with_capacity(pending.len());
+        for contributor in pending {
+            let source = match contributor.source {
+                ImplicitFailureSource::NumericOperation => HirBuiltinFailureSource::NumericOperation,
+                ImplicitFailureSource::PrivateCall(path) => HirBuiltinFailureSource::Call(
+                    self.resolve_call_target_or_error(&path, &contributor.span)?,
+                ),
+            };
+            contributors.push(HirBuiltinFailureContributor {
+                source,
+                span: contributor.span,
+                codes: contributor.codes,
+            });
+        }
+        Ok(contributors)
     }
 
     pub(super) fn resolve_doc_fragments(&mut self, ast: &Ast) -> Result<(), CompilerError> {

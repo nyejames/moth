@@ -17,6 +17,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
+use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -130,6 +131,10 @@ pub struct HirModule {
     /// deterministic direct provenance. HIR validation rejects missing, extra or out-of-range
     /// coverage as `CompilerError`.
     pub function_provenance: FxHashMap<FunctionId, SyntheticInterfaceProvenance>,
+
+    /// Direct unhandled failure producers and source boundary for every local function.
+    /// Summary convergence consumes this read-only projection rather than AST or CFG rescans.
+    pub(crate) function_failure_facts: FxHashMap<FunctionId, HirFunctionFailureFacts>,
 }
 
 impl HirModule {
@@ -152,6 +157,7 @@ impl HirModule {
             regions: vec![],
             const_facts: HirConstFacts::default(),
             function_provenance: FxHashMap::default(),
+            function_failure_facts: FxHashMap::default(),
         }
     }
 

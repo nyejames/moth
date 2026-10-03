@@ -88,6 +88,10 @@ pub(crate) enum DiagnosticLabelMessage {
     GenericInferencePreviousEvidence,
     /// Marks the original immutable binding declaration for assignment-target diagnostics.
     ImmutableBindingDeclaration,
+    TypedFailureProducer {
+        error_type_id: TypeId,
+    },
+    ImplicitFailureProducer,
 }
 
 impl DiagnosticLabelMessage {
@@ -111,7 +115,9 @@ impl DiagnosticLabelMessage {
             | DiagnosticLabelMessage::GenericInstantiationBodySite
             | DiagnosticLabelMessage::GenericInstantiationDeclarationSite
             | DiagnosticLabelMessage::GenericInferencePreviousEvidence
-            | DiagnosticLabelMessage::ImmutableBindingDeclaration => {}
+            | DiagnosticLabelMessage::ImmutableBindingDeclaration
+            | DiagnosticLabelMessage::TypedFailureProducer { .. }
+            | DiagnosticLabelMessage::ImplicitFailureProducer => {}
         }
     }
 }

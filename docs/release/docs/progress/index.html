@@ -1142,15 +1142,15 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Expression-wide catch and private implicit propagation</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
- <td style="padding: 0.1em 0.5em; "> Accepted checked numeric failure follows the enclosing handler or function contract. Catch covers the complete selected expression. Private functions with no error slot infer and propagate implicit failure within the same module without postfix <code>!</code> at each internal call.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend semantic facts and diagnostics exist, including the pre-lowering unsupported-catch diagnostic. Runtime propagation, Error materialisation and backend delivery are not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> The frontend records complete-expression producers, compatible catch contracts and private implicit-failure candidates. Accepted checked numeric failure follows the enclosing handler or function contract, but runtime delivery is deferred. Unsupported recovery shapes are diagnosed before lowering rather than delivered at runtime. Private no-slot calls need no postfix <code>!</code> for the inferred same-module lane.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Export and custom-error discharge diagnostics</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
- <td style="padding: 0.1em 0.5em; "> Not implemented.</td>
- <td style="padding: 0.1em 0.5em; "> Accepted exported callables with no error slot must discharge implicit failure or receive a compiler diagnostic. Custom <code>E!</code> contracts require local recovery or explicit mapping instead of an implicit adapter.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend boundary diagnostics exist, including the pre-lowering unsupported-catch diagnostic. Runtime propagation, Error materialisation and backend delivery are not implemented.</td>
+ <td style="padding: 0.1em 0.5em; "> The frontend diagnoses escaping implicit failure at exported no-slot and custom <code>E!</code> boundaries, including dormant generic contracts. Accepted local recovery or explicit mapping remains subject to the unsupported-catch lowering hold. These semantic checks do not implement runtime propagation, materialisation or recovery.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">

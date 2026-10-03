@@ -1,4 +1,8 @@
 use super::*;
+use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::failure_facts::{
+    HirBuiltinFailureBoundary, HirBuiltinFailureSource,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use moth_lexical::numeric::profile::NumericProfile;
 #[test]
@@ -1335,6 +1339,79 @@ wrapped Wrapper = identity(make())
         .expect("facade-hidden provider nominal should retain its fields");
     assert_eq!(hidden_fields.len(), 1);
     assert_eq!(hidden_fields[0].type_id, builtin_type_ids::INT);
+}
+
+#[test]
+fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_convergence() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let dir = temp_dir.path().to_path_buf();
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("should create project entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    ).expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
+         product type T |marker T, left Int, right Int| -> Int:\n\
+             return multiply(left, right)\n;\n\
+         safe_product type T |marker T, left Int, right Int| -> Int, Error!:\n\
+             return multiply(left, right)\n;\n\
+         use_product |left Int, right Int| -> Int:\n    return product(0, left, right)\n;\n\
+         use_safe_product |left Int, right Int| -> Int, Error!:\n\
+             return safe_product(0, left, right)!\n;\n\
+         result = use_product(2, 3)\n",
+    ).expect("should write private generic helper source");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    ).expect("real private generic helper contracts should compile");
+
+    let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+    assert_eq!(sidecars.len(), 2, "both authored concrete requests must materialise");
+    let mut inferred_roots = 0;
+    let mut error_slot_roots = 0;
+    for sidecar in sidecars {
+        let executable = &sidecar.module.executable;
+        let hir = &executable.hir;
+        let root = *hir.function_ids_by_generated.get(&sidecar.identity)
+            .expect("sidecar identity must resolve to its exact generated root");
+        let facts = &hir.function_failure_facts[&root];
+        assert_eq!(facts.contributors.len(), 1);
+        let contributor = &facts.contributors[0];
+        let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source else {
+            panic!("materialised donor-private call must retain its failure contributor: {contributor:?}");
+        };
+        assert!(contributor.span.is_some());
+        assert!(
+            hir.module_private_call_summaries[helper].escapes_builtin_failure,
+            "the real multiply body, not an injected summary, must establish helper failure",
+        );
+        let summary = &executable.borrow_analysis.analysis.public_call_summaries[&root];
+        match facts.boundary {
+            HirBuiltinFailureBoundary::InferPrivate => {
+                inferred_roots += 1;
+                assert!(summary.escapes_builtin_failure);
+            }
+            HirBuiltinFailureBoundary::BuiltinErrorSlot => {
+                error_slot_roots += 1;
+                assert!(!summary.escapes_builtin_failure);
+            }
+            boundary => panic!("unexpected generated failure contract: {boundary:?}"),
+        }
+    }
+    assert_eq!((inferred_roots, error_slot_roots), (1, 1));
 }
 
 #[test]

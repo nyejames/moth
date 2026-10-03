@@ -5,6 +5,7 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
+use crate::compiler_frontend::source::SourceSpan;
 
 // -------------------------------
 //  Diagnostic Payload Supporting Types
@@ -1382,6 +1383,7 @@ pub enum InvalidFallibleHandlingReason {
     FunctionHasNoOptionalReturn,
     OptionPropagationReturnTypeMismatch,
     OptionPropagationCatchConflict,
+    ExplicitPropagationCatchConflict,
     CatchHandlerConflicts,
     CatchHandlerCanFallThrough,
     InlineCatchMultiline,
@@ -1392,11 +1394,50 @@ pub enum InvalidFallibleHandlingReason {
     DirectOptionFallbackSyntax,
     UnhandledErrorReturn,
     SuccessValueDiscarded,
+    IncompatibleCatchErrorTypes {
+        first_error_type_id: TypeId,
+        second_error_type_id: TypeId,
+        first_producer_span: Option<SourceSpan>,
+        second_producer_span: Option<SourceSpan>,
+    },
+    CustomErrorMixedWithImplicitFailure {
+        error_type_id: TypeId,
+        typed_producer_span: Option<SourceSpan>,
+        implicit_producer_span: Option<SourceSpan>,
+    },
+    UnhandledBuiltinFailureInCustomErrorFunction {
+        error_type_id: TypeId,
+        implicit_producer_span: Option<SourceSpan>,
+    },
+    UnhandledBuiltinFailureInExportedFunction,
+    UnsupportedCatchExpressionShape {
+        expression_name: StringId,
+    },
 }
 
 impl InvalidFallibleHandlingReason {
     pub(crate) fn message(self) -> &'static str {
         match self {
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes { .. } => {
+                "This catch protects producers with incompatible typed errors. Split the work into separately handled expressions or convert the errors explicitly."
+            }
+
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure { .. } => {
+                "This catch mixes a custom typed error with implicit built-in failure. Split the work into separately handled expressions or convert the errors explicitly."
+            }
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. } => {
+                "Implicit built-in failure cannot escape through a custom error slot. Recover locally with catch or convert the failure explicitly with catch and return!."
+            }
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction => {
+                "This exported function has no error slot but implicit built-in failure may escape. Recover locally with catch or declare a final Error! return slot."
+            }
+
+            InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { .. } => {
+                "Catch recovery for this expression shape is not supported by the current compiler. Split the protected work into separately handled expressions or recover through a supported typed fallible call."
+            }
+
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
                 "`catch` can only handle a fallible expression at an assignment, declaration, return, or statement boundary."
             }
@@ -1434,7 +1475,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` handles fallible `Error!` expressions, but this expression is not fallible."
+                "`catch` handles implicit built-in failure or compatible typed errors, but this expression is not fallible."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {
@@ -1467,6 +1508,10 @@ impl InvalidFallibleHandlingReason {
 
             InvalidFallibleHandlingReason::OptionPropagationCatchConflict => {
                 "`catch` handles fallible expressions. Optional values must use explicit option inspection instead of `? catch`."
+            }
+
+            InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => {
+                "Explicit propagation leaves the enclosing function and cannot target a surrounding catch. Split the work into statements before recovering locally."
             }
 
             InvalidFallibleHandlingReason::CatchHandlerConflicts => {

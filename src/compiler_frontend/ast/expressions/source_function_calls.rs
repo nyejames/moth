@@ -16,7 +16,6 @@ use crate::compiler_frontend::ast::generic_functions::{
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
     with_generic_primary_span,
 };
-use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -77,9 +76,6 @@ pub(super) fn parse_source_callable_member(
     } = input;
 
     let expression_is_boundary_leading = expression.is_empty();
-    let allow_call_boundary_catch = allow_boundary_catch
-        && expression_is_boundary_leading
-        && fallible_catch_allowed_in_context(context);
 
     // ------------------------
     //  Generic source call
@@ -136,7 +132,7 @@ pub(super) fn parse_source_callable_member(
             context,
             expected_context,
             value_required: true,
-            allow_boundary_catch: allow_call_boundary_catch,
+            allow_boundary_catch,
             call_span,
             warnings: None,
             type_interner,
@@ -176,7 +172,7 @@ pub(super) fn parse_source_callable_member(
         context,
         signature,
         value_required: true,
-        allow_boundary_catch: allow_call_boundary_catch,
+        allow_boundary_catch,
         warnings: None,
         type_interner,
         string_table,

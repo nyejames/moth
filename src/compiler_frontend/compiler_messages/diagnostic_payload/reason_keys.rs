@@ -419,8 +419,15 @@ macro_rules! define_reasoned_diagnostic_registry {
             Rule::InvalidFallibleHandling => {
                 payload: InvalidFallibleHandling;
                 fields: { reason: InvalidFallibleHandlingReason }
-                bindings: {}
-                remap: {}
+                bindings: { reason }
+                remap: {
+                    if let InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape {
+                        expression_name,
+                    } = reason
+                    {
+                        *expression_name = remap.get(*expression_name);
+                    }
+                }
                 descriptor: { "MOTH-RULE-0051", "Invalid fallible handling", Error }
             },
             Rule::InvalidTemplateSlot => {
@@ -1384,6 +1391,7 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => "invalid_fallible_handling.function_has_no_optional_return",
     &InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => "invalid_fallible_handling.option_propagation_return_type_mismatch",
     &InvalidFallibleHandlingReason::OptionPropagationCatchConflict => "invalid_fallible_handling.option_propagation_catch_conflict",
+    &InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => "invalid_fallible_handling.explicit_propagation_catch_conflict",
     &InvalidFallibleHandlingReason::CatchHandlerConflicts => "invalid_fallible_handling.catch_handler_conflicts",
     &InvalidFallibleHandlingReason::CatchHandlerCanFallThrough => "invalid_fallible_handling.catch_handler_can_fall_through",
     &InvalidFallibleHandlingReason::InlineCatchMultiline => "invalid_fallible_handling.inline_catch_multiline",
@@ -1393,6 +1401,11 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::ThenRequiresValues => "invalid_fallible_handling.then_requires_values",
     &InvalidFallibleHandlingReason::DirectOptionFallbackSyntax => "invalid_fallible_handling.direct_option_fallback_syntax",
     &InvalidFallibleHandlingReason::UnhandledErrorReturn => "invalid_fallible_handling.unhandled_error_return",
+    &InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes { .. } => "invalid_fallible_handling.incompatible_catch_error_types",
+    &InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure { .. } => "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
+    &InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. } => "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
+    &InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+    &InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { .. } => "invalid_fallible_handling.unsupported_catch_expression_shape",
     &InvalidFallibleHandlingReason::SuccessValueDiscarded => "invalid_fallible_handling.success_value_discarded",
     },
 

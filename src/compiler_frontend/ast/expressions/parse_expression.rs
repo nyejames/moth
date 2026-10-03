@@ -1,7 +1,8 @@
 //! AST expression parsing and expression-list helpers.
 //!
-//! WHAT: parses token streams into typed AST expressions before evaluation and lowering.
-//! WHY: expression parsing centralizes precedence, call parsing, and place-expression rules in one pass.
+//! Owns ordinary reduction followed by receiving-boundary recovery selection. Nested parses
+//! retain producer facts but do not gain a catch boundary; the root rejects typed producers
+//! still unhandled after its complete expression is known.
 
 use super::error::ExpressionParseError;
 use super::eval_expression::evaluate_expression;
@@ -15,6 +16,10 @@ use super::parse_expression_input::{
 };
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::statements::fallible_handling::{
+    parse_completed_expression_catch, parse_fallible_handling_suffix_for_expression,
+    token_stream_starts_typed_propagation_suffix,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidReturnShapeReason,
@@ -219,12 +224,43 @@ pub(crate) fn create_expression_without_boundary_catch(
 pub(crate) fn create_expression_with_trailing_newline_policy(
     mut input: ExpressionParseInput<'_, '_, '_>,
 ) -> Result<Expression, ExpressionParseError> {
+    if !input.scope_context.defer_typed_error_validation {
+        let deferred_context = input
+            .scope_context
+            .new_pending_typed_error_expression_context();
+        let mut deferred_input = ExpressionParseInput::new(
+            ExpressionParseResources {
+                token_stream: input.token_stream,
+                scope_context: &deferred_context,
+                type_interner: input.type_interner,
+                expected_type: input.expected_type,
+                cast_target_context: input.cast_target_context,
+                value_mode: input.value_mode,
+                string_table: input.string_table,
+                path_fork: input.path_fork,
+            },
+            input.trailing_policy,
+        );
+        deferred_input.stop_at_named_entry = input.stop_at_named_entry;
+        let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
+        validate_completed_typed_errors(&expression)?;
+        return Ok(expression);
+    }
+
+    // Keep the authored terminator until recovery has selected its expression.
+    let skip_trailing_newlines = input.trailing_policy.skip_trailing_newlines;
+    input.trailing_policy.skip_trailing_newlines = false;
     let nodes = match collect_expression_fragment(&mut input)? {
-        ExpressionFragment::Value(value) => return Ok(*value),
+        ExpressionFragment::Value(value) => {
+            if skip_trailing_newlines {
+                input.token_stream.skip_newlines();
+            }
+            return Ok(*value);
+        }
         ExpressionFragment::Nodes(nodes) => nodes,
     };
 
-    evaluate_expression(
+    let expression = evaluate_expression(
         input.scope_context,
         nodes,
         input.type_interner,
@@ -232,8 +268,65 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.value_mode,
         input.string_table,
         input.path_fork,
-    )
-    .map_err(ExpressionParseError::from)
+    )?;
+
+    let expression = complete_pending_expression(
+        input.token_stream,
+        input.scope_context,
+        input.type_interner,
+        expression,
+        input.trailing_policy.allow_boundary_catch,
+        input.string_table,
+        input.path_fork,
+    )?;
+
+    if skip_trailing_newlines {
+        input.token_stream.skip_newlines();
+    }
+    Ok(expression)
+}
+
+/// Finish an existing expression at a receiving site without reparsing its primary.
+///
+/// Place parsing must first distinguish mutation from a call statement. Its non-mutation path
+/// rejoins this owner so postfix propagation and whole-expression recovery have one meaning.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "completion keeps parser resources and the already-typed value separate"
+)]
+pub(crate) fn complete_pending_expression(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    mut expression: Expression,
+    allow_boundary_catch: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<Expression, ExpressionParseError> {
+    if token_stream_starts_typed_propagation_suffix(token_stream) {
+        let value_required = expression.type_id != type_interner.environment().builtins().none;
+        expression = parse_fallible_handling_suffix_for_expression(
+            token_stream, context, type_interner, expression, value_required,
+            allow_boundary_catch, string_table, path_fork,
+        )?;
+    }
+    if token_stream.current_tag() == TokenTag::CATCH {
+        expression = parse_completed_expression_catch(
+            token_stream, context, type_interner, expression, allow_boundary_catch,
+            string_table, path_fork,
+        )?;
+    }
+    if !context.defer_typed_error_validation {
+        validate_completed_typed_errors(&expression)?;
+    }
+    Ok(expression)
+}
+
+fn validate_completed_typed_errors(expression: &Expression) -> Result<(), ExpressionParseError> {
+    if let Some(diagnostic) = expression.unhandled_typed_error_diagnostic() {
+        return Err(diagnostic.into());
+    }
+    Ok(())
 }
 
 /// One parsed expression before evaluation.

@@ -55,6 +55,9 @@ pub(crate) struct AstModuleLookups {
     pub(crate) declaration_table: Rc<TopLevelDeclarationTable>,
     pub(crate) imported_functions_by_local_path:
         FxHashMap<PathId, crate::compiler_frontend::ast::AstImportedFunctionContract>,
+    /// Exact exported callable paths projected by the resolved public-root owner before emission.
+    /// Source parsing excludes these closed contracts from the same-module private failure lane.
+    pub(crate) exported_callable_paths: FxHashSet<PathId>,
     pub(crate) imported_struct_definitions:
         Vec<crate::compiler_frontend::ast::AstImportedStructDefinition>,
     pub(crate) imported_choice_definitions: Vec<crate::compiler_frontend::ast::AstChoiceDefinition>,

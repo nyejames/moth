@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -29,6 +30,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
     OwnedRuntimeTemplateNode,
+};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -46,6 +50,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 struct DebugTypeValidationContext<'a> {
     type_environment: &'a TypeEnvironment,
     template_ir_store: &'a TemplateIrStore,
+    recovery_context: ExpressionValidationContext,
 }
 
 /// Entry point for debug TypeId validation before HIR lowering.
@@ -66,6 +71,7 @@ pub(super) fn debug_validate_type_ids_for_hir(
     let context = DebugTypeValidationContext {
         type_environment,
         template_ir_store,
+        recovery_context: ExpressionValidationContext::Ordinary,
     };
 
     for node in nodes {
@@ -268,7 +274,7 @@ fn debug_validate_expression_type_id(
     debug_validate_expression_type_id_with_context(
         expression,
         context,
-        ExpressionValidationContext::Ordinary,
+        context.recovery_context,
     );
 }
 
@@ -503,15 +509,34 @@ fn debug_validate_expression_type_id_with_context(
                     "ValueBlock::Catch carried non-handler fallible handling"
                 );
                 debug_assert!(
-                    expression_is_recovering_catch_subject(&value_catch.handled_value),
+                    expression_is_recovering_catch_subject(&value_catch.handled_value, context),
                     "ValueBlock::Catch handled value was not marked for recovery"
                 );
+                // Nested compatible producers belong to the complete protected expression.
+                // Only a validated semantic catch disposition grants that recursive permission.
+                let protected_context = DebugTypeValidationContext {
+                    type_environment: context.type_environment,
+                    template_ir_store: context.template_ir_store,
+                    recovery_context: if matches!(
+                        value_catch.handled_value.failure_facts.disposition,
+                        FailureDisposition::HandledByCatch { .. }
+                    ) {
+                        ExpressionValidationContext::ValueCatchHandledValue
+                    } else {
+                        ExpressionValidationContext::Ordinary
+                    },
+                };
                 debug_validate_expression_type_id_with_context(
                     &value_catch.handled_value,
-                    context,
+                    &protected_context,
                     ExpressionValidationContext::ValueCatchHandledValue,
                 );
-                debug_validate_fallible_handling_type_ids(&value_catch.handler, context);
+                let handler_context = DebugTypeValidationContext {
+                    type_environment: context.type_environment,
+                    template_ir_store: context.template_ir_store,
+                    recovery_context: ExpressionValidationContext::Ordinary,
+                };
+                debug_validate_fallible_handling_type_ids(&value_catch.handler, &handler_context);
             }
         },
 
@@ -529,7 +554,47 @@ fn debug_validate_expression_type_id_with_context(
     }
 }
 
-fn expression_is_recovering_catch_subject(expression: &Expression) -> bool {
+fn expression_is_recovering_catch_subject(
+    expression: &Expression,
+    context: &DebugTypeValidationContext,
+) -> bool {
+    // Catch eligibility belongs to AST failure facts, not the subset of expression shapes that
+    // current HIR recovery can deliver. The semantic façade diagnoses unsupported delivery later.
+    if let FailureDisposition::HandledByCatch { error_type_id } =
+        expression.failure_facts.disposition
+    {
+        debug_validate_type_id(error_type_id, context.type_environment, "catch error type");
+        let builtin_error = context.type_environment.type_id_for_canonical_identity(
+            &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
+        );
+        let implicit_is_compatible = expression.failure_facts.implicit.is_empty()
+            || Some(error_type_id) == builtin_error;
+        let typed_errors_are_compatible = expression
+            .failure_facts
+            .typed_errors
+            .iter()
+            .all(|producer| producer.error_type_id == error_type_id);
+        let is_eligible = expression.failure_facts.checked_numeric_operation
+            || !expression.failure_facts.implicit.is_empty()
+            || !expression.failure_facts.typed_errors.is_empty();
+        if !implicit_is_compatible
+            || !typed_errors_are_compatible
+            || !is_eligible
+            || expression.failure_facts.postfix_exit_span.is_some()
+        {
+            return false;
+        }
+        if !matches!(
+            expression.kind,
+            ExpressionKind::HandledFallibleFunctionCall { .. }
+                | ExpressionKind::HandledFallibleHostFunctionCall { .. }
+                | ExpressionKind::HandledFallibleExpression { .. }
+                | ExpressionKind::Cast(_)
+        ) {
+            return true;
+        }
+    }
+
     match &expression.kind {
         ExpressionKind::HandledFallibleFunctionCall { handling, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { handling, .. }

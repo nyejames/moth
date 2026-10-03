@@ -23,6 +23,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::function_calls::{
+    CallFinishContext, finish_function_call_expression,
+};
 use crate::compiler_frontend::ast::field_access::parse_chain::expression_from_postfix_node;
 use crate::compiler_frontend::ast::field_access::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
@@ -33,6 +36,7 @@ use crate::compiler_frontend::ast::generic_functions::{
     validate_generic_function_bound_evidence,
 };
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
+use crate::compiler_frontend::ast::statements::fallible_handling::HandledFallibleCall;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -72,6 +76,13 @@ impl SourceReceiverMethodTarget<'_> {
         match self {
             SourceReceiverMethodTarget::Declared(entry) => &entry.signature,
             SourceReceiverMethodTarget::TraitSurface(method) => &method.signature,
+        }
+    }
+
+    fn method_path(&self) -> PathId {
+        match self {
+            SourceReceiverMethodTarget::Declared(entry) => entry.function_path,
+            SourceReceiverMethodTarget::TraitSurface(method) => method.method_path,
         }
     }
 }
@@ -327,12 +338,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             float_precision: scope_context.numeric_profile.float_precision,
         },
     )?;
-    let result_type_ids = receiver_result_type_ids_for_call(
-        call_signature.success_return_type_ids(),
-        call_signature.error_return_type_id(),
-        token_stream,
-        type_interner,
-    )?;
 
     if !scope_context.generic_template_validation
         && let Some(request) = generic_request
@@ -343,14 +348,75 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
 
     let receiver_expression = expression_from_postfix_node(receiver_node)?;
-    let method_call_expression = Expression::method_call_with_typed_arguments(
-        receiver_expression,
-        method_path,
-        args,
-        result_type_ids,
-        type_interner.environment_mut_for_derived_types(),
-        member_span,
-    );
+    let method_call_expression = if let Some(error_return_type_id) =
+        call_signature.error_return_type_id()
+    {
+        // Typed methods use the established handled-call shape, with their receiver in slot zero.
+        // A raw MethodCall inside a carrier would bypass HIR's explicit error-channel call lowering.
+        let receiver_span = receiver_expression.span;
+        let receiver_access = if source_method.receiver_mutable() {
+            CallAccessMode::Mutable
+        } else {
+            CallAccessMode::Shared
+        };
+        let receiver_argument =
+            CallArgument::positional(receiver_expression, receiver_access, receiver_span)
+                .with_marker_span(authored_marker_span)
+                .with_parameter_slot(ParameterSlot::new(0));
+        let mut full_arguments = Vec::with_capacity(args.len() + 1);
+        full_arguments.push(receiver_argument);
+        for argument in args {
+            let Some(parameter_slot) = argument.parameter_slot else {
+                return Err(CompilerError::compiler_error(
+                    "Receiver call argument is missing its retained parameter slot",
+                )
+                .into());
+            };
+            full_arguments.push(
+                argument.with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)),
+            );
+        }
+        let result_type_ids = call_signature.success_return_type_ids();
+        let value_required = !result_type_ids.is_empty();
+        finish_function_call_expression(
+            HandledFallibleCall {
+                name: method_path,
+                args: full_arguments,
+                result_type_ids,
+                call_span: member_span,
+            },
+            Some(error_return_type_id),
+            CallFinishContext {
+                token_stream,
+                context: scope_context,
+                value_required,
+                allow_boundary_catch: false,
+                warnings: None,
+                type_interner,
+                string_table,
+                path_fork,
+            },
+        )?
+    } else {
+        let result_type_ids = receiver_result_type_ids_for_call(
+            call_signature.success_return_type_ids(),
+            token_stream,
+            type_interner,
+        )?;
+        let method_call_expression = Expression::method_call_with_typed_arguments(
+            receiver_expression,
+            method_path,
+            args,
+            result_type_ids,
+            type_interner.environment_mut_for_derived_types(),
+            member_span,
+        );
+        if scope_context.source_call_has_private_failure_lane(source_method.method_path()) {
+            method_call_expression.with_private_call_failure_candidate(method_path)
+        } else {
+            method_call_expression
+        }
+    };
 
     Ok(AstNode {
         kind: NodeKind::ExpressionStatement(method_call_expression),

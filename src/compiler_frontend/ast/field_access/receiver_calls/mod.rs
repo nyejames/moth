@@ -17,6 +17,8 @@ mod generic_bound_methods;
 mod shared;
 mod source_methods;
 
+pub(super) use shared::finish_pending_receiver_call_expression;
+
 pub(super) fn parse_receiver_method_call_typed(
     token_stream: &mut AstCursor<'_>,
     member_step_context: MemberStepContext<'_>,

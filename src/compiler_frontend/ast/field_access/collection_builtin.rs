@@ -10,11 +10,11 @@ use super::parse_chain::expression_from_postfix_node;
 use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
+use super::receiver_calls::finish_pending_receiver_call_expression;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::statements::fallible_handling::token_stream_starts_fallible_handling_suffix;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::error_type::{
@@ -266,19 +266,6 @@ pub(super) fn parse_collection_builtin_member_typed(
         .into());
     }
 
-    // Collection `get`, `set`, fixed `push`, and `remove` have recoverable source-visible `Error!`
-    // paths, so the parser rejects raw values before HIR can mistake them for ordinary runtime
-    // data. Growable push has no recoverable `Error!` path, so a suffix on it never reaches this
-    // check.
-    if builtin.is_fallible() && !token_stream_starts_fallible_handling_suffix(token_stream) {
-        return Err(CompilerDiagnostic::invalid_builtin_call(
-            InvalidBuiltinCallReason::UnhandledFallibleCall,
-            Some(member_name),
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
     increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
 
     let receiver_expression = expression_from_postfix_node(receiver_node)?;
@@ -289,6 +276,11 @@ pub(super) fn parse_collection_builtin_member_typed(
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_span,
+    );
+    let builtin_expression = finish_pending_receiver_call_expression(
+        builtin_expression,
+        token_stream,
+        type_interner,
     );
 
     Ok(Some(AstNode {

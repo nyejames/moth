@@ -15,7 +15,8 @@ use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
     DeclarationId, DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
-    ResolvedPublicTypeRootTable, TopLevelDeclarationTable, build_resolved_public_trait_roots,
+    ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable, TopLevelDeclarationTable,
+    build_resolved_public_trait_roots,
     build_resolved_public_type_roots,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
@@ -736,6 +737,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         })?;
 
+        // Reuse the completed public-surface owner, including methods exported with their nominal
+        // receiver. Calls need this closed-contract gate before body parsing begins.
+        let public_roots = &resolved_public_surface_outputs.type_roots;
+        let mut exported_callable_paths = FxHashSet::default();
+        for root in &public_roots.roots {
+            if matches!(&root.kind, ResolvedPublicTypeRootKind::Function { .. }) {
+                exported_callable_paths.insert(root.path);
+            }
+        }
+        for method in &public_roots.receiver_methods {
+            exported_callable_paths.insert(method.function_path);
+        }
+
         Ok(AstModuleEnvironment {
             lookups: Rc::new(AstModuleLookups {
                 module_symbols: self.module_symbols,
@@ -743,6 +757,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 warnings: self.warnings,
                 declaration_table: self.declaration_table,
                 imported_functions_by_local_path: self.projected_imported_functions_by_local_path,
+                exported_callable_paths,
                 imported_struct_definitions: self.imported_struct_definitions,
                 imported_choice_definitions: self.imported_choice_definitions,
                 resolved_module_constants: self.resolved_module_constants,

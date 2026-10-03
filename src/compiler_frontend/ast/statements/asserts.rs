@@ -11,8 +11,10 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::assert_message_escape_diagnostic;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
+    assert_message_escape_diagnostic, assertion_condition_is_statically_true,
+    pending_expression_failure_facts,
+};
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
 };
@@ -113,7 +115,7 @@ pub(crate) fn parse_assert_statement(
             )
         })?
         .value;
-    let message = resolved_arguments
+    let mut message = resolved_arguments
         .next()
         .ok_or_else(|| {
             CompilerError::compiler_error(
@@ -134,6 +136,10 @@ pub(crate) fn parse_assert_statement(
     {
         return Err(diagnostic.into());
     }
+    message.failure_facts = pending_expression_failure_facts(
+        &message,
+        &context.template_ir_store.borrow(),
+    )?;
 
     // Reject `assert(...)!` — assert is not a fallible expression.
     if token_stream.current_tag() == TokenTag::BANG {

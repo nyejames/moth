@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: queued immediately after Numeric types and semantics.
-- Current slice: implementation not started.
-- Blockers: completed numeric types, numeric profile, Dec family and Error.code U32 delivery.
-- Next action: complete the prerequisite, then run Phase 0 on the activation tree.
+- Status: active. Phase 2 semantic facts are recorded. Runtime delivery is not implemented.
+- Current slice: Phase 3 explicit lowering and backend delivery.
+- Blockers: none for Phase 3. Numeric trap dispatch remains until the lowering phase replaces it.
+- Next action: lower the recorded failure facts without changing source acceptance.
 
 ## Goal and authority
 
@@ -833,16 +833,16 @@ the complete work contract until closeout verifies every transferred rule.
 
 Acceptance coverage: F01, F03, C01-C11, D01 and D04 at the frontend/semantic level.
 
-- [ ] Add parser/typing cases for unparenthesised whole-expression catch,
+- [x] Add parser/typing cases for unparenthesised whole-expression catch,
   arguments/receivers, multiple compatible typed calls and cast operands.
-- [ ] Extend the current expression completion/receiving owner to retain pending
+- [x] Extend the current expression completion/receiving owner to retain pending
   producer facts until the outer catch is known. Resolve compatibility once.
-- [ ] Add private-call inferred failure summaries and deterministic convergence
+- [x] Add private-call inferred failure summaries and deterministic convergence
   inside the canonical module service, including supported recursion and
   generated work. Reuse existing canonical type and call identities.
-- [ ] Resolve nearest local handling, automatic Error! conversion and custom E!
+- [x] Resolve nearest local handling, automatic Error! conversion and custom E!
   rejection without introducing a third escaping function channel.
-- [ ] Preserve propagation, option, assertion-message, constant and statement
+- [x] Preserve propagation, option, assertion-message, constant and statement
   boundary rules. Add focused tests for each accepted/rejected combination.
 
 Exit: one typed semantic representation describes every handler and function

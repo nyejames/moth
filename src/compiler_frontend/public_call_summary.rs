@@ -1,7 +1,7 @@
 //! Shared semantic call-summary vocabulary.
 //!
-//! WHAT: owns the backend-neutral parameter, effect, transfer, reactive and return-alias facts
-//! shared by borrow validation and the declaration-centric public-interface draft.
+//! WHAT: owns backend-neutral parameter, effect, transfer, reactive, return-alias and escaping
+//! builtin-failure facts shared by semantic convergence and the public-interface draft.
 //! WHY: both stages consume the same semantic contract. Keeping the vocabulary at the frontend
 //! boundary prevents either stage from becoming the source of a second interpretation.
 
@@ -93,6 +93,9 @@ pub(crate) enum FunctionReturnAliasSummary {
 pub(crate) struct PublicCallSummary {
     pub parameters: Vec<PublicCallParameterSummary>,
     pub return_alias: FunctionReturnAliasSummary,
+    /// Whether unhandled implicit builtin failure escapes the function boundary.
+    /// Signature-only `false` is the initial convergence value, not proof of infallibility.
+    pub escapes_builtin_failure: bool,
 }
 
 /// The result of validating one retained call-summary transition.
@@ -135,8 +138,8 @@ pub(crate) fn validate_public_call_summary(
 
 /// Validate that a newly computed call summary preserves the finite widening order.
 ///
-/// WHAT: checks invariant fields and the mutation, reactive-effect and return-alias partial orders
-///       before a summary replaces an already retained summary.
+/// WHAT: checks invariant fields and the mutation, reactive-effect, return-alias and escaping
+///       builtin-failure partial orders before a summary replaces an already retained summary.
 /// WHY: convergence must make progress through one explicit finite order. Silently accepting a
 ///      narrowing or incomparable transition would make scheduling order observable and hide an
 ///      error in the summary producer.
@@ -159,6 +162,12 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     }
 
     let mut widened = false;
+    if previous.escapes_builtin_failure && !next.escapes_builtin_failure {
+        return Err(CompilerError::compiler_error(
+            "public call summary transition narrowed escaping builtin failure",
+        ));
+    }
+    widened |= previous.escapes_builtin_failure != next.escapes_builtin_failure;
     for (parameter_index, (previous, next)) in
         previous.parameters.iter().zip(&next.parameters).enumerate()
     {

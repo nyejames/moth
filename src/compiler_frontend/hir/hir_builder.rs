@@ -477,7 +477,11 @@ impl<'a> HirBuilder<'a> {
             }
         }
 
-        // 5. Assign semantic origins to functions
+        // 5. Project semantic failure facts and join exact function origins.
+        if let Err(error) = self.project_function_failure_facts(&ast) {
+            return Err(self.lower_error_messages(error));
+        }
+
         if let Err(error) = self.assign_function_origins() {
             return Err(self.lower_error_messages(error));
         }

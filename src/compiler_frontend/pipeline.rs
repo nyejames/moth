@@ -24,6 +24,8 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::unsupported_catch_diagnostic;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
@@ -586,6 +588,32 @@ impl<'a> CompilerFrontend<'a> {
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     ) -> Result<HirLoweringResult, CompilerMessages> {
+        // Keep unsupported authored recovery in the semantic lane for every lowering client.
+        // The HIR builder still treats malformed completed AST as an internal invariant.
+        match unsupported_catch_diagnostic(
+            &ast.nodes,
+            &TemplateIrStore::new(),
+            &mut self.string_table,
+        ) {
+            Ok(Some(diagnostic)) => {
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    diagnostic,
+                    ast.warnings,
+                    &self.string_table,
+                )
+                .with_type_context_for_all_diagnostics(ast.type_environment));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(CompilerMessages::from_error_with_warnings(
+                    error,
+                    ast.warnings,
+                    &self.string_table,
+                )
+                .with_type_context_for_all_diagnostics(ast.type_environment));
+            }
+        }
+
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
         let mut result = lower_module(
             ast,

@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticOperator, InvalidAssignmentTargetReason,
-    InvalidFieldAccessReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, InvalidFieldAccessReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -81,6 +81,73 @@ fn rule_diagnostics_render_receiver_type_names() {
             .iter()
             .any(|line| line.contains("A temporary value cannot be assigned through"))
     );
+}
+
+#[test]
+fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
+    let mut type_environment = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut error_types = Vec::new();
+
+    for name in ["ParseFailure", "StoreFailure"] {
+        let path = path_fork
+            .try_intern_portable_path(name, &mut string_table)
+            .expect("test path fits");
+        let (_, type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path,
+            fields: Box::new([]),
+            generic_parameters: None,
+            const_record: false,
+        });
+        error_types.push(type_id);
+    }
+
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+    let cases = [
+        (
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id: error_types[0],
+                second_error_type_id: error_types[1],
+                first_producer_span: None,
+                second_producer_span: None,
+            },
+            vec!["`ParseFailure!`", "`StoreFailure!`", "convert the errors explicitly"],
+        ),
+        (
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id: error_types[0],
+                typed_producer_span: None,
+                implicit_producer_span: None,
+            },
+            vec!["`ParseFailure!`", "implicit built-in failure", "separately handled expressions"],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                error_type_id: error_types[0],
+                implicit_producer_span: None,
+            },
+            vec!["custom `ParseFailure!` slot", "explicitly to `ParseFailure`", "`return!`"],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+            vec!["exported function", "Recover locally", "final Error! return slot"],
+        ),
+    ];
+
+    for (reason, expected_fragments) in cases {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason, None);
+        let guidance = format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let terse = format_terse_diagnostics_with_context(&[diagnostic], context).join("\n");
+        for fragment in expected_fragments {
+            assert!(guidance.contains(fragment), "missing {fragment:?} in {guidance}");
+            assert!(terse.contains(fragment), "missing {fragment:?} in {terse}");
+        }
+    }
 }
 
 #[test]

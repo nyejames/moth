@@ -15,6 +15,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::module_compilation::generated::test_fixtures::PublishedBoundary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
@@ -66,6 +67,7 @@ fn summary(return_alias: FunctionReturnAliasSummary) -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
         return_alias,
+        escapes_builtin_failure: false,
     }
 }
 
@@ -484,6 +486,254 @@ fn convergence_base_changes_reject_a_narrowing_report() {
     let error = base_summary_changes(&hir, &previous, &next)
         .expect_err("a narrowing base summary must stop convergence");
     assert!(error.msg.contains("narrowed"));
+}
+
+#[test]
+fn builtin_failure_widening_uses_existing_base_change_lane() {
+    let public = origin("public");
+    let private = private_identity("private");
+    let hir = base_hir(&[public.clone()], &[private.clone()]);
+    let initial = summary(FunctionReturnAliasSummary::Fresh);
+    let mut escaping = initial.clone();
+    escaping.escapes_builtin_failure = true;
+    let previous = report([
+        (FunctionId(0), initial.clone()),
+        (FunctionId(1), initial),
+    ]);
+    let next = report([
+        (FunctionId(0), escaping.clone()),
+        (FunctionId(1), escaping),
+    ]);
+
+    let changes = base_summary_changes(&hir, &previous, &next).unwrap();
+    assert_eq!(changes.public, vec![public]);
+    assert_eq!(changes.module_private, vec![private]);
+    assert!(base_summary_changes(&hir, &next, &previous).is_err());
+}
+
+#[test]
+fn missing_base_summary_is_not_an_infallible_summary() {
+    let hir = base_hir(&[origin("public")], &[]);
+    let complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let missing = BorrowCheckReport::default();
+
+    assert!(base_summary_changes(&hir, &missing, &complete).is_err());
+    assert!(base_summary_changes(&hir, &complete, &missing).is_err());
+}
+
+#[test]
+fn builtin_failure_inference_requires_semantic_facts_and_call_summary() {
+    let hir = base_hir(&[origin("public")], &[]);
+    let mut complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+    let mut missing = BorrowCheckReport::default();
+
+    assert!(infer_builtin_failure_summaries(&hir, &mut missing).is_err());
+    assert!(infer_builtin_failure_summaries(&hir, &mut complete).is_err());
+}
+
+fn failure_contributor(source: HirBuiltinFailureSource) -> HirBuiltinFailureContributor {
+    let codes = match &source {
+        HirBuiltinFailureSource::NumericOperation => vec![BuiltinErrorCode::IntOverflow],
+        HirBuiltinFailureSource::Call(_) => vec![],
+    };
+    HirBuiltinFailureContributor { source, span: None, codes }
+}
+
+fn failure_facts(
+    boundary: HirBuiltinFailureBoundary,
+    sources: Vec<HirBuiltinFailureSource>,
+) -> HirFunctionFailureFacts {
+    HirFunctionFailureFacts {
+        span: None,
+        boundary,
+        contributors: sources.into_iter().map(failure_contributor).collect(),
+        assertion_message_calls: vec![],
+    }
+}
+
+#[test]
+fn numeric_failure_contributor_rejects_empty_or_non_numeric_catalog_codes() {
+    for codes in [vec![], vec![BuiltinErrorCode::Unsupported]] {
+        let mut hir = base_hir(&[], &[private_identity("producer")]);
+        let mut facts = failure_facts(
+            HirBuiltinFailureBoundary::InferPrivate,
+            vec![HirBuiltinFailureSource::NumericOperation],
+        );
+        facts.contributors[0].codes = codes;
+        hir.function_failure_facts.insert(FunctionId(0), facts);
+        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+        assert!(infer_builtin_failure_summaries(&hir, &mut report).is_err());
+    }
+}
+
+#[test]
+fn builtin_failure_inference_reaches_local_recursive_fixed_point() {
+    let mut hir = base_hir(&[], &[
+        private_identity("first"),
+        private_identity("second"),
+        private_identity("producer"),
+    ]);
+    for index in 0..3 {
+        let mut sources = vec![HirBuiltinFailureSource::Call(
+            CallTarget::Local(FunctionId((index + 1) % 3)),
+        )];
+        if index == 2 {
+            sources.push(HirBuiltinFailureSource::NumericOperation);
+        }
+        hir.function_failure_facts.insert(
+            FunctionId(index),
+            failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources),
+        );
+    }
+    let mut report = report((0..3).map(|index| {
+        (FunctionId(index), summary(FunctionReturnAliasSummary::Fresh))
+    }));
+    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    assert!(report.analysis.public_call_summaries.values().all(|summary| {
+        summary.escapes_builtin_failure
+    }));
+}
+
+#[test]
+fn declared_error_and_export_boundaries_never_forward_builtin_failure_bit() {
+    for boundary in [
+        HirBuiltinFailureBoundary::BuiltinErrorSlot,
+        HirBuiltinFailureBoundary::CustomErrorSlot(TypeId(7)),
+        HirBuiltinFailureBoundary::ExportedNoSlot,
+    ] {
+        let mut hir = base_hir(&[origin("boundary")], &[]);
+        hir.function_failure_facts.insert(
+            FunctionId(0),
+            failure_facts(boundary, vec![HirBuiltinFailureSource::NumericOperation]),
+        );
+        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+        infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+        assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
+        assert_eq!(
+            builtin_failure_diagnostic(&hir, &report, FunctionId(0)).unwrap().is_some(),
+            boundary != HirBuiltinFailureBoundary::BuiltinErrorSlot,
+        );
+    }
+}
+
+#[test]
+fn assertion_message_candidates_validate_without_forwarding_failure() {
+    let mut hir = base_hir(&[], &[
+        private_identity("assertion"),
+        private_identity("producer"),
+    ]);
+    let mut assertion = failure_facts(HirBuiltinFailureBoundary::InferPrivate, vec![]);
+    assertion.assertion_message_calls.push(failure_contributor(
+        HirBuiltinFailureSource::Call(CallTarget::Local(FunctionId(1))),
+    ));
+    hir.function_failure_facts.insert(FunctionId(0), assertion);
+    hir.function_failure_facts.insert(
+        FunctionId(1),
+        failure_facts(
+            HirBuiltinFailureBoundary::InferPrivate,
+            vec![HirBuiltinFailureSource::NumericOperation],
+        ),
+    );
+    let mut report = report((0..2).map(|index| {
+        (FunctionId(index), summary(FunctionReturnAliasSummary::Fresh))
+    }));
+    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+    assert!(!report.analysis.public_call_summaries[&FunctionId(0)].escapes_builtin_failure);
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).unwrap().is_some());
+    report.analysis.public_call_summaries.get_mut(&FunctionId(1)).unwrap()
+        .escapes_builtin_failure = false;
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).unwrap().is_none());
+    report.analysis.public_call_summaries.remove(&FunctionId(1));
+    assert!(builtin_failure_diagnostic(&hir, &report, FunctionId(0)).unwrap().is_some());
+}
+
+#[test]
+fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
+    use crate::compiler_frontend::module_compilation::generated::test_fixtures::test_sidecar;
+    use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedRequestFacts;
+
+    let identity = generated_identity("assertion");
+    let private = private_identity("producer");
+    let initial = summary(FunctionReturnAliasSummary::Fresh);
+    let mut sidecar = test_sidecar(identity.clone(), initial.clone());
+    let mut facts = failure_facts(HirBuiltinFailureBoundary::InferPrivate, vec![]);
+    facts.assertion_message_calls.push(failure_contributor(HirBuiltinFailureSource::Call(
+        CallTarget::ModulePrivate(private.clone()),
+    )));
+    sidecar.module.executable.hir.function_failure_facts.insert(FunctionId(0), facts);
+    let published = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(published.view());
+    let request = transaction.register_requests([GeneratedRequestFacts {
+        identity: identity.clone(),
+        display_name: "assertion".to_owned(),
+        call_span: None,
+    }])[0];
+    transaction.enter(request).unwrap();
+    transaction.complete(request, initial.clone(), sidecar).unwrap();
+    let base = base_hir(&[], &[private.clone()]);
+    let base_links = link_facts_for_calls(vec![]);
+    let private_identities = FxHashSet::from_iter([private.clone()]);
+    let public_origins = FxHashSet::default();
+    let mut model = ConvergenceModel::from_link_facts_for_base_callees(
+        &base_links,
+        transaction.completed_link_facts(),
+        &public_origins,
+        &private_identities,
+    ).unwrap();
+    model.include_assertion_message_dependencies(
+        &base, &mut transaction, &public_origins, &private_identities,
+    ).unwrap();
+    assert_eq!(model.callers(ConvergenceNodeId(0)), Some(&[ConvergenceNodeId(1)][..]));
+    let mut queue = VecDeque::new();
+    let mut queued = vec![false; model.node_count()];
+    enqueue_base_dependents(
+        &model,
+        &BaseSummaryChanges { public: vec![], module_private: vec![private] },
+        &mut queue,
+        &mut queued,
+    ).unwrap();
+    assert_eq!(queue.into_iter().collect::<Vec<_>>(), vec![ConvergenceNodeId(1)]);
+
+    let mut escaping = initial.clone();
+    escaping.escapes_builtin_failure = true;
+    assert!(update_generated_summary(&mut transaction, &identity, escaping).unwrap());
+    assert!(transaction.summary(&identity).unwrap().escapes_builtin_failure);
+    assert!(update_generated_summary(&mut transaction, &identity, initial).is_err());
+}
+
+#[test]
+fn builtin_failure_call_resolution_preserves_exact_summary_bits() {
+    let private = private_identity("private");
+    let generated = generated_identity("generated");
+    let imported = origin("imported");
+    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    escaping.escapes_builtin_failure = true;
+    let mut hir = HirModule::new();
+    install_convergence_summaries(
+        &mut hir,
+        &[(generated.clone(), escaping.clone())],
+        &[(imported.clone(), escaping.clone())],
+        &[(private.clone(), escaping.clone())],
+    );
+    let report = report([(FunctionId(0), escaping)]);
+
+    for target in [
+        CallTarget::Local(FunctionId(0)),
+        CallTarget::CrossModule(imported),
+        CallTarget::ModulePrivate(private),
+        CallTarget::Generated(generated),
+    ] {
+        assert!(call_escapes_builtin_failure(&hir, &report, &target).unwrap());
+    }
+    assert!(call_escapes_builtin_failure(&hir, &report, &CallTarget::Local(FunctionId(1))).is_err());
+    assert!(
+        call_escapes_builtin_failure(
+            &hir,
+            &report,
+            &CallTarget::Generated(generated_identity("missing")),
+        )
+        .is_err()
+    );
 }
 
 #[test]

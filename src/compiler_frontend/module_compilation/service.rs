@@ -734,6 +734,7 @@ fn run_semantic_stages(
         &function_link_facts,
         &mut generated_transaction,
         bootstrap_borrow_analysis,
+        &type_environment,
         &warnings,
         #[cfg(feature = "timers")]
         timing_context,

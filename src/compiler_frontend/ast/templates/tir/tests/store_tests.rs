@@ -73,6 +73,7 @@ fn bool_selector() -> TemplateBranchSelector {
     TemplateBranchSelector::Bool(Expression {
         kind: ExpressionKind::Bool(true),
         type_id: builtin_type_ids::BOOL,
+        failure_facts: Default::default(),
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,

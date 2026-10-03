@@ -2578,6 +2578,91 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
 }
 
 #[test]
+fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(1);
+    let catch_span = Some(exact_span(source, 0, 30, &mut span_builder));
+    let first_span = Some(exact_span(source, 0, 8, &mut span_builder));
+    let second_span = Some(exact_span(source, 11, 9, &mut span_builder));
+    let reasons = [
+        (
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id: builtin_type_ids::INT,
+                second_error_type_id: builtin_type_ids::STRING,
+                first_producer_span: first_span,
+                second_producer_span: second_span,
+            },
+            "invalid_fallible_handling.incompatible_catch_error_types",
+            vec![first_span, second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id: builtin_type_ids::INT,
+                typed_producer_span: first_span,
+                implicit_producer_span: second_span,
+            },
+            "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
+            vec![first_span, second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                error_type_id: builtin_type_ids::INT,
+                implicit_producer_span: second_span,
+            },
+            "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
+            vec![second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+            "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+            vec![],
+        ),
+    ];
+
+    for (reason, reason_key, producer_spans) in reasons {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason, catch_span);
+        assert_eq!(diagnostic.primary_span, catch_span);
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0051");
+        assert_eq!(diagnostic.identity().reason_key, Some(reason_key));
+        assert_eq!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidFallibleHandling { reason },
+        );
+        assert_eq!(
+            diagnostic.labels.iter().map(|label| label.span).collect::<Vec<_>>(),
+            producer_spans,
+        );
+    }
+}
+
+#[test]
+fn unsupported_catch_expression_name_survives_string_remapping() {
+    let mut local_table = StringTable::new();
+    let expression_name = local_table.intern("an arithmetic expression");
+    let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+        InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { expression_name },
+        None,
+    );
+    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+    let mut merged_table = StringTable::new();
+    merged_table.intern("another module's string");
+    let remap = merged_table.merge_from(&local_table);
+    assert!(!remap.is_identity());
+    bag.remap_string_ids(&remap);
+
+    let diagnostic = &bag.diagnostics()[0];
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_fallible_handling.unsupported_catch_expression_shape"),
+    );
+    let context = DiagnosticRenderContext::new(&merged_table);
+    let terse_message = terse::format_terse_diagnostic_with_context(diagnostic, context);
+    assert!(terse_message.contains("an arithmetic expression"));
+    assert!(terse_message.contains("not supported by the current compiler"));
+    assert!(!terse_message.contains("UnsupportedCatchExpressionShape"));
+}
+
+#[test]
 fn phase_1_2_renderers_keep_source_language_terminology() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

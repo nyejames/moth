@@ -5,11 +5,12 @@
 //! declaration/type/call validation.
 
 use crate::compiler_frontend::compiler_messages::{
-    InvalidControlFlowStatementReason, InvalidMatchPatternReason, NonExhaustiveMatchReason,
+    InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchPatternReason,
+    NonExhaustiveMatchReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
-use super::named_value_or_default;
+use super::{DiagnosticRenderContext, diagnostic_type_name, named_value_or_default};
 
 pub(crate) fn invalid_control_flow_statement_message(
     reason: InvalidControlFlowStatementReason,
@@ -81,6 +82,54 @@ pub(crate) fn invalid_control_flow_statement_message(
         InvalidControlFlowStatementReason::ExpectedValueAfterElse => {
             "Expected a value after 'else'.".to_string()
         }
+    }
+}
+
+pub(crate) fn invalid_fallible_handling_message(
+    reason: InvalidFallibleHandlingReason,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    match reason {
+        InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+            first_error_type_id,
+            second_error_type_id,
+            ..
+        } => {
+            let first_error = diagnostic_type_name(first_error_type_id, context);
+            let second_error = diagnostic_type_name(second_error_type_id, context);
+            format!(
+                "This catch protects incompatible typed error producers: `{first_error}!` and `{second_error}!`. Split the work into separately handled expressions or convert the errors explicitly."
+            )
+        }
+
+        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+            error_type_id,
+            ..
+        } => {
+            let error_type = diagnostic_type_name(error_type_id, context);
+            format!(
+                "This catch mixes a `{error_type}!` producer with implicit built-in failure (`Error`). Split the work into separately handled expressions or convert the errors explicitly."
+            )
+        }
+
+        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+            error_type_id,
+            ..
+        } => {
+            let error_type = diagnostic_type_name(error_type_id, context);
+            format!(
+                "Implicit built-in failure cannot escape through the custom `{error_type}!` slot. Recover locally with `catch` or convert the failure explicitly to `{error_type}` with `catch` and `return!`."
+            )
+        }
+
+        InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { expression_name } => {
+            let expression = context.string_table.resolve(expression_name);
+            format!(
+                "Catch recovery for {expression} is not supported by the current compiler. Split the protected work into separately handled expressions or recover through a supported typed fallible call."
+            )
+        }
+
+        _ => reason.message().to_owned(),
     }
 }
 

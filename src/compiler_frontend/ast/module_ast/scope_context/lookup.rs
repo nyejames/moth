@@ -14,6 +14,8 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Resolved declaration reference returned by `ScopeContext::get_reference`.
@@ -236,6 +238,55 @@ impl ScopeContext {
             ExpressionKind::Function(signature) => Some(signature),
             _ => None,
         }
+    }
+
+    /// Only local private no-slot calls may contribute inferred failure to an outer expression.
+    ///
+    /// Visibility permits the lane but never proves failure. A completed body's proof can close
+    /// it; numeric work, private-call candidates and unparsed/recursive bodies stay conservative.
+    /// Donor-private helpers and concrete instances retain the declaring module's private lane.
+    pub(crate) fn source_call_has_private_failure_lane(&self, path: PathId) -> bool {
+        let Some(lookups) = self.lookups.as_ref() else {
+            return false;
+        };
+        let known_infallible = |path| {
+            self.known_infallible_functions.as_ref()
+                .is_some_and(|functions| functions.borrow().contains(&path))
+        };
+        if known_infallible(path) {
+            return false;
+        }
+        if lookups.exported_callable_paths.contains(&path) {
+            return false;
+        }
+        if let Some(contract) = lookups.imported_functions_by_local_path.get(&path) {
+            return match &contract.target {
+                SourceFunctionTarget::Local(local_path) => {
+                    !lookups.exported_callable_paths.contains(local_path)
+                        && !known_infallible(*local_path)
+                }
+                SourceFunctionTarget::ModulePrivate { .. } => true,
+                SourceFunctionTarget::Generated { identity, .. } => {
+                    matches!(identity.declaration(), GeneratedDeclarationIdentity::ModulePrivate(_))
+                }
+                SourceFunctionTarget::Imported { .. } => false,
+            };
+        }
+        if let Some(template) = lookups.generic_function_templates_by_path.get(&path) {
+            return match &template.declaration_identity {
+                Some(GeneratedDeclarationIdentity::ModulePrivate(_)) => true,
+                Some(GeneratedDeclarationIdentity::Public(_)) => false,
+                None => template.body_tokens.is_some(),
+            };
+        }
+
+        // Ordinary top-level targets have header-owned source membership. Body-local functions
+        // have no header signature row and are necessarily private to their enclosing body.
+        if let Some(source) = lookups.module_symbols.canonical_source_by_symbol_path.get(&path) {
+            return lookups.module_symbols.module_file_paths.contains(source);
+        }
+        !lookups.resolved_function_signatures_by_path.contains_key(&path)
+            && !lookups.module_symbols.module_file_paths.is_empty()
     }
 
     /// Resolve constructor metadata for a source struct declaration.

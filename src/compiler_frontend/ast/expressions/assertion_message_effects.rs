@@ -27,6 +27,10 @@ use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    ExpressionFailureFacts, FailureDisposition, ImplicitFailureContributor, ImplicitFailureSource,
+};
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
@@ -47,6 +51,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use crate::compiler_frontend::source::SourceSpan;
 
 /// One control-flow effect that can escape an assertion message's value computation.
@@ -61,6 +68,7 @@ pub(crate) enum EnclosingExitEffect {
     OptionPropagation(Option<SourceSpan>),
     FunctionReturn(Option<SourceSpan>),
     ErrorReturn(Option<SourceSpan>),
+    InferredFailure(Option<SourceSpan>),
 }
 
 impl EnclosingExitEffect {
@@ -69,7 +77,8 @@ impl EnclosingExitEffect {
             Self::ErrorPropagation(span)
             | Self::OptionPropagation(span)
             | Self::FunctionReturn(span)
-            | Self::ErrorReturn(span) => *span,
+            | Self::ErrorReturn(span)
+            | Self::InferredFailure(span) => *span,
         }
     }
 }
@@ -93,6 +102,58 @@ pub(crate) fn classify_assertion_message_effect(
     classify_expression(message, template_ir_store, &mut state)
 }
 
+/// Collect pending semantic contributors through the same store-aware traversal used for
+/// assertion messages. Statement-owned range checks join the expression-owned facts here.
+pub(crate) fn pending_body_failure_facts(
+    nodes: &[AstNode],
+    template_ir_store: &TemplateIrStore,
+) -> Result<ExpressionFailureFacts, CompilerError> {
+    let mut state = TraversalState {
+        pending_facts: Some(ExpressionFailureFacts::default()),
+        ..TraversalState::default()
+    };
+    classify_nodes(nodes, template_ir_store, &mut state)?;
+    Ok(state.pending_facts.take().unwrap_or_default())
+}
+
+pub(crate) fn pending_expression_failure_facts(
+    expression: &Expression,
+    template_ir_store: &TemplateIrStore,
+) -> Result<ExpressionFailureFacts, CompilerError> {
+    let mut state = TraversalState {
+        pending_facts: Some(ExpressionFailureFacts::default()),
+        ..TraversalState::default()
+    };
+    classify_expression(expression, template_ir_store, &mut state)?;
+    Ok(state.pending_facts.take().unwrap_or_default())
+}
+
+/// Function projection keeps failure-edge messages separate from escaping body work.
+pub(crate) struct PendingFunctionFailureFacts {
+    pub(crate) body: ExpressionFailureFacts,
+    pub(crate) assertion_message_calls: Vec<ImplicitFailureContributor>,
+}
+
+pub(crate) fn pending_function_failure_facts(
+    nodes: &[AstNode],
+    template_ir_store: &TemplateIrStore,
+) -> Result<PendingFunctionFailureFacts, CompilerError> {
+    let mut state = TraversalState {
+        pending_facts: Some(ExpressionFailureFacts::default()),
+        assertion_message_facts: Some(ExpressionFailureFacts::default()),
+        ..TraversalState::default()
+    };
+    classify_nodes(nodes, template_ir_store, &mut state)?;
+    let mut assertion_facts = state.assertion_message_facts.take().unwrap_or_default();
+    assertion_facts.implicit.retain(|contributor| {
+        matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+    });
+    Ok(PendingFunctionFailureFacts {
+        body: state.pending_facts.take().unwrap_or_default(),
+        assertion_message_calls: assertion_facts.implicit,
+    })
+}
+
 /// Builds the user-facing diagnostic for an assertion message that can escape.
 pub(crate) fn assert_message_escape_diagnostic(
     message: &Expression,
@@ -108,10 +169,116 @@ pub(crate) fn assert_message_escape_diagnostic(
     )
 }
 
+/// An explicit exit inside protected work still targets the function, never the catch.
+pub(crate) fn explicit_propagation_catch_diagnostic(
+    expression: &Expression,
+    template_ir_store: &TemplateIrStore,
+) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+    if expression.failure_facts.postfix_exit_span.is_none() {
+        return Ok(None);
+    }
+    let mut state = TraversalState {
+        explicit_exit_only: true,
+        ..TraversalState::default()
+    };
+    let effect = classify_expression(expression, template_ir_store, &mut state)?;
+    Ok(effect.map(|effect| {
+        let reason = match effect {
+            EnclosingExitEffect::OptionPropagation(_) => {
+                InvalidFallibleHandlingReason::OptionPropagationCatchConflict
+            }
+            _ => InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict,
+        };
+        CompilerDiagnostic::invalid_fallible_handling(reason, effect.span())
+    }))
+}
+
+/// Reject source recovery shapes before the invariant-only HIR lowering boundary.
+/// This is a mode of the existing AST/runtime-handoff traversal, not another expression walker.
+pub(crate) fn unsupported_catch_diagnostic(
+    nodes: &[AstNode],
+    template_ir_store: &TemplateIrStore,
+    string_table: &mut StringTable,
+) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+    let mut state = TraversalState {
+        pending_facts: Some(ExpressionFailureFacts::default()),
+        check_catch_support: true,
+        ..TraversalState::default()
+    };
+    classify_nodes(nodes, template_ir_store, &mut state)?;
+    Ok(state.unsupported_catch.map(|(name, span)| {
+        CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape {
+                expression_name: string_table.intern(name),
+            },
+            span,
+        )
+    }))
+}
+
+fn catch_operand_has_pending_failure(
+    expression: &Expression,
+    template_ir_store: &TemplateIrStore,
+) -> Result<bool, CompilerError> {
+    let mut state = TraversalState {
+        pending_facts: Some(ExpressionFailureFacts::default()),
+        check_pending_failure: true,
+        ..TraversalState::default()
+    };
+    classify_expression(expression, template_ir_store, &mut state)?;
+    Ok(state.has_pending_failure)
+}
+
+fn protected_operands_have_pending_failure(
+    expression: &Expression,
+    template_ir_store: &TemplateIrStore,
+) -> Result<bool, CompilerError> {
+    match &expression.kind {
+        ExpressionKind::FunctionCall { args, .. }
+        | ExpressionKind::HostFunctionCall { args, .. }
+        | ExpressionKind::HandledFallibleFunctionCall { args, .. }
+        | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
+            for argument in args {
+                if catch_operand_has_pending_failure(&argument.value, template_ir_store)? {
+                    return Ok(true);
+                }
+            }
+        }
+        ExpressionKind::HandledFallibleExpression { value, .. } => {
+            return protected_operands_have_pending_failure(value, template_ir_store);
+        }
+        ExpressionKind::MethodCall { receiver, args, .. }
+        | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
+        | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
+            if catch_operand_has_pending_failure(receiver, template_ir_store)? {
+                return Ok(true);
+            }
+            for argument in args {
+                if catch_operand_has_pending_failure(&argument.value, template_ir_store)? {
+                    return Ok(true);
+                }
+            }
+        }
+        ExpressionKind::Cast(cast) => {
+            return catch_operand_has_pending_failure(&cast.source, template_ir_store);
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
 #[derive(Default)]
 struct TraversalState {
     loop_depth: usize,
     visited_templates: HashSet<TemplateTirReference>,
+    pending_facts: Option<ExpressionFailureFacts>,
+    assertion_message_facts: Option<ExpressionFailureFacts>,
+    protected_failure_depth: usize,
+    check_catch_support: bool,
+    unsupported_catch: Option<(&'static str, Option<SourceSpan>)>,
+    check_pending_failure: bool,
+    has_pending_failure: bool,
+    explicit_exit_only: bool,
 }
 
 fn classify_expression(
@@ -119,37 +286,97 @@ fn classify_expression(
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
-    match &expression.kind {
+    if state.unsupported_catch.is_some() || state.has_pending_failure {
+        return Ok(None);
+    }
+    let traverses_owned_payload = matches!(
+        expression.kind,
+        ExpressionKind::ValueBlock { .. }
+            | ExpressionKind::Template(_)
+            | ExpressionKind::RuntimeTemplateHandoff(_)
+            | ExpressionKind::RuntimeSlotApplicationHandoff(_)
+    );
+    if let Some(facts) = &mut state.pending_facts {
+        if !traverses_owned_payload && state.protected_failure_depth == 0 {
+            if state.check_pending_failure {
+                state.has_pending_failure = expression.failure_facts.has_pending_implicit()
+                    || (expression.failure_facts.disposition == FailureDisposition::Pending
+                        && !expression.failure_facts.typed_errors.is_empty());
+            } else if !state.check_catch_support {
+                facts.merge_pending_from(&expression.failure_facts);
+            }
+        }
+    } else if !state.explicit_exit_only
+        && state.protected_failure_depth == 0
+        && expression.failure_facts.disposition == FailureDisposition::Pending
+    {
+        // Private-call candidates are resolved by summary convergence, not guessed here.
+        let implicit = expression.failure_facts.implicit.iter().find(|contributor| {
+            contributor.source == ImplicitFailureSource::NumericOperation
+        });
+        let span = implicit.map(|contributor| contributor.span).or_else(|| {
+            expression.failure_facts.typed_errors.first().map(|producer| producer.span)
+        });
+        if let Some(span) = span {
+            return Ok(Some(EnclosingExitEffect::InferredFailure(span)));
+        }
+    }
+
+    let protects_failure = expression.failure_facts.disposition != FailureDisposition::Pending;
+    if protects_failure {
+        state.protected_failure_depth += 1;
+    }
+    let effect = match &expression.kind {
         ExpressionKind::HandledFallibleFunctionCall { args, handling, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { args, handling, .. } => {
-            if matches!(handling, FallibleExpressionHandling::Propagate) {
+            if state.pending_facts.is_none()
+                && matches!(handling, FallibleExpressionHandling::Propagate)
+            {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
                     expression_propagation_span(expression),
                 )));
             }
-            classify_call_arguments(args, template_ir_store, state)
+            let recovers = matches!(handling, FallibleExpressionHandling::Recover);
+            state.protected_failure_depth += usize::from(recovers);
+            let effect = classify_call_arguments(args, template_ir_store, state);
+            state.protected_failure_depth -= usize::from(recovers);
+            effect
         }
         ExpressionKind::HandledFallibleExpression {
             value, handling, ..
         } => {
-            if matches!(handling, FallibleExpressionHandling::Propagate) {
+            if state.pending_facts.is_none()
+                && matches!(handling, FallibleExpressionHandling::Propagate)
+            {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
                     expression_propagation_span(expression),
                 )));
             }
-            classify_expression(value, template_ir_store, state)
+            let recovers = matches!(handling, FallibleExpressionHandling::Recover);
+            state.protected_failure_depth += usize::from(recovers);
+            let effect = classify_expression(value, template_ir_store, state);
+            state.protected_failure_depth -= usize::from(recovers);
+            effect
         }
-        ExpressionKind::OptionPropagation { .. } => Ok(Some(
-            EnclosingExitEffect::OptionPropagation(expression.span),
-        )),
+        ExpressionKind::OptionPropagation { value } => {
+            if state.pending_facts.is_some() {
+                classify_expression(value, template_ir_store, state)
+            } else {
+                Ok(Some(EnclosingExitEffect::OptionPropagation(expression.span)))
+            }
+        }
         ExpressionKind::Cast(cast) => {
             // Only user-authored `cast!` is an expression-level error-propagation effect.
             // `StoreConversion` belongs to a statement assignment; its HIR error edge is not part
             // of an assertion-message expression.
-            if matches!(cast.handling, CastHandling::Propagate) {
+            if state.pending_facts.is_none() && matches!(cast.handling, CastHandling::Propagate) {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(cast.span)));
             }
-            classify_expression(&cast.source, template_ir_store, state)
+            let recovers = matches!(cast.handling, CastHandling::Recover);
+            state.protected_failure_depth += usize::from(recovers);
+            let effect = classify_expression(&cast.source, template_ir_store, state);
+            state.protected_failure_depth -= usize::from(recovers);
+            effect
         }
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
@@ -252,7 +479,11 @@ fn classify_expression(
         ExpressionKind::FallibleCarrierConstruct { value, .. } => {
             classify_expression(value, template_ir_store, state)
         }
+    };
+    if protects_failure {
+        state.protected_failure_depth -= 1;
     }
+    effect
 }
 
 fn expression_propagation_span(expression: &Expression) -> Option<SourceSpan> {
@@ -329,15 +560,47 @@ fn classify_value_block(
             }
         }
         ValueBlock::Catch(value_catch) => {
-            if matches!(value_catch.handler, FallibleHandling::Propagate) {
+            if state.check_catch_support {
+                let protected = &value_catch.handled_value;
+                let unsupported_name = match &protected.kind {
+                    ExpressionKind::HandledFallibleFunctionCall { .. }
+                    | ExpressionKind::HandledFallibleHostFunctionCall { .. }
+                    | ExpressionKind::HandledFallibleExpression { .. }
+                    | ExpressionKind::Cast(_) => {
+                        protected_operands_have_pending_failure(protected, template_ir_store)?
+                            .then_some("an expression with fallible operands or arguments")
+                    }
+                    ExpressionKind::Runtime(_) => Some("an arithmetic expression"),
+                    ExpressionKind::FunctionCall { .. } => Some("an inferred-failure private call"),
+                    _ => Some("this protected expression"),
+                };
+                if let Some(name) = unsupported_name {
+                    state.unsupported_catch.get_or_insert((name, protected.span));
+                    return Ok(None);
+                }
+            }
+            if state.pending_facts.is_none()
+                && matches!(value_catch.handler, FallibleHandling::Propagate)
+            {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
                     expression_propagation_span(&value_catch.handled_value),
                 )));
             }
-            if let Some(effect) =
-                classify_expression(&value_catch.handled_value, template_ir_store, state)?
-            {
-                return Ok(Some(effect));
+            if matches!(value_catch.handler, FallibleHandling::Propagate) {
+                if let Some(effect) =
+                    classify_expression(&value_catch.handled_value, template_ir_store, state)?
+                {
+                    return Ok(Some(effect));
+                }
+            } else if state.pending_facts.is_none() || state.check_catch_support {
+                state.protected_failure_depth += 1;
+                let effect = classify_expression(
+                    &value_catch.handled_value, template_ir_store, state,
+                );
+                state.protected_failure_depth -= 1;
+                if let Some(effect) = effect? {
+                    return Ok(Some(effect));
+                }
             }
             if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
                 return classify_nodes(body, template_ir_store, state);
@@ -379,7 +642,17 @@ fn classify_nodes(
     state: &mut TraversalState,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for node in nodes {
+        if state.unsupported_catch.is_some() || state.has_pending_failure {
+            return Ok(None);
+        }
         let effect = match &node.kind {
+            NodeKind::Return(values) if state.pending_facts.is_some() => {
+                classify_expressions(values, template_ir_store, state)?
+            }
+            NodeKind::ReturnError(value) if state.pending_facts.is_some() => {
+                classify_expression(value, template_ir_store, state)?
+            }
+            NodeKind::Break | NodeKind::Continue if state.pending_facts.is_some() => None,
             NodeKind::Return(_) => Some(EnclosingExitEffect::FunctionReturn(node.span)),
             NodeKind::ReturnError(_) => Some(EnclosingExitEffect::ErrorReturn(node.span)),
             // A loop-local control transfer cannot escape the assertion message's enclosing
@@ -431,6 +704,11 @@ fn classify_nodes(
             }
             NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
             NodeKind::RangeLoop { range, body, .. } => {
+                if let Some(effect) = classify_range_failure(
+                    range.start.type_id, node.span, state,
+                ) {
+                    return Ok(Some(effect));
+                }
                 let mut effect = classify_expression(&range.start, template_ir_store, state)?;
                 if effect.is_none() {
                     effect = classify_expression(&range.end, template_ir_store, state)?;
@@ -465,13 +743,28 @@ fn classify_nodes(
             NodeKind::Assignment { value, .. } | NodeKind::MultiBind { value, .. } => {
                 classify_expression(value, template_ir_store, state)?
             }
-            NodeKind::Assert { condition, message } => classify_expression(
-                condition,
-                template_ir_store,
-                state,
-            )?
-            .or(classify_expression(message, template_ir_store, state)?),
+            NodeKind::Assert { condition, message } => {
+                let effect = classify_expression(condition, template_ir_store, state)?;
+                if state.check_catch_support {
+                    classify_expression(message, template_ir_store, state)?;
+                }
+                if state.pending_facts.is_some() {
+                    if state.assertion_message_facts.is_some() {
+                        let message_facts =
+                            pending_expression_failure_facts(message, template_ir_store)?;
+                        if let Some(facts) = &mut state.assertion_message_facts {
+                            facts.merge_pending_from(&message_facts);
+                        }
+                    }
+                    effect
+                } else {
+                    effect.or(classify_expression(message, template_ir_store, state)?)
+                }
+            }
             // Nested function returns belong to that function and cannot escape this message.
+            NodeKind::Function(_, _, body) if state.check_catch_support => {
+                classify_nodes(body, template_ir_store, state)?
+            }
             NodeKind::Function(_, _, _) => None,
             NodeKind::StructDefinition(_, fields) => {
                 classify_declarations(fields, template_ir_store, state)?
@@ -609,6 +902,10 @@ fn classify_loop_header(
             classify_expression(condition, template_ir_store, state)
         }
         TemplateLoopHeader::Range { range, .. } => {
+            let span = range.step.as_ref().and_then(|step| step.span).or(range.start.span);
+            if let Some(effect) = classify_range_failure(range.start.type_id, span, state) {
+                return Ok(Some(effect));
+            }
             if let Some(effect) = classify_expression(&range.start, template_ir_store, state)? {
                 return Ok(Some(effect));
             }
@@ -624,4 +921,35 @@ fn classify_loop_header(
             classify_expression(iterable, template_ir_store, state)
         }
     }
+}
+
+fn classify_range_failure(
+    type_id: TypeId,
+    span: Option<SourceSpan>,
+    state: &mut TraversalState,
+) -> Option<EnclosingExitEffect> {
+    if state.explicit_exit_only || state.check_catch_support || state.protected_failure_depth > 0 {
+        return None;
+    }
+    if state.check_pending_failure {
+        state.has_pending_failure = true;
+    } else if let Some(facts) = &mut state.pending_facts {
+        let binary_float = type_id == builtin_type_ids::FLOAT
+            || [FixedScalar::F16, FixedScalar::F32, FixedScalar::F64]
+                .into_iter()
+                .any(|scalar| type_id == builtin_type_ids::fixed_scalar(scalar));
+        let codes = if binary_float {
+            vec![BuiltinErrorCode::FloatNonFinite]
+        } else {
+            vec![BuiltinErrorCode::IntOverflow]
+        };
+        facts.implicit.push(ImplicitFailureContributor {
+            span,
+            codes,
+            source: ImplicitFailureSource::NumericOperation,
+        });
+    } else {
+        return Some(EnclosingExitEffect::InferredFailure(span));
+    }
+    None
 }
