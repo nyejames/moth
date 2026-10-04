@@ -22,6 +22,8 @@ use super::synthetic_build_results::{
 };
 use crate::build_system::build::{DeferredResourceOutput, FileKind};
 use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
+#[cfg(unix)]
+use crate::compiler_tests::test_fs::RestrictedDirectory;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -789,23 +791,20 @@ fn node_harness_removes_its_workspace_after_a_successful_run() {
 #[test]
 #[cfg(unix)]
 fn node_harness_reports_a_workspace_that_cannot_be_removed() {
-    use std::os::unix::fs::PermissionsExt;
-
     // A workspace that outlives its run can change a later run's behaviour, so a removal failure
     // must fail the harness rather than be discarded.
-    let mut locked_directory = PathBuf::new();
+    let mut locked_workspace = None;
     let error = with_harness_workspace(|workspace| {
         workspace.write("kept.txt", "data")?;
-        locked_directory = workspace.path().to_path_buf();
-        std::fs::set_permissions(&locked_directory, std::fs::Permissions::from_mode(0o500))
-            .expect("test should be able to make the workspace read-only");
+        locked_workspace = Some(RestrictedDirectory::deny_writes(workspace.path()));
         Ok(())
     })
     .expect_err("an unremovable workspace must be reported");
 
-    // Restore write access before asserting so the directory never leaks out of this test.
-    std::fs::set_permissions(&locked_directory, std::fs::Permissions::from_mode(0o700))
-        .expect("test should be able to restore workspace permissions");
+    // Restore write access before removing so the directory never leaks out of this test.
+    let restricted = locked_workspace.expect("the harness body should have locked its workspace");
+    let locked_directory = restricted.path().to_path_buf();
+    drop(restricted);
     std::fs::remove_dir_all(&locked_directory).expect("test should clean up its own workspace");
 
     assert_eq!(error.kind, RenderHarnessErrorKind::Cleanup);

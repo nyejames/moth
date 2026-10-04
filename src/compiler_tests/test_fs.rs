@@ -88,6 +88,88 @@ pub fn read_utf8(path: &Path) -> String {
         .unwrap_or_else(|error| panic!("file at {path:?} is not valid UTF-8: {error}"))
 }
 
+/// A directory whose Unix permissions are restricted for one test and restored on drop.
+///
+/// WHAT: applies a restricted mode, proves the restriction is enforced, and restores owner
+///   access when dropped, including while a failed assertion unwinds.
+/// WHY: tests that rely on permission denial pass vacuously, or fail with a misleading
+///   result, when the process can bypass permission checks (for example when it runs as
+///   root in a container). The probe turns that environment into one explicit failure.
+#[cfg(unix)]
+pub struct RestrictedDirectory {
+    path: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl RestrictedDirectory {
+    /// Removes read access so the directory cannot be listed. Search and write remain,
+    /// so paths inside it still resolve.
+    #[track_caller]
+    pub fn deny_listing(path: &Path) -> Self {
+        let restricted = Self::apply(path, 0o300);
+        let probe = std::fs::read_dir(path).map(|_| ());
+        restricted.require_denied(probe, "listing");
+        restricted
+    }
+
+    /// Removes write access so entries cannot be created or removed inside the directory.
+    #[track_caller]
+    pub fn deny_writes(path: &Path) -> Self {
+        let restricted = Self::apply(path, 0o500);
+        let probe_path = path.join(".moth-permission-probe");
+        let probe = std::fs::create_dir(&probe_path);
+        if probe.is_ok() {
+            // Leave the directory as the test created it before reporting the bypass.
+            let _ = std::fs::remove_dir(&probe_path);
+        }
+        restricted.require_denied(probe, "writing");
+        restricted
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[track_caller]
+    fn apply(path: &Path, mode: u32) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .unwrap_or_else(|error| panic!("failed to restrict {path:?} to {mode:o}: {error}"));
+
+        Self {
+            path: path.to_path_buf(),
+        }
+    }
+
+    #[track_caller]
+    fn require_denied(&self, probe: std::io::Result<()>, operation: &str) {
+        match probe {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+            Ok(()) => panic!(
+                "permission restrictions are not enforced for this process: {operation} {:?} \
+                 still succeeded. Run the tests as an unprivileged user, not root.",
+                self.path
+            ),
+            Err(error) => panic!(
+                "unexpected error while probing {operation} {:?}: {error}",
+                self.path
+            ),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for RestrictedDirectory {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+
+        // A panic here would abort while unwinding, and the temp directory owner reports
+        // any cleanup that still fails, so restoration is best effort.
+        let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
