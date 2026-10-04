@@ -1,0 +1,167 @@
+## Create a builder
+
+A project builder defines what a Moth project can use and turns its compiled
+assemblies into application artefacts. A game builder can provide engine
+packages and emit Wasm. A web builder can provide HTML helpers and assemble
+browser output. Both use the same compiler and build services.
+
+Use the public `moth::builder` API for this work. The four main values are
+`BuilderDefinition`, `CompiledProject`, `BuildContext` and `BuildArtifacts`.
+`ProjectBuilder` connects them through two methods:
+
+- `definition` describes the packages, configuration and capabilities available
+  to the project's source.
+- `build` consumes a successfully compiled project and requests the artefacts
+  that implement the builder's application model.
+
+The build driver calls `definition` before configuration or source compilation.
+It retains the resulting immutable definition for the build. It calls `build`
+only after the required semantic compilation succeeds. A builder doesn't
+sequence parsing, type checking or borrow analysis itself.
+
+### A Wasm package builder
+
+This builder compiles the application's explicit project package facade to
+Wasm. It also makes a Moth source package and a Rust host package available.
+The example package has no output-relative resource strings.
+
+[codeblock, $code("rust"):
+    use std::path::PathBuf;
+
+    use moth::builder::{
+        BuildArtifacts, BuildContext, BuilderDefinition, CompiledProject,
+        Error, HostPackage, ProjectBuilder, SourcePackage,
+    };
+
+    #[moth::host_function]
+    fn has_prefix(text: &str, prefix: &str) -> bool {
+        text.starts_with(prefix)
+    }
+
+    struct GameBuilder {
+        package_root: PathBuf,
+    }
+
+    impl ProjectBuilder for GameBuilder {
+        fn definition(&self) -> Result<BuilderDefinition, Error> {
+            BuilderDefinition::new("game")
+                .source_package(
+                    SourcePackage::new("@game")
+                        .from_dir(&self.package_root),
+                )
+                .host_package(
+                    HostPackage::new("@platform")
+                        .function(moth::host_binding!(has_prefix)),
+                )
+                .moth_templates()
+                .markdown()
+                .finish()
+        }
+
+        fn build(
+            &self,
+            project: &CompiledProject,
+            context: &mut BuildContext,
+        ) -> Result<BuildArtifacts, Error> {
+            let package = project.require_package()?;
+            let wasm = context.compile_wasm(package)?;
+
+            let mut output = BuildArtifacts::new();
+            output.add("game.wasm", wasm)?;
+            Ok(output)
+        }
+    }
+]
+
+`require_package` returns the owner-bound assembly for the authored project
+facade. A missing facade produces a builder diagnostic. The facade selects its
+public surface through normal Moth visibility rules. It has no implicit
+`start`, page output or access to private declarations in other modules.
+
+`compile_wasm` compiles the selected assembly and its reachable dependencies.
+The result retains the import, export and runtime contract needed by an
+embedding host. It doesn't make every source module a separate Wasm binary,
+create a WIT component or execute the program.
+
+`output.add` records an artefact under a relative output path. It preserves the
+artefact's associated contracts and rejects conflicting records. It doesn't
+write the final file. The central output owner validates destinations,
+materialises resource bytes and applies manifest-based cleanup.
+
+An assembly containing browser-only operations cannot be compiled for a native
+Wasm host merely by calling this method. Target validation reports the
+unsupported reachable operation. Resource-bearing assemblies also require the
+output context described in Assembly and runtime output.
+
+### Invoke the build driver
+
+Use `BuildRequest` to supply the project location and per-build options. Keep
+installed builder package locations separate from the application source root.
+This example obtains the package directory relative to the Rust crate that
+contains the builder:
+
+[codeblock, $code("rust"):
+    use moth::builder::{BuildRequest, build_project};
+
+    fn main() -> Result<(), moth::builder::Error> {
+        let builder = GameBuilder {
+            package_root: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("moth/game"),
+        };
+        let request = BuildRequest::new("game-project");
+        let result = build_project(&builder, request)?;
+
+        result.write_outputs()?;
+        Ok(())
+    }
+]
+
+The Moth package directory contains its normal package facade and source files.
+When distributing a builder, install those files at a known location and pass
+that location explicitly. An absolute installation path locates bytes. It is
+not the package's semantic identity.
+
+Building and writing are separate operations so an embedding tool can inspect
+results before committing output. An unsuccessful compilation never supplies a
+partial `CompiledProject` to `build`. A failed build never authorises stale
+output cleanup as though a replacement build had succeeded.
+
+### Define once, consume through services
+
+The fluent helpers construct one validated capability surface. `finish`
+validates the complete registration and returns an immutable definition or a
+structured error. Duplicate names, conflicting package roots, invalid defaults
+and attempts to override compiler-owned facilities fail instead of replacing
+an earlier registration.
+
+The definition contains builder policy, not an independent compiler. Source
+packages still use Moth semantic interfaces. Native host packages still use the
+canonical binding machinery. Helpers don't introduce parallel type tables,
+configuration parsers or copies of compiler result stores.
+
+Builder identity is a stable declared identity used for ownership and
+compatibility. It isn't a Rust type name, filesystem path or enum entry that
+requires editing the compiler for each builder. Source aliases don't change
+package or output ownership.
+
+One selected numeric profile governs directly linked Moth code. The
+`numeric_profile` definition helper selects that profile before configuration
+values are materialised. Build mode and physical target selection don't change
+it. Compiler-owned names and mandatory Core facilities remain authoritative.
+
+### Build-time code and runtime code
+
+The Rust builder uses the compiler as a library. The running application uses a
+host runtime and its installed bindings. These are separate responsibilities,
+even when one executable contains both.
+
+Declaring `has_prefix` makes its interface available during compilation.
+Installing its adapter in the application's Wasm host makes it callable during
+execution. Registering an interface alone neither installs a native function in
+a browser nor sends a request to a server. A target without an implementation
+rejects reachable calls to that binding.
+
+A project builder reuses compiler backends. Writing a new backend is a different
+job that consumes validated compiler IR through its own handoff. Ordinary
+builder code uses assemblies and services rather than public access to HIR,
+type environments or analysis side tables.

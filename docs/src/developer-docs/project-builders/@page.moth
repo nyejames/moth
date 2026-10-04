@@ -1,0 +1,34 @@
+@creating-a-builder content as builder_content
+@host-packages content as host_content
+@capabilities-and-directives content as capability_content
+@assemblies-and-runtime content as assembly_content
+@styles navbar, section, theme_head
+
+page_title #= "Create a project builder in Rust"
+page_description #= "Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Developers) / Rust project builders
+
+    # Create a project builder in Rust
+
+    A project builder connects Moth to an application environment. This guide
+    builds a small Wasm package builder, then explains source packages, Rust
+    bindings, configuration, directives and runtime output.
+
+    The compiler owns language semantics. Your builder owns its application
+    contract and uses the public SDK to request validated compilation and
+    output services.
+
+    Read alongside @../../docs/project-structure (Project structure),
+    @../../docs/packages (Packages) and @../memory-management (Memory management)
+    for their source and lifetime contracts.
+]
+
+#[section, builder_content]
+#[section, host_content]
+#[section, capability_content]
+#[section, assembly_content]

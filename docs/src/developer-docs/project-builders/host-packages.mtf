@@ -1,0 +1,254 @@
+## Packages and Rust host functions
+
+Use a source package for reusable Moth code and a host package for functions or
+resources implemented outside Moth. Both enter normal package resolution.
+Neither grants special access to another module's private implementation.
+
+### Provide a source package
+
+`SourcePackage::new` assigns the public package root. `from_dir` supplies its
+installed files. Registration through `BuilderDefinition::source_package`
+records Builder provenance without asking the caller to construct an internal
+registry entry.
+
+[codeblock, $code("rust"):
+    let package = SourcePackage::new("@ui")
+        .from_dir("installed-packages/ui")
+        .available_in_templates();
+]
+
+`available_in_templates` makes the package's exported constants eligible for
+implicit template scope. It doesn't inject arbitrary Rust functions, expose
+private constants or change Moth's no-shadowing rules. Ambiguous visible names
+are errors.
+
+Packages compile in their own semantic boundaries under the selected numeric
+profile. Builder source packages don't inherit the application's private
+project globals. Project-specific compile-time inputs use an explicitly
+registered synthetic interface with tracked provenance, not ambient state.
+
+### Derive a host interface from a Rust signature
+
+Apply `#[moth::host_function]` to a supported concrete Rust free function. Add
+its generated descriptor to a package explicitly:
+
+[codeblock, $code("rust"):
+    let package = HostPackage::new("@platform")
+        .function(moth::host_binding!(has_prefix));
+]
+
+The attribute preserves the Rust function and generates a typed binding
+description and call adapter. `host_binding!` selects that generated
+description. Package registration gives it its Moth package and symbol
+identity. The normal function name is the default exposed name.
+
+The attribute removes duplicate signature declarations. It doesn't register a
+global plugin, scan the crate for other functions or create an HTTP endpoint.
+Rust `pub` visibility and Moth package visibility remain separate from network
+exposure. The package definition is the place to inspect which functions the
+builder provides.
+
+Generated descriptions enter the same canonical registration path as manual
+host descriptors. The macro generates no Moth source to parse again and
+introduces no alternate semantic type system. Manual descriptors receive the
+same signature, identity and target validation. They cannot make an invalid
+Rust adapter safe by claiming a different signature.
+
+### The automatic binding profile
+
+The automatic adapter accepts a closed set of Rust signature shapes. Each has
+one Moth meaning. These are boundary rules, not a claim that Rust and Moth have
+the same layout or ownership model.
+
+[table:
+    [th:
+        [: Rust shape]
+        [: Moth meaning]
+    ]
+    [td:
+        [: `bool` and `char`]
+        [: `Bool` and `Char`]
+    ]
+    [td:
+        [: `i8`, `i16`, `i32`, `i64`]
+        [: The matching fixed-width signed type]
+    ]
+    [td:
+        [: `u8`, `u16`, `u32`, `u64`]
+        [: The matching fixed-width unsigned type]
+    ]
+    [td:
+        [: `f32` and `f64`]
+        [: `F32` and `F64`, with Moth's finite-value checks]
+    ]
+    [td:
+        [: `moth::host::Byte`]
+        [: Nominal `Byte`, distinct from `U8`]
+    ]
+    [td:
+        [: `moth::host::Int` and `moth::host::Float`]
+        [: Profile-selected `Int` and `Float`]
+    ]
+    [td:
+        [: `&str` parameter]
+        [: Shared string input with call-scoped Rust access]
+    ]
+    [td:
+        [: `String` result]
+        [: An independent Moth string result]
+    ]
+    [td:
+        [: `Option<T>` for an eligible value type]
+        [: One optional Moth value]
+    ]
+    [td:
+        [: `()` as the return type]
+        [: Zero success result slots]
+    ]
+    [td:
+        [: `Result<T, moth::host::Error>` as the outer return type]
+        [: The success shape plus the built-in Moth error channel]
+    ]
+    [td:
+        [: `&T` or `&mut T` for an explicitly registered host resource]
+        [: Shared or exclusive access to that opaque resource]
+    ]
+]
+
+Rust `i32` means `I32`, even when Moth's selected `Int` happens to be 32 bits.
+Rust `u8` means `U8`, never `Byte`. The host wrappers express those distinct
+Moth types without asking the adapter to guess from a machine word size.
+
+`Result<(), moth::host::Error>` has zero success slots and an error channel.
+`Result<Option<T>, moth::host::Error>` keeps absence distinct from failure.
+This mapping doesn't create a source-level Result object or tuple in Moth.
+The error's code is a `U32` value. Code zero is valid error data and doesn't
+turn an error outcome into success.
+
+The automatic profile rejects architecture-dependent `usize` and `isize`, raw
+pointers, borrowed results, arbitrary Rust references, unregistered structs,
+trait objects, generic functions, `impl Trait`, async functions and callbacks.
+Arrays, collections, tuples and arbitrary nested Rust Result values acquire no
+implicit mapping. A type accepted elsewhere in Moth isn't automatically part
+of this host profile. Write a concrete wrapper with an eligible surface when a
+Rust API uses another representation.
+
+A Rust type alias doesn't bypass these restrictions. Generated type obligations
+let Rust check the resolved type and adapter implementation. The procedural
+macro examines syntax rather than resolving arbitrary Rust names or analysing
+function bodies. It doesn't infer purity, absence of panics or application
+permissions from a function signature.
+
+### Values cross through an adapter
+
+The runtime adapter validates scalar encodings, numeric ranges, finite floats,
+Unicode and string lengths before exposing a value at the receiving boundary.
+Invalid values don't become successful Moth results through truncation,
+sentinel substitution or a changed type. A host contract violation is a
+boundary fault, not an undeclared Moth error return.
+
+A Rust `&str` parameter grants access only for that call. The adapter may copy
+into call-owned storage when the runtime cannot safely provide a borrowed view.
+It promises correct values and lifetimes, not zero-copy access. Host code cannot
+retain a reference into guest memory after the call.
+
+String results become independent Moth storage. Rust allocator ownership,
+reference counts and raw pointers don't pass through as Moth ownership. The
+adapter follows the declared ABI and cleanup contract rather than transmuting
+Rust layouts. A Rust `repr(C)` annotation alone supplies none of that contract.
+
+A recoverable Rust failure is converted deliberately to `moth::host::Error` by
+the wrapper. The attribute doesn't stringify every Rust error, catch every
+panic or expose sensitive internal details automatically. Assertions, traps,
+resource exhaustion and faults outside the typed result remain distinct from
+normal Moth error returns.
+
+### Register opaque resources
+
+Use `#[moth::host_type]` for a Rust-owned resource whose internals stay on the
+host. Register its type and free-function surface in the package:
+
+[codeblock, $code("rust"):
+    #[moth::host_type]
+    struct Window {
+        width: u32,
+        height: u32,
+    }
+
+    #[moth::host_function]
+    fn resize(window: &mut Window, width: u32, height: u32) {
+        window.width = width;
+        window.height = height;
+    }
+
+    let package = HostPackage::new("@window")
+        .opaque_type::<Window>()
+        .function(moth::host_binding!(resize));
+]
+
+The annotation describes an opaque Moth type, not a serialisable Rust struct.
+Its fields, native layout and address remain private to Rust. Registering the
+type creates no resource instance. The host resource API supplies instances
+under an explicit lifecycle and resolves their handles when functions run.
+
+A resource handle is associated with its registered type, owning runtime and
+lifecycle. The adapter rejects the wrong type, a stale handle or a handle from
+another runtime before constructing a Rust reference. Repeated aliases also
+remain subject to access checks. Two handles do not prove two distinct mutable
+resources.
+
+`&mut Window` requires exclusive resource access. It doesn't mean that an
+arbitrary request is authorised or that the function cannot mutate unrelated
+host state. Host-side calls and nested invocations obey the resource access
+contract as well as Moth's static checks.
+
+The package exports free functions. The attribute doesn't manufacture Moth
+receiver methods or expose every Rust method on the resource. Moth source
+wrappers can provide a higher-level API through ordinary source-owned types.
+
+### Supply host context explicitly
+
+A host-context parameter is supplied by the runtime rather than by the Moth
+caller. Mark it explicitly and keep it separate from ordinary parameters:
+
+[codeblock, $code("rust"):
+    struct HostState {
+        user_name: Option<String>,
+    }
+
+    #[moth::host_function]
+    fn current_user(
+        #[moth(context)] host: &HostState,
+    ) -> Option<String> {
+        host.user_name.clone()
+    }
+]
+
+The Moth function takes no argument and returns an optional string. The clone
+provides an independent result rather than retaining a borrow of host state.
+The runtime supplies the required `HostState` for the invocation. An absent or
+incompatible context is rejected before calling the Rust function.
+
+A binding has at most one marked context parameter. Context is neither a
+serialised Moth value nor an arbitrary dependency-injection registry. A mutable
+context has an exclusive access requirement. The host determines its scope,
+such as an application, session or request, and never shares request-private
+state accidentally through a global instance.
+
+### Install the execution surface
+
+Compilation consumes package descriptions. Execution consumes the matching
+runtime adapters. The embedding host installs implementations for the import
+contract recorded on the Wasm artefact and supplies the required resource and
+context owners. Missing implementations or mismatched contracts fail before
+normal execution.
+
+A native Rust implementation isn't a JavaScript implementation. Browser and
+server targets require their own compatible bindings. The SDK doesn't turn a
+missing browser binding into RPC. A host import is also not a public web route.
+Authentication, authorisation and HTTP mutation protection belong to the web
+builder and application boundary that receive the request.
+
+Host-binding attributes are the SDK's narrowly scoped use of procedural
+macros. They generate checked descriptions and adapters. They don't provide an
+extension point for arbitrary compiler passes or unrelated metaprogramming.
