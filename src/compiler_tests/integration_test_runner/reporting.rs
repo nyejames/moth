@@ -894,6 +894,7 @@ fn failure_kind_label(kind: FailureKind) -> &'static str {
         FailureKind::RenderedOutputExactMismatch => "rendered output exact mismatch",
         FailureKind::RenderedOutputOrderMismatch => "rendered output order mismatch",
         FailureKind::RenderedOutputMultiplicityMismatch => "rendered output multiplicity mismatch",
+        FailureKind::EntryFailed => "entry failed",
         FailureKind::HarnessFailed => "harness error",
         FailureKind::ExpectationViolation => "expectation violation",
     }

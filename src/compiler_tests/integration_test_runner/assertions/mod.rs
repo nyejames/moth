@@ -33,7 +33,9 @@ pub(crate) use node_harness::{
 #[cfg(test)]
 pub(crate) use rendered_output::{RuntimeEvent, SlotOutput, parse_harness_output};
 #[cfg(test)]
-pub(crate) use rendered_output::{execute_wasm_harness_for_test, required_text_artifact_for_test};
+pub(crate) use rendered_output::{
+    execute_html_harness_for_test, execute_wasm_harness_for_test, required_text_artifact_for_test,
+};
 
 #[cfg(test)]
 use super::GoldenMode;

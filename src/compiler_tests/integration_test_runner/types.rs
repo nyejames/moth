@@ -264,6 +264,7 @@ pub(crate) enum FailureKind {
     RenderedOutputExactMismatch,
     RenderedOutputOrderMismatch,
     RenderedOutputMultiplicityMismatch,
+    EntryFailed,
     HarnessFailed,
     ExpectationViolation,
 }

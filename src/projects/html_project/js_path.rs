@@ -12,8 +12,10 @@
 //!      that would prematurely close the script tag.
 //!   4. A second inline `<script>` calls entry `start()` once. Only a successful outcome
 //!      publishes its runtime fragment array, hydrating each slot in source order.
+//!      Failure reports a generic terminal notice and release pages append fixed text,
+//!      without reading application error data or disturbing static HTML.
 
-use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
+use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsLoweringConfig, lower_hir_to_js};
 use crate::build_system::build::{FileKind, OutputFile, ProjectLinkedModule};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -37,6 +39,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Fixed release fallback, inserted as text rather than application HTML.
+pub(crate) const RELEASE_ENTRY_FAILURE_NOTICE: &str = "This page could not start.";
+
 /// Inputs for rendering a JS-backed HTML document.
 ///
 /// WHAT: groups all data needed to produce the final HTML document from a lowered JS module.
@@ -55,6 +60,7 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub function_names: &'a HashMap<FunctionId, String>,
     /// Lowering-owned fact from the emitted start's HIR return type.
     pub start_is_fallible: bool,
+    pub release_build: bool,
     pub entry_runtime_fragment_count: usize,
     /// Whether the emitted JS bundle contains reactive runtime fragments that need the DOM mount
     /// helper instead of plain-string slot insertion.
@@ -278,6 +284,7 @@ pub(crate) fn compile_html_module_js(
         js_bundle: &bundle_with_imports,
         function_names: &js_module.function_name_by_id,
         start_is_fallible: js_module.start_is_fallible,
+        release_build: input.build_profile.is_release(),
         entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
         uses_reactive_runtime_fragments,
         import_map_html: glue_result.import_map_html,
@@ -475,6 +482,7 @@ pub(crate) fn render_html_document(
         input.use_module_script,
         input.uses_reactive_runtime_fragments,
         input.start_is_fallible,
+        input.release_build,
     );
 
     render_html_document_shell(HtmlDocumentShellInput {
@@ -496,6 +504,7 @@ fn render_runtime_bootstrap_script_html(
     is_module_script: bool,
     uses_reactive_runtime_fragments: bool,
     start_is_fallible: bool,
+    release_build: bool,
 ) -> String {
     // Escape the bundle so any `</script>` sequence inside string literals or comments cannot
     // prematurely terminate the HTML script tag and corrupt the page.
@@ -518,6 +527,7 @@ fn render_runtime_bootstrap_script_html(
             "",
             uses_reactive_runtime_fragments,
             start_is_fallible,
+            release_build,
         );
         if start_is_fallible {
             html.push_str("})();\n");
@@ -539,6 +549,7 @@ fn render_runtime_bootstrap_script_html(
             "  ",
             uses_reactive_runtime_fragments,
             start_is_fallible,
+            release_build,
         );
         html.push_str("})();\n");
         html.push_str("</script>\n");
@@ -553,15 +564,28 @@ fn append_runtime_bootstrap(
     indent: &str,
     uses_reactive_runtime_fragments: bool,
     start_is_fallible: bool,
+    release_build: bool,
 ) {
     if start_is_fallible {
         // Failure has no success slot: branch before reading or publishing any fragments.
         html.push_str(&format!(
             "{indent}var moth_result = {start_function_name}();\n"
         ));
+        html.push_str(&format!("{indent}if (moth_result.tag !== \"ok\") {{\n"));
         html.push_str(&format!(
-            "{indent}if (moth_result.tag !== \"ok\") return;\n"
+            "{indent}  if (typeof process !== \"undefined\" && process.stderr) {{\n\
+             {indent}    process.stderr.write({ENTRY_FAILURE_NOTICE:?});\n\
+             {indent}    process.exitCode = 1;\n\
+             {indent}  }}\n"
         ));
+        if release_build {
+            html.push_str(&format!(
+                "{indent}  if (typeof document !== \"undefined\" && document.body && document.createTextNode) {{\n\
+                 {indent}    document.body.appendChild(document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?}));\n\
+                 {indent}  }}\n"
+            ));
+        }
+        html.push_str(&format!("{indent}  return;\n{indent}}}\n"));
         if slot_ids.is_empty() {
             return;
         }

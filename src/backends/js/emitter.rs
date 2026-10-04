@@ -6,7 +6,7 @@
 use crate::backends::js::JsModule;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
-use crate::backends::js::{JsFunctionEmissionPolicy, JsLoweringConfig};
+use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -191,7 +191,17 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line("(function () {");
                 self.indent += 1;
                 self.emit_line(&format!("var moth_result = {start_name}();"));
-                self.emit_line("if (moth_result.tag !== \"ok\") return;");
+                self.emit_line("if (moth_result.tag !== \"ok\") {");
+                self.indent += 1;
+                self.emit_line("if (typeof process !== \"undefined\" && process.stderr) {");
+                self.indent += 1;
+                self.emit_line(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?});"));
+                self.emit_line("process.exitCode = 1;");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.emit_line("return;");
+                self.indent -= 1;
+                self.emit_line("}");
                 self.indent -= 1;
                 self.emit_line("})();");
             } else {

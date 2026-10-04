@@ -40,6 +40,9 @@ use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Generic terminal report for an unsuccessful entry invocation, independent of application data.
+pub(crate) const ENTRY_FAILURE_NOTICE: &str = "Moth entry failed\n";
+
 /// Policy controlling which HIR functions are emitted in a JS bundle.
 ///
 /// WHAT: determines whether every HIR function is lowered or only an explicit selected set.

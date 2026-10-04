@@ -5,11 +5,15 @@
 
 use super::super::FailureKind;
 use super::super::execution::panic_case_result;
-use super::super::assertions::validate_success_result;
+use super::super::assertions::{
+    RuntimeEvent, execute_html_harness_for_test, validate_success_result,
+};
 use super::super::execution::execute_test_case;
 use super::super::types::{GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::success_test_case;
+use crate::backends::js::ENTRY_FAILURE_NOTICE;
+use crate::projects::html_project::js_path::RELEASE_ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, ProjectBuilder, build_project};
 use crate::build_system::create_project_modules::{
@@ -256,16 +260,14 @@ fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
              value = load()!\n[:[value]]\n",
             directory_entry,
         );
-        let result = build_project(
-            &ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
-            fixture.entry.to_str().expect("fixture entry should be UTF-8"),
-            &[],
-            &BuildConfigInputSet::new(),
-        );
-        let messages = match result {
-            Err(messages) => messages,
-            Ok(_) => panic!("custom error cannot propagate through builtin start Error!"),
-        };
+        let mut case = success_test_case(BackendId::Html, output_expectation("unreachable"));
+        case.entry_path = fixture.entry.clone();
+        case.fixture_root = fixture.directory.path().to_path_buf();
+        let result = execute_test_case(&case);
+        assert!(!result.passed);
+        assert_eq!(result.failure_kind, Some(FailureKind::ExpectationViolation));
+        assert!(result.build_result.is_none(), "source diagnostics must precede runtime execution");
+        let messages = result.messages.expect("source rejection must retain compiler diagnostics");
         assert!(!messages.has_infrastructure_error(), "{messages:?}");
         let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1);
@@ -504,7 +506,7 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         for source in [
-            "load || -> String, Error!:\n    return! Error(\"private-failure-message\")\n;\n\
+            "load || -> String, Error!:\n    return! Error(message = \"application-secret\", code = 0)\n;\n\
              #[:static-survives]\n\
              io.line(\"before-failure\")\n\
              [:staged-before-failure]\n\
@@ -520,20 +522,107 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
              [:after-failure-[value]]\n",
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
-            let built = fixture.build(&[]);
+            let mut built = fixture.build(&[]);
             let html = built.project.output_files.iter().find_map(|output| {
                 if let FileKind::Html(html) = output.file_kind() { Some(html) } else { None }
             }).expect("fallible entry must emit HTML");
             assert!(html.contains("static-survives"), "static fragment remains independently published");
 
-            let mut expectation = output_expectation("before-failure");
-            expectation.rendered_output = RenderedOutputExpectation {
-                exact: Some("before-failure".to_owned()),
-                ..Default::default()
-            };
+            let rendered = execute_html_harness_for_test(&mut built)
+                .expect("failed start must still produce a valid harness summary");
+            assert_eq!(
+                rendered.events(),
+                &[
+                    RuntimeEvent::Console { text: "before-failure".to_owned() },
+                    RuntimeEvent::EntryFailure,
+                ],
+                "{source}",
+            );
+            assert_eq!(rendered.combined_output(), "before-failure", "{source}");
+            assert!(rendered.slot_outputs().is_empty(), "failed start must publish no staged fragments");
+            assert!(rendered.runtime_error_message().is_none(), "entry failure is not an uncaught Error");
+            for forbidden in ["after-failure", "staged-before-failure", "application-secret"] {
+                assert!(!rendered.combined_output().contains(forbidden), "{source}: {forbidden}");
+            }
+
+            let expectation = output_expectation("before-failure");
             let case = success_test_case(BackendId::Html, expectation.clone());
             let result = validate_success_result(&case, built, &expectation);
-            assert!(result.passed, "{source}: {:?}", result.failure_reason);
+            assert!(!result.passed, "a failed start must not satisfy a success expectation");
+            assert_eq!(result.failure_kind, Some(FailureKind::EntryFailed), "{source}");
+            let reason = result.failure_reason.expect("entry failure must report a generic notice");
+            assert_eq!(reason, format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()));
+            assert!(!reason.contains("application-secret"), "{reason}");
         }
+    }
+}
+
+#[test]
+fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let source = "load || -> String, Error!:\n\
+         return! Error(message = \"application-secret\", code = 0)\n\
+     ;\n\
+     #[:static-survives]\n\
+     io.line(\"before-failure\")\n\
+     [:staged-before-failure]\n\
+     value = load()!\n\
+     io.line(\"after-failure\")\n";
+    for release in [false, true] {
+        let fixture = EntryFixture::new(source, true);
+        let flags: &[Flag] = if release { &[Flag::Release] } else { &[] };
+        let mut built = fixture.build(flags);
+        let html = built.project.output_files.iter().find_map(|output| {
+            if let FileKind::Html(html) = output.file_kind() { Some(html.clone()) } else { None }
+        }).expect("fallible entry must emit HTML");
+        assert!(html.contains("static-survives"), "static HTML remains in the release document");
+        let fallback_call = format!("document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?})");
+        if release {
+            assert!(html.contains(&fallback_call), "release profile must emit the fixed text node");
+            assert!(!html.contains("insertAdjacentHTML(\"beforeend\", moth_result"));
+        } else {
+            assert!(!html.contains(&fallback_call), "dev pages must not insert the release notice");
+            assert!(!html.contains(RELEASE_ENTRY_FAILURE_NOTICE));
+        }
+        let rendered = execute_html_harness_for_test(&mut built)
+            .expect("release and dev failures must remain harness-observable");
+        assert_eq!(
+            rendered.events(),
+            &[
+                RuntimeEvent::Console { text: "before-failure".to_owned() },
+                RuntimeEvent::EntryFailure,
+            ],
+        );
+        assert!(rendered.slot_outputs().is_empty());
+        assert!(!rendered.combined_output().contains("application-secret"));
+        assert!(!rendered.combined_output().contains("after-failure"));
+    }
+}
+
+#[test]
+fn synthetic_start_root_assertion_remains_an_unexpected_runtime_error() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    for directory_entry in [true, false] {
+        let fixture = EntryFixture::new(
+            "io.line(\"before-assertion\")\n[:staged-before-assertion]\n\
+             assert(false, \"root invariant failed\")\n",
+            directory_entry,
+        );
+        let mut built = fixture.build(&[]);
+        let rendered = execute_html_harness_for_test(&mut built)
+            .expect("root assertion must retain the uncaught Error protocol");
+        assert_eq!(rendered.combined_output(), "before-assertion");
+        assert!(rendered.slot_outputs().is_empty());
+        assert!(matches!(
+            rendered.events().last(),
+            Some(RuntimeEvent::RuntimeError { message }) if message.contains("root invariant failed")
+        ));
+
+        let expectation = output_expectation("unreachable");
+        let case = success_test_case(BackendId::Html, expectation.clone());
+        let result = validate_success_result(&case, built, &expectation);
+        assert!(!result.passed);
+        assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
+        assert!(result.failure_reason.is_some_and(|reason| reason.contains("root invariant failed")));
     }
 }

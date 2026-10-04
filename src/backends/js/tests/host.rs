@@ -1,6 +1,7 @@
 //! Host-function and start-invocation JavaScript emission tests.
 
 use super::support::*;
+use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -177,7 +178,12 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         let terminator = if succeeds {
             HirTerminator::ReturnSuccess(int_expression(2, 42, types.int, region))
         } else {
-            HirTerminator::ReturnError(string_expression(2, "failure", types.string, region))
+            HirTerminator::ReturnError(string_expression(
+                2,
+                "application-secret",
+                types.string,
+                region,
+            ))
         };
         let block = HirBlock {
             id: BlockId(0),
@@ -220,21 +226,16 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         )
         .expect("fallible start should lower");
         assert!(output.start_is_fallible);
-        let start_name = expected_dev_function_name("start_main", 0);
-        assert!(output.source.ends_with(&format!(
-            "(function () {{\n    var moth_result = {start_name}();\n    if (moth_result.tag !== \"ok\") return;\n}})();\n"
-        )));
 
         let runtime = std::process::Command::new("node")
             .args(["--eval", &output.source])
             .output()
             .expect("Node.js is required for automatic start runtime tests");
-        assert!(
-            runtime.status.success(),
-            "Automatic start failed: {}",
-            String::from_utf8_lossy(&runtime.stderr)
-        );
+        assert_eq!(runtime.status.code(), Some(if succeeds { 0 } else { 1 }));
         assert_eq!(String::from_utf8(runtime.stdout).expect("UTF-8 output"), "start\n");
-        assert!(runtime.stderr.is_empty());
+        let stderr = String::from_utf8(runtime.stderr).expect("UTF-8 error output");
+        assert_eq!(stderr, if succeeds { "" } else { ENTRY_FAILURE_NOTICE });
+        assert!(!stderr.contains("application-secret"));
+        assert!(!output.source.contains("document"));
     }
 }

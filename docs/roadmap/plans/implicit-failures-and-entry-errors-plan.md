@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. A later generated request reuses the declaring module's converged private-failure summary. Applicable synthetic start has a builtin Error! slot. HTML runtime fragments are published only after a successful invocation. Infallible and static starts keep the plain fragment return. Terminal reporting and the release fallback are not implemented.
-- Current slice: Phase 5 terminal reporting and release fallback.
-- Blockers: none for the start slot or success-only HTML publication.
-- Next action: report a failed entry on standard error with a nonzero status, and render the generic release fallback without application Error HTML.
+- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. A later generated request reuses the declaring module's converged private-failure summary. Applicable synthetic start has a builtin Error! slot. A failed entry reports a fixed terminal notice and exits unsuccessfully, independent of Error.code. Release pages append fixed safe text and do not publish runtime fragments. Dev browser presentation is not implemented.
+- Current slice: Phase 6 dev browser and terminal reports.
+- Blockers: none for fallible start, publication, terminal reporting, or the release fallback.
+- Next action: show a returned start Error in the existing dev presentation and report it once to the terminal without failing the completed build.
 
 ## Goal and authority
 
@@ -893,9 +893,9 @@ Acceptance coverage: E01-E05.
   altering dependency activation, API-only roots or success-slot representation.
 - [x] Make the generated HTML caller branch on entry outcome and publish all
   invocation-owned runtime fragments only on success.
-- [ ] Implement terminal reporting and the generic release fallback independently
+- [x] Implement terminal reporting and the generic release fallback independently
   of application templates. Preserve static content and earlier explicit IO.
-- [ ] Update current harnesses/consumers to inspect outcomes, not only stdout or
+- [x] Update current harnesses/consumers to inspect outcomes, not only stdout or
   fragments. Test once-only execution and absence of retries or partial output.
 
 Exit: short top-level programs remain terse and a failed invocation is never
