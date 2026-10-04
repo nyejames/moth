@@ -906,7 +906,9 @@ pub(crate) fn builtin_failure_diagnostic(
             }
         }
         HirBuiltinFailureBoundary::ExportedNoSlot => {
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                implicit_producer_span: contributor.span,
+            }
         }
     };
     Ok(Some(CompilerDiagnostic::invalid_fallible_handling(reason, facts.span)))

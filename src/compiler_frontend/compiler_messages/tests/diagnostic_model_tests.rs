@@ -2613,9 +2613,11 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
             vec![second_span],
         ),
         (
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                implicit_producer_span: second_span,
+            },
             "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
-            vec![],
+            vec![second_span],
         ),
     ];
 

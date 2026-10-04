@@ -1405,7 +1405,7 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes { .. } => "invalid_fallible_handling.incompatible_catch_error_types",
     &InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure { .. } => "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
     &InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. } => "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
-    &InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+    &InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
     &InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { .. } => "invalid_fallible_handling.unsupported_catch_expression_shape",
     &InvalidFallibleHandlingReason::SuccessValueDiscarded => "invalid_fallible_handling.success_value_discarded",
     },

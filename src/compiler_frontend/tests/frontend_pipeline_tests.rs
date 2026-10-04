@@ -2183,9 +2183,20 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
                  return left * right\n    ;\n;\n",
     );
     let messages = project.ast_result().err().expect("a dormant public generic cannot publish bare numeric failure");
-    assert_fallible_reason(
-        &messages, InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
-    );
+    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics[0];
+    let DiagnosticPayload::InvalidFallibleHandling {
+        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+            implicit_producer_span: Some(producer_span),
+        },
+    } = diagnostic.payload else {
+        panic!("expected dormant exported boundary witness, got {diagnostic:?}");
+    };
+    assert!(diagnostic.primary_span.is_some());
+    assert_eq!(diagnostic.labels.len(), 1);
+    assert_eq!(diagnostic.labels[0].span, Some(producer_span));
+    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
 
     let mut project = failure_project(
         "Failure = | message String |\n\
@@ -2230,9 +2241,20 @@ fn implicit_failure_dormant_public_generic_holds_unresolved_private_calls() {
                  return identity(value)\n    ;\n;\n",
     );
     let messages = project.ast_result().err().expect("unresolved private failure cannot publish through a dormant generic");
-    assert_fallible_reason(
-        &messages, InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
-    );
+    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics[0];
+    let DiagnosticPayload::InvalidFallibleHandling {
+        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+            implicit_producer_span: Some(producer_span),
+        },
+    } = diagnostic.payload else {
+        panic!("expected dormant private-call boundary witness, got {diagnostic:?}");
+    };
+    assert!(diagnostic.primary_span.is_some());
+    assert_eq!(diagnostic.labels.len(), 1);
+    assert_eq!(diagnostic.labels[0].span, Some(producer_span));
+    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
 }
 
 #[test]

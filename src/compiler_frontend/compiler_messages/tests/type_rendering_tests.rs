@@ -134,7 +134,9 @@ fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
             vec!["custom `ParseFailure!` slot", "explicitly to `ParseFailure`", "`return!`"],
         ),
         (
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                implicit_producer_span: None,
+            },
             vec!["exported function", "Recover locally", "final Error! return slot"],
         ),
     ];

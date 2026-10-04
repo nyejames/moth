@@ -1,0 +1,39 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+message_contains = ["Failure", "Recover locally", "return!"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function"
+path = "input/@page.moth"
+line = 3
+column = 1
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 4
+column = 17
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+message_contains = ["Failure", "Recover locally", "return!"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function"
+path = "input/@page.moth"
+line = 3
+column = 1
+count = 1
+
+[[backends.html_wasm.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 4
+column = 17

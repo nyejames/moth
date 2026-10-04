@@ -1411,7 +1411,9 @@ pub enum InvalidFallibleHandlingReason {
         error_type_id: TypeId,
         implicit_producer_span: Option<SourceSpan>,
     },
-    UnhandledBuiltinFailureInExportedFunction,
+    UnhandledBuiltinFailureInExportedFunction {
+        implicit_producer_span: Option<SourceSpan>,
+    },
     UnsupportedCatchExpressionShape {
         expression_name: StringId,
     },
@@ -1432,7 +1434,7 @@ impl InvalidFallibleHandlingReason {
                 "Implicit built-in failure cannot escape through a custom error slot. Recover locally with catch or convert the failure explicitly with catch and return!."
             }
 
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction => {
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => {
                 "This exported function has no error slot but implicit built-in failure may escape. Recover locally with catch or declare a final Error! return slot."
             }
 

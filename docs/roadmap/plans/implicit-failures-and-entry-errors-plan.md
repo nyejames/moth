@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure, including compound write-back and required range updates, propagates through an internal carrier and materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. start Error! is not implemented.
-- Current slice: Phase 4 public boundary validation and diagnostics.
-- Blockers: none for the private lane or Wasm failure-shape rejection. Uncaught start, custom E! and exported no-slot arithmetic still trap.
-- Next action: reject an export or custom error slot that lets implicit failure escape unrepresented.
+- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export or custom error slot that would let implicit failure escape is a source diagnostic with a witness, not a trap. start Error! is not implemented.
+- Current slice: Phase 4 remaining public-surface and compatibility checks.
+- Blockers: none for local export or custom-slot rejection.
+- Next action: prove re-exports, package facades and foreign projections cannot publish an unchecked implicit failure, then invalidate stale summaries and old artefacts.
 
 ## Goal and authority
 

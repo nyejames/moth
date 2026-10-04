@@ -1872,6 +1872,9 @@ impl CompilerDiagnostic {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 implicit_producer_span,
                 ..
+            }
+            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                implicit_producer_span,
             } => [
                 (
                     implicit_producer_span,

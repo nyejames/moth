@@ -12167,11 +12167,11 @@ contract = "language.numeric.builtin_error_recovery_acceptance"
 role = "primary"
 
 [[case]]
-id = "custom_numeric_failure_trap"
-path = "custom_numeric_failure_trap"
-tags = ["integration", "numeric", "runtime", "js-backend", "error-handling"]
-contract = "backend.html.custom_error_channel_numeric_trap"
-role = "backend"
+id = "custom_numeric_failure_rejected"
+path = "custom_numeric_failure_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "js-backend", "html-wasm", "error-handling"]
+contract = "language.numeric.caller_catch_does_not_discharge_custom_slot"
+role = "primary"
 
 [[case]]
 id = "checked_numeric_unreachable_helper_ignored"
@@ -12220,6 +12220,34 @@ id = "implicit_failure_private_chain"
 path = "implicit_failure_private_chain"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
 contract = "language.numeric.private_failure_propagates_to_error_slot"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_private_chain"
+path = "implicit_failure_exported_private_chain"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_private_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_operation"
+path = "implicit_failure_exported_operation"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_operation_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_method"
+path = "implicit_failure_exported_method"
+tags = ["integration", "language", "numeric", "results", "receivers", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_receiver_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_slot"
+path = "implicit_failure_custom_slot"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.custom_error_slot_requires_failure_mapping"
 role = "primary"
 
 [[case]]

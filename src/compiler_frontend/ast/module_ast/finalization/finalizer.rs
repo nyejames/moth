@@ -617,7 +617,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         implicit_producer_span: contributor.span,
                     }
                 }
-                None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction,
+                None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                    implicit_producer_span: contributor.span,
+                },
             };
             return Err(CompilerMessages::from_diagnostic_with_warnings(
                 CompilerDiagnostic::invalid_fallible_handling(reason, node.span.or(contributor.span)),
