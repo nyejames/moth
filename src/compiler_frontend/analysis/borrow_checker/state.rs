@@ -6,7 +6,7 @@
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowStateSnapshot, LocalBorrowSnapshot, LocalMode,
 };
-use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
 
 // WHAT: Stable intra-function position key used by move/borrow decisions.
@@ -21,7 +21,6 @@ pub(super) struct FunctionLayout {
     pub local_ids: Vec<LocalId>,
     pub local_index_by_id: FxHashMap<LocalId, usize>,
     pub local_mutable: Vec<bool>,
-    pub local_regions: Vec<RegionId>,
     pub local_first_write_order: Vec<OrderKey>,
     pub local_last_use_order: Vec<OrderKey>,
     // WHAT: Per-node evaluation order used during transfer.
@@ -32,8 +31,12 @@ pub(super) struct FunctionLayout {
     // WHY: Enables "future use in this block" checks without rescanning statements.
     pub block_local_max_use_order: FxHashMap<BlockId, Vec<OrderKey>>,
     pub block_successors: FxHashMap<BlockId, Vec<BlockId>>,
+    // Shared by assignment reachability and forward state kills at lexical region exits.
+    pub visible_locals_by_block: FxHashMap<BlockId, RootSet>,
     pub may_use_from_block: FxHashMap<BlockId, RootSet>,
     pub must_use_from_block: FxHashMap<BlockId, RootSet>,
+    // Direct assignment reachability is separate from definition-killing read liveness.
+    pub may_assign_from_block: FxHashMap<BlockId, RootSet>,
 }
 
 pub(super) struct FunctionLayoutInputs {
@@ -41,15 +44,16 @@ pub(super) struct FunctionLayoutInputs {
     // WHY: Keeping this separate from FunctionLayout lets callers build then validate atomically.
     pub local_ids: Vec<LocalId>,
     pub local_mutable: Vec<bool>,
-    pub local_regions: Vec<RegionId>,
     pub local_first_write_order: Vec<OrderKey>,
     pub local_last_use_order: Vec<OrderKey>,
     pub statement_order_by_id: FxHashMap<HirNodeId, OrderKey>,
     pub terminator_order_by_block: FxHashMap<BlockId, OrderKey>,
     pub block_local_max_use_order: FxHashMap<BlockId, Vec<OrderKey>>,
     pub block_successors: FxHashMap<BlockId, Vec<BlockId>>,
+    pub visible_locals_by_block: FxHashMap<BlockId, RootSet>,
     pub may_use_from_block: FxHashMap<BlockId, RootSet>,
     pub must_use_from_block: FxHashMap<BlockId, RootSet>,
+    pub may_assign_from_block: FxHashMap<BlockId, RootSet>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,15 +83,16 @@ impl FunctionLayout {
             local_ids: inputs.local_ids,
             local_index_by_id,
             local_mutable: inputs.local_mutable,
-            local_regions: inputs.local_regions,
             local_first_write_order: inputs.local_first_write_order,
             local_last_use_order: inputs.local_last_use_order,
             statement_order_by_id: inputs.statement_order_by_id,
             terminator_order_by_block: inputs.terminator_order_by_block,
             block_local_max_use_order: inputs.block_local_max_use_order,
             block_successors: inputs.block_successors,
+            visible_locals_by_block: inputs.visible_locals_by_block,
             may_use_from_block: inputs.may_use_from_block,
             must_use_from_block: inputs.must_use_from_block,
+            may_assign_from_block: inputs.may_assign_from_block,
         }
     }
 
@@ -161,6 +166,27 @@ impl FunctionLayout {
         } else {
             FutureUseKind::May
         }
+    }
+
+    /// Whether a reachable successor directly assigns this local on any path.
+    ///
+    /// In-block writes are already covered by the inclusive `future_use_kind` activity query.
+    /// This fact does not classify write-through aliases or change read/transfer liveness.
+    pub(super) fn local_has_future_assignment(
+        &self,
+        block_id: BlockId,
+        local_index: usize,
+    ) -> bool {
+        let Some(successors) = self.block_successors.get(&block_id) else {
+            return false;
+        };
+
+        successors.iter().any(|successor| {
+            self.may_assign_from_block
+                .get(successor)
+                .map(|roots| roots.contains(local_index))
+                .unwrap_or(false)
+        })
     }
 
     fn local_has_future_use_in_block(

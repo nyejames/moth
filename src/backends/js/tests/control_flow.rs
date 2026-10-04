@@ -111,6 +111,268 @@ fn emits_structured_if_without_dispatcher() {
     assert!(!output.source.contains("switch (__bb"));
 }
 
+/// Nested RHS branches retain edge values, selected evaluation and one shared continuation.
+#[test]
+fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
+    enum NestedBranch {
+        If,
+        Fallible,
+        SharedError,
+        SharedContinuationError,
+    }
+
+    for branch in [
+        NestedBranch::If,
+        NestedBranch::Fallible,
+        NestedBranch::SharedError,
+        NestedBranch::SharedContinuationError,
+    ] {
+        let mut path_fork = PathInternerFork::empty();
+        let mut string_table = StringTable::new();
+        let (type_environment, types) = build_type_environment();
+        let region = RegionId(0);
+        let load = |id, local_id, ty| {
+            expression(
+                id,
+                HirExpressionKind::Load(HirPlace::Local(local_id)),
+                ty,
+                region,
+                ValueKind::RValue,
+            )
+        };
+        let nested_terminator = match branch {
+            NestedBranch::If => HirTerminator::If {
+                condition: load(2, LocalId(7), types.boolean),
+                then_block: BlockId(3),
+                else_block: BlockId(4),
+            },
+            NestedBranch::Fallible
+            | NestedBranch::SharedError
+            | NestedBranch::SharedContinuationError => HirTerminator::FallibleBranch {
+                result: load(3, LocalId(1), types.fallible_int_string),
+                success_block: BlockId(3),
+                error_block: BlockId(4),
+            },
+        };
+        let shared_error = matches!(branch, NestedBranch::SharedError);
+        let shared_continuation_error = matches!(branch, NestedBranch::SharedContinuationError);
+        let blocks = vec![
+            HirBlock {
+                id: BlockId(0),
+                region,
+                locals: vec![
+                    local(0, types.boolean, region),
+                    local(1, types.fallible_int_string, region),
+                    local(2, types.int, region),
+                    local(3, types.int, region),
+                    local(4, types.int, region),
+                    local(5, types.int, region),
+                    local(7, types.boolean, region),
+                ],
+                statements: vec![
+                    statement(
+                        1,
+                        HirStatementKind::Assign {
+                            target: HirPlace::Local(LocalId(4)),
+                            value: int_expression(8, 10, types.int, region),
+                        },
+                    ),
+                    statement(
+                        2,
+                        HirStatementKind::Assign {
+                            target: HirPlace::Local(LocalId(5)),
+                            value: int_expression(9, 99, types.int, region),
+                        },
+                    ),
+                ],
+                terminator: HirTerminator::If {
+                    condition: load(1, LocalId(0), types.boolean),
+                    then_block: BlockId(1),
+                    else_block: if shared_error { BlockId(4) } else { BlockId(2) },
+                },
+            },
+            HirBlock {
+                id: BlockId(1),
+                region,
+                locals: vec![],
+                statements: vec![statement(
+                    3,
+                    HirStatementKind::Assign {
+                        target: HirPlace::Local(LocalId(2)),
+                        value: int_expression(10, 1, types.int, region),
+                    },
+                )],
+                terminator: nested_terminator,
+            },
+            HirBlock {
+                id: BlockId(2),
+                region,
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Jump {
+                    target: BlockId(5),
+                    args: vec![LocalId(4), LocalId(5)],
+                },
+            },
+            HirBlock {
+                id: BlockId(3),
+                region,
+                locals: vec![],
+                statements: vec![statement(
+                    4,
+                    HirStatementKind::Assign {
+                        target: HirPlace::Local(LocalId(5)),
+                        value: expression(
+                            4,
+                            HirExpressionKind::FallibleUnwrapSuccess {
+                                result: Box::new(load(5, LocalId(1), types.fallible_int_string)),
+                            },
+                            types.int,
+                            region,
+                            ValueKind::RValue,
+                        ),
+                    },
+                )],
+                terminator: HirTerminator::Jump {
+                    target: BlockId(5),
+                    args: vec![LocalId(5), LocalId(4)],
+                },
+            },
+            HirBlock {
+                id: BlockId(4),
+                region,
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::ReturnError(expression(
+                    6,
+                    HirExpressionKind::FallibleUnwrapError {
+                        result: Box::new(load(7, LocalId(1), types.fallible_int_string)),
+                    },
+                    types.string,
+                    region,
+                    ValueKind::RValue,
+                )),
+            },
+            HirBlock {
+                id: BlockId(5),
+                region,
+                locals: vec![local(6, types.int, region), local(8, types.int, region)],
+                statements: vec![statement(
+                    5,
+                    HirStatementKind::Assign {
+                        target: HirPlace::Local(LocalId(3)),
+                        value: load(11, LocalId(8), types.int),
+                    },
+                )],
+                terminator: if shared_continuation_error {
+                    HirTerminator::FallibleBranch {
+                        result: load(13, LocalId(1), types.fallible_int_string),
+                        success_block: BlockId(6),
+                        error_block: BlockId(4),
+                    }
+                } else {
+                    HirTerminator::ReturnSuccess(load(12, LocalId(6), types.int))
+                },
+            },
+            HirBlock {
+                id: BlockId(6),
+                region,
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::ReturnSuccess(load(14, LocalId(6), types.int)),
+            },
+        ];
+        let function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(7)],
+            return_type: types.fallible_int_string,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            "nested_diamond",
+            blocks,
+            function,
+            &[
+                (LocalId(0), "lhs"),
+                (LocalId(1), "result"),
+                (LocalId(2), "rhs_seen"),
+                (LocalId(3), "join_seen"),
+                (LocalId(4), "fallback"),
+                (LocalId(5), "success"),
+                (LocalId(6), "merged"),
+                (LocalId(7), "result_ok"),
+                (LocalId(8), "second"),
+            ],
+        );
+        let output = lower_hir_to_js(
+            &module,
+            &BorrowCheckReport::default(),
+            &NumericProofs::default(),
+            &string_table,
+            default_config(),
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("nested diamond lowering should succeed");
+        let function_name = expected_dev_function_name("nested_diamond", 0);
+        let body = helper_source(&output.source, &function_name);
+        assert_eq!(
+            body.contains("switch (__bb"),
+            shared_error || shared_continuation_error
+        );
+        assert_eq!(
+            body.matches("const __jump_arg_").count(),
+            if shared_error { 2 } else { 4 },
+            "each reachable convergence edge captures both arguments"
+        );
+        let join_name = expected_dev_local_name("join_seen", 3);
+        assert_eq!(
+            body.matches(&format!("__moth_assign_borrow({join_name},"))
+                .count(),
+            1,
+            "the shared continuation must have one emission owner"
+        );
+
+        let script = format!(
+            r#"{}
+const rows = [[false, {{tag: "err", value: "boom"}}, false],
+              [true, {{tag: "ok", value: 42}}, true],
+              [true, {{tag: "err", value: "boom"}}, false]].map(([lhs, result, ok]) => {{
+    const rhs = __moth_binding(0);
+    const join = __moth_binding(0);
+    const outcome = {function_name}(lhs, result, rhs, join, ok);
+    return [outcome.tag, outcome.value, __moth_read(rhs), __moth_read(join)];
+}});
+console.log(JSON.stringify(rows));"#,
+            output.source
+        );
+        let runtime = std::process::Command::new("node")
+            .args(["--eval", &script])
+            .output()
+            .expect("Node.js is required for nested diamond runtime tests");
+        assert!(
+            runtime.status.success(),
+            "nested diamond runtime failed: {}",
+            String::from_utf8_lossy(&runtime.stderr)
+        );
+        let expected = if shared_error {
+            r#"[["err","boom",0,0],["ok",42,1,10],["err","boom",1,0]]"#
+        } else if shared_continuation_error {
+            r#"[["err","boom",0,99],["ok",42,1,10],["err","boom",1,0]]"#
+        } else {
+            r#"[["ok",10,0,99],["ok",42,1,10],["err","boom",1,0]]"#
+        };
+        assert_eq!(
+            String::from_utf8(runtime.stdout)
+                .expect("Node output should be UTF-8")
+                .trim(),
+            expected
+        );
+    }
+}
+
 /// Verifies that a synthetic wildcard merge arm remains a post-match continuation. [cfg]
 #[test]
 fn emits_structured_match_without_inlining_synthetic_merge_arm() {

@@ -3,5 +3,5 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["before Dec division trap"]
-runtime_error_contains = ["Division by zero"]
+entry_error_code = 300
+rendered_output_exact = "before Dec division trap"

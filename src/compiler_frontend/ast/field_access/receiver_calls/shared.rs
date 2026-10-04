@@ -25,7 +25,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
@@ -36,6 +36,13 @@ pub(super) struct TraitSurfaceReceiverMethod {
     pub(super) method_path: PathId,
     pub(super) signature: FunctionSignature,
     pub(super) receiver_mutable: bool,
+    pub(super) origin: TraitSurfaceMethodOrigin,
+}
+
+/// A dormant requirement has only its declared contract; concrete evidence owns a source body.
+pub(super) enum TraitSurfaceMethodOrigin {
+    DeclaredRequirement,
+    ConcreteEvidence,
 }
 
 pub(super) fn receiver_result_type_ids_for_call(
@@ -64,6 +71,7 @@ pub(super) fn receiver_result_type_ids_for_call(
 /// node exposes only success types, so receiver and argument typing never sees a first-class result.
 pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_call_expression(
     mut expression: Expression,
+    builtin_name: StringId,
     token_stream: &AstCursor<'_>,
     type_interner: &mut AstTypeInterner<'_>,
 ) -> Expression {
@@ -89,7 +97,7 @@ pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_c
         span,
     );
     expression.failure_facts = pending_facts;
-    expression.with_typed_error_producer(error_type_id)
+    expression.with_typed_error_producer(error_type_id, Some(builtin_name))
 }
 
 pub(super) fn replace_trait_this_type(

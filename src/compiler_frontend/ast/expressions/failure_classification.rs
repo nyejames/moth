@@ -4,7 +4,7 @@
 //! effective TIR payloads and owned runtime handoffs, scopes catch protection, and projects each
 //! escaping origin once. Assertion-message rejection policy remains in assertion_message_effects.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -35,10 +35,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
+    BuiltinFailureWitness, CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -175,6 +176,114 @@ pub(crate) fn pending_function_failure_facts(
     Ok(facts)
 }
 
+/// Closed AST-local verdicts for retained typed bodies, never public concrete call summaries.
+///
+/// All known bodies start at the bottom of the failure lattice. Numeric origins and unavailable
+/// callees activate edges monotonically, so declaration order and origin-free recursion do not
+/// manufacture failure. Dormant templates and catch capability checks share this resolution.
+pub(crate) struct AstBuiltinFailureSummaries {
+    functions: HashMap<PathId, PendingFunctionFailureFacts>,
+    active: HashSet<PathId>,
+}
+
+impl AstBuiltinFailureSummaries {
+    pub(crate) fn compute(
+        node_groups: &[&[AstNode]],
+        template_ir_store: &TemplateIrStore,
+    ) -> Result<Self, CompilerError> {
+        let mut functions = HashMap::new();
+        for nodes in node_groups {
+            for node in *nodes {
+                if let NodeKind::Function(path, _, body) = &node.kind {
+                    functions.insert(
+                        *path,
+                        pending_function_failure_facts(body, template_ir_store)?,
+                    );
+                }
+            }
+        }
+        let mut summaries = Self {
+            functions,
+            active: HashSet::new(),
+        };
+        loop {
+            let mut changed = false;
+            for (path, facts) in &summaries.functions {
+                if !summaries.active.contains(path)
+                    && facts
+                        .body
+                        .implicit
+                        .iter()
+                        .any(|contributor| summaries.is_active(contributor))
+                {
+                    summaries.active.insert(*path);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        Ok(summaries)
+    }
+
+    pub(crate) fn function_facts(&self, path: PathId) -> Option<&PendingFunctionFailureFacts> {
+        self.functions.get(&path)
+    }
+
+    pub(crate) fn is_active(&self, contributor: &ImplicitFailureContributor) -> bool {
+        match contributor.source {
+            ImplicitFailureSource::NumericOperation => true,
+            ImplicitFailureSource::PrivateCall(path) => self.call_may_fail(path),
+        }
+    }
+
+    fn call_may_fail(&self, path: PathId) -> bool {
+        !self.functions.contains_key(&path) || self.active.contains(&path)
+    }
+
+    pub(crate) fn witness<'a>(
+        &'a self,
+        mut contributor: &'a ImplicitFailureContributor,
+    ) -> BuiltinFailureWitness {
+        let mut witness = BuiltinFailureWitness {
+            codes: Vec::new(),
+            call_spans: Vec::new(),
+            origin_span: None,
+            elided_call_hops: 0,
+        };
+        let mut visited = HashSet::new();
+        loop {
+            let path = match contributor.source {
+                ImplicitFailureSource::NumericOperation => {
+                    witness.codes.extend_from_slice(contributor.codes);
+                    witness.origin_span = contributor.span;
+                    break;
+                }
+                ImplicitFailureSource::PrivateCall(path) => path,
+            };
+
+            // Match HIR's deterministic first-active witness, including its bounded call labels.
+            if witness.call_spans.len() < 3 {
+                witness.call_spans.push(contributor.span);
+            } else {
+                witness.elided_call_hops += 1;
+            }
+            if !visited.insert(path) {
+                break;
+            }
+            let Some(facts) = self.functions.get(&path) else {
+                break;
+            };
+            let Some(next) = facts.body.implicit.iter().find(|next| self.is_active(next)) else {
+                break;
+            };
+            contributor = next;
+        }
+        witness
+    }
+}
+
 /// An explicit exit inside protected work still targets the function, never the catch.
 pub(crate) fn explicit_propagation_catch_diagnostic(
     expression: &Expression,
@@ -206,7 +315,9 @@ pub(crate) fn unsupported_catch_diagnostic(
     template_ir_store: &TemplateIrStore,
     string_table: &mut StringTable,
 ) -> Result<Option<CompilerDiagnostic>, CompilerError> {
+    let summaries = AstBuiltinFailureSummaries::compute(&[nodes], template_ir_store)?;
     let mut state = TraversalState::new(TraversalPurpose::CatchSupport { unsupported: None });
+    state.private_failure_summaries = Some(&summaries);
     classify_nodes(nodes, template_ir_store, &mut state)?;
 
     // Traversal mutates the selected job's result, never replaces its purpose.
@@ -227,11 +338,13 @@ fn catch_operand_has_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
     private_calls: PrivateCallCompatibility,
+    summaries: Option<&AstBuiltinFailureSummaries>,
 ) -> Result<bool, CompilerError> {
     let mut state = TraversalState::new(TraversalPurpose::UnsupportedOperands {
         private_calls,
         found: false,
     });
+    state.private_failure_summaries = summaries;
     classify_expression(expression, template_ir_store, &mut state)?;
 
     // Traversal mutates the selected job's result, never replaces its purpose.
@@ -245,6 +358,7 @@ fn protected_operands_have_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
     private_calls: PrivateCallCompatibility,
+    summaries: Option<&AstBuiltinFailureSummaries>,
 ) -> Result<bool, CompilerError> {
     match &expression.kind {
         ExpressionKind::FunctionCall { args, .. }
@@ -256,6 +370,7 @@ fn protected_operands_have_unsupported_failure(
                     &argument.value,
                     template_ir_store,
                     private_calls,
+                    summaries,
                 )? {
                     return Ok(true);
                 }
@@ -266,12 +381,18 @@ fn protected_operands_have_unsupported_failure(
                 value,
                 template_ir_store,
                 private_calls,
+                summaries,
             );
         }
         ExpressionKind::MethodCall { receiver, args, .. }
         | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
         | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-            if catch_operand_has_unsupported_failure(receiver, template_ir_store, private_calls)? {
+            if catch_operand_has_unsupported_failure(
+                receiver,
+                template_ir_store,
+                private_calls,
+                summaries,
+            )? {
                 return Ok(true);
             }
             for argument in args {
@@ -279,6 +400,7 @@ fn protected_operands_have_unsupported_failure(
                     &argument.value,
                     template_ir_store,
                     private_calls,
+                    summaries,
                 )? {
                     return Ok(true);
                 }
@@ -289,6 +411,7 @@ fn protected_operands_have_unsupported_failure(
                 &cast.source,
                 template_ir_store,
                 private_calls,
+                summaries,
             );
         }
         ExpressionKind::Runtime(rpn) => {
@@ -298,6 +421,7 @@ fn protected_operands_have_unsupported_failure(
                         operand,
                         template_ir_store,
                         private_calls,
+                        summaries,
                     )?
                 {
                     return Ok(true);
@@ -331,20 +455,22 @@ enum TraversalPurpose {
     },
 }
 
-struct TraversalState {
+struct TraversalState<'a> {
     purpose: TraversalPurpose,
     loop_depth: usize,
     visited_templates: HashSet<TemplateTirReference>,
     protected_failure_depth: usize,
+    private_failure_summaries: Option<&'a AstBuiltinFailureSummaries>,
 }
 
-impl TraversalState {
+impl<'a> TraversalState<'a> {
     fn new(purpose: TraversalPurpose) -> Self {
         Self {
             purpose,
             loop_depth: 0,
             visited_templates: HashSet::new(),
             protected_failure_depth: 0,
+            private_failure_summaries: None,
         }
     }
 
@@ -486,7 +612,12 @@ fn classify_expression_with_root_protection(
                 let facts = &expression.failure_facts.summary;
                 *found = facts.first_typed.is_some()
                     || (matches!(private_calls, PrivateCallCompatibility::Unsupported)
-                        && facts.first_private_call.is_some());
+                        && expression.failure_facts.implicit.iter().any(|contributor| {
+                            matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+                                && state
+                                    .private_failure_summaries
+                                    .is_none_or(|summaries| summaries.is_active(contributor))
+                        }));
             }
             TraversalPurpose::AssertionMessage => {
                 // Private candidates wait for exact callee convergence. Numeric failure takes
@@ -786,6 +917,7 @@ fn classify_value_block(
                         } else {
                             PrivateCallCompatibility::Unsupported
                         },
+                        state.private_failure_summaries,
                     )?
                     .then_some("an expression with unsupported fallible operands or arguments"),
                     ExpressionKind::FunctionCall { .. } => Some("an inferred-failure private call"),

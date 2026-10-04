@@ -238,6 +238,10 @@ pub(crate) fn compile_html_module_js(
         {
             entry_exported_names.push(start_name);
         }
+        if js_module.start_is_fallible {
+            // The generated caller lives outside the entry's isolated runtime prelude.
+            entry_exported_names.push("__moth_error_code".to_owned());
+        }
         isolated_modules.push((std::mem::take(&mut js_module.source), entry_exported_names));
         js_module.source = assemble_isolated_module_sources(
             isolated_modules,
@@ -574,7 +578,7 @@ fn append_runtime_bootstrap(
         html.push_str(&format!("{indent}if (moth_result.tag !== \"ok\") {{\n"));
         html.push_str(&format!(
             "{indent}  if (typeof globalThis.__moth_record_entry_failure === \"function\") {{\n\
-             {indent}    globalThis.__moth_record_entry_failure();\n\
+             {indent}    globalThis.__moth_record_entry_failure(__moth_error_code(moth_result.value));\n\
              {indent}  }}\n"
         ));
         html.push_str(&format!(

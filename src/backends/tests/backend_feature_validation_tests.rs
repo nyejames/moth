@@ -1498,6 +1498,49 @@ fn backend_feature_validation_allows_direct_fixed_scalar_values() {
 }
 
 #[test]
+fn backend_feature_validation_keeps_fixed_scalar_failure_carriers_out_of_aggregate_gate() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let span = Some(test_source_span(17));
+
+    for scalar in FixedScalar::ALL {
+        let success_type = builtin_type_ids::fixed_scalar(scalar);
+        let carrier = type_environment.intern_fallible_carrier(success_type, error_type);
+        let module = module_returning_expression(carrier, span);
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "an internal scalar-success carrier must reach the Error representation gate",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::ErrorValues,
+        );
+        assert_eq!(diagnostic.primary_span, span);
+    }
+
+    let aggregate =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+    let carrier = type_environment.intern_fallible_carrier(aggregate, error_type);
+    let module = module_returning_expression(carrier, span);
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "an internal carrier must not hide unsupported user-aggregate success values",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+    assert_eq!(diagnostic.primary_span, span);
+}
+
+#[test]
 fn backend_feature_validation_rejects_reachable_nested_number_values() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();

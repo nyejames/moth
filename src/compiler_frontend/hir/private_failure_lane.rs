@@ -25,6 +25,7 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
 };
@@ -553,6 +554,11 @@ impl LaneInstaller<'_> {
             region,
             span: None,
         });
+
+        // Mutable transport storage is scratch space, not a source-exclusive alias.
+        self.hir
+            .side_table
+            .bind_local_origin(id, HirLocalOriginKind::CompilerTemp, None, None);
         id
     }
 

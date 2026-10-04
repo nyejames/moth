@@ -53,6 +53,7 @@ use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
@@ -79,6 +80,7 @@ use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildP
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::profile::NumericProfile;
+use rustc_hash::FxHashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -915,12 +917,12 @@ fn builtin_error_type_id(project: &FrontendProject, ast: &Ast) -> TypeId {
 }
 
 #[track_caller]
-fn assert_catch_contract<'a>(
-    expression: &'a Expression,
+fn assert_catch_contract(
+    expression: &Expression,
     has_implicit: bool,
     typed_error_id: Option<TypeId>,
     error_type_id: TypeId,
-) -> &'a ValueCatchBlock {
+) -> &ValueCatchBlock {
     let block = catch_block(expression);
     let facts = &block.handled_value.failure_facts;
     let summary = &facts.summary;
@@ -1432,6 +1434,88 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
             }),
         "a zero step must return builtin Error through the private failure lane",
     );
+}
+
+#[test]
+fn private_failure_lane_marks_carriers_as_temps_without_weakening_fresh_mutable_arguments() {
+    let mut project = failure_project(
+        "increment |value ~Int| -> Int:\n\
+             value += 1\n\
+             return value\n;\n\
+         fresh |value Int| -> Int:\n\
+             return increment(value + 1)\n;\n",
+    );
+    let ast = project.ast();
+    let lowered = project
+        .frontend
+        .with_compiler(|compiler| {
+            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+        })
+        .expect("fresh mutable arguments and private checked arithmetic must lower");
+    let mut hir = lowered.hir_module;
+    let mut type_environment = lowered.type_environment;
+    let original_origins = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.locals)
+        .map(|local| (local.id, hir.side_table.local_origin(local.id)))
+        .collect::<FxHashMap<_, _>>();
+    assert!(
+        original_origins.values().any(|origin| {
+            origin.is_some_and(|origin| origin.kind == HirLocalOriginKind::CompilerFreshMutableArg)
+        }),
+        "the computed mutable argument must materialise an exclusive fresh root"
+    );
+
+    let mut report = project
+        .frontend
+        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("fresh mutable arguments must pass borrow checking before lane installation");
+    crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
+        &hir,
+        &mut report,
+    )
+    .expect("private checked arithmetic summaries must converge");
+    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
+        &mut hir,
+        &report,
+        &mut type_environment,
+    )
+    .expect("private checked arithmetic must install failure lanes");
+
+    let mut introduced_carriers = 0;
+    for local in hir.blocks.iter().flat_map(|block| &block.locals) {
+        let origin = hir.side_table.local_origin(local.id);
+        if let Some(original_origin) = original_origins.get(&local.id) {
+            assert_eq!(
+                origin, *original_origin,
+                "lane installation must preserve existing origins, including fresh mutable roots"
+            );
+            continue;
+        }
+
+        introduced_carriers += 1;
+        let origin = origin.expect("every lane-generated carrier must have a typed origin");
+        assert_eq!(origin.kind, HirLocalOriginKind::CompilerTemp);
+        assert_eq!(origin.call_span, None);
+        assert_eq!(origin.argument_index, None);
+        assert!(
+            local.mutable,
+            "carrier storage must remain writable scratch space"
+        );
+        assert!(
+            type_environment.fallible_carrier_slots(local.ty).is_some(),
+            "lane-generated storage must carry the checked success and error outcomes"
+        );
+    }
+    assert!(
+        introduced_carriers > 0,
+        "checked arithmetic and the private call must introduce transport carriers"
+    );
+    project
+        .frontend
+        .with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("transport carriers must not introduce exclusive aliases of fresh mutable roots");
 }
 
 #[test]
@@ -3374,34 +3458,172 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
 }
 
 #[test]
-fn implicit_failure_dormant_public_generic_holds_unresolved_private_calls() {
+fn implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_infallible() {
     let mut project = failure_project(
         "identity |value Int| -> Int:\n    return identity(value)\n;\n\
          export:\n    wrapper type T |marker T, value Int| -> Int:\n\
                  return identity(value)\n    ;\n;\n",
     );
+    // Match concrete HIR convergence: stack exhaustion is fatal, not numeric failure.
+    project
+        .ast_result()
+        .expect("a complete origin-free recursive graph is infallible");
+}
+
+#[test]
+fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_infallible() {
+    for helpers in [
+        "identity type U |value U| -> U:\n    return value\n;\n",
+        "middle type U |value U| -> U:\n    return identity(value)\n;\n\
+         identity type V |value V| -> V:\n    return value\n;\n",
+    ] {
+        let target = if helpers.starts_with("middle") {
+            "middle"
+        } else {
+            "identity"
+        };
+        for helper_first in [true, false] {
+            let wrapper = format!(
+                "export:\n    forward type T |value T| -> T:\n        return {target}(value)\n    ;\n;\n"
+            );
+            let source = if helper_first {
+                format!("{helpers}{wrapper}")
+            } else {
+                format!("{wrapper}{helpers}")
+            };
+            let mut project = failure_project(&source);
+            let ast = project
+                .ast_result()
+                .expect("closed private generic forwarding is infallible");
+            assert!(
+                !ast.nodes.iter().any(|node| match &node.kind {
+                    NodeKind::Function(path, _, _) => project
+                        .frontend
+                        .path_fork
+                        .component(*path)
+                        .is_some_and(
+                            |name| project.frontend.string_table.resolve(name) == "forward"
+                        ),
+                    _ => false,
+                }),
+                "dormant proofs must not publish executable template bodies"
+            );
+        }
+    }
+}
+
+#[test]
+fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witness() {
+    let mut project = failure_project(
+        "identity type U |value U| -> U:\n    return value\n;\n\
+         multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
+         private_product type U |marker U, left Int, right Int| -> Int:\n\
+             return multiply(left, right)\n;\n\
+         export:\n    product type T |marker T, left Int, right Int| -> Int:\n\
+                 retained = identity(marker)\n        return private_product(retained, left, right)\n    ;\n;\n",
+    );
     let messages = project
         .ast_result()
         .err()
-        .expect("unresolved private failure cannot publish through a dormant generic");
+        .expect("a real numeric failure cannot escape a dormant export");
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics[0];
     let DiagnosticPayload::InvalidFallibleHandling {
         reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
-    } = &diagnostic.payload
+    } = &diagnostics[0].payload
     else {
-        panic!("expected dormant private-call boundary witness, got {diagnostic:?}");
+        panic!(
+            "expected dormant numeric-origin witness, got {:?}",
+            diagnostics[0]
+        );
     };
-    assert!(witness.codes.is_empty());
-    assert_eq!(witness.origin_span, None);
-    assert_eq!(witness.elided_call_hops, 0);
-    assert_eq!(witness.call_spans.len(), 1);
-    let producer_span = witness.call_spans[0].expect("unresolved private call has its own site");
-    assert!(diagnostic.primary_span.is_some());
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].span, Some(producer_span));
-    assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert!(witness.origin_span.is_some());
+    assert_eq!(witness.call_spans.len(), 2);
+}
+
+#[test]
+fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
+    let mut project = failure_project(
+        "recursive |value Int, ready Bool| -> Int:\n\
+             if ready:\n        return value * 2\n    ;\n    return recursive(value, ready)\n;\n\
+         export:\n    wrapper type T |marker T, value Int, ready Bool| -> Int:\n\
+                 return recursive(value, ready)\n    ;\n;\n",
+    );
+    let messages = project
+        .ast_result()
+        .err()
+        .expect("a recursive graph still carries numeric origins");
+    assert!(matches!(
+        messages
+            .error_diagnostics()
+            .next()
+            .expect("numeric boundary diagnostic")
+            .payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. },
+        }
+    ));
+}
+
+#[test]
+fn implicit_failure_dormant_custom_error_generic_receiver_uses_closed_trait_requirement_contract() {
+    let mut project = failure_project(
+        "Failure = | message String |\n\
+         DISPLAY_TEXT must:\n    display |This| -> String\n;\n\
+         render type T is DISPLAY_TEXT |value T| -> String, Failure!:\n\
+             return value.display()\n;\n",
+    );
+    project
+        .ast_result()
+        .expect("a declared success-only requirement cannot gain a private lane");
+}
+
+#[test]
+fn implicit_failure_typed_map_catch_resolves_infallible_private_arguments_in_both_orders() {
+    let helper = "key |value String| -> String:\n    return [value]\n;\n";
+    let caller = "recover |value String| -> Int:\n\
+                      set_values ~= {\"key\" = 1}\n\
+                      ~set_values.set(key(value), 2) catch:\n    ;\n\
+                      get_values = {\"key\" = 1}\n\
+                      found = get_values.get(key(value)) catch then 0\n\
+                      remove_values ~= {\"key\" = 1}\n\
+                      removed = ~remove_values.remove(key(value)) catch then 0\n\
+                      return removed\n;\n";
+    for helper_first in [true, false] {
+        let source = if helper_first {
+            format!("{helper}{caller}")
+        } else {
+            format!("{caller}{helper}")
+        };
+        let mut project = failure_project(&source);
+        project
+            .failure_contract_result()
+            .expect("infallible arguments retain supported typed-map catches");
+    }
+}
+
+#[test]
+fn implicit_failure_typed_map_catch_keeps_genuinely_failing_private_argument_gate() {
+    let mut project = failure_project(
+        "key |value Int| -> Int:\n    return value * 2\n;\n\
+         recover |value Int| -> Int:\n\
+             values = {0 = 1}\n    return values.get(key(value)) catch then 0\n;\n",
+    );
+    let ast = project.ast();
+    let messages = project
+        .lower_ast_result(ast)
+        .expect_err("unsupported inferred argument recovery remains diagnosed");
+    assert!(matches!(
+        messages
+            .error_diagnostics()
+            .next()
+            .expect("unsupported recovery diagnostic")
+            .payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::UnsupportedCatchExpressionShape { .. },
+        }
+    ));
 }
 
 #[test]

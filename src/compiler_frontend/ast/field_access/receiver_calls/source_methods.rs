@@ -410,8 +410,20 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             type_interner.environment_mut_for_derived_types(),
             member_span,
         );
-        if scope_context.source_call_has_private_failure_lane(source_method.method_path()) {
-            method_call_expression.with_private_call_failure_candidate(method_path)
+        let declared_requirement = matches!(
+            &source_method,
+            SourceReceiverMethodTarget::TraitSurface(method)
+                if matches!(method.origin, super::shared::TraitSurfaceMethodOrigin::DeclaredRequirement)
+        );
+        if !declared_requirement
+            && scope_context.source_call_has_private_failure_lane(source_method.method_path())
+        {
+            let failure_path = if scope_context.generic_template_validation {
+                source_method.method_path()
+            } else {
+                method_path
+            };
+            method_call_expression.with_private_call_failure_candidate(failure_path)
         } else {
             method_call_expression
         }

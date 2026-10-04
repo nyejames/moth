@@ -366,7 +366,7 @@ fn finish_generic_function_call(
             type_interner.environment_mut_for_derived_types(),
             call.call_span,
         )
-        .with_typed_error_producer(error_return_type_id),
+        .with_typed_error_producer(error_return_type_id, None),
     )
 }
 

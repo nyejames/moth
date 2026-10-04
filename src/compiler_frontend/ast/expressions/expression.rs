@@ -33,7 +33,8 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidBuiltinCallReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
@@ -418,10 +419,15 @@ impl Expression {
         }
     }
 
-    pub(crate) fn with_typed_error_producer(mut self, error_type_id: TypeId) -> Self {
+    pub(crate) fn with_typed_error_producer(
+        mut self,
+        error_type_id: TypeId,
+        builtin_name: Option<StringId>,
+    ) -> Self {
         self.failure_facts.record_typed_error(TypedErrorProducer {
             span: self.span,
             error_type_id,
+            builtin_name,
         });
         self
     }
@@ -442,10 +448,19 @@ impl Expression {
             return None;
         }
         self.failure_facts.summary.first_typed.map(|producer| {
-            CompilerDiagnostic::invalid_fallible_handling(
-                InvalidFallibleHandlingReason::UnhandledErrorReturn,
-                producer.span.or(self.span),
-            )
+            let span = producer.span.or(self.span);
+            if let Some(builtin_name) = producer.builtin_name {
+                CompilerDiagnostic::invalid_builtin_call(
+                    InvalidBuiltinCallReason::UnhandledFallibleCall,
+                    Some(builtin_name),
+                    span,
+                )
+            } else {
+                CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::UnhandledErrorReturn,
+                    span,
+                )
+            }
         })
     }
 

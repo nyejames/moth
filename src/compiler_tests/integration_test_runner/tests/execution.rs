@@ -617,6 +617,55 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
 }
 
 #[test]
+fn synthetic_start_expected_entry_code_from_linked_source_dependency_passes() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+
+    // Project discovery links the support package; single-file entry coverage stays separate.
+    for code in [0, u32::MAX] {
+        let fixture = EntryFixture::new(
+            "@support load\n\
+             io.line(\"before-failure\")\n\
+             [:staged-before-failure]\n\
+             value = load()!\n\
+             io.line(\"after-failure\")\n\
+             [:after-failure-[value]]\n",
+            true,
+        );
+        fs::create_dir(fixture.directory.path().join("src/support"))
+            .expect("should create source dependency");
+        fs::write(
+            fixture.directory.path().join("src/support/+package.moth"),
+            format!(
+                "export:\n\
+                     load || -> String, Error!:\n\
+                         return! Error(message = \"application-secret\", code = {code})\n\
+                     ;\n\
+                 ;\n"
+            ),
+        )
+        .expect("should write fallible source dependency");
+
+        let mut expectation = output_expectation("before-failure");
+        expectation.rendered_output.entry_error_code = Some(code);
+        expectation.rendered_output.not_contains = vec![
+            "staged-before-failure".to_owned(),
+            "after-failure".to_owned(),
+            "application-secret".to_owned(),
+        ];
+        let mut case = success_test_case(BackendId::Html, expectation);
+        case.entry_path = fixture.entry.clone();
+        case.fixture_root = fixture.directory.path().to_path_buf();
+        let result = execute_test_case(&case);
+
+        assert!(
+            result.passed,
+            "linked entry code {code}: {:?} {:?}",
+            result.failure_reason, result.messages
+        );
+    }
+}
+
+#[test]
 fn synthetic_start_canonical_postfix_case_executes() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let cases = super::super::fixture::load_canonical_case_specs(
@@ -637,21 +686,37 @@ fn synthetic_start_canonical_postfix_case_executes() {
 fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
-        for source in [
-            "load || -> String, Error!:\n    return! Error(message = \"application-secret\", code = 0)\n;\n\
+        for (source, code) in [
+            (
+                "load || -> String, Error!:\n    return! Error(message = \"application-secret\", code = 0)\n;\n\
              #[:static-survives]\n\
              io.line(\"before-failure\")\n\
              [:staged-before-failure]\n\
              value = load()!\n\
              io.line(\"after-failure\")\n\
              [:after-failure-[value]]\n",
-            "left ~= 1\nright ~= 0\n\
+                0,
+            ),
+            (
+                "left ~= 1\nright ~= 0\n\
              #[:static-survives]\n\
              io.line(\"before-failure\")\n\
              [:staged-before-failure]\n\
              value = left // right\n\
              io.line(\"after-failure\")\n\
              [:after-failure-[value]]\n",
+                300,
+            ),
+            (
+                "left ~= 2147483647\nright ~= 1\n\
+             #[:static-survives]\n\
+             io.line(\"before-failure\")\n\
+             [:staged-before-failure]\n\
+             value = left + right\n\
+             io.line(\"after-failure\")\n\
+             [:after-failure-[value]]\n",
+                301,
+            ),
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let mut built = fixture.build(&[]);
@@ -680,7 +745,7 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
                     RuntimeEvent::Console {
                         text: "before-failure".to_owned()
                     },
-                    RuntimeEvent::EntryFailure,
+                    RuntimeEvent::EntryFailure { code },
                 ],
                 "{source}",
             );
@@ -742,7 +807,10 @@ fn synthetic_start_dynamic_zero_range_step_is_entry_failure_without_body_output(
         let mut built = fixture.build(&[]);
         let rendered = execute_html_harness_for_test(&mut built)
             .expect("zero range step must produce a valid entry failure summary");
-        assert_eq!(rendered.events(), &[RuntimeEvent::EntryFailure]);
+        assert_eq!(
+            rendered.events(),
+            &[RuntimeEvent::EntryFailure { code: 306 }]
+        );
         assert_eq!(
             rendered.combined_output(),
             "",
@@ -821,7 +889,7 @@ fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
                 RuntimeEvent::Console {
                     text: "before-failure".to_owned()
                 },
-                RuntimeEvent::EntryFailure,
+                RuntimeEvent::EntryFailure { code: 0 },
             ],
         );
         assert!(rendered.slot_outputs().is_empty());

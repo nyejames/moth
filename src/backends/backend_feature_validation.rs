@@ -195,9 +195,9 @@ pub fn validate_hir_backend_feature_support(
 
 /// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
 ///
-/// WHAT: direct fixed scalars, including F16, are accepted, but aggregate types containing any
-///       fixed scalar remain unsupported. The canonical builtin Error is exempt: its internal
-///       field shapes are its own runtime representation, reported by the Error-value gate.
+/// WHAT: direct fixed scalars and compiler-internal carriers of those success values are accepted,
+///       but user aggregates containing fixed scalars remain unsupported. Canonical builtin Error
+///       representation belongs to its own Error-value gate.
 /// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
@@ -223,20 +223,14 @@ fn validate_fixed_width_scalar_values(
     // a source-mapped occurrence wins over earlier generated HIR that has no source provenance.
     let module_occurrences =
         first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
-            match type_environment.fixed_scalar(type_id) {
-                Some(_) => false,
-                None => backend_type_facts.contains_fixed_scalar(type_id),
-            }
+            backend_type_facts.is_unsupported_fixed_scalar_shape(type_id)
         });
     let occurrence = if let Some(authored) = module_occurrences.authored {
         Some(authored)
     } else {
         let signature_occurrences =
             first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
-                match type_environment.fixed_scalar(type_id) {
-                    Some(_) => false,
-                    None => backend_type_facts.contains_fixed_scalar(type_id),
-                }
+                backend_type_facts.is_unsupported_fixed_scalar_shape(type_id)
             });
         signature_occurrences
             .authored
@@ -1379,6 +1373,24 @@ impl<'environment> BackendTypeFacts<'environment> {
             memo: FxHashMap::default(),
             visiting: FxHashSet::default(),
         }
+    }
+
+    fn is_unsupported_fixed_scalar_shape(&mut self, type_id: TypeId) -> bool {
+        if self.type_environment.fixed_scalar(type_id).is_some() {
+            return false;
+        }
+
+        // A failure lane preserves a scalar success slot; it does not manufacture a user
+        // aggregate. Keep custom error shapes and genuine success aggregates in the walk.
+        if let Some((success_type, error_type)) =
+            self.type_environment.fallible_carrier_slots(type_id)
+            && self.error_type_id == Some(error_type)
+            && self.type_environment.fixed_scalar(success_type).is_some()
+        {
+            return false;
+        }
+
+        self.contains_fixed_scalar(type_id)
     }
 
     fn contains_fixed_scalar(&mut self, type_id: TypeId) -> bool {

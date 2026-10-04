@@ -212,7 +212,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
@@ -290,7 +290,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {
@@ -438,15 +438,16 @@ impl<'a> HirBuilder<'a> {
         let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
         let operands = HirNumericOperands::Binary { left, right };
         let failure_mode = self.select_numeric_failure_mode(span)?;
-        let no_span = None;
 
+        // Generated updates still belong to the authored loop/assignment. Preserve that
+        // producer span so a target capability rejection never points at anonymous scaffolding.
         if matches!(failure_mode, NumericFailureMode::Trap) {
-            return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
+            return self.emit_numeric_op_statement(op, failure_mode, operands, target, span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, &no_span)?;
+        let success_type = self.checked_numeric_result_type(op, span)?;
         let success_value =
-            self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
+            self.emit_recoverable_numeric_value(op, operands, success_type, span)?;
         self.emit_assign_local_statement(target, success_value, span)
     }
 
@@ -462,6 +463,21 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<TypeId, CompilerError> {
         let domain_type = op.domain.type_id(&self.type_environment);
         self.lower_type_id(domain_type, span)
+    }
+
+    /// Formatting and incoming-value guards are integrity checks, not implicit numeric failure.
+    /// Only a source-declared builtin Error! contract makes these guards recoverable. The exact
+    /// start identity is retained from the compiler-generated AST entry, not inferred from a name.
+    fn select_float_integrity_failure_mode(
+        &mut self,
+        span: &Option<SourceSpan>,
+    ) -> Result<NumericFailureMode, CompilerError> {
+        let function_id = self.current_function_id_or_error(span)?;
+        if self.module.start_function == Some(function_id) {
+            return Ok(NumericFailureMode::Trap);
+        }
+
+        self.select_numeric_failure_mode(span)
     }
 
     /// Selects the numeric failure mode for the current function context.

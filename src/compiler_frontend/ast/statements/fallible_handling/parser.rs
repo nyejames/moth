@@ -468,7 +468,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                     expression_span,
                 );
                 handled_expression =
-                    handled_expression.with_typed_error_producer(error_return_type_id);
+                    handled_expression.with_typed_error_producer(error_return_type_id, None);
 
                 let mut recovered =
                     wrap_catch_expression(handled_expression, handling, success_result_type_ids);

@@ -120,8 +120,7 @@ impl<'a> BorrowChecker<'a> {
         let reachable_blocks = self.collect_reachable_blocks(function)?;
         let reachable_block_set = reachable_blocks.iter().copied().collect::<FxHashSet<_>>();
         let layout = self.build_function_layout(function, &reachable_blocks)?;
-        let visible_locals_by_block =
-            self.build_visibility_masks(function.id, &layout, &reachable_blocks)?;
+        let visible_locals_by_block = &layout.visible_locals_by_block;
 
         let transfer_context = BorrowTransferContext {
             external_package_registry: self.external_package_registry,

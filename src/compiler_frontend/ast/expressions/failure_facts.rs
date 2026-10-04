@@ -14,6 +14,7 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ExpressionFailureFacts {
@@ -61,6 +62,8 @@ pub(crate) enum ImplicitFailureSource {
 pub(crate) struct TypedErrorProducer {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) error_type_id: TypeId,
+    /// Compiler-owned member identity retained for deferred builtin-call diagnostics.
+    pub(crate) builtin_name: Option<StringId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

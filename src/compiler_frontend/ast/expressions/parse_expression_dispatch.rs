@@ -26,7 +26,6 @@ use super::parse_expression_templates::parse_template_expression;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::ast_log;
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::field_access::{
@@ -40,6 +39,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 };
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_starts_match_arm_header;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
@@ -1229,7 +1229,7 @@ fn parse_cast_expression(
             let error_type_id =
                 resolve_builtin_error_type_typed(context, cast_expression.span, string_table)?
                     .type_id;
-            cast_expression = cast_expression.with_typed_error_producer(error_type_id);
+            cast_expression = cast_expression.with_typed_error_producer(error_type_id, None);
         }
         let error_type_id = compatible_expression_error_type(
             &mut cast_expression,
@@ -1246,8 +1246,14 @@ fn parse_cast_expression(
                 success_type_id: target_type_id,
                 error_type_id,
                 value_required_span: cast_expression.span,
+                // Explicit constant/default receivers retain cast recovery; const evaluation
+                // owns whether the handler's value-producing shape can actually fold.
                 allow_boundary_catch: state.allow_boundary_catch
-                    && fallible_catch_allowed_in_context(context),
+                    && (fallible_catch_allowed_in_context(context)
+                        || matches!(
+                            context.kind,
+                            ContextKind::Constant | ContextKind::ConstantHeader
+                        )),
             },
             string_table,
             path_fork,

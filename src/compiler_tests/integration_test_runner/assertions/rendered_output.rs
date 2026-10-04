@@ -165,10 +165,32 @@ fn validate_rendered_output_result(
     rendered: &RenderedOutput,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
-    if rendered.events.last() == Some(&RuntimeEvent::EntryFailure) {
+    if let Some(RuntimeEvent::EntryFailure { code }) = rendered.events.last() {
+        let Some(expected_code) = expectation.entry_error_code else {
+            return Some((
+                format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()),
+                FailureKind::EntryFailed,
+            ));
+        };
+        if *code != expected_code {
+            return Some((
+                format!(
+                    "rendered_output: expected returned entry Error code {expected_code}, but received code {code}."
+                ),
+                FailureKind::EntryFailed,
+            ));
+        }
+
+        // The terminal event carries no application text; assertions still protect its prefix.
+        return validate_rendered_output_fragments(&rendered.combined_output(), expectation);
+    }
+
+    if let Some(expected_code) = expectation.entry_error_code {
         return Some((
-            format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()),
-            FailureKind::EntryFailed,
+            format!(
+                "rendered_output: expected returned entry Error code {expected_code}, but no entry failure occurred."
+            ),
+            FailureKind::RenderedOutputMismatch,
         ));
     }
 
@@ -377,7 +399,7 @@ pub(crate) enum RuntimeEvent {
     FragmentInsert { id: String, html: String },
     WasmTrap { message: String },
     RuntimeError { message: String },
-    EntryFailure,
+    EntryFailure { code: u32 },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -394,7 +416,7 @@ impl RenderedOutput {
             RuntimeEvent::Console { .. }
             | RuntimeEvent::FragmentInsert { .. }
             | RuntimeEvent::WasmTrap { .. }
-            | RuntimeEvent::EntryFailure => None,
+            | RuntimeEvent::EntryFailure { .. } => None,
         }
     }
 
@@ -404,7 +426,7 @@ impl RenderedOutput {
             RuntimeEvent::Console { .. }
             | RuntimeEvent::FragmentInsert { .. }
             | RuntimeEvent::RuntimeError { .. }
-            | RuntimeEvent::EntryFailure => None,
+            | RuntimeEvent::EntryFailure { .. } => None,
         }
     }
 
@@ -446,7 +468,7 @@ impl RenderedOutput {
                 RuntimeEvent::FragmentInsert { html, .. } => parts.push(html.to_owned()),
                 RuntimeEvent::RuntimeError { .. }
                 | RuntimeEvent::WasmTrap { .. }
-                | RuntimeEvent::EntryFailure => {}
+                | RuntimeEvent::EntryFailure { .. } => {}
             }
         }
 
@@ -549,10 +571,14 @@ let __moth_summary_error_hook = null;
 let __moth_runtime_trap_message_hook = null;
 let __moth_finished = false;
 let __moth_entry_failure_recorded = false;
-globalThis.__moth_record_entry_failure = () => {
+globalThis.__moth_record_entry_failure = (code) => {
     if (__moth_entry_failure_recorded || __moth_finished) return;
+    if (!Number.isInteger(code) || code < 0 || code > 4294967295) {
+        __moth_report_harness_failure(new Error("entry failure code must be a U32"));
+        return;
+    }
     __moth_entry_failure_recorded = true;
-    __moth_events.push({ type: 'entry_failure' });
+    __moth_events.push({ type: 'entry_failure', code });
     __moth_write_summary();
 };
 function __moth_write_summary() {
@@ -839,7 +865,7 @@ pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderH
             &event,
             RuntimeEvent::RuntimeError { .. }
                 | RuntimeEvent::WasmTrap { .. }
-                | RuntimeEvent::EntryFailure
+                | RuntimeEvent::EntryFailure { .. }
         );
         events.push(event);
     }
@@ -879,8 +905,13 @@ fn decode_runtime_event(index: usize, value: &serde_json::Value) -> Result<Runti
         }
 
         "entry_failure" => {
-            reject_unknown_fields(object, &["type"], &format!("event {index}"))?;
-            Ok(RuntimeEvent::EntryFailure)
+            reject_unknown_fields(object, &["type", "code"], &format!("event {index}"))?;
+            let code = object
+                .get("code")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|code| u32::try_from(code).ok())
+                .ok_or_else(|| format!("event {index} field 'code' must be a U32"))?;
+            Ok(RuntimeEvent::EntryFailure { code })
         }
 
         other => Err(format!("event {index} has unknown type '{other}'")),

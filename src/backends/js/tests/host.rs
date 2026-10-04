@@ -232,8 +232,9 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             .last()
             .expect("generated entry caller");
         assert!(caller.contains("typeof globalThis.__moth_record_entry_failure === \"function\""));
-        assert!(caller.contains("globalThis.__moth_record_entry_failure();"));
-        assert!(!caller.contains("moth_result.value"));
+        assert!(caller.contains(
+            "globalThis.__moth_record_entry_failure(__moth_error_code(moth_result.value));"
+        ));
         assert!(!caller.contains(".message"));
         assert!(!caller.contains(".code"));
 

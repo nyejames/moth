@@ -630,8 +630,8 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        // Generated normalization: magnitude/direction CFG and checked numeric
-        // step updates are compiler scaffolding and stay spanless.
+        // Keep normalization CFG scaffolding separate from the checked step producer, whose
+        // authored loop span must survive for failure and backend-capability diagnostics.
         let RangeLoopRuntime {
             blocks,
             locals,

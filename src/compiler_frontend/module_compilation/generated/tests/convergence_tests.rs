@@ -496,7 +496,10 @@ fn convergence_base_changes_reject_a_narrowing_report() {
 fn builtin_failure_widening_uses_existing_base_change_lane() {
     let public = origin("public");
     let private = private_identity("private");
-    let hir = base_hir(&[public.clone()], &[private.clone()]);
+    let hir = base_hir(
+        std::slice::from_ref(&public),
+        std::slice::from_ref(&private),
+    );
     let initial = summary(FunctionReturnAliasSummary::Fresh);
     let mut escaping = initial.clone();
     escaping.escapes_builtin_failure = true;
@@ -934,7 +937,7 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
     transaction
         .complete(request, initial.clone(), sidecar)
         .unwrap();
-    let base = base_hir(&[], &[private.clone()]);
+    let base = base_hir(&[], std::slice::from_ref(&private));
     let base_links = link_facts_for_calls(vec![]);
     let private_identities = FxHashSet::from_iter([private.clone()]);
     let public_origins = FxHashSet::default();

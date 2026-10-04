@@ -1054,6 +1054,106 @@ fn parses_and_retains_all_rendered_output_assertion_forms() {
 }
 
 #[test]
+fn entry_error_code_only_retains_runtime_intent_and_counts_one_assertion() {
+    for backend in ["html", "html_wasm"] {
+        for code in [0, u32::MAX] {
+            let (_root, case_root) = write_fixture(
+                "entry_error_code_only",
+                &format!(
+                    "[backends.{backend}]\nmode = \"success\"\nwarnings = \"forbid\"\nentry_error_code = {code}\n"
+                ),
+            );
+            let cases = load_canonical_case_specs(&case_root, None)
+                .expect("an entry error code alone must satisfy success completeness");
+            let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
+                panic!("entry failure is a runtime contract, not compile-failure intent");
+            };
+
+            assert_eq!(expectation.success_contract, None);
+            assert_eq!(expectation.rendered_output.entry_error_code, Some(code));
+            assert!(expectation.rendered_output.is_present());
+            assert_eq!(expectation.rendered_output.assertion_count(), 1);
+            assert!(
+                expectation
+                    .rendered_output
+                    .runtime_error_contains
+                    .is_empty()
+            );
+            assert!(expectation.rendered_output.runtime_trap_contains.is_empty());
+        }
+    }
+}
+
+#[test]
+fn entry_error_code_rejects_values_outside_u32() {
+    for value in ["-1", "4294967296", "1.5", "\"0\"", "true", "[]"] {
+        let (_root, case_root) = write_fixture(
+            "invalid_entry_error_code",
+            &format!(
+                "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nentry_error_code = {value}\n"
+            ),
+        );
+        let Err(error) = load_canonical_case_specs(&case_root, None) else {
+            panic!("entry_error_code = {value} must be rejected");
+        };
+
+        assert_eq!(
+            error.kind,
+            super::super::errors::FixtureLoadErrorKind::ExpectationParse
+        );
+        assert!(
+            error.message.contains("entry_error_code"),
+            "invalid code {value} must identify its field: {error}"
+        );
+    }
+}
+
+#[test]
+fn entry_error_code_conflicts_with_authored_runtime_fields_including_empty_lists() {
+    for field in ["runtime_error_contains", "runtime_trap_contains"] {
+        for value in ["[\"terminal message\"]", "[]"] {
+            let (_root, case_root) = write_fixture(
+                "conflicting_entry_error_code",
+                &format!(
+                    "[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nentry_error_code = 0\n{field} = {value}\n"
+                ),
+            );
+            let Err(error) = load_canonical_case_specs(&case_root, None) else {
+                panic!("an authored {field} = {value} must conflict with entry_error_code");
+            };
+
+            assert_eq!(
+                error.kind,
+                super::super::errors::FixtureLoadErrorKind::ExpectationContract
+            );
+            assert!(
+                error.message.contains("must not combine")
+                    && error.message.contains("entry_error_code")
+                    && error.message.contains(field),
+                "authored-field conflict must precede fragment validation: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn entry_error_code_rejects_compile_failure_mode() {
+    let (_root, case_root) = write_fixture(
+        "entry_error_code_compile_failure",
+        "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\nentry_error_code = 0\n",
+    );
+    let Err(error) = load_canonical_case_specs(&case_root, None) else {
+        panic!("entry_error_code must not satisfy a compile-failure contract");
+    };
+
+    assert_eq!(
+        error.kind,
+        super::super::errors::FixtureLoadErrorKind::ExpectationContract
+    );
+    assert!(error.message.contains("entry_error_code"), "{error}");
+}
+
+#[test]
 fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
     for backend in ["html", "html_wasm"] {
         let (_root, case_root) = write_fixture(

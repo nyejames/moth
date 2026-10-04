@@ -1305,7 +1305,7 @@ fn rendered_output_decodes_one_runtime_error_after_captured_events() {
 #[test]
 fn rendered_output_decodes_entry_failure_without_losing_earlier_events() {
     let output = parse_harness_output(
-        r#"{"events":[{"type":"console","text":"before"},{"type":"fragment_insert","id":"root","html":"<p>published</p>"},{"type":"entry_failure"}]}"#,
+        r#"{"events":[{"type":"console","text":"before"},{"type":"fragment_insert","id":"root","html":"<p>published</p>"},{"type":"entry_failure","code":0}]}"#,
     )
     .expect("entry failure must retain the previously captured event prefix");
 
@@ -1319,11 +1319,23 @@ fn rendered_output_decodes_entry_failure_without_losing_earlier_events() {
                 id: "root".to_owned(),
                 html: "<p>published</p>".to_owned(),
             },
-            RuntimeEvent::EntryFailure,
+            RuntimeEvent::EntryFailure { code: 0 },
         ]
     );
     assert_eq!(output.combined_output(), "before\n<p>published</p>");
     assert_eq!(output.runtime_error_message(), None);
+}
+
+#[test]
+fn rendered_output_decodes_maximum_u32_entry_failure_code() {
+    let output = parse_harness_output(r#"{"events":[{"type":"entry_failure","code":4294967295}]}"#)
+        .expect("the full unsigned Error code range must survive the runtime protocol");
+
+    assert_eq!(
+        output.events(),
+        &[RuntimeEvent::EntryFailure { code: u32::MAX }]
+    );
+    assert_eq!(output.combined_output(), "");
 }
 
 #[test]
@@ -1416,26 +1428,45 @@ fn rendered_output_rejects_unknown_or_malformed_runtime_events() {
             "missing string field 'message'",
         ),
         (
-            r#"{"events":[{"type":"entry_failure"},{"type":"console","text":"after"}]}"#,
+            r#"{"events":[{"type":"entry_failure","code":0},{"type":"console","text":"after"}]}"#,
             "must be the final event",
         ),
         (
-            r#"{"events":[{"type":"entry_failure"},{"type":"entry_failure"}]}"#,
+            r#"{"events":[{"type":"entry_failure","code":0},{"type":"entry_failure","code":301}]}"#,
             "must be the final event",
         ),
         (
-            r#"{"events":[{"type":"entry_failure","message":"application-secret"}]}"#,
+            r#"{"events":[{"type":"entry_failure","code":0,"message":"application-secret"}]}"#,
             "unknown field 'message'",
-        ),
-        (
-            r#"{"events":[{"type":"entry_failure","code":0}]}"#,
-            "unknown field 'code'",
         ),
     ] {
         let error =
             parse_harness_output(json).expect_err("malformed runtime events must fail decoding");
         assert_eq!(error.kind, RenderHarnessErrorKind::OutputProtocol);
         assert!(error.message.contains(expected_reason), "{}", error.message);
+    }
+}
+
+#[test]
+fn rendered_output_rejects_missing_or_invalid_u32_entry_failure_codes() {
+    for event in [
+        r#"{"type":"entry_failure"}"#,
+        r#"{"type":"entry_failure","code":-1}"#,
+        r#"{"type":"entry_failure","code":4294967296}"#,
+        r#"{"type":"entry_failure","code":1.5}"#,
+        r#"{"type":"entry_failure","code":"0"}"#,
+        r#"{"type":"entry_failure","code":true}"#,
+        r#"{"type":"entry_failure","code":null}"#,
+    ] {
+        let json = format!(r#"{{"events":[{event}]}}"#);
+        let error = parse_harness_output(&json)
+            .expect_err("entry failure must carry one unsigned 32-bit integer code");
+
+        assert_eq!(error.kind, RenderHarnessErrorKind::OutputProtocol);
+        assert!(
+            error.message.contains("code"),
+            "invalid event {event} must identify its code: {error:?}"
+        );
     }
 }
 
@@ -1477,8 +1508,8 @@ fn rendered_output_classic_and_module_harnesses_publish_one_safe_entry_failure()
         "const application_error = {{ message: 'application-secret', code: 0 }};\n\
          console.log('before');\n\
          document.getElementById('root').insertAdjacentHTML('beforeend', '<p>published</p>');\n\
-         globalThis.__moth_record_entry_failure();\n\
-         globalThis.__moth_record_entry_failure();\n\
+         globalThis.__moth_record_entry_failure(application_error.code);\n\
+         globalThis.__moth_record_entry_failure(301);\n\
          process.stderr.write({notice});\n\
          process.exitCode = 1;"
     );
@@ -1498,7 +1529,7 @@ fn rendered_output_classic_and_module_harnesses_publish_one_safe_entry_failure()
                     id: "root".to_owned(),
                     html: "<p>published</p>".to_owned(),
                 },
-                RuntimeEvent::EntryFailure,
+                RuntimeEvent::EntryFailure { code: 0 },
             ],
             "{script_type}",
         );
@@ -1516,7 +1547,7 @@ fn rendered_output_recorded_entry_failure_stays_terminal_after_queued_host_work(
          });\n\
          setTimeout(() => console.log('timer'), 0);\n\
          console.log('before');\n\
-         globalThis.__moth_record_entry_failure();";
+         globalThis.__moth_record_entry_failure(301);";
     for script_type in ["", " type=\"module\""] {
         let script_block = format!("<script{script_type}>{script}</script>\n  </body>");
         let html = VALID_HTML.replace("  </body>", &script_block);
@@ -1529,7 +1560,7 @@ fn rendered_output_recorded_entry_failure_stays_terminal_after_queued_host_work(
                 RuntimeEvent::Console {
                     text: "before".to_owned()
                 },
-                RuntimeEvent::EntryFailure,
+                RuntimeEvent::EntryFailure { code: 301 },
             ],
             "{script_type}",
         );
@@ -1540,7 +1571,7 @@ fn rendered_output_recorded_entry_failure_stays_terminal_after_queued_host_work(
 fn rendered_output_entry_failure_precedes_output_and_runtime_expectation_mismatches() {
     let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("notice is a valid string");
     let script = format!(
-        "console.log('before'); globalThis.__moth_record_entry_failure(); \
+        "console.log('before'); globalThis.__moth_record_entry_failure(0); \
          process.stderr.write({notice}); process.exitCode = 1;"
     );
     let generic_reason = format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end());
@@ -1582,7 +1613,7 @@ fn rendered_output_recorded_entry_failure_survives_cleared_host_status() {
         String::new(),
     ] {
         let script = format!(
-            "console.log('before'); globalThis.__moth_record_entry_failure(); {presentation}"
+            "console.log('before'); globalThis.__moth_record_entry_failure(0); {presentation}"
         );
         let (passed, kind, reason) = validate_html_script(
             &script,
@@ -1666,7 +1697,7 @@ fn rendered_output_nonzero_exit_code_does_not_replace_an_uncaught_error() {
 fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps() {
     let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("notice is a valid string");
     let script = format!(
-        "console.log('before'); globalThis.__moth_record_entry_failure(); \
+        "console.log('before'); globalThis.__moth_record_entry_failure(0); \
          process.stderr.write({notice}); process.exitCode = 1;"
     );
     let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
@@ -1680,7 +1711,7 @@ fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps(
             RuntimeEvent::Console {
                 text: "before".to_owned()
             },
-            RuntimeEvent::EntryFailure,
+            RuntimeEvent::EntryFailure { code: 0 },
         ]
     );
     assert_eq!(output.runtime_error_message(), None);
@@ -1702,6 +1733,123 @@ fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps(
             ENTRY_FAILURE_NOTICE.trim_end()
         ))
     );
+}
+
+#[test]
+fn rendered_output_expected_entry_code_passes_and_checks_only_the_captured_prefix() {
+    for code in [0, 301, u32::MAX] {
+        let script = format!(
+            "console.log('before');\n\
+             document.getElementById('root').insertAdjacentHTML('beforeend', '<p>published</p>');\n\
+             globalThis.__moth_record_entry_failure({code});\n\
+             console.log('after');"
+        );
+        for exact in [None, Some("before\n<p>published</p>".to_owned())] {
+            let (passed, kind, reason) = validate_html_script(
+                &script,
+                RenderedOutputExpectation {
+                    entry_error_code: Some(code),
+                    exact,
+                    ..Default::default()
+                },
+            );
+
+            assert!(passed, "matching entry code {code} must pass: {reason:?}");
+            assert_eq!(kind, None);
+        }
+
+        let (passed, kind, reason) = validate_html_script(
+            &script,
+            RenderedOutputExpectation {
+                entry_error_code: Some(code),
+                contains: vec!["after".to_owned()],
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            !passed,
+            "matching code must still check the terminal prefix"
+        );
+        assert_eq!(
+            kind,
+            Some(FailureKind::RenderedOutputMismatch),
+            "{reason:?}"
+        );
+    }
+}
+
+#[test]
+fn rendered_output_expected_entry_code_rejects_wrong_code_before_prefix_mismatch() {
+    let (passed, kind, reason) = validate_html_script(
+        "console.log('before'); globalThis.__moth_record_entry_failure(301);",
+        RenderedOutputExpectation {
+            entry_error_code: Some(0),
+            exact: Some("missing prefix".to_owned()),
+            ..Default::default()
+        },
+    );
+
+    assert!(!passed, "a returned Error with another code cannot match");
+    assert_eq!(kind, Some(FailureKind::EntryFailed), "{reason:?}");
+    let reason = reason.expect("a wrong entry code must report the code mismatch");
+    assert!(
+        reason.contains("code 0") && reason.contains("code 301"),
+        "{reason}"
+    );
+    assert!(!reason.contains("missing prefix"), "{reason}");
+}
+
+#[test]
+fn rendered_output_expected_entry_code_never_matches_success_host_error_or_status() {
+    for (script, expected_kind) in [
+        (
+            "console.log('before');",
+            FailureKind::RenderedOutputMismatch,
+        ),
+        (
+            "console.log('before'); throw new Error('application-secret');",
+            FailureKind::RenderedOutputMismatch,
+        ),
+        (
+            "console.log('before'); process.stderr.write('Moth entry failed\\n'); process.exitCode = 1;",
+            FailureKind::HarnessFailed,
+        ),
+    ] {
+        let (passed, kind, reason) = validate_html_script(
+            script,
+            RenderedOutputExpectation {
+                entry_error_code: Some(0),
+                exact: Some("before".to_owned()),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            !passed,
+            "only a recorded returned Error may match: {script}"
+        );
+        assert_eq!(kind, Some(expected_kind), "{reason:?}");
+    }
+}
+
+#[test]
+fn rendered_output_expected_entry_code_never_matches_a_wasm_trap() {
+    let (passed, kind, reason) = validate_wasm_page(
+        wasm_bootstrap_script("console.log('before'); instance.exports.trap();"),
+        wasm_module_with_trap(TestWasmTrap::Unreachable),
+        RenderedOutputExpectation {
+            entry_error_code: Some(0),
+            exact: Some("before".to_owned()),
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        !passed,
+        "a Wasm trap cannot match returned Error: {reason:?}"
+    );
+    assert_eq!(kind, Some(FailureKind::RenderedOutputMismatch));
 }
 
 #[test]

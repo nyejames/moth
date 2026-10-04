@@ -137,7 +137,7 @@ A fallible operation with no success values does not need `then`.
 
 - `catch` and postfix `!`, `cast!` or optional `?` conflict on the same expression.
 - Explicit propagation still leaves the function. It does not target the nearest catch.
-- Catch bodies remain statement-like and are rejected inside conditions, templates and constants.
+- Catch bodies remain statement-like and are rejected inside conditions, templates and constants, except for directly foldable cast recovery at an explicit constant/default receiving boundary.
 - Comma, parenthesis, logical-line and statement boundaries still delimit the selected expression.
 - Grouping an operand without a catch inside it does not shrink an outer handler's scope.
 - First-class fallible carriers cannot be stored without handling.

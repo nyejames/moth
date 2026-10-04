@@ -251,7 +251,7 @@ pub(crate) fn finish_function_call_expression(
             type_interner.environment_mut_for_derived_types(),
             call.call_span,
         )
-        .with_typed_error_producer(error_return_type_id),
+        .with_typed_error_producer(error_return_type_id, None),
     )
 }
 
@@ -501,7 +501,7 @@ fn finish_external_function_call_expression(
                 },
                 type_interner.environment_mut_for_derived_types(),
             )
-            .with_typed_error_producer(error_type_id),
+            .with_typed_error_producer(error_type_id, None),
         );
     }
 

@@ -197,7 +197,9 @@ impl<'hir> JsEmitter<'hir> {
                     "if (typeof globalThis.__moth_record_entry_failure === \"function\") {",
                 );
                 self.indent += 1;
-                self.emit_line("globalThis.__moth_record_entry_failure();");
+                self.emit_line(
+                    "globalThis.__moth_record_entry_failure(__moth_error_code(moth_result.value));",
+                );
                 self.indent -= 1;
                 self.emit_line("}");
                 self.emit_line("if (typeof process !== \"undefined\" && process.stderr) {");

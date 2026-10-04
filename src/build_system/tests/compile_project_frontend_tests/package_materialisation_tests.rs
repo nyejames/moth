@@ -385,7 +385,7 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
 ;
 
 seed_helper type T |value ~Int, marker T| -> Int:
-    value = value + 1
+    value = 2
     return value
 ;
 

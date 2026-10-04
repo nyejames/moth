@@ -3,11 +3,15 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
+entry_error_code = 301
 rendered_output_exact = ""
-runtime_error_contains = ["Int operation overflowed"]
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_exact = ""
-runtime_trap_contains = ["unreachable"]
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+# provisional span until Phase 7 safe-operation discharge.
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"

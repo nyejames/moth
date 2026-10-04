@@ -389,6 +389,10 @@ fn add_model_edges(
 }
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "convergence keeps the frontend, base HIR, link facts, generated transaction, bootstrap borrow report, mutable type environment, warnings and the timers-only context as separate borrows"
+)]
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
     compiler: &mut CompilerFrontend<'_>,
     hir_module: &mut HirModule,

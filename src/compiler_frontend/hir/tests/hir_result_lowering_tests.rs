@@ -1189,10 +1189,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
         vec![node(
             NodeKind::ReturnError(Expression::string_slice(
@@ -1216,7 +1213,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
                 Expression::handled_fallible_function_call(
                     can_fail_name,
                     vec![],
-                    vec![builtin_type_ids::STRING],
+                    vec![],
                     FallibleExpressionHandling::Recover,
                     location,
                 ),

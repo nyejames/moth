@@ -6,12 +6,11 @@ warnings = "forbid"
 rendered_output_exact = "bounded proofs u8=300 i16=-10000 i8sub=-255 i16u16sub=-98303 wide-high=4294967295 wide-low=-4294967295 i8mul=16384 u16mul=4294836225 i16u16mul=-2147450880 neg-min=128 neg-zero=0 halve=-3 lastbit=1/0 halve64=-4611686018427387904 parity64=-1 i64min=-9223372036854775808 i64max=9223372036854775807 u64max=18446744073709551615 u64third=6148914691236517205 u64parity=1 widemul=18446744065119617025 power=2147483648 retained=2147483647"
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_exact = "bounded proofs u8=300 i16=-10000 i8sub=-255 i16u16sub=-98303 wide-high=4294967295 wide-low=-4294967295 i8mul=16384 u16mul=4294836225 i16u16mul=-2147450880 neg-min=128 neg-zero=0 halve=-3 lastbit=1/0 halve64=-4611686018427387904 parity64=-1 i64min=-9223372036854775808 i64max=9223372036854775807 u64max=18446744073709551615 u64third=6148914691236517205 u64parity=1 widemul=18446744065119617025 power=2147483648 retained=2147483647"
+diagnostic_codes = ["MOTH-RULE-0064"]
 
-[[backends.html_wasm.artifact_assertions]]
-path = "page.wasm"
-kind = "wasm"
-validate_wasm = true
-must_export = ["moth_start"]
+# provisional span until Phase 7 safe-operation discharge.
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
