@@ -26,7 +26,10 @@ pub fn for_each_terminator_target(terminator: &HirTerminator, mut visit: impl Fn
 }
 
 /// Rewrite each successor block ID in place.
-pub fn for_each_terminator_target_mut(terminator: &mut HirTerminator, mut visit: impl FnMut(&mut BlockId)) {
+pub fn for_each_terminator_target_mut(
+    terminator: &mut HirTerminator,
+    mut visit: impl FnMut(&mut BlockId),
+) {
     match terminator {
         HirTerminator::Jump { target, .. }
         | HirTerminator::Break { target }

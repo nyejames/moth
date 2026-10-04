@@ -6,7 +6,7 @@
 
 #[allow(dead_code)] // Some codes are reserved for planned surfaces and must keep stable values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum BuiltinErrorCode {
+pub enum BuiltinErrorCode {
     UnknownOrUnassigned = 0,
     Unsupported = 1,
     CollectionExpectedOrderedCollection = 100,
@@ -118,9 +118,7 @@ impl BuiltinErrorCode {
             }
             BuiltinErrorCode::FloatFormatInvariant => "Float formatting invariant failed",
             BuiltinErrorCode::InvalidRangeStep => "Loop step cannot be zero",
-            BuiltinErrorCode::RangeStepNoProgress => {
-                "Floating-point range step made no progress"
-            }
+            BuiltinErrorCode::RangeStepNoProgress => "Floating-point range step made no progress",
             BuiltinErrorCode::TimeInvalidTimestampText => "Cannot parse Timestamp from text",
             BuiltinErrorCode::TimeTimestampOutOfRange => {
                 "Timestamp instant is outside the renderable range"

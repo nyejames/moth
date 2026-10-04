@@ -193,7 +193,9 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line(&format!("var moth_result = {start_name}();"));
                 self.emit_line("if (moth_result.tag !== \"ok\") {");
                 self.indent += 1;
-                self.emit_line("if (typeof globalThis.__moth_record_entry_failure === \"function\") {");
+                self.emit_line(
+                    "if (typeof globalThis.__moth_record_entry_failure === \"function\") {",
+                );
                 self.indent += 1;
                 self.emit_line("globalThis.__moth_record_entry_failure();");
                 self.indent -= 1;
@@ -313,7 +315,9 @@ impl<'hir> JsEmitter<'hir> {
                             self.config.numeric_profile.float_precision.into(),
                         ),
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
-                        HirStatementKind::RangeStepFailure { .. } => usage.range_step_failure = true,
+                        HirStatementKind::RangeStepFailure { .. } => {
+                            usage.range_step_failure = true
+                        }
                         _ => {}
                     }
                 }

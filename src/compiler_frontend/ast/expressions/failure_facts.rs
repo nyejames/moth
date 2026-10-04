@@ -6,9 +6,7 @@
 
 use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
-use super::expression_types::{
-    CastHandling, FallibleExpressionHandling, ResolvedCastEvidence,
-};
+use super::expression_types::{CastHandling, FallibleExpressionHandling, ResolvedCastEvidence};
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -80,7 +78,9 @@ impl FailureSummary {
         if let Some(first) = self.first_typed {
             if self.conflicting_typed.is_none() {
                 self.conflicting_typed = match other.first_typed {
-                    Some(producer) if producer.error_type_id != first.error_type_id => Some(producer),
+                    Some(producer) if producer.error_type_id != first.error_type_id => {
+                        Some(producer)
+                    }
                     _ => other.conflicting_typed,
                 };
             }
@@ -91,7 +91,9 @@ impl FailureSummary {
     }
 
     fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
-        let witness = Some(ImplicitFailureContributorSummary { span: contributor.span });
+        let witness = Some(ImplicitFailureContributorSummary {
+            span: contributor.span,
+        });
         self.first_implicit = self.first_implicit.or(witness);
         match contributor.source {
             ImplicitFailureSource::NumericOperation => {
@@ -107,7 +109,9 @@ impl FailureSummary {
 pub(crate) enum FailureDisposition {
     #[default]
     Pending,
-    HandledByCatch { error_type_id: TypeId },
+    HandledByCatch {
+        error_type_id: TypeId,
+    },
 }
 
 impl ExpressionFailureFacts {
@@ -183,10 +187,7 @@ impl ExpressionFailureFacts {
     }
 
     /// Aggregate actual evaluated children, not references to their declaration initialisers.
-    pub(crate) fn from_expression_kind(
-        kind: &ExpressionKind,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub(crate) fn from_expression_kind(kind: &ExpressionKind, span: Option<SourceSpan>) -> Self {
         let mut facts = Self::default();
         match kind {
             ExpressionKind::Runtime(rpn) => {
@@ -307,7 +308,10 @@ fn numeric_failure_codes(
     );
     if domain.is_binary_float() {
         if divides {
-            return &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::FloatNonFinite];
+            return &[
+                BuiltinErrorCode::DivideByZero,
+                BuiltinErrorCode::FloatNonFinite,
+            ];
         }
         return if operator == NumericOperator::Negate {
             &[]
@@ -317,9 +321,17 @@ fn numeric_failure_codes(
     }
     if domain.is_integer() {
         return match operator {
-            NumericOperator::Divide | NumericOperator::Remainder => &[BuiltinErrorCode::DivideByZero],
-            NumericOperator::IntegerDivide => &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::IntOverflow],
-            NumericOperator::Power => &[BuiltinErrorCode::IntOverflow, BuiltinErrorCode::InvalidExponent],
+            NumericOperator::Divide | NumericOperator::Remainder => {
+                &[BuiltinErrorCode::DivideByZero]
+            }
+            NumericOperator::IntegerDivide => &[
+                BuiltinErrorCode::DivideByZero,
+                BuiltinErrorCode::IntOverflow,
+            ],
+            NumericOperator::Power => &[
+                BuiltinErrorCode::IntOverflow,
+                BuiltinErrorCode::InvalidExponent,
+            ],
             _ => &[BuiltinErrorCode::IntOverflow],
         };
     }

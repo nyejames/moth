@@ -23,17 +23,23 @@ pub(crate) fn classify_assertion_message_effect(
     message: &Expression,
     template_ir_store: &TemplateIrStore,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
-    classify_enclosing_exit_effect(message, template_ir_store, ExitClassification::AssertionMessage)
+    classify_enclosing_exit_effect(
+        message,
+        template_ir_store,
+        ExitClassification::AssertionMessage,
+    )
 }
 
 pub(crate) fn assert_message_escape_diagnostic(
     message: &Expression,
     template_ir_store: &TemplateIrStore,
 ) -> Result<Option<CompilerDiagnostic>, CompilerError> {
-    Ok(classify_assertion_message_effect(message, template_ir_store)?.map(|effect| {
-        CompilerDiagnostic::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-            effect.span(),
-        )
-    }))
+    Ok(
+        classify_assertion_message_effect(message, template_ir_store)?.map(|effect| {
+            CompilerDiagnostic::invalid_fallible_handling(
+                InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+                effect.span(),
+            )
+        }),
+    )
 }

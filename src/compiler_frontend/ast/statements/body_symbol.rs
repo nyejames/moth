@@ -357,7 +357,10 @@ pub(crate) fn parse_symbol_statement(
     }
 
     // External (host) function calls have no local declaration; resolve by name.
-    if context.lookup_visible_external_function(symbol_id).is_some() {
+    if context
+        .lookup_visible_external_function(symbol_id)
+        .is_some()
+    {
         if token_stream.peek_next_tag() == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
             // Explicit external imports retain the authored dependency span; prelude-injected
             // symbols intentionally have no source span to attach.

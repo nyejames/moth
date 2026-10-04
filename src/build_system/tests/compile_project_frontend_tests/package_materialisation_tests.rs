@@ -1370,7 +1370,8 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
          use_safe_product |left Int, right Int| -> Int, Error!:\n\
              return safe_product(0, left, right)!\n;\n\
          result = use_product(2, 3)\n",
-    ).expect("should write private generic helper source");
+    )
+    .expect("should write private generic helper source");
 
     let mut config = Config::new(dir);
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1383,22 +1384,32 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
-    ).expect("real private generic helper contracts should compile");
+    )
+    .expect("real private generic helper contracts should compile");
 
     let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
-    assert_eq!(sidecars.len(), 2, "both authored concrete requests must materialise");
+    assert_eq!(
+        sidecars.len(),
+        2,
+        "both authored concrete requests must materialise"
+    );
     let mut inferred_roots = 0;
     let mut error_slot_roots = 0;
     for sidecar in sidecars {
         let executable = &sidecar.module.executable;
         let hir = &executable.hir;
-        let root = *hir.function_ids_by_generated.get(&sidecar.identity)
+        let root = *hir
+            .function_ids_by_generated
+            .get(&sidecar.identity)
             .expect("sidecar identity must resolve to its exact generated root");
         let facts = &hir.function_failure_facts[&root];
         assert_eq!(facts.contributors.len(), 1);
         let contributor = &facts.contributors[0];
-        let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source else {
-            panic!("materialised donor-private call must retain its failure contributor: {contributor:?}");
+        let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source
+        else {
+            panic!(
+                "materialised donor-private call must retain its failure contributor: {contributor:?}"
+            );
         };
         assert!(contributor.span.is_some());
         assert!(
@@ -1530,8 +1541,13 @@ export:
         "the published declaring context must replace multiply's signature-only bootstrap false",
     );
     let mut sidecars = frontend.project.generated.sidecars();
-    let sidecar = sidecars.next().expect("the page request should materialise product");
-    assert!(sidecars.next().is_none(), "only product should be generated");
+    let sidecar = sidecars
+        .next()
+        .expect("the page request should materialise product");
+    assert!(
+        sidecars.next().is_none(),
+        "only product should be generated"
+    );
     let executable = &sidecar.module.executable;
     let hir = &executable.hir;
     let root = *hir
@@ -1541,10 +1557,14 @@ export:
     let facts = &hir.function_failure_facts[&root];
     assert_eq!(facts.contributors.len(), 1);
     let contributor = &facts.contributors[0];
-    let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source else {
+    let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source
+    else {
         panic!("later product request must retain its private-call contributor: {contributor:?}");
     };
-    assert_eq!(helper, multiply, "the sidecar must call the declaring private multiply");
+    assert_eq!(
+        helper, multiply,
+        "the sidecar must call the declaring private multiply"
+    );
     assert!(
         hir.module_private_call_summaries[multiply].escapes_builtin_failure,
         "the later page request must consume the converged private summary, not bootstrap false",

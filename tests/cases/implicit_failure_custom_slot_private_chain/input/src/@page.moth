@@ -1,0 +1,13 @@
+Failure = | message String |
+
+multiply |left Int, right Int| -> Int:
+    return left * right
+;
+
+first |left Int, right Int| -> Int:
+    return multiply(left, right)
+;
+
+area |left Int, right Int| -> Int, Failure!:
+    return first(left, right)
+;

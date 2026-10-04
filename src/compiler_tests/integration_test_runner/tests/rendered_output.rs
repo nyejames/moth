@@ -9,11 +9,10 @@
 
 use super::super::assertions::{
     RenderHarnessErrorKind, RuntimeEvent, SlotOutput, execute_html_harness_for_test,
-    execute_wasm_harness_for_test,
-    extract_executable_scripts, parse_harness_output, parse_node_major_for_test,
-    probe_node_runtime_for_test, required_text_artifact_for_test, run_node_script_within,
-    run_script_with_executable_for_test, validate_rendered_output_fragments,
-    validate_success_result, with_harness_workspace,
+    execute_wasm_harness_for_test, extract_executable_scripts, parse_harness_output,
+    parse_node_major_for_test, probe_node_runtime_for_test, required_text_artifact_for_test,
+    run_node_script_within, run_script_with_executable_for_test,
+    validate_rendered_output_fragments, validate_success_result, with_harness_workspace,
 };
 use super::super::types::{ArtifactKind, GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, FailureKind, SuccessExpectation, WarningExpectation};
@@ -1313,7 +1312,9 @@ fn rendered_output_decodes_entry_failure_without_losing_earlier_events() {
     assert_eq!(
         output.events(),
         &[
-            RuntimeEvent::Console { text: "before".to_owned() },
+            RuntimeEvent::Console {
+                text: "before".to_owned()
+            },
             RuntimeEvent::FragmentInsert {
                 id: "root".to_owned(),
                 html: "<p>published</p>".to_owned(),
@@ -1490,7 +1491,9 @@ fn rendered_output_classic_and_module_harnesses_publish_one_safe_entry_failure()
         assert_eq!(
             output.events(),
             &[
-                RuntimeEvent::Console { text: "before".to_owned() },
+                RuntimeEvent::Console {
+                    text: "before".to_owned()
+                },
                 RuntimeEvent::FragmentInsert {
                     id: "root".to_owned(),
                     html: "<p>published</p>".to_owned(),
@@ -1523,7 +1526,9 @@ fn rendered_output_recorded_entry_failure_stays_terminal_after_queued_host_work(
         assert_eq!(
             output.events(),
             &[
-                RuntimeEvent::Console { text: "before".to_owned() },
+                RuntimeEvent::Console {
+                    text: "before".to_owned()
+                },
                 RuntimeEvent::EntryFailure,
             ],
             "{script_type}",
@@ -1540,8 +1545,14 @@ fn rendered_output_entry_failure_precedes_output_and_runtime_expectation_mismatc
     );
     let generic_reason = format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end());
     for expectation in [
-        RenderedOutputExpectation { exact: Some("before".to_owned()), ..Default::default() },
-        RenderedOutputExpectation { exact: Some("missing output".to_owned()), ..Default::default() },
+        RenderedOutputExpectation {
+            exact: Some("before".to_owned()),
+            ..Default::default()
+        },
+        RenderedOutputExpectation {
+            exact: Some("missing output".to_owned()),
+            ..Default::default()
+        },
         RenderedOutputExpectation {
             contains: vec!["missing output".to_owned()],
             ..Default::default()
@@ -1555,7 +1566,11 @@ fn rendered_output_entry_failure_precedes_output_and_runtime_expectation_mismatc
         assert!(!passed);
         assert_eq!(kind, Some(FailureKind::EntryFailed));
         assert_eq!(reason.as_deref(), Some(generic_reason.as_str()));
-        assert!(!reason.expect("entry failure must have a generic reason").contains("application-secret"));
+        assert!(
+            !reason
+                .expect("entry failure must have a generic reason")
+                .contains("application-secret")
+        );
     }
 }
 
@@ -1580,17 +1595,26 @@ fn rendered_output_recorded_entry_failure_survives_cleared_host_status() {
         assert_eq!(kind, Some(FailureKind::EntryFailed), "{reason:?}");
         assert_eq!(
             reason,
-            Some(format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()))
+            Some(format!(
+                "rendered_output: {}",
+                ENTRY_FAILURE_NOTICE.trim_end()
+            ))
         );
     }
 }
 
 #[test]
 fn rendered_output_zero_or_unset_exit_code_does_not_report_entry_failure() {
-    for script in ["console.log('success');", "process.exitCode = 0; console.log('success');"] {
+    for script in [
+        "console.log('success');",
+        "process.exitCode = 0; console.log('success');",
+    ] {
         let (passed, kind, reason) = validate_html_script(
             script,
-            RenderedOutputExpectation { exact: Some("success".to_owned()), ..Default::default() },
+            RenderedOutputExpectation {
+                exact: Some("success".to_owned()),
+                ..Default::default()
+            },
         );
         assert!(passed, "{reason:?}");
         assert_eq!(kind, None);
@@ -1607,10 +1631,17 @@ fn rendered_output_unrelated_exit_code_is_a_host_fault() {
     ] {
         let (passed, kind, reason) = validate_html_script(
             script,
-            RenderedOutputExpectation { exact: Some("before".to_owned()), ..Default::default() },
+            RenderedOutputExpectation {
+                exact: Some("before".to_owned()),
+                ..Default::default()
+            },
         );
         assert!(!passed, "{script}");
-        assert_eq!(kind, Some(FailureKind::HarnessFailed), "{script}: {reason:?}");
+        assert_eq!(
+            kind,
+            Some(FailureKind::HarnessFailed),
+            "{script}: {reason:?}"
+        );
         let reason = reason.expect("host status must explain the fault");
         assert!(reason.contains("host process status"), "{script}: {reason}");
         assert_ne!(kind, Some(FailureKind::EntryFailed));
@@ -1621,7 +1652,10 @@ fn rendered_output_unrelated_exit_code_is_a_host_fault() {
 fn rendered_output_nonzero_exit_code_does_not_replace_an_uncaught_error() {
     let (passed, kind, reason) = validate_html_script(
         "process.exitCode = 1; console.log('before'); throw new Error('uncaught invariant');",
-        RenderedOutputExpectation { contains: vec!["missing output".to_owned()], ..Default::default() },
+        RenderedOutputExpectation {
+            contains: vec!["missing output".to_owned()],
+            ..Default::default()
+        },
     );
     assert!(!passed);
     assert_eq!(kind, Some(FailureKind::HarnessFailed));
@@ -1636,13 +1670,16 @@ fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps(
          process.stderr.write({notice}); process.exitCode = 1;"
     );
     let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
-    std::fs::write(temp_dir.path().join("page.js"), &script).expect("page script should be written");
+    std::fs::write(temp_dir.path().join("page.js"), &script)
+        .expect("page script should be written");
     let output = execute_wasm_harness_for_test(temp_dir.path())
         .expect("shared Wasm harness protocol must retain entry failure");
     assert_eq!(
         output.events(),
         &[
-            RuntimeEvent::Console { text: "before".to_owned() },
+            RuntimeEvent::Console {
+                text: "before".to_owned()
+            },
             RuntimeEvent::EntryFailure,
         ]
     );
@@ -1658,7 +1695,13 @@ fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps(
     );
     assert!(!passed);
     assert_eq!(kind, Some(FailureKind::EntryFailed));
-    assert_eq!(reason, Some(format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end())));
+    assert_eq!(
+        reason,
+        Some(format!(
+            "rendered_output: {}",
+            ENTRY_FAILURE_NOTICE.trim_end()
+        ))
+    );
 }
 
 #[test]

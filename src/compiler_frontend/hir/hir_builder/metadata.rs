@@ -9,8 +9,8 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
 };
@@ -142,12 +142,15 @@ impl<'a> HirBuilder<'a> {
 
     /// Freeze expression-owned failure facts while the completed AST is still available.
     /// Exact exportedness is joined by origin assignment after this body projection.
-    pub(super) fn project_function_failure_facts(&mut self, ast: &Ast) -> Result<(), CompilerError> {
-        let builtin_error_type = self
-            .type_environment
-            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
-                CanonicalBuiltinType::Error,
-            ));
+    pub(super) fn project_function_failure_facts(
+        &mut self,
+        ast: &Ast,
+    ) -> Result<(), CompilerError> {
+        let builtin_error_type =
+            self.type_environment
+                .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                    CanonicalBuiltinType::Error,
+                ));
         // Completed AST contains owned runtime handoffs, never unresolved TIR references.
         let template_ir_store = TemplateIrStore::new();
 
@@ -167,7 +170,8 @@ impl<'a> HirBuilder<'a> {
             let contributors = self.project_failure_contributors(pending.body.implicit)?;
             let assertion_message_calls =
                 self.project_failure_contributors(pending.assertion_message_calls)?;
-            let mut deferred_custom_catches = Vec::with_capacity(pending.body.deferred_custom_catches.len());
+            let mut deferred_custom_catches =
+                Vec::with_capacity(pending.body.deferred_custom_catches.len());
             for check in pending.body.deferred_custom_catches {
                 deferred_custom_catches.push(HirDeferredCustomCatchCheck {
                     catch_span: check.catch_span,
@@ -198,7 +202,9 @@ impl<'a> HirBuilder<'a> {
         let mut contributors = Vec::with_capacity(pending.len());
         for contributor in pending {
             let source = match contributor.source {
-                ImplicitFailureSource::NumericOperation => HirBuiltinFailureSource::NumericOperation,
+                ImplicitFailureSource::NumericOperation => {
+                    HirBuiltinFailureSource::NumericOperation
+                }
                 ImplicitFailureSource::PrivateCall(path) => HirBuiltinFailureSource::Call(
                     self.resolve_call_target_or_error(&path, &contributor.span)?,
                 ),

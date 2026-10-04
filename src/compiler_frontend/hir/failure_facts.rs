@@ -42,6 +42,10 @@ pub(crate) struct HirBuiltinFailureContributor {
     pub(crate) codes: Vec<BuiltinErrorCode>,
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "contributors are matched by reference during convergence; boxing would allocate per call contributor"
+)]
 #[derive(Debug, Clone)]
 pub(crate) enum HirBuiltinFailureSource {
     NumericOperation,

@@ -11,15 +11,14 @@ use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::expressions::failure_facts::{
-    ExpressionFailureFacts, FailureDisposition, FailureSummary, ImplicitFailureContributor,
-    ImplicitFailureContributorSummary, ImplicitFailureSource,
-};
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    ExpressionFailureFacts, FailureDisposition, FailureSummary, ImplicitFailureContributor,
+    ImplicitFailureContributorSummary, ImplicitFailureSource,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
@@ -30,17 +29,18 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplateTirReference, TirView, walk_tir_view_expression_payloads,
-    walk_expression_payloads_with_nested_tir_views,
+    TemplateIrStore, TemplateTirReference, TirView, walk_expression_payloads_with_nested_tir_views,
+    walk_tir_view_expression_payloads,
 };
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use crate::compiler_frontend::source::SourceSpan;
 
 /// A control-flow effect targeting the current enclosing function.
 ///
@@ -83,7 +83,11 @@ pub(crate) fn classify_enclosing_exit_effect(
         ExitClassification::AssertionMessage => TraversalPurpose::AssertionMessage,
         ExitClassification::ExplicitPropagation => TraversalPurpose::ExplicitPropagation,
     };
-    classify_expression(expression, template_ir_store, &mut TraversalState::new(purpose))
+    classify_expression(
+        expression,
+        template_ir_store,
+        &mut TraversalState::new(purpose),
+    )
 }
 
 pub(crate) fn pending_body_failure_facts(
@@ -249,7 +253,9 @@ fn protected_operands_have_unsupported_failure(
         | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
             for argument in args {
                 if catch_operand_has_unsupported_failure(
-                    &argument.value, template_ir_store, private_calls,
+                    &argument.value,
+                    template_ir_store,
+                    private_calls,
                 )? {
                     return Ok(true);
                 }
@@ -257,20 +263,22 @@ fn protected_operands_have_unsupported_failure(
         }
         ExpressionKind::HandledFallibleExpression { value, .. } => {
             return protected_operands_have_unsupported_failure(
-                value, template_ir_store, private_calls,
+                value,
+                template_ir_store,
+                private_calls,
             );
         }
         ExpressionKind::MethodCall { receiver, args, .. }
         | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
         | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-            if catch_operand_has_unsupported_failure(
-                receiver, template_ir_store, private_calls,
-            )? {
+            if catch_operand_has_unsupported_failure(receiver, template_ir_store, private_calls)? {
                 return Ok(true);
             }
             for argument in args {
                 if catch_operand_has_unsupported_failure(
-                    &argument.value, template_ir_store, private_calls,
+                    &argument.value,
+                    template_ir_store,
+                    private_calls,
                 )? {
                     return Ok(true);
                 }
@@ -278,14 +286,18 @@ fn protected_operands_have_unsupported_failure(
         }
         ExpressionKind::Cast(cast) => {
             return catch_operand_has_unsupported_failure(
-                &cast.source, template_ir_store, private_calls,
+                &cast.source,
+                template_ir_store,
+                private_calls,
             );
         }
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
                 if let ExpressionRpnItem::Operand(operand) = item
                     && catch_operand_has_unsupported_failure(
-                        operand, template_ir_store, private_calls,
+                        operand,
+                        template_ir_store,
+                        private_calls,
                     )?
                 {
                     return Ok(true);
@@ -310,8 +322,13 @@ enum TraversalPurpose {
     ExpressionProjection(PendingFailureFacts),
     FunctionProjection(PendingFunctionFailureFacts),
     PrivateCallCandidates(Vec<ImplicitFailureContributor>),
-    CatchSupport { unsupported: Option<(&'static str, Option<SourceSpan>)> },
-    UnsupportedOperands { private_calls: PrivateCallCompatibility, found: bool },
+    CatchSupport {
+        unsupported: Option<(&'static str, Option<SourceSpan>)>,
+    },
+    UnsupportedOperands {
+        private_calls: PrivateCallCompatibility,
+        found: bool,
+    },
 }
 
 struct TraversalState {
@@ -323,11 +340,19 @@ struct TraversalState {
 
 impl TraversalState {
     fn new(purpose: TraversalPurpose) -> Self {
-        Self { purpose, loop_depth: 0, visited_templates: HashSet::new(), protected_failure_depth: 0 }
+        Self {
+            purpose,
+            loop_depth: 0,
+            visited_templates: HashSet::new(),
+            protected_failure_depth: 0,
+        }
     }
 
     fn classifies_exits(&self) -> bool {
-        matches!(self.purpose, TraversalPurpose::AssertionMessage | TraversalPurpose::ExplicitPropagation)
+        matches!(
+            self.purpose,
+            TraversalPurpose::AssertionMessage | TraversalPurpose::ExplicitPropagation
+        )
     }
 
     fn checks_catch_support(&self) -> bool {
@@ -335,9 +360,13 @@ impl TraversalState {
     }
 
     fn stopped(&self) -> bool {
-        matches!(self.purpose,
-            TraversalPurpose::CatchSupport { unsupported: Some(_), .. }
-            | TraversalPurpose::UnsupportedOperands { found: true, .. })
+        matches!(
+            self.purpose,
+            TraversalPurpose::CatchSupport {
+                unsupported: Some(_),
+                ..
+            } | TraversalPurpose::UnsupportedOperands { found: true, .. }
+        )
     }
 
     fn summary_mut(&mut self) -> Option<&mut ExpressionFailureFacts> {
@@ -362,9 +391,10 @@ impl TraversalState {
             TraversalPurpose::ExpressionProjection(facts) => facts.implicit.push(*contributor),
             TraversalPurpose::FunctionProjection(facts) => facts.body.implicit.push(*contributor),
             TraversalPurpose::PrivateCallCandidates(candidates)
-                if matches!(contributor.source, ImplicitFailureSource::PrivateCall(_)) => {
-                    candidates.push(*contributor);
-                }
+                if matches!(contributor.source, ImplicitFailureSource::PrivateCall(_)) =>
+            {
+                candidates.push(*contributor);
+            }
             _ => {}
         }
     }
@@ -402,12 +432,14 @@ fn collect_deferred_check(
         unreachable!("candidate traversal retains its purpose");
     };
     if let Some(projection) = state.projection_mut() {
-        projection.deferred_custom_catches.push(CollectedDeferredCustomCatchCheck {
-            catch_span: check.catch_span,
-            error_type_id: check.error_type_id,
-            typed_producer_span: check.typed_producer_span,
-            candidates,
-        });
+        projection
+            .deferred_custom_catches
+            .push(CollectedDeferredCustomCatchCheck {
+                catch_span: check.catch_span,
+                error_type_id: check.error_type_id,
+                typed_producer_span: check.typed_producer_span,
+                candidates,
+            });
     }
     Ok(())
 }
@@ -417,7 +449,12 @@ fn classify_expression(
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
-    classify_expression_with_root_protection(expression, template_ir_store, state, RootProtection::Respect)
+    classify_expression_with_root_protection(
+        expression,
+        template_ir_store,
+        state,
+        RootProtection::Respect,
+    )
 }
 
 fn classify_expression_with_root_protection(
@@ -431,7 +468,8 @@ fn classify_expression_with_root_protection(
     }
 
     let ignores_root = matches!(root_protection, RootProtection::Ignore);
-    let pending_root = ignores_root || expression.failure_facts.disposition == FailureDisposition::Pending;
+    let pending_root =
+        ignores_root || expression.failure_facts.disposition == FailureDisposition::Pending;
     let owns_payload = matches!(
         expression.kind,
         ExpressionKind::ValueBlock { .. }
@@ -441,7 +479,10 @@ fn classify_expression_with_root_protection(
     );
     if state.protected_failure_depth == 0 && pending_root {
         match &mut state.purpose {
-            TraversalPurpose::UnsupportedOperands { private_calls, found } if !owns_payload => {
+            TraversalPurpose::UnsupportedOperands {
+                private_calls,
+                found,
+            } if !owns_payload => {
                 let facts = &expression.failure_facts.summary;
                 *found = facts.first_typed.is_some()
                     || (matches!(private_calls, PrivateCallCompatibility::Unsupported)
@@ -451,7 +492,10 @@ fn classify_expression_with_root_protection(
                 // Private candidates wait for exact callee convergence. Numeric failure takes
                 // precedence over typed failure, matching the retained aggregate diagnostics.
                 let facts = &expression.failure_facts.summary;
-                let span = facts.first_numeric.as_ref().map(|witness| witness.span)
+                let span = facts
+                    .first_numeric
+                    .as_ref()
+                    .map(|witness| witness.span)
                     .or_else(|| facts.first_typed.as_ref().map(|producer| producer.span));
                 if let Some(span) = span {
                     return Ok(Some(EnclosingExitEffect::InferredFailure(span)));
@@ -471,8 +515,7 @@ fn classify_expression_with_root_protection(
     let effect = match &expression.kind {
         ExpressionKind::HandledFallibleFunctionCall { args, handling, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { args, handling, .. } => {
-            if state.classifies_exits()
-                && matches!(handling, FallibleExpressionHandling::Propagate)
+            if state.classifies_exits() && matches!(handling, FallibleExpressionHandling::Propagate)
             {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
                     expression_propagation_span(expression),
@@ -487,8 +530,7 @@ fn classify_expression_with_root_protection(
         ExpressionKind::HandledFallibleExpression {
             value, handling, ..
         } => {
-            if state.classifies_exits()
-                && matches!(handling, FallibleExpressionHandling::Propagate)
+            if state.classifies_exits() && matches!(handling, FallibleExpressionHandling::Propagate)
             {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
                     expression_propagation_span(expression),
@@ -504,7 +546,9 @@ fn classify_expression_with_root_protection(
             if !state.classifies_exits() {
                 classify_expression(value, template_ir_store, state)
             } else {
-                Ok(Some(EnclosingExitEffect::OptionPropagation(expression.span)))
+                Ok(Some(EnclosingExitEffect::OptionPropagation(
+                    expression.span,
+                )))
             }
         }
         ExpressionKind::Cast(cast) => {
@@ -594,12 +638,21 @@ fn classify_expression_with_root_protection(
                 Ok(())
             };
             if classifies_exits {
-                walk_expression_payloads_with_nested_tir_views(expression, template_ir_store, &mut visit)?;
+                walk_expression_payloads_with_nested_tir_views(
+                    expression,
+                    template_ir_store,
+                    &mut visit,
+                )?;
             } else {
                 // Projection needs the wrapper origins that the predicate-oriented nested walker
                 // intentionally unwraps. Structural recursion still belongs to canonical TIR.
                 let reference = template.tir_reference;
-                let view = TirView::new(template_ir_store, reference.root, reference.phase, reference.context)?;
+                let view = TirView::new(
+                    template_ir_store,
+                    reference.root,
+                    reference.phase,
+                    reference.context,
+                )?;
                 walk_tir_view_expression_payloads(&view, &mut visit)?;
             }
             Ok(effect)
@@ -725,18 +778,16 @@ fn classify_value_block(
                     | ExpressionKind::HandledFallibleHostFunctionCall { .. }
                     | ExpressionKind::HandledFallibleExpression { .. }
                     | ExpressionKind::Cast(_)
-                    | ExpressionKind::Runtime(_) => {
-                        protected_operands_have_unsupported_failure(
-                            protected,
-                            template_ir_store,
-                            if protected.failure_facts.deferred_custom_catch.is_some() {
-                                PrivateCallCompatibility::Deferred
-                            } else {
-                                PrivateCallCompatibility::Unsupported
-                            },
-                        )?
-                            .then_some("an expression with unsupported fallible operands or arguments")
-                    }
+                    | ExpressionKind::Runtime(_) => protected_operands_have_unsupported_failure(
+                        protected,
+                        template_ir_store,
+                        if protected.failure_facts.deferred_custom_catch.is_some() {
+                            PrivateCallCompatibility::Deferred
+                        } else {
+                            PrivateCallCompatibility::Unsupported
+                        },
+                    )?
+                    .then_some("an expression with unsupported fallible operands or arguments"),
                     ExpressionKind::FunctionCall { .. } => Some("an inferred-failure private call"),
                     _ => Some("this protected expression"),
                 };
@@ -756,19 +807,11 @@ fn classify_value_block(
                 // Catch completion historically published handler checks before protected checks.
                 // Protected work contributes no escaping origins, so visiting it second preserves
                 // that diagnostic order without changing the escaping contributor order.
-                classify_catch_handler(
-                    body,
-                    &value_catch.handled_value,
-                    template_ir_store,
-                    state,
-                )?;
+                classify_catch_handler(body, &value_catch.handled_value, template_ir_store, state)?;
 
                 state.protected_failure_depth += 1;
-                let effect = classify_expression(
-                    &value_catch.handled_value,
-                    template_ir_store,
-                    state,
-                );
+                let effect =
+                    classify_expression(&value_catch.handled_value, template_ir_store, state);
                 state.protected_failure_depth -= 1;
                 return effect;
             }
@@ -788,9 +831,8 @@ fn classify_value_block(
                 }
             } else {
                 state.protected_failure_depth += 1;
-                let effect = classify_expression(
-                    &value_catch.handled_value, template_ir_store, state,
-                );
+                let effect =
+                    classify_expression(&value_catch.handled_value, template_ir_store, state);
                 state.protected_failure_depth -= 1;
                 if let Some(effect) = effect? {
                     return Ok(Some(effect));
@@ -815,8 +857,8 @@ fn classify_catch_handler(
     template_ir_store: &TemplateIrStore,
     state: &mut TraversalState,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
-    let dead_handler = !state.classifies_exits()
-        && protected.failure_facts.is_folded_numeric_catch_success();
+    let dead_handler =
+        !state.classifies_exits() && protected.failure_facts.is_folded_numeric_catch_success();
     state.protected_failure_depth += usize::from(dead_handler);
     let effect = classify_nodes(body, template_ir_store, state);
     state.protected_failure_depth -= usize::from(dead_handler);
@@ -917,9 +959,8 @@ fn classify_nodes(
             }
             NodeKind::LexicalScope { body } => classify_nodes(body, template_ir_store, state)?,
             NodeKind::RangeLoop { range, body, .. } => {
-                if let Some(effect) = classify_range_failure(
-                    range.start.type_id, node.span, state,
-                ) {
+                if let Some(effect) = classify_range_failure(range.start.type_id, node.span, state)
+                {
                     return Ok(Some(effect));
                 }
                 let mut effect = classify_expression(&range.start, template_ir_store, state)?;
@@ -960,16 +1001,23 @@ fn classify_nodes(
                 let effect = classify_expression(condition, template_ir_store, state)?;
                 match &mut state.purpose {
                     TraversalPurpose::FunctionProjection(facts) => {
-                        let message_facts = collect_expression_failure_facts(message, template_ir_store)?;
-                        facts.assertion_message_calls.extend(message_facts.implicit.into_iter().filter(|contributor| {
-                            matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
-                        }));
+                        let message_facts =
+                            collect_expression_failure_facts(message, template_ir_store)?;
+                        facts.assertion_message_calls.extend(
+                            message_facts.implicit.into_iter().filter(|contributor| {
+                                matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+                            }),
+                        );
                     }
                     TraversalPurpose::CatchSupport { .. } => {
                         classify_expression(message, template_ir_store, state)?;
                     }
                     TraversalPurpose::AssertionMessage | TraversalPurpose::ExplicitPropagation => {
-                        return Ok(effect.or(classify_expression(message, template_ir_store, state)?));
+                        return Ok(effect.or(classify_expression(
+                            message,
+                            template_ir_store,
+                            state,
+                        )?));
                     }
                     _ => {}
                 }
@@ -1116,7 +1164,11 @@ fn classify_loop_header(
             classify_expression(condition, template_ir_store, state)
         }
         TemplateLoopHeader::Range { range, .. } => {
-            let span = range.step.as_ref().and_then(|step| step.span).or(range.start.span);
+            let span = range
+                .step
+                .as_ref()
+                .and_then(|step| step.span)
+                .or(range.start.span);
             if let Some(effect) = classify_range_failure(range.start.type_id, span, state) {
                 return Ok(Some(effect));
             }
@@ -1149,7 +1201,8 @@ fn classify_range_failure(
         TraversalPurpose::AssertionMessage => {
             return Some(EnclosingExitEffect::InferredFailure(span));
         }
-        TraversalPurpose::ExplicitPropagation | TraversalPurpose::CatchSupport { .. }
+        TraversalPurpose::ExplicitPropagation
+        | TraversalPurpose::CatchSupport { .. }
         | TraversalPurpose::PrivateCallCandidates(_) => return None,
         TraversalPurpose::UnsupportedOperands { found, .. } => {
             *found = true;
@@ -1162,10 +1215,19 @@ fn classify_range_failure(
         || [FixedScalar::F16, FixedScalar::F32, FixedScalar::F64]
             .into_iter()
             .any(|scalar| type_id == builtin_type_ids::fixed_scalar(scalar));
+    // Range loops fail on overflow plus their step guards: zero step (306) in every domain and
+    // no progress (307) when floating rounding leaves the candidate unchanged.
     let codes: &'static [BuiltinErrorCode] = if binary_float {
-        &[BuiltinErrorCode::FloatNonFinite]
+        &[
+            BuiltinErrorCode::FloatNonFinite,
+            BuiltinErrorCode::InvalidRangeStep,
+            BuiltinErrorCode::RangeStepNoProgress,
+        ]
     } else {
-        &[BuiltinErrorCode::IntOverflow]
+        &[
+            BuiltinErrorCode::IntOverflow,
+            BuiltinErrorCode::InvalidRangeStep,
+        ]
     };
     let contributor = ImplicitFailureContributor {
         span,

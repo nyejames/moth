@@ -103,7 +103,11 @@ impl<'hir> JsEmitter<'hir> {
                 )?;
             }
 
-            HirStatementKind::RangeStepFailure { cause, failure_mode, result } => {
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result,
+            } => {
                 let error_code = cause.builtin_error_code();
                 let helper_call = format!(
                     "__moth_error_result({:?}, {})",

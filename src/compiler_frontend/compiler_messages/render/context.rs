@@ -423,6 +423,12 @@ fn diagnostic_label_message_text(
         DiagnosticLabelMessage::ImplicitFailureProducer => {
             "implicit built-in failure may escape here".to_owned()
         }
+        DiagnosticLabelMessage::BuiltinFailureCall => {
+            "implicit built-in failure propagates through this call".to_owned()
+        }
+        DiagnosticLabelMessage::BuiltinFailureOrigin => {
+            "original failing numeric or range operation here".to_owned()
+        }
     }
 }
 

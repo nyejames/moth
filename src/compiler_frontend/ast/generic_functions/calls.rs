@@ -331,11 +331,13 @@ fn finish_generic_function_call(
         let call_path = call.name;
         let expression =
             call.into_plain_expression(type_interner.environment_mut_for_derived_types());
-        return Ok(if context.source_call_has_private_failure_lane(declaration_path) {
-            expression.with_private_call_failure_candidate(call_path)
-        } else {
-            expression
-        });
+        return Ok(
+            if context.source_call_has_private_failure_lane(declaration_path) {
+                expression.with_private_call_failure_candidate(call_path)
+            } else {
+                expression
+            },
+        );
     };
 
     if token_stream_starts_typed_propagation_suffix(token_stream) {
@@ -355,15 +357,17 @@ fn finish_generic_function_call(
         );
     }
 
-    Ok(Expression::handled_fallible_function_call_with_typed_arguments(
-        call.name,
-        call.args,
-        call.result_type_ids,
-        FallibleExpressionHandling::Recover,
-        type_interner.environment_mut_for_derived_types(),
-        call.call_span,
+    Ok(
+        Expression::handled_fallible_function_call_with_typed_arguments(
+            call.name,
+            call.args,
+            call.result_type_ids,
+            FallibleExpressionHandling::Recover,
+            type_interner.environment_mut_for_derived_types(),
+            call.call_span,
+        )
+        .with_typed_error_producer(error_return_type_id),
     )
-    .with_typed_error_producer(error_return_type_id))
 }
 
 pub(crate) struct GenericFunctionInferenceInput<'a> {

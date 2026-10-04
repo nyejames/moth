@@ -13,13 +13,13 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -83,7 +83,8 @@ pub(super) fn resolve_expression_result_type(
                         type_environment,
                     )?;
                     if let Some(numeric_operator) = operator.numeric_operator()
-                        && let Some(domain) = NumericScalar::from_type_id(result_type, type_environment)
+                        && let Some(domain) =
+                            NumericScalar::from_type_id(result_type, type_environment)
                     {
                         failure_facts.record_numeric_operation(numeric_operator, domain, *span);
                     }
@@ -146,7 +147,8 @@ pub(super) fn resolve_expression_result_type(
                         path_fork,
                     )?;
                     if let Some(numeric_operator) = operator.numeric_operator()
-                        && let Some(domain) = NumericScalar::from_type_id(result_type, type_environment)
+                        && let Some(domain) =
+                            NumericScalar::from_type_id(result_type, type_environment)
                     {
                         failure_facts.record_numeric_operation(numeric_operator, domain, *span);
                     }

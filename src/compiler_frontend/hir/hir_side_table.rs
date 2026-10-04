@@ -233,17 +233,24 @@ impl HirSideTable {
         self.ast_to_hir = std::mem::take(&mut self.ast_to_hir)
             .into_iter()
             .filter_map(|(span, locations)| {
-                let locations = locations.into_iter().filter_map(remap_location).collect::<Vec<_>>();
+                let locations = locations
+                    .into_iter()
+                    .filter_map(remap_location)
+                    .collect::<Vec<_>>();
                 (!locations.is_empty()).then_some((span, locations))
             })
             .collect();
         self.hir_to_ast = std::mem::take(&mut self.hir_to_ast)
             .into_iter()
-            .filter_map(|(location, span)| remap_location(location).map(|location| (location, span)))
+            .filter_map(|(location, span)| {
+                remap_location(location).map(|location| (location, span))
+            })
             .collect();
         self.hir_to_source = std::mem::take(&mut self.hir_to_source)
             .into_iter()
-            .filter_map(|(location, span)| remap_location(location).map(|location| (location, span)))
+            .filter_map(|(location, span)| {
+                remap_location(location).map(|location| (location, span))
+            })
             .collect();
         self.terminator_spans = std::mem::take(&mut self.terminator_spans)
             .into_iter()

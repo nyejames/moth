@@ -292,11 +292,8 @@ pub(super) fn parse_map_builtin_member_typed(
         type_interner.environment_mut_for_derived_types(),
         member_span,
     );
-    let builtin_expression = finish_pending_receiver_call_expression(
-        builtin_expression,
-        token_stream,
-        type_interner,
-    );
+    let builtin_expression =
+        finish_pending_receiver_call_expression(builtin_expression, token_stream, type_interner);
 
     Ok(Some(AstNode {
         kind: NodeKind::ExpressionStatement(builtin_expression),

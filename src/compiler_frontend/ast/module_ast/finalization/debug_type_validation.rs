@@ -271,11 +271,7 @@ fn debug_validate_expression_type_id(
     expression: &Expression,
     context: &DebugTypeValidationContext,
 ) {
-    debug_validate_expression_type_id_with_context(
-        expression,
-        context,
-        context.recovery_context,
-    );
+    debug_validate_expression_type_id_with_context(expression, context, context.recovery_context);
 }
 
 fn debug_validate_expression_type_id_with_context(
@@ -571,13 +567,14 @@ fn expression_is_recovering_catch_subject(
         let implicit_is_compatible = facts.summary.first_implicit.is_none()
             || Some(error_type_id) == builtin_error
             || (facts.summary.first_numeric.is_none()
-                && facts.deferred_custom_catch.is_some_and(|check| {
-                    check.error_type_id == error_type_id
-                }));
+                && facts
+                    .deferred_custom_catch
+                    .is_some_and(|check| check.error_type_id == error_type_id));
         let typed_errors_are_compatible = facts.summary.conflicting_typed.is_none()
-            && facts.summary.first_typed.is_none_or(|producer| {
-                producer.error_type_id == error_type_id
-            });
+            && facts
+                .summary
+                .first_typed
+                .is_none_or(|producer| producer.error_type_id == error_type_id);
         let is_eligible = facts.checked_numeric_operation
             || facts.summary.first_implicit.is_some()
             || facts.summary.first_typed.is_some();

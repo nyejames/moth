@@ -15,12 +15,12 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleHandlingReason,
-    InvalidFallibleOperandReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
+    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
+    InvalidImportPathReason, InvalidLoopHeaderReason, InvalidMapLiteralReason,
+    InvalidMapTypeReason, InvalidMatchArmReason, InvalidMutableAccessReason,
+    InvalidPageMetadataReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
+    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
+    InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
     NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
@@ -1833,63 +1833,69 @@ impl CompilerDiagnostic {
         reason: InvalidFallibleHandlingReason,
         span: Option<SourceSpan>,
     ) -> Self {
-        let producer_labels = match reason {
+        let mut labels = Vec::new();
+        let mut add_label = |producer_span: Option<SourceSpan>, message| {
+            if producer_span.is_some() {
+                labels.push(DiagnosticLabel::secondary(producer_span, Some(message)));
+            }
+        };
+
+        match &reason {
             InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
                 first_error_type_id,
                 second_error_type_id,
                 first_producer_span,
                 second_producer_span,
-            } => [
-                (
-                    first_producer_span,
-                    Some(DiagnosticLabelMessage::TypedFailureProducer {
-                        error_type_id: first_error_type_id,
-                    }),
-                ),
-                (
-                    second_producer_span,
-                    Some(DiagnosticLabelMessage::TypedFailureProducer {
-                        error_type_id: second_error_type_id,
-                    }),
-                ),
-            ],
+            } => {
+                add_label(
+                    *first_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *first_error_type_id,
+                    },
+                );
+                add_label(
+                    *second_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *second_error_type_id,
+                    },
+                );
+            }
 
             InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
                 error_type_id,
                 typed_producer_span,
                 implicit_producer_span,
-            } => [
-                (
-                    typed_producer_span,
-                    Some(DiagnosticLabelMessage::TypedFailureProducer { error_type_id }),
-                ),
-                (
-                    implicit_producer_span,
-                    Some(DiagnosticLabelMessage::ImplicitFailureProducer),
-                ),
-            ],
+            } => {
+                add_label(
+                    *typed_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *error_type_id,
+                    },
+                );
+                add_label(
+                    *implicit_producer_span,
+                    DiagnosticLabelMessage::ImplicitFailureProducer,
+                );
+            }
 
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                implicit_producer_span,
+                witness,
                 ..
             }
             | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                implicit_producer_span,
-            } => [
-                (
-                    implicit_producer_span,
-                    Some(DiagnosticLabelMessage::ImplicitFailureProducer),
-                ),
-                (None, None),
-            ],
+                witness,
+            } => {
+                for call_span in &witness.call_spans {
+                    add_label(*call_span, DiagnosticLabelMessage::BuiltinFailureCall);
+                }
+                add_label(
+                    witness.origin_span,
+                    DiagnosticLabelMessage::BuiltinFailureOrigin,
+                );
+            }
 
-            _ => [(None, None), (None, None)],
-        };
-        let labels = producer_labels
-            .into_iter()
-            .filter(|(producer_span, _)| producer_span.is_some())
-            .map(|(producer_span, message)| DiagnosticLabel::secondary(producer_span, message))
-            .collect();
+            _ => {}
+        }
 
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFallibleHandling),

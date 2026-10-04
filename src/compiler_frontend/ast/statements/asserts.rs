@@ -136,10 +136,7 @@ pub(crate) fn parse_assert_statement(
     {
         return Err(diagnostic.into());
     }
-    let pending = pending_expression_failure_facts(
-        &message,
-        &context.template_ir_store.borrow(),
-    )?;
+    let pending = pending_expression_failure_facts(&message, &context.template_ir_store.borrow())?;
     message.failure_facts.summary = pending.summary;
     message.failure_facts.checked_numeric_operation = pending.checked_numeric_operation;
     message.failure_facts.postfix_exit_span = pending.postfix_exit_span;

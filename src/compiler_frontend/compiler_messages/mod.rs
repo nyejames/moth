@@ -44,7 +44,7 @@ pub(crate) use diagnostic_label::{
     DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, GenericSubstitutionDiagnostic,
 };
 pub(crate) use diagnostic_payload::{
-    BorrowAccessKind, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
+    BorrowAccessKind, BuiltinFailureWitness, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
     CompileTimeEvaluationErrorReason, CssTemplateWarning, DeferredFeatureReason,
     DependencyClauseKind, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
     DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason, GenericInferenceSubject,

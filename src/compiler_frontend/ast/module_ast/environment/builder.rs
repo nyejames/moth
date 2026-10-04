@@ -16,8 +16,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
     DeclarationId, DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
     ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable, TopLevelDeclarationTable,
-    build_resolved_public_trait_roots,
-    build_resolved_public_type_roots,
+    build_resolved_public_trait_roots, build_resolved_public_type_roots,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};

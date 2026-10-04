@@ -372,9 +372,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 )
                 .into());
             };
-            full_arguments.push(
-                argument.with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)),
-            );
+            full_arguments
+                .push(argument.with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)));
         }
         let result_type_ids = call_signature.success_return_type_ids();
         let value_required = !result_type_ids.is_empty();

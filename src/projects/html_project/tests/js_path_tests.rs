@@ -415,7 +415,13 @@ fn plain_and_static_bootstrap_bytes_remain_unchanged() {
         );
         assert_eq!(
             render_runtime_bootstrap_script_html(
-                "start_entry", "", &[], false, false, false, release_build,
+                "start_entry",
+                "",
+                &[],
+                false,
+                false,
+                false,
+                release_build,
             ),
             concat!(
                 "<script>\n\n</script>\n<script>\n(function () {\n",
@@ -425,7 +431,13 @@ fn plain_and_static_bootstrap_bytes_remain_unchanged() {
         );
         assert_eq!(
             render_runtime_bootstrap_script_html(
-                "start_entry", "", &[], true, false, false, release_build,
+                "start_entry",
+                "",
+                &[],
+                true,
+                false,
+                false,
+                release_build,
             ),
             concat!(
                 "<script type=\"module\">\n\n",
@@ -462,9 +474,9 @@ fn fallible_bootstrap_failure_reports_once_without_publishing_or_reading_payload
                         "typeof globalThis.__moth_record_entry_failure === \"function\""
                     ));
                     assert!(caller.contains("globalThis.__moth_record_entry_failure();"));
-                    assert!(caller.contains(&format!(
-                        "process.stderr.write({ENTRY_FAILURE_NOTICE:?})"
-                    )));
+                    assert!(
+                        caller.contains(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?})"))
+                    );
                     assert!(caller.contains("process.exitCode = 1"));
                     assert!(!caller.contains("<application-error>"));
                     if release_build {
@@ -476,7 +488,9 @@ fn fallible_bootstrap_failure_reports_once_without_publishing_or_reading_payload
                         assert!(!caller.contains("createTextNode"));
                     }
 
-                    for missing_dom in [None, Some("document"), Some("body"), Some("createTextNode")] {
+                    for missing_dom in
+                        [None, Some("document"), Some("body"), Some("createTextNode")]
+                    {
                         let mut bundle = String::from(
                             r#"
 const events = [];
@@ -543,7 +557,8 @@ function __moth_mount_template_fragment(_, fragment) { events.push(fragment); }
                             String::from_utf8_lossy(&output.stderr)
                         );
                         assert_eq!(output.stderr, ENTRY_FAILURE_NOTICE.as_bytes());
-                        let stdout = String::from_utf8(output.stdout).expect("Node.js output is UTF-8");
+                        let stdout =
+                            String::from_utf8(output.stdout).expect("Node.js output is UTF-8");
                         assert!(!stdout.contains("<application-error>"));
                         if release_build && missing_dom.is_none() {
                             assert_eq!(
@@ -609,9 +624,14 @@ function __moth_mount_template_fragment(element, fragment) {
                     "Bootstrap runtime failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 );
-                assert!(output.stderr.is_empty(), "Success must not report a terminal notice");
+                assert!(
+                    output.stderr.is_empty(),
+                    "Success must not report a terminal notice"
+                );
                 assert_eq!(
-                    String::from_utf8(output.stdout).expect("Node.js output is UTF-8").trim(),
+                    String::from_utf8(output.stdout)
+                        .expect("Node.js output is UTF-8")
+                        .trim(),
                     r#"["start","unwrap","moth-slot-0:first","moth-slot-1:second"]"#
                 );
             }
@@ -627,8 +647,12 @@ fn run_bootstrap_scripts(
 ) -> std::process::Output {
     let mut source = String::new();
     for script in html.split("<script").skip(1) {
-        let (_, body) = script.split_once('>').expect("generated script has an opener");
-        let (body, _) = body.split_once("</script>").expect("generated script has a closer");
+        let (_, body) = script
+            .split_once('>')
+            .expect("generated script has an opener");
+        let (body, _) = body
+            .split_once("</script>")
+            .expect("generated script has a closer");
         source.push_str(body);
         source.push('\n');
     }

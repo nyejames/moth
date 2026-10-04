@@ -12286,6 +12286,13 @@ contract = "language.numeric.exported_private_failure_rejected"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_exported_private_chain_bounded"
+path = "implicit_failure_exported_private_chain_bounded"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_private_failure_witness_bounded"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_exported_operation"
 path = "implicit_failure_exported_operation"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
@@ -12300,11 +12307,25 @@ contract = "language.numeric.exported_receiver_failure_rejected"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_exported_method_private_chain"
+path = "implicit_failure_exported_method_private_chain"
+tags = ["integration", "language", "numeric", "results", "receivers", "diagnostics", "dependencies", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_receiver_failure_witness_preserves_donor"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_custom_slot"
 path = "implicit_failure_custom_slot"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
 contract = "language.numeric.custom_error_slot_requires_failure_mapping"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_slot_private_chain"
+path = "implicit_failure_custom_slot_private_chain"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.custom_error_slot_private_failure_witness"
+role = "boundary"
 
 [[case]]
 id = "implicit_failure_reexport_rejected"

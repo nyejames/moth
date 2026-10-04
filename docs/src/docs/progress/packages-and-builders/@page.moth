@@ -230,6 +230,14 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
+            [: Fallible HTML entry and runtime fragment publication]
+            [: Partial]
+            [: Targeted synthetic-start, propagated/implicit failure, code-zero failure, local recovery, once-only execution, fragment suppression and safe release-notice coverage. The execution harness records failure at the generated start call.]
+            [: HTML / JS]
+            [: Applicable synthetic [$html:<code>start</code>] has builtin [$html:<code>Error!</code>]. The generated caller publishes invocation-owned runtime fragments only after success. Failure preserves static HTML and earlier explicit IO, reports a fixed terminal notice independently of [$html:<code>Error.code</code>] and appends fixed safe release text, not application Error HTML. Wasm capability diagnostics and remaining pre-HIR catch-shape gates appear in @../ (Compiler Progress). Phase 6 dev reporting remains the next slice.]
+        ]
+
+        [data:
             [: Moth template [$html:<code>.mtf</code>] content assets]
             [: Partial]
             [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.]
@@ -345,6 +353,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Accepted queued HTML entry declaration. One normal-root [$html:<code>$page</code>] per directory, metadata cutover from reserved [$html:<code>page_*</code>] names, and command-specific no-page rules. Current HTML entries still come from implemented root activity and reserved page metadata.]
+        ]
+
+        [data:
+            [: Dev entry-error reporting]
+            [: Deferred]
+            [: The current generated caller reports a fixed failure notice. Invocation-local dev browser/terminal reporting has no delivered coverage.]
+            [: Phase 6 will reuse the existing dev presentation, retain hot reload and correlate once-only terminal reports without changing global build success. Returned Error, identified assertion and unknown startup fault remain distinct categories.]
         ]
 
         [data:

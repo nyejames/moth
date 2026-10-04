@@ -501,7 +501,6 @@ pub struct ScopeContext {
     ///      that slot must not make a root `return` look like an authored return.
     pub(crate) inside_authored_function: bool,
 
-
     /// Active value-production target for `then` statements in the current scope.
     ///
     /// WHAT: when present, `then` statements must produce values matching these types.

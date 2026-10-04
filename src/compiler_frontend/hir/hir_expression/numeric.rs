@@ -97,10 +97,13 @@ impl<'a> HirBuilder<'a> {
         let block = self.current_block_id_or_error(span)?;
         if let Some(error_type) = error_type {
             let region = self.current_region_or_error(span)?;
-            let error_result = self.make_local_load_expression(result_local, result_type, &None, region);
+            let error_result =
+                self.make_local_load_expression(result_local, result_type, &None, region);
             let error_payload = self.make_expression(
                 span,
-                HirExpressionKind::FallibleUnwrapError { result: Box::new(error_result) },
+                HirExpressionKind::FallibleUnwrapError {
+                    result: Box::new(error_result),
+                },
                 error_type,
                 ValueKind::RValue,
                 region,

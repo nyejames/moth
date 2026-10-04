@@ -47,7 +47,6 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     assert_message_escape_diagnostic, assertion_condition_is_statically_true,
 };
-use crate::compiler_frontend::ast::expressions::failure_classification::collect_expression_failure_facts;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
@@ -55,6 +54,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::collect_expression_failure_facts;
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRootKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;

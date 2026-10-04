@@ -192,7 +192,10 @@ pub fn evaluate_expression(
             .iter()
             .filter_map(|item| match item {
                 ExpressionRpnItem::Operator { operator, span }
-                    if operator.numeric_operator().is_some() => Some(*span),
+                    if operator.numeric_operator().is_some() =>
+                {
+                    Some(*span)
+                }
                 _ => None,
             })
             .collect();
@@ -211,7 +214,9 @@ pub fn evaluate_expression(
             )
             .into());
         };
-        expression.failure_facts.take_origin_work_from(operation_failure_facts);
+        expression
+            .failure_facts
+            .take_origin_work_from(operation_failure_facts);
         return Ok(expression);
     }
 
@@ -237,7 +242,9 @@ pub fn evaluate_expression(
         value_mode,
         stack_span.or(span),
     )?;
-    expression.failure_facts.take_origin_work_from(operation_failure_facts);
+    expression
+        .failure_facts
+        .take_origin_work_from(operation_failure_facts);
     Ok(expression)
 }
 

@@ -92,6 +92,8 @@ pub(crate) enum DiagnosticLabelMessage {
         error_type_id: TypeId,
     },
     ImplicitFailureProducer,
+    BuiltinFailureCall,
+    BuiltinFailureOrigin,
 }
 
 impl DiagnosticLabelMessage {
@@ -117,7 +119,9 @@ impl DiagnosticLabelMessage {
             | DiagnosticLabelMessage::GenericInferencePreviousEvidence
             | DiagnosticLabelMessage::ImmutableBindingDeclaration
             | DiagnosticLabelMessage::TypedFailureProducer { .. }
-            | DiagnosticLabelMessage::ImplicitFailureProducer => {}
+            | DiagnosticLabelMessage::ImplicitFailureProducer
+            | DiagnosticLabelMessage::BuiltinFailureCall
+            | DiagnosticLabelMessage::BuiltinFailureOrigin => {}
         }
     }
 }

@@ -306,14 +306,25 @@ pub(crate) fn complete_pending_expression(
     if token_stream_starts_typed_propagation_suffix(token_stream) {
         let value_required = expression.type_id != type_interner.environment().builtins().none;
         expression = parse_fallible_handling_suffix_for_expression(
-            token_stream, context, type_interner, expression, value_required,
-            allow_boundary_catch, string_table, path_fork,
+            token_stream,
+            context,
+            type_interner,
+            expression,
+            value_required,
+            allow_boundary_catch,
+            string_table,
+            path_fork,
         )?;
     }
     if token_stream.current_tag() == TokenTag::CATCH {
         expression = parse_completed_expression_catch(
-            token_stream, context, type_interner, expression, allow_boundary_catch,
-            string_table, path_fork,
+            token_stream,
+            context,
+            type_interner,
+            expression,
+            allow_boundary_catch,
+            string_table,
+            path_fork,
         )?;
     }
     if !context.defer_typed_error_validation {

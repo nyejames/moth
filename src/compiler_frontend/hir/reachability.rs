@@ -902,13 +902,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 failure_mode,
                 ..
             } => {
-                self.direct_facts
-                    .reachable_range_step_failures
-                    .push(ReachableRangeStepFailureUse {
+                self.direct_facts.reachable_range_step_failures.push(
+                    ReachableRangeStepFailureUse {
                         cause: *cause,
                         failure_mode: *failure_mode,
                         span,
-                    });
+                    },
+                );
             }
 
             HirStatementKind::CastOp { policy, source, .. } => {

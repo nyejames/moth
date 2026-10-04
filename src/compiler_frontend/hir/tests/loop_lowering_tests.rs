@@ -385,14 +385,20 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         _ => panic!("expected runtime zero-check branch"),
     };
 
-    assert!(module.blocks[panic_block.0 as usize].statements.iter().any(|statement| matches!(
-        statement.kind,
-        HirStatementKind::RangeStepFailure {
-            cause: RangeStepFailureCause::ZeroStep,
-            failure_mode: NumericFailureMode::Trap,
-            ..
-        }
-    )), "a function without Error! or a private lane keeps a typed fatal guard");
+    assert!(
+        module.blocks[panic_block.0 as usize]
+            .statements
+            .iter()
+            .any(|statement| matches!(
+                statement.kind,
+                HirStatementKind::RangeStepFailure {
+                    cause: RangeStepFailureCause::ZeroStep,
+                    failure_mode: NumericFailureMode::Trap,
+                    ..
+                }
+            )),
+        "a function without Error! or a private lane keeps a typed fatal guard"
+    );
 }
 
 #[test]

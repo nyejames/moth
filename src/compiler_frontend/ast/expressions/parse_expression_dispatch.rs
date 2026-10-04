@@ -458,7 +458,8 @@ pub(super) fn dispatch_expression_token(
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::CatchOutsideBoundary,
                     Some(token_stream.current_span()),
-                ).into());
+                )
+                .into());
             }
             Ok(ExpressionTokenStep::Break)
         }
@@ -1226,14 +1227,17 @@ fn parse_cast_expression(
             if matches!(cast.handling, CastHandling::Recover))
         {
             let error_type_id =
-                resolve_builtin_error_type_typed(context, cast_expression.span, string_table)?.type_id;
+                resolve_builtin_error_type_typed(context, cast_expression.span, string_table)?
+                    .type_id;
             cast_expression = cast_expression.with_typed_error_producer(error_type_id);
         }
-        let error_type_id =
-            compatible_expression_error_type(
-                &mut cast_expression, context, type_interner.environment(), string_table,
-                Some(token_stream.current_span()),
-            )?;
+        let error_type_id = compatible_expression_error_type(
+            &mut cast_expression,
+            context,
+            type_interner.environment(),
+            string_table,
+            Some(token_stream.current_span()),
+        )?;
         let handler = parse_cast_catch_handling_suffix(
             token_stream,
             context,
@@ -1249,9 +1253,7 @@ fn parse_cast_expression(
             path_fork,
         )?;
         cast_expression = wrap_catch_expression(cast_expression, handler, vec![target_type_id]);
-        complete_catch_failure_fact(
-            &mut cast_expression, error_type_id, context,
-        )?;
+        complete_catch_failure_fact(&mut cast_expression, error_type_id, context)?;
     }
 
     state

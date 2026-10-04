@@ -482,7 +482,7 @@ fn render_payload_message(
             ..
         } => non_exhaustive_match_message(*reason, missing_variants, string_table),
         DiagnosticPayload::InvalidFallibleHandling { reason } => {
-            invalid_fallible_handling_message(*reason, context)
+            invalid_fallible_handling_message(reason, context)
         }
         DiagnosticPayload::InvalidTemplateSlot { reason, slot_name } => {
             invalid_template_slot_message(*reason, *slot_name, string_table)

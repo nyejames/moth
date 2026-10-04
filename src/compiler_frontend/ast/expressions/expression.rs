@@ -418,10 +418,7 @@ impl Expression {
         }
     }
 
-    pub(crate) fn with_typed_error_producer(
-        mut self,
-        error_type_id: TypeId,
-    ) -> Self {
+    pub(crate) fn with_typed_error_producer(mut self, error_type_id: TypeId) -> Self {
         self.failure_facts.record_typed_error(TypedErrorProducer {
             span: self.span,
             error_type_id,
@@ -430,11 +427,12 @@ impl Expression {
     }
 
     pub(crate) fn with_private_call_failure_candidate(mut self, path: PathId) -> Self {
-        self.failure_facts.record_implicit(ImplicitFailureContributor {
-            span: self.span,
-            codes: &[],
-            source: ImplicitFailureSource::PrivateCall(path),
-        });
+        self.failure_facts
+            .record_implicit(ImplicitFailureContributor {
+                span: self.span,
+                codes: &[],
+                source: ImplicitFailureSource::PrivateCall(path),
+            });
         self
     }
 
@@ -1059,7 +1057,8 @@ impl Expression {
                     "only propagating fallible expressions carry a postfix span"
                 );
                 *propagation_span = span;
-                self.failure_facts.postfix_exit_span = span.or(self.failure_facts.postfix_exit_span);
+                self.failure_facts.postfix_exit_span =
+                    span.or(self.failure_facts.postfix_exit_span);
             }
             _ => debug_assert!(
                 false,

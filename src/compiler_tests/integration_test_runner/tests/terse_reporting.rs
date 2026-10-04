@@ -563,14 +563,27 @@ fn terse_entry_failure_uses_its_own_label_and_generic_notice() {
         panic_message: None,
         build_result: Some(minimal_build_result()),
         messages: None,
-        failure_reason: Some(format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end())),
+        failure_reason: Some(format!(
+            "rendered_output: {}",
+            ENTRY_FAILURE_NOTICE.trim_end()
+        )),
         failure_kind: Some(FailureKind::EntryFailed),
     };
     let output = format_single_case(case, result, false);
 
     assert!(output[0].contains("[entry failed]"), "{output:?}");
-    assert!(output.iter().any(|line| line.contains(ENTRY_FAILURE_NOTICE.trim_end())), "{output:?}");
-    assert!(output.iter().all(|line| !line.contains("application-secret")), "{output:?}");
+    assert!(
+        output
+            .iter()
+            .any(|line| line.contains(ENTRY_FAILURE_NOTICE.trim_end())),
+        "{output:?}"
+    );
+    assert!(
+        output
+            .iter()
+            .all(|line| !line.contains("application-secret")),
+        "{output:?}"
+    );
     assert_eq!(
         serde_json::to_string(&FailureKind::EntryFailed).expect("failure kind must serialize"),
         "\"entry_failed\"",

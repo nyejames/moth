@@ -22,8 +22,8 @@ use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::utils::for_each_terminator_target_mut;
 use crate::compiler_frontend::hir::structs::HirStruct;
+use crate::compiler_frontend::hir::utils::for_each_terminator_target_mut;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -195,7 +195,10 @@ impl HirModule {
             });
         }
         for function in &mut self.functions {
-            function.entry = remap.get(&function.entry).copied().unwrap_or(function.entry);
+            function.entry = remap
+                .get(&function.entry)
+                .copied()
+                .unwrap_or(function.entry);
         }
         self.side_table.remap_block_ids(&remap);
     }

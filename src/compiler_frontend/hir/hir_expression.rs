@@ -872,10 +872,14 @@ impl<'a> HirBuilder<'a> {
             }
             ExpressionKind::HandledFallibleExpression { value, .. } => {
                 let carrier_type = self.lower_type_id(value.type_id, span)?;
-                self.type_environment.fallible_carrier_slots(carrier_type)
-                    .ok_or_else(|| CompilerError::compiler_error(
-                        "Recovering expression has no fallible carrier",
-                    ))?.1
+                self.type_environment
+                    .fallible_carrier_slots(carrier_type)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Recovering expression has no fallible carrier",
+                        )
+                    })?
+                    .1
             }
             ExpressionKind::Runtime(_) | ExpressionKind::Cast(_) => {
                 self.builtin_error_type_id(span)?
@@ -908,8 +912,12 @@ impl<'a> HirBuilder<'a> {
         if let ExpressionKind::Cast(cast) = &protected.kind
             && cast.requires_optional_wrap_after_cast
         {
-            let value = self.wrap_cast_result_optional_if_needed(lowered.value, result_type_id, span)?;
-            return Ok(LoweredExpression { prelude: lowered.prelude, value });
+            let value =
+                self.wrap_cast_result_optional_if_needed(lowered.value, result_type_id, span)?;
+            return Ok(LoweredExpression {
+                prelude: lowered.prelude,
+                value,
+            });
         }
         Ok(lowered)
     }
@@ -926,9 +934,17 @@ impl<'a> HirBuilder<'a> {
                 self.emit_result_call_carrier_to_current_block(target, args, result_type_ids, span)?
             }
             ExpressionKind::HandledFallibleHostFunctionCall {
-                id, args, result_type_ids: call_result_type_ids, error_type_id, ..
+                id,
+                args,
+                result_type_ids: call_result_type_ids,
+                error_type_id,
+                ..
             } => self.emit_external_result_call_carrier_to_current_block(
-                *id, args, call_result_type_ids, *error_type_id, span,
+                *id,
+                args,
+                call_result_type_ids,
+                *error_type_id,
+                span,
             )?,
             ExpressionKind::HandledFallibleExpression { value, .. } => {
                 return self.lower_recovering_fallible_expression(value, result_type_ids, span);
@@ -945,7 +961,9 @@ impl<'a> HirBuilder<'a> {
                     ResolvedCastEvidence::UserDefined { method_path, .. } => {
                         let target = self.resolve_call_target_or_error(method_path, span)?;
                         let argument = CallArgument::positional(
-                            (*cast.source).clone(), CallAccessMode::Shared, *span,
+                            (*cast.source).clone(),
+                            CallAccessMode::Shared,
+                            *span,
                         );
                         self.emit_user_defined_cast_call_carrier(target, &argument, span)?
                     }
@@ -962,7 +980,10 @@ impl<'a> HirBuilder<'a> {
             ),
         };
         let value = self.lower_carrier_to_active_catch_success(carrier, span)?;
-        Ok(LoweredExpression { prelude: vec![], value })
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
     }
 
     // -------------------------
@@ -1106,11 +1127,8 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredExpression, CompilerError> {
         let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
         let failure_mode = self.select_numeric_failure_mode(span)?;
-        let success_value = self.lower_store_conversion_carrier_to_success_value(
-            carrier,
-            failure_mode,
-            span,
-        )?;
+        let success_value =
+            self.lower_store_conversion_carrier_to_success_value(carrier, failure_mode, span)?;
         let value = self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
 
         Ok(LoweredExpression {
@@ -1205,7 +1223,6 @@ impl<'a> HirBuilder<'a> {
             ),
         }
     }
-
 
     /// Emits a user-defined cast method call that returns a fallible carrier.
     fn emit_user_defined_cast_call_carrier(

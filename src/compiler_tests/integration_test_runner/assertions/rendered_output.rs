@@ -830,7 +830,8 @@ pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderH
     for (index, event_value) in events_array.iter().enumerate() {
         if terminal_event_seen {
             return Err(invalid_harness_output(
-                "a runtime_error, wasm_trap or entry_failure event must be the final event".to_owned(),
+                "a runtime_error, wasm_trap or entry_failure event must be the final event"
+                    .to_owned(),
             ));
         }
         let event = decode_runtime_event(index, event_value).map_err(invalid_harness_output)?;

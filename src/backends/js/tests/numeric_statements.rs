@@ -17,7 +17,10 @@ use moth_lexical::numeric::profile::NumericProfile;
 
 #[test]
 fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
-    for cause in [RangeStepFailureCause::ZeroStep, RangeStepFailureCause::NoProgress] {
+    for cause in [
+        RangeStepFailureCause::ZeroStep,
+        RangeStepFailureCause::NoProgress,
+    ] {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let (type_environment, types) = build_type_environment();
@@ -26,11 +29,14 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
             id: BlockId(0),
             region,
             locals: vec![local(0, types.boolean, region)],
-            statements: vec![statement(1, HirStatementKind::RangeStepFailure {
-                cause,
-                failure_mode: NumericFailureMode::Trap,
-                result: LocalId(0),
-            })],
+            statements: vec![statement(
+                1,
+                HirStatementKind::RangeStepFailure {
+                    cause,
+                    failure_mode: NumericFailureMode::Trap,
+                    result: LocalId(0),
+                },
+            )],
             terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
         };
         let function = HirFunction {
@@ -40,18 +46,33 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
             return_type: types.unit,
         };
         let module = build_module(
-            &mut path_fork, &mut string_table, "main", vec![block], function,
+            &mut path_fork,
+            &mut string_table,
+            "main",
+            vec![block],
+            function,
             &[(LocalId(0), "result")],
         );
         let output = lower_hir_to_js(
-            &module, &BorrowCheckReport::default(), &NumericProofs::default(), &string_table,
-            default_config(), &type_environment, &path_fork.snapshot_table(),
-        ).expect("Trap-mode range failure must lower").source;
+            &module,
+            &BorrowCheckReport::default(),
+            &NumericProofs::default(),
+            &string_table,
+            default_config(),
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("Trap-mode range failure must lower")
+        .source;
         let code = cause.builtin_error_code();
-        assert!(output.contains(&format!(
-            "__moth_numeric_trap(__moth_error_result({:?}, {}))",
-            code.default_message(), code.as_u32(),
-        )), "fatal range guard must consume its typed cause through the numeric trap");
+        assert!(
+            output.contains(&format!(
+                "__moth_numeric_trap(__moth_error_result({:?}, {}))",
+                code.default_message(),
+                code.as_u32(),
+            )),
+            "fatal range guard must consume its typed cause through the numeric trap"
+        );
         assert!(output.contains("throw new Error(__moth_error_message(carrier.value));"));
     }
 }

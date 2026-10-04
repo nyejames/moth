@@ -231,9 +231,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             .split("(function () {")
             .last()
             .expect("generated entry caller");
-        assert!(caller.contains(
-            "typeof globalThis.__moth_record_entry_failure === \"function\""
-        ));
+        assert!(caller.contains("typeof globalThis.__moth_record_entry_failure === \"function\""));
         assert!(caller.contains("globalThis.__moth_record_entry_failure();"));
         assert!(!caller.contains("moth_result.value"));
         assert!(!caller.contains(".message"));
@@ -244,7 +242,10 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             .output()
             .expect("Node.js is required for automatic start runtime tests");
         assert_eq!(runtime.status.code(), Some(if succeeds { 0 } else { 1 }));
-        assert_eq!(String::from_utf8(runtime.stdout).expect("UTF-8 output"), "start\n");
+        assert_eq!(
+            String::from_utf8(runtime.stdout).expect("UTF-8 output"),
+            "start\n"
+        );
         let stderr = String::from_utf8(runtime.stderr).expect("UTF-8 error output");
         assert_eq!(stderr, if succeeds { "" } else { ENTRY_FAILURE_NOTICE });
         assert!(!stderr.contains("application-secret"));

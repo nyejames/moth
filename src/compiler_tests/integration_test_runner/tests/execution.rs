@@ -4,16 +4,15 @@
 //! and emitted projects. Backend-local bootstrap shape tests remain with the HTML builder.
 
 use super::super::FailureKind;
-use super::super::execution::panic_case_result;
 use super::super::assertions::{
     RuntimeEvent, execute_html_harness_for_test, validate_success_result,
 };
 use super::super::execution::execute_test_case;
+use super::super::execution::panic_case_result;
 use super::super::types::{GoldenExpectation, RenderedOutputExpectation};
 use super::super::{BackendId, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::success_test_case;
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
-use crate::projects::html_project::js_path::RELEASE_ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, ProjectBuilder, build_project};
 use crate::build_system::create_project_modules::{
@@ -34,6 +33,7 @@ use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
+use crate::projects::html_project::js_path::RELEASE_ENTRY_FAILURE_NOTICE;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -68,7 +68,8 @@ impl EntryFixture {
         fs::write(
             directory.path().join("config.moth"),
             "project #= (name = \"entry_contract\", entry_root = \"src\")\nhtml #= ()\n",
-        ).expect("should write directory config");
+        )
+        .expect("should write directory config");
         // The existing runtime harness owns index.html plus root page.js/page.wasm.
         // @page is the single-file homepage convention; selection still dispatches by file path.
         let root_source = directory.path().join("src/@page.moth");
@@ -78,7 +79,11 @@ impl EntryFixture {
         } else {
             root_source.clone()
         };
-        Self { directory, entry, root_source }
+        Self {
+            directory,
+            entry,
+            root_source,
+        }
     }
 
     fn frontend(&self) -> ProjectFrontendCompilation {
@@ -97,14 +102,13 @@ impl EntryFixture {
             &frontend_test_style_directives(),
             &mut BuilderSurface::with_mandatory_core(),
             &mut string_table,
-        ).expect("entry frontend should complete without infrastructure failure");
+        )
+        .expect("entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend.into_render_messages_with_frozen_identity(
-                &mut string_table,
-                source_database,
-                None,
-            ).expect("frontend diagnostics must retain their frozen source identity");
+            let messages = frontend
+                .into_render_messages_with_frozen_identity(&mut string_table, source_database, None)
+                .expect("frontend diagnostics must retain their frozen source identity");
             let rendered = crate::compiler_frontend::compiler_messages::render::terse::
                 format_terse_compiler_messages(&messages);
             let source = fs::read_to_string(&self.root_source).expect("fixture source must exist");
@@ -124,7 +128,8 @@ impl EntryFixture {
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
-        ).expect("entry project should build")
+        )
+        .expect("entry project should build")
     }
 }
 
@@ -142,7 +147,10 @@ fn assert_start_result(module: &Module, fallible: bool) {
     let carrier = types.fallible_carrier_slots(start.return_type);
     assert_eq!(carrier.is_some(), fallible);
     let success_type = carrier.map_or(start.return_type, |(success, _)| success);
-    assert_eq!(types.collection_element_type(success_type), Some(builtin_type_ids::STRING));
+    assert_eq!(
+        types.collection_element_type(success_type),
+        Some(builtin_type_ids::STRING)
+    );
 
     let hir = &module.executable.hir;
     let mut pending = vec![start.entry];
@@ -158,11 +166,17 @@ fn assert_start_result(module: &Module, fallible: bool) {
         match terminator {
             HirTerminator::ReturnError(_) => reaches_error = true,
             HirTerminator::ReturnSuccess(_) => {
-                assert!(fallible, "narrowed start must return a plain fragment collection");
+                assert!(
+                    fallible,
+                    "narrowed start must return a plain fragment collection"
+                );
                 reaches_success = true;
             }
             HirTerminator::Return(_) => {
-                assert!(!fallible, "fallible start must return through the success channel");
+                assert!(
+                    !fallible,
+                    "fallible start must return through the success channel"
+                );
                 reaches_success = true;
             }
             _ => {}
@@ -170,7 +184,10 @@ fn assert_start_result(module: &Module, fallible: bool) {
         pending.extend(terminator_targets(terminator));
     }
     assert_eq!(reaches_error, fallible);
-    assert!(reaches_success, "start must retain the fragment-collection success return");
+    assert!(
+        reaches_success,
+        "start must retain the fragment-collection success return"
+    );
 }
 
 fn output_expectation(text: &str) -> SuccessExpectation {
@@ -197,7 +214,10 @@ fn synthetic_start_builtin_propagation_and_arithmetic_execute_directory_and_sing
                  value = load()!\n[:[value]]\n",
                 "loaded",
             ),
-            ("left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n", "42"),
+            (
+                "left ~= 6\nright ~= 7\nvalue = left * right\n[:[value]]\n",
+                "42",
+            ),
             (
                 "product |left Int, right Int| -> Int:\n    return left * right\n;\n\
                  value = product(6, 7)\n[:[value]]\n",
@@ -206,7 +226,10 @@ fn synthetic_start_builtin_propagation_and_arithmetic_execute_directory_and_sing
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let frontend = fixture.frontend();
-            let module = frontend.successful_module_views().next().expect("entry must compile");
+            let module = frontend
+                .successful_module_views()
+                .next()
+                .expect("entry must compile");
             assert_start_result(module, true);
 
             let expectation = output_expectation(expected);
@@ -214,7 +237,11 @@ fn synthetic_start_builtin_propagation_and_arithmetic_execute_directory_and_sing
             case.entry_path = fixture.entry.clone();
             case.fixture_root = fixture.directory.path().to_path_buf();
             let result = execute_test_case(&case);
-            assert!(result.passed, "{}: {:?} {:?}", source, result.failure_reason, result.messages);
+            assert!(
+                result.passed,
+                "{}: {:?} {:?}",
+                source, result.failure_reason, result.messages
+            );
         }
     }
 }
@@ -229,19 +256,40 @@ fn synthetic_start_local_catch_narrows_and_executes_directory_and_single_file() 
                  value = load() catch then \"recovered\"\n[:[value]]\n",
                 "recovered",
             ),
-            ("left ~= 1\nright ~= 0\nvalue = left // right catch then 17\n[:[value]]\n", "17"),
+            (
+                "left ~= 1\nright ~= 0\nvalue = left // right catch then 17\n[:[value]]\n",
+                "17",
+            ),
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let frontend = fixture.frontend();
-            let module = frontend.successful_module_views().next().expect("entry must compile");
+            let module = frontend
+                .successful_module_views()
+                .next()
+                .expect("entry must compile");
             assert_start_result(module, false);
 
             let built = fixture.build(&[]);
-            let html = built.project.output_files.iter().find_map(|output| {
-                if let FileKind::Html(html) = output.file_kind() { Some(html) } else { None }
-            }).expect("entry must emit HTML");
-            assert!(!html.contains("moth_entry_result"), "infallible entry needs no result branch");
-            assert!(!html.contains("if (moth_result.tag"), "narrowed entry needs no error branch");
+            let html = built
+                .project
+                .output_files
+                .iter()
+                .find_map(|output| {
+                    if let FileKind::Html(html) = output.file_kind() {
+                        Some(html)
+                    } else {
+                        None
+                    }
+                })
+                .expect("entry must emit HTML");
+            assert!(
+                !html.contains("moth_entry_result"),
+                "infallible entry needs no result branch"
+            );
+            assert!(
+                !html.contains("if (moth_result.tag"),
+                "narrowed entry needs no error branch"
+            );
             let expectation = output_expectation(expected);
             let case = success_test_case(BackendId::Html, expectation.clone());
             let result = validate_success_result(&case, built, &expectation);
@@ -266,15 +314,23 @@ fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
         let result = execute_test_case(&case);
         assert!(!result.passed);
         assert_eq!(result.failure_kind, Some(FailureKind::ExpectationViolation));
-        assert!(result.build_result.is_none(), "source diagnostics must precede runtime execution");
-        let messages = result.messages.expect("source rejection must retain compiler diagnostics");
+        assert!(
+            result.build_result.is_none(),
+            "source diagnostics must precede runtime execution"
+        );
+        let messages = result
+            .messages
+            .expect("source rejection must retain compiler diagnostics");
         assert!(!messages.has_infrastructure_error(), "{messages:?}");
         let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].kind.code(), "MOTH-TYPE-0001");
         assert!(matches!(
             diagnostics[0].payload,
-            DiagnosticPayload::TypeMismatch { context: TypeMismatchContext::ErrorReturn, .. }
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::ErrorReturn,
+                ..
+            }
         ));
         assert!(diagnostics[0].primary_span.is_some());
     }
@@ -292,15 +348,23 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
                 &ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
-                fixture.entry.to_str().expect("fixture entry should be UTF-8"),
+                fixture
+                    .entry
+                    .to_str()
+                    .expect("fixture entry should be UTF-8"),
                 &[],
                 &BuildConfigInputSet::new(),
             );
             let messages = match result {
                 Err(messages) => messages,
-                Ok(_) => panic!("authored return must not become a synthetic start return: {source}"),
+                Ok(_) => {
+                    panic!("authored return must not become a synthetic start return: {source}")
+                }
             };
-            assert!(!messages.has_infrastructure_error(), "{source}: {messages:?}");
+            assert!(
+                !messages.has_infrastructure_error(),
+                "{source}: {messages:?}"
+            );
             let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1, "{source}: {messages:?}");
             assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0042");
@@ -313,7 +377,6 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
         }
     }
 }
-
 
 #[test]
 fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
@@ -329,13 +392,20 @@ fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
         true,
     );
     let frontend = fixture.frontend();
-    assert!(!frontend.has_diagnosed_or_blocked(), "nested authored return must stay legal");
+    assert!(
+        !frontend.has_diagnosed_or_blocked(),
+        "nested authored return must stay legal"
+    );
     let expectation = output_expectation("nested");
     let mut case = success_test_case(BackendId::Html, expectation);
     case.entry_path = fixture.entry.clone();
     case.fixture_root = fixture.directory.path().to_path_buf();
     let result = execute_test_case(&case);
-    assert!(result.passed, "{:?} {:?}", result.failure_reason, result.messages);
+    assert!(
+        result.passed,
+        "{:?} {:?}",
+        result.failure_reason, result.messages
+    );
 }
 #[test]
 fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
@@ -355,7 +425,10 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
             let fixture = EntryFixture::new(source, directory_entry);
             let result = build_project(
                 &ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
-                fixture.entry.to_str().expect("fixture entry should be UTF-8"),
+                fixture
+                    .entry
+                    .to_str()
+                    .expect("fixture entry should be UTF-8"),
                 &[Flag::HtmlWasm],
                 &BuildConfigInputSet::new(),
             );
@@ -363,7 +436,10 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
                 Err(messages) => messages,
                 Ok(_) => panic!("Wasm must retain its reachable failure target gate"),
             };
-            assert!(!messages.has_infrastructure_error(), "must diagnose before LIR: {messages:?}");
+            assert!(
+                !messages.has_infrastructure_error(),
+                "must diagnose before LIR: {messages:?}"
+            );
             let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1);
             assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0064");
@@ -382,7 +458,10 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
     for directory_entry in [true, false] {
         let fixture = EntryFixture::new("value = \"plain-vector\"\n[:[value]]\n", directory_entry);
         let frontend = fixture.frontend();
-        let module = frontend.successful_module_views().next().expect("entry must compile");
+        let module = frontend
+            .successful_module_views()
+            .next()
+            .expect("entry must compile");
         assert_start_result(module, false);
 
         let built = fixture.build(&[Flag::HtmlWasm]);
@@ -391,7 +470,9 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
         for output in &built.project.output_files {
             match output.file_kind() {
                 FileKind::Wasm(bytes) => {
-                    wasmparser::Validator::new().validate_all(bytes).expect("Wasm must validate");
+                    wasmparser::Validator::new()
+                        .validate_all(bytes)
+                        .expect("Wasm must validate");
                     saw_wasm = true;
                 }
                 FileKind::Js(script) if output.relative_output_path() == Path::new("page.js") => {
@@ -404,7 +485,10 @@ fn synthetic_start_infallible_wasm_retains_plain_vec_abi() {
                 _ => {}
             }
         }
-        assert!(saw_wasm && saw_bootstrap, "must emit the existing Wasm/vector bootstrap");
+        assert!(
+            saw_wasm && saw_bootstrap,
+            "must emit the existing Wasm/vector bootstrap"
+        );
         let expectation = output_expectation("plain-vector");
         let case = success_test_case(BackendId::HtmlWasm, expectation.clone());
         let result = validate_success_result(&case, built, &expectation);
@@ -417,17 +501,41 @@ fn synthetic_start_static_html_needs_no_runtime_error_branch() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let fixture = EntryFixture::new("#[:static-entry]\n", true);
     let frontend = fixture.frontend();
-    let module = frontend.successful_module_views().next().expect("static root must compile");
+    let module = frontend
+        .successful_module_views()
+        .next()
+        .expect("static root must compile");
     assert_start_result(module, false);
     let built = fixture.build(&[]);
-    let html = built.project.output_files.iter().find_map(|output| {
-        if let FileKind::Html(html) = output.file_kind() { Some(html) } else { None }
-    }).expect("static root must emit a page");
+    let html = built
+        .project
+        .output_files
+        .iter()
+        .find_map(|output| {
+            if let FileKind::Html(html) = output.file_kind() {
+                Some(html)
+            } else {
+                None
+            }
+        })
+        .expect("static root must emit a page");
     assert!(html.contains("static-entry"));
-    assert!(html.contains("if (typeof "), "static entry keeps its existing plain start call");
-    assert!(!html.contains("if (moth_result.tag"), "static page must not acquire an error branch");
-    assert!(!html.contains("catch (__moth_err)"), "static start must not acquire a fallible wrapper");
-    assert!(!html.contains("var moth_result ="), "static start must not acquire a result carrier");
+    assert!(
+        html.contains("if (typeof "),
+        "static entry keeps its existing plain start call"
+    );
+    assert!(
+        !html.contains("if (moth_result.tag"),
+        "static page must not acquire an error branch"
+    );
+    assert!(
+        !html.contains("catch (__moth_err)"),
+        "static start must not acquire a fallible wrapper"
+    );
+    assert!(
+        !html.contains("var moth_result ="),
+        "static start must not acquire a result carrier"
+    );
 }
 
 #[test]
@@ -437,7 +545,10 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
     fs::create_dir(fixture.directory.path().join("src/support")).expect("should create support");
     fs::create_dir(fixture.directory.path().join("src/api")).expect("should create API module");
     for (path, source) in [
-        ("src/support/+package.moth", "export:\n    label #= \"support\"\n;\n"),
+        (
+            "src/support/+package.moth",
+            "export:\n    label #= \"support\"\n;\n",
+        ),
         ("src/api/@mod.moth", "export:\n    label #= \"api\"\n;\n"),
         ("+package.moth", "export:\n    label #= \"facade\"\n;\n"),
     ] {
@@ -445,16 +556,21 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
     }
     let frontend = fixture.frontend();
     for relative_path in ["src/support/+package.moth", "+package.moth"] {
-        let module = frontend.successful_module_views().find(|module| {
-            module.metadata.entry_point.ends_with(relative_path)
-        }).expect("each API-only root must be compiled");
-        assert!(start_function(module).is_none(), "{relative_path} must not synthesize start");
+        let module = frontend
+            .successful_module_views()
+            .find(|module| module.metadata.entry_point.ends_with(relative_path))
+            .expect("each API-only root must be compiled");
+        assert!(
+            start_function(module).is_none(),
+            "{relative_path} must not synthesize start"
+        );
     }
 
     // Declarations alone do not change a Normal root's semantic role or activate it.
-    let normal_api = frontend.successful_module_views().find(|module| {
-        module.metadata.entry_point.ends_with("src/api/@mod.moth")
-    }).expect("declaration-only Normal root must be compiled");
+    let normal_api = frontend
+        .successful_module_views()
+        .find(|module| module.metadata.entry_point.ends_with("src/api/@mod.moth"))
+        .expect("declaration-only Normal root must be compiled");
     assert_start_result(normal_api, false);
 }
 
@@ -469,24 +585,35 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
          load || -> String, Error!:\n    return! Error(\"provider-error\")\n;\n\
          io.line(\"provider-ran\")\n\
          value = load()!\n[:[value]]\n",
-    ).expect("should write failing provider root");
+    )
+    .expect("should write failing provider root");
     let frontend = fixture.frontend();
-    let consumer = frontend.successful_module_views().find(|module| {
-        module.metadata.entry_point == fs::canonicalize(&fixture.root_source).expect("root must exist")
-    }).expect("consumer must compile");
+    let consumer = frontend
+        .successful_module_views()
+        .find(|module| {
+            module.metadata.entry_point
+                == fs::canonicalize(&fixture.root_source).expect("root must exist")
+        })
+        .expect("consumer must compile");
     assert_start_result(consumer, false);
-    let provider = frontend.successful_module_views().find(|module| {
-        module.metadata.entry_point.ends_with("provider/@mod.moth")
-    }).expect("provider must compile its dormant body");
+    let provider = frontend
+        .successful_module_views()
+        .find(|module| module.metadata.entry_point.ends_with("provider/@mod.moth"))
+        .expect("provider must compile its dormant body");
     assert_start_result(provider, true);
 
     let mut expectation = output_expectation("consumer-only");
-    expectation.rendered_output.not_contains = vec!["provider-error".to_owned(), "provider-ran".to_owned()];
+    expectation.rendered_output.not_contains =
+        vec!["provider-error".to_owned(), "provider-ran".to_owned()];
     let mut case = success_test_case(BackendId::Html, expectation);
     case.entry_path = fixture.entry.clone();
     case.fixture_root = fixture.directory.path().to_path_buf();
     let result = execute_test_case(&case);
-    assert!(result.passed, "{:?} {:?}", result.failure_reason, result.messages);
+    assert!(
+        result.passed,
+        "{:?} {:?}",
+        result.failure_reason, result.messages
+    );
 }
 
 #[test]
@@ -495,10 +622,15 @@ fn synthetic_start_canonical_postfix_case_executes() {
     let cases = super::super::fixture::load_canonical_case_specs(
         Path::new("tests/cases/result_postfix_in_start_code_success"),
         None,
-    ).expect("canonical top-level propagation case must load");
+    )
+    .expect("canonical top-level propagation case must load");
     assert_eq!(cases.len(), 1);
     let result = execute_test_case(&cases[0]);
-    assert!(result.passed, "{:?} {:?}", result.failure_reason, result.messages);
+    assert!(
+        result.passed,
+        "{:?} {:?}",
+        result.failure_reason, result.messages
+    );
 }
 
 #[test]
@@ -523,35 +655,74 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
         ] {
             let fixture = EntryFixture::new(source, directory_entry);
             let mut built = fixture.build(&[]);
-            let html = built.project.output_files.iter().find_map(|output| {
-                if let FileKind::Html(html) = output.file_kind() { Some(html) } else { None }
-            }).expect("fallible entry must emit HTML");
-            assert!(html.contains("static-survives"), "static fragment remains independently published");
+            let html = built
+                .project
+                .output_files
+                .iter()
+                .find_map(|output| {
+                    if let FileKind::Html(html) = output.file_kind() {
+                        Some(html)
+                    } else {
+                        None
+                    }
+                })
+                .expect("fallible entry must emit HTML");
+            assert!(
+                html.contains("static-survives"),
+                "static fragment remains independently published"
+            );
 
             let rendered = execute_html_harness_for_test(&mut built)
                 .expect("failed start must still produce a valid harness summary");
             assert_eq!(
                 rendered.events(),
                 &[
-                    RuntimeEvent::Console { text: "before-failure".to_owned() },
+                    RuntimeEvent::Console {
+                        text: "before-failure".to_owned()
+                    },
                     RuntimeEvent::EntryFailure,
                 ],
                 "{source}",
             );
             assert_eq!(rendered.combined_output(), "before-failure", "{source}");
-            assert!(rendered.slot_outputs().is_empty(), "failed start must publish no staged fragments");
-            assert!(rendered.runtime_error_message().is_none(), "entry failure is not an uncaught Error");
-            for forbidden in ["after-failure", "staged-before-failure", "application-secret"] {
-                assert!(!rendered.combined_output().contains(forbidden), "{source}: {forbidden}");
+            assert!(
+                rendered.slot_outputs().is_empty(),
+                "failed start must publish no staged fragments"
+            );
+            assert!(
+                rendered.runtime_error_message().is_none(),
+                "entry failure is not an uncaught Error"
+            );
+            for forbidden in [
+                "after-failure",
+                "staged-before-failure",
+                "application-secret",
+            ] {
+                assert!(
+                    !rendered.combined_output().contains(forbidden),
+                    "{source}: {forbidden}"
+                );
             }
 
             let expectation = output_expectation("before-failure");
             let case = success_test_case(BackendId::Html, expectation.clone());
             let result = validate_success_result(&case, built, &expectation);
-            assert!(!result.passed, "a failed start must not satisfy a success expectation");
-            assert_eq!(result.failure_kind, Some(FailureKind::EntryFailed), "{source}");
-            let reason = result.failure_reason.expect("entry failure must report a generic notice");
-            assert_eq!(reason, format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()));
+            assert!(
+                !result.passed,
+                "a failed start must not satisfy a success expectation"
+            );
+            assert_eq!(
+                result.failure_kind,
+                Some(FailureKind::EntryFailed),
+                "{source}"
+            );
+            let reason = result
+                .failure_reason
+                .expect("entry failure must report a generic notice");
+            assert_eq!(
+                reason,
+                format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end())
+            );
             assert!(!reason.contains("application-secret"), "{reason}");
         }
     }
@@ -572,14 +743,27 @@ fn synthetic_start_dynamic_zero_range_step_is_entry_failure_without_body_output(
         let rendered = execute_html_harness_for_test(&mut built)
             .expect("zero range step must produce a valid entry failure summary");
         assert_eq!(rendered.events(), &[RuntimeEvent::EntryFailure]);
-        assert_eq!(rendered.combined_output(), "", "zero step must fail before the loop body");
-        assert!(rendered.slot_outputs().is_empty(), "zero step must publish no loop-body fragments");
-        assert!(rendered.runtime_error_message().is_none(), "zero step is an entry failure, not an uncaught Error");
+        assert_eq!(
+            rendered.combined_output(),
+            "",
+            "zero step must fail before the loop body"
+        );
+        assert!(
+            rendered.slot_outputs().is_empty(),
+            "zero step must publish no loop-body fragments"
+        );
+        assert!(
+            rendered.runtime_error_message().is_none(),
+            "zero step is an entry failure, not an uncaught Error"
+        );
 
         let expectation = output_expectation("range-body-ran");
         let case = success_test_case(BackendId::Html, expectation.clone());
         let result = validate_success_result(&case, built, &expectation);
-        assert!(!result.passed, "a zero-step start must not satisfy a success expectation");
+        assert!(
+            !result.passed,
+            "a zero-step start must not satisfy a success expectation"
+        );
         assert_eq!(result.failure_kind, Some(FailureKind::EntryFailed));
     }
 }
@@ -599,16 +783,34 @@ fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
         let fixture = EntryFixture::new(source, true);
         let flags: &[Flag] = if release { &[Flag::Release] } else { &[] };
         let mut built = fixture.build(flags);
-        let html = built.project.output_files.iter().find_map(|output| {
-            if let FileKind::Html(html) = output.file_kind() { Some(html.clone()) } else { None }
-        }).expect("fallible entry must emit HTML");
-        assert!(html.contains("static-survives"), "static HTML remains in the release document");
+        let html = built
+            .project
+            .output_files
+            .iter()
+            .find_map(|output| {
+                if let FileKind::Html(html) = output.file_kind() {
+                    Some(html.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("fallible entry must emit HTML");
+        assert!(
+            html.contains("static-survives"),
+            "static HTML remains in the release document"
+        );
         let fallback_call = format!("document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?})");
         if release {
-            assert!(html.contains(&fallback_call), "release profile must emit the fixed text node");
+            assert!(
+                html.contains(&fallback_call),
+                "release profile must emit the fixed text node"
+            );
             assert!(!html.contains("insertAdjacentHTML(\"beforeend\", moth_result"));
         } else {
-            assert!(!html.contains(&fallback_call), "dev pages must not insert the release notice");
+            assert!(
+                !html.contains(&fallback_call),
+                "dev pages must not insert the release notice"
+            );
             assert!(!html.contains(RELEASE_ENTRY_FAILURE_NOTICE));
         }
         let rendered = execute_html_harness_for_test(&mut built)
@@ -616,7 +818,9 @@ fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
         assert_eq!(
             rendered.events(),
             &[
-                RuntimeEvent::Console { text: "before-failure".to_owned() },
+                RuntimeEvent::Console {
+                    text: "before-failure".to_owned()
+                },
                 RuntimeEvent::EntryFailure,
             ],
         );
@@ -650,6 +854,10 @@ fn synthetic_start_root_assertion_remains_an_unexpected_runtime_error() {
         let result = validate_success_result(&case, built, &expectation);
         assert!(!result.passed);
         assert_eq!(result.failure_kind, Some(FailureKind::HarnessFailed));
-        assert!(result.failure_reason.is_some_and(|reason| reason.contains("root invariant failed")));
+        assert!(
+            result
+                .failure_reason
+                .is_some_and(|reason| reason.contains("root invariant failed"))
+        );
     }
 }

@@ -51,18 +51,27 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
     facts.record_numeric_operation(NumericOperator::Power, NumericScalar::Int, None);
     assert_eq!(
         facts.implicit[0].codes,
-        &[BuiltinErrorCode::IntOverflow, BuiltinErrorCode::InvalidExponent],
+        &[
+            BuiltinErrorCode::IntOverflow,
+            BuiltinErrorCode::InvalidExponent
+        ],
     );
 
     let mut remainder = ExpressionFailureFacts::default();
     remainder.record_numeric_operation(NumericOperator::Remainder, NumericScalar::Int, None);
-    assert_eq!(remainder.implicit[0].codes, &[BuiltinErrorCode::DivideByZero]);
+    assert_eq!(
+        remainder.implicit[0].codes,
+        &[BuiltinErrorCode::DivideByZero]
+    );
 
     let mut float = ExpressionFailureFacts::default();
     float.record_numeric_operation(NumericOperator::Divide, NumericScalar::Float, None);
     assert_eq!(
         float.implicit[0].codes,
-        &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::FloatNonFinite],
+        &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::FloatNonFinite
+        ],
     );
 }
 
@@ -75,13 +84,19 @@ fn call_keeps_argument_failure_without_changing_success_type() {
     let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
     let expression = returned_value(body);
     let argument = &call_arguments(expression)[0].value;
-    let numeric_span = argument.failure_facts.summary.first_numeric
+    let numeric_span = argument
+        .failure_facts
+        .summary
+        .first_numeric
         .expect("the argument contains checked arithmetic")
         .span;
 
     assert_eq!(expression.type_id, builtin_type_ids::STRING);
     assert_eq!(
-        expression.failure_facts.summary.first_numeric
+        expression
+            .failure_facts
+            .summary
+            .first_numeric
             .expect("the call retains the argument's failure classification")
             .span,
         numeric_span,
@@ -139,23 +154,34 @@ fn nested_calls_retain_one_local_witness_per_producer_in_postorder() {
     producer_sites.reverse();
 
     let pending = pending_function_failure_facts(body, &TemplateIrStore::new()).expect("valid AST");
-    let collected_sites: Vec<_> = pending.body.implicit.iter()
+    let collected_sites: Vec<_> = pending
+        .body
+        .implicit
+        .iter()
         .map(|witness| (witness.span, witness.source))
         .collect();
     assert_eq!(collected_sites, producer_sites);
     assert_eq!(
-        pending.body.summary.summary.first_private_call
+        pending
+            .body
+            .summary
+            .summary
+            .first_private_call
             .expect("the compact summary retains the first producer")
             .span,
         producer_sites[0].0,
     );
     assert!(pending.assertion_message_calls.is_empty());
 
-    let compact = pending_expression_failure_facts(expression, &TemplateIrStore::new())
-        .expect("valid AST");
+    let compact =
+        pending_expression_failure_facts(expression, &TemplateIrStore::new()).expect("valid AST");
     assert!(compact.implicit.is_empty());
     assert_eq!(
-        compact.summary.first_private_call.expect("the chain has a producer").span,
+        compact
+            .summary
+            .first_private_call
+            .expect("the chain has a producer")
+            .span,
         producer_sites[0].0,
     );
 }
@@ -176,18 +202,35 @@ fn catch_handler_failure_goes_outward_without_reentering_protected_work() {
         panic!("the fixture contains a catch");
     };
     let protected_span = catch.handled_value.span;
-    let protected_numeric_span = catch.handled_value.failure_facts.summary.first_numeric
+    let protected_numeric_span = catch
+        .handled_value
+        .failure_facts
+        .summary
+        .first_numeric
         .expect("the protected argument contains checked arithmetic")
         .span;
-    assert!(catch.handled_value.failure_facts.summary.first_private_call.is_some());
+    assert!(
+        catch
+            .handled_value
+            .failure_facts
+            .summary
+            .first_private_call
+            .is_some()
+    );
 
     let pending = pending_function_failure_facts(body, &TemplateIrStore::new()).expect("valid AST");
     assert_eq!(pending.body.implicit.len(), 1);
     let handler_witness = &pending.body.implicit[0];
-    assert_eq!(handler_witness.source, ImplicitFailureSource::NumericOperation);
+    assert_eq!(
+        handler_witness.source,
+        ImplicitFailureSource::NumericOperation
+    );
     assert_eq!(
         handler_witness.codes,
-        &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::IntOverflow],
+        &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::IntOverflow
+        ],
     );
     assert!(handler_witness.span.is_some());
     assert_ne!(handler_witness.span, protected_span);
@@ -196,10 +239,14 @@ fn catch_handler_failure_goes_outward_without_reentering_protected_work() {
     let protected = pending_expression_failure_facts(&catch.handled_value, &TemplateIrStore::new())
         .expect("valid AST");
     assert!(protected.summary.first_implicit.is_none());
-    let outward = pending_expression_failure_facts(expression, &TemplateIrStore::new())
-        .expect("valid AST");
+    let outward =
+        pending_expression_failure_facts(expression, &TemplateIrStore::new()).expect("valid AST");
     assert_eq!(
-        outward.summary.first_numeric.expect("handler failure escapes").span,
+        outward
+            .summary
+            .first_numeric
+            .expect("handler failure escapes")
+            .span,
         handler_witness.span,
     );
     assert_eq!(
@@ -258,7 +305,10 @@ fn first_numeric_and_typed_diagnostics_keep_descendant_producer_spans() {
     assert!(first_numeric.span.is_some());
     assert_ne!(first_typed.span, first_outer_call.span);
     assert_ne!(first_numeric.span, later_numeric.span);
-    assert_eq!(protected.failure_facts.summary.first_typed, Some(first_typed));
+    assert_eq!(
+        protected.failure_facts.summary.first_typed,
+        Some(first_typed)
+    );
     assert_eq!(
         protected.failure_facts.summary.first_numeric,
         Some(first_numeric),

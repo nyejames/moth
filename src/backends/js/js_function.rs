@@ -189,8 +189,7 @@ impl<'hir> JsEmitter<'hir> {
                 } => {
                     let success_termination =
                         self.inspect_simple_branch_termination(*success_block);
-                    let error_termination =
-                        self.inspect_simple_branch_termination(*error_block);
+                    let error_termination = self.inspect_simple_branch_termination(*error_block);
                     let (Ok(success_termination), Ok(error_termination)) =
                         (success_termination, error_termination)
                     else {
@@ -199,11 +198,8 @@ impl<'hir> JsEmitter<'hir> {
 
                     // Structured branches require one direct diamond join. Shared catch
                     // handlers have error-transfer hops and use the ordinary CFG dispatcher.
-                    if Self::resolve_branch_merge_target(
-                        success_termination,
-                        error_termination,
-                    )
-                    .is_err()
+                    if Self::resolve_branch_merge_target(success_termination, error_termination)
+                        .is_err()
                     {
                         return Ok(ControlFlowStrategy::Dispatcher);
                     }

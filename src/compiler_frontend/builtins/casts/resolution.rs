@@ -144,10 +144,11 @@ pub(crate) fn resolve_cast_expression(
             }
         },
 
-        CastHandling::Recover if operand_only_recovery =>
-        {
+        CastHandling::Recover if operand_only_recovery => {
             // Recovery may protect operand evaluation without making the conversion fallible.
-            selection.infallible.expect("the guarded selection contains infallible evidence")
+            selection
+                .infallible
+                .expect("the guarded selection contains infallible evidence")
         }
 
         CastHandling::Propagate | CastHandling::Recover | CastHandling::StoreConversion => {

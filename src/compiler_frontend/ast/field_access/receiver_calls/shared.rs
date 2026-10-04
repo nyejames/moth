@@ -80,8 +80,7 @@ pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_c
 
     let span = expression.span;
     let pending_facts = std::mem::take(&mut expression.failure_facts);
-    let diagnostic_type =
-        diagnostic_type_spelling(success_type_id, type_interner.environment());
+    let diagnostic_type = diagnostic_type_spelling(success_type_id, type_interner.environment());
     let mut expression = Expression::handled_result_with_type_id(
         expression,
         FallibleExpressionHandling::Recover,

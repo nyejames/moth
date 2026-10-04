@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
+use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
@@ -33,9 +34,13 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
-use crate::compiler_frontend::canonical_type_identity::{CanonicalBuiltinType, CanonicalTypeIdentity};
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidFallibleHandlingReason};
+use crate::compiler_frontend::compiler_messages::{
+    BuiltinFailureWitness, CompilerDiagnostic, InvalidFallibleHandlingReason,
+};
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -581,9 +586,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
-        let builtin_error_type = self.environment.type_environment.type_id_for_canonical_identity(
-            &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
-        );
+        let builtin_error_type = self
+            .environment
+            .type_environment
+            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::Error,
+            ));
         let template_ir_store = self.context.template_ir_store.borrow();
         for node in nodes {
             let NodeKind::Function(path, signature, body) = &node.kind else {
@@ -605,25 +613,51 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let custom_error = match signature.error_return_type_id() {
                 Some(error_type) if Some(error_type) == builtin_error_type => continue,
                 Some(error_type) => Some(error_type),
-                None if self.environment.lookups.exported_callable_paths.contains(path) => None,
+                None if self
+                    .environment
+                    .lookups
+                    .exported_callable_paths
+                    .contains(path) =>
+                {
+                    None
+                }
                 None => continue,
             };
             let Some(contributor) = pending.body.implicit.first() else {
                 continue;
             };
+            // Dormant templates have no converged HIR call graph. Only a direct operation owns
+            // numeric causes and an origin; an unresolved private call supplies its call site.
+            let witness = match contributor.source {
+                ImplicitFailureSource::NumericOperation => BuiltinFailureWitness {
+                    codes: contributor.codes.to_vec(),
+                    call_spans: Vec::new(),
+                    origin_span: contributor.span,
+                    elided_call_hops: 0,
+                },
+                ImplicitFailureSource::PrivateCall(_) => BuiltinFailureWitness {
+                    codes: Vec::new(),
+                    call_spans: vec![contributor.span],
+                    origin_span: None,
+                    elided_call_hops: 0,
+                },
+            };
             let reason = match custom_error {
                 Some(error_type_id) => {
                     InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                         error_type_id,
-                        implicit_producer_span: contributor.span,
+                        witness,
                     }
                 }
                 None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                    implicit_producer_span: contributor.span,
+                    witness,
                 },
             };
             return Err(CompilerMessages::from_diagnostic_with_warnings(
-                CompilerDiagnostic::invalid_fallible_handling(reason, node.span.or(contributor.span)),
+                CompilerDiagnostic::invalid_fallible_handling(
+                    reason,
+                    node.span.or(contributor.span),
+                ),
                 warnings.to_owned(),
                 string_table,
             )
