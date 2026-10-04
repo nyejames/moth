@@ -10,8 +10,8 @@
 //!   3. The compiled JS bundle is embedded in an inline `<script>` block.
 //!      The bundle content is escaped so it cannot contain a raw `</script>` sequence
 //!      that would prematurely close the script tag.
-//!   4. A second inline `<script>` calls entry `start()` once. start() returns the
-//!      runtime fragment array and each element is hydrated into its slot in source order.
+//!   4. A second inline `<script>` calls entry `start()` once. Only a successful outcome
+//!      publishes its runtime fragment array, hydrating each slot in source order.
 
 use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 use crate::build_system::build::{FileKind, OutputFile, ProjectLinkedModule};
@@ -53,6 +53,8 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub project_name: &'a str,
     pub js_bundle: &'a str,
     pub function_names: &'a HashMap<FunctionId, String>,
+    /// Lowering-owned fact from the emitted start's HIR return type.
+    pub start_is_fallible: bool,
     pub entry_runtime_fragment_count: usize,
     /// Whether the emitted JS bundle contains reactive runtime fragments that need the DOM mount
     /// helper instead of plain-string slot insertion.
@@ -275,6 +277,7 @@ pub(crate) fn compile_html_module_js(
         project_name: input.project_name,
         js_bundle: &bundle_with_imports,
         function_names: &js_module.function_name_by_id,
+        start_is_fallible: js_module.start_is_fallible,
         entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
         uses_reactive_runtime_fragments,
         import_map_html: glue_result.import_map_html,
@@ -471,6 +474,7 @@ pub(crate) fn render_html_document(
         &slot_ids,
         input.use_module_script,
         input.uses_reactive_runtime_fragments,
+        input.start_is_fallible,
     );
 
     render_html_document_shell(HtmlDocumentShellInput {
@@ -491,6 +495,7 @@ fn render_runtime_bootstrap_script_html(
     slot_ids: &[String],
     is_module_script: bool,
     uses_reactive_runtime_fragments: bool,
+    start_is_fallible: bool,
 ) -> String {
     // Escape the bundle so any `</script>` sequence inside string literals or comments cannot
     // prematurely terminate the HTML script tag and corrupt the page.
@@ -503,13 +508,20 @@ fn render_runtime_bootstrap_script_html(
         html.push_str("<script type=\"module\">\n");
         html.push_str(&safe_bundle);
         html.push('\n');
+        if start_is_fallible {
+            html.push_str("(function () {\n");
+        }
         append_runtime_bootstrap(
             &mut html,
             start_function_name,
             slot_ids,
             "",
             uses_reactive_runtime_fragments,
+            start_is_fallible,
         );
+        if start_is_fallible {
+            html.push_str("})();\n");
+        }
         html.push_str("</script>\n");
         html
     } else {
@@ -526,6 +538,7 @@ fn render_runtime_bootstrap_script_html(
             slot_ids,
             "  ",
             uses_reactive_runtime_fragments,
+            start_is_fallible,
         );
         html.push_str("})();\n");
         html.push_str("</script>\n");
@@ -539,20 +552,34 @@ fn append_runtime_bootstrap(
     slot_ids: &[String],
     indent: &str,
     uses_reactive_runtime_fragments: bool,
+    start_is_fallible: bool,
 ) {
-    if slot_ids.is_empty() {
+    if start_is_fallible {
+        // Failure has no success slot: branch before reading or publishing any fragments.
+        html.push_str(&format!(
+            "{indent}var moth_result = {start_function_name}();\n"
+        ));
+        html.push_str(&format!(
+            "{indent}if (moth_result.tag !== \"ok\") return;\n"
+        ));
+        if slot_ids.is_empty() {
+            return;
+        }
+    } else if slot_ids.is_empty() {
         html.push_str(&format!(
             "{indent}if (typeof {start_function_name} === \"function\") {start_function_name}();\n"
         ));
         return;
     }
 
-    // WHAT: call entry start() once; it returns the runtime fragment array in source order.
-    // WHY: start() accumulates fragments via PushRuntimeFragment and returns them as a JS array.
-    //      Calling start() here both produces the fragments and runs the lifecycle.
-    html.push_str(&format!(
-        "{indent}var moth_frags = {start_function_name}();\n"
-    ));
+    // Fragments remain staged until the single start invocation succeeds.
+    if start_is_fallible {
+        html.push_str(&format!("{indent}var moth_frags = moth_result.value;\n"));
+    } else {
+        html.push_str(&format!(
+            "{indent}var moth_frags = {start_function_name}();\n"
+        ));
+    }
     html.push_str(&format!("{indent}var moth_slots = [\n"));
     for slot_id in slot_ids {
         html.push_str(&format!("{indent}  \"{slot_id}\",\n"));

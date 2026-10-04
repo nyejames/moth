@@ -157,9 +157,6 @@ impl<'a> HirBuilder<'a> {
             };
             let function_id = self.resolve_function_id_or_error(path, &node.span)?;
             let boundary = match signature.error_return_type_id() {
-                _ if self.module.start_function == Some(function_id) => {
-                    HirBuiltinFailureBoundary::BuiltinErrorSlot
-                }
                 Some(error_type) if Some(error_type) == builtin_error_type => {
                     HirBuiltinFailureBoundary::BuiltinErrorSlot
                 }

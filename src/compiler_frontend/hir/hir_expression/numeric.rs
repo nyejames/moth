@@ -411,21 +411,16 @@ impl<'a> HirBuilder<'a> {
 
     /// Selects the numeric failure mode for the current function context.
     ///
-    /// WHAT: returns `ReturnError` only when the enclosing function has an internal fallible carrier
-    ///       whose error slot is exactly builtin `Error`. Top-level `start()`, non-fallible functions,
-    ///       and custom error channels all use `Trap`.
-    /// WHY: only builtin `Error!` can represent numeric failures as user-recoverable values; other
-    ///      contexts have no channel for the failure.
+    /// WHAT: returns `ReturnError` when the signature's fallible carrier has builtin `Error`.
+    ///       Other signatures initially use `Trap`.
+    /// WHY: the private failure lane later installs inferred delivery for private no-slot
+    ///      functions. Custom error slots require frontend-validated local recovery or explicit
+    ///      mapping, never automatic conversion.
     pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {
         let current_function_id = self.current_function_id_or_error(span)?;
-        // Entry `start()` is implicitly non-fallible regardless of its carrier shape.
-        if Some(current_function_id) == self.module.start_function {
-            return Ok(NumericFailureMode::Trap);
-        }
-
         let function = self.function_by_id_or_error(current_function_id, span)?;
         let Some((_, error_type)) = self
             .type_environment

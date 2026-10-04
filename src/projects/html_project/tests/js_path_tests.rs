@@ -33,6 +33,7 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
         &slot_ids,
         false,
         false,
+        false,
     );
 
     assert!(
@@ -253,6 +254,7 @@ fn no_runtime_fragments_still_emits_start_call() {
             project_name: "",
             js_bundle: "function start_entry() { return []; }",
             function_names: &function_names,
+            start_is_fallible: false,
             entry_runtime_fragment_count: 0,
             uses_reactive_runtime_fragments: false,
             import_map_html: None,
@@ -312,6 +314,7 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
             project_name: "",
             js_bundle: "const msg = \"</script>\";\n",
             function_names: &function_names,
+            start_is_fallible: false,
             entry_runtime_fragment_count: 0,
             uses_reactive_runtime_fragments: false,
             import_map_html: None,
@@ -341,6 +344,7 @@ fn bootstrap_uses_mount_helper_for_reactive_runtime_fragments() {
         &slot_ids,
         false,
         true,
+        false,
     );
 
     assert!(
@@ -363,6 +367,7 @@ fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
         &slot_ids,
         false,
         false,
+        false,
     );
 
     assert!(
@@ -373,4 +378,146 @@ fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
         !script.contains("__moth_mount_template_fragment"),
         "non-reactive bootstrap must not reference the mount helper"
     );
+}
+
+#[test]
+fn plain_and_static_bootstrap_bytes_remain_unchanged() {
+    let slots = vec![String::from("moth-slot-0")];
+    let mut bootstrap = String::new();
+    append_runtime_bootstrap(&mut bootstrap, "start_entry", &slots, "  ", false, false);
+    assert_eq!(
+        bootstrap,
+        concat!(
+            "  var moth_frags = start_entry();\n",
+            "  var moth_slots = [\n",
+            "    \"moth-slot-0\",\n",
+            "  ];\n",
+            "  for (var i = 0; i < moth_slots.length; i++) {\n",
+            "    var el = document.getElementById(moth_slots[i]);\n",
+            "    if (!el) throw new Error(\"Missing runtime mount slot: \" + moth_slots[i]);\n",
+            "    el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\");\n",
+            "  }\n",
+        )
+    );
+    assert_eq!(
+        render_runtime_bootstrap_script_html("start_entry", "", &[], false, false, false),
+        concat!(
+            "<script>\n\n</script>\n<script>\n(function () {\n",
+            "  if (typeof start_entry === \"function\") start_entry();\n",
+            "})();\n</script>\n",
+        )
+    );
+    assert_eq!(
+        render_runtime_bootstrap_script_html("start_entry", "", &[], true, false, false),
+        concat!(
+            "<script type=\"module\">\n\n",
+            "if (typeof start_entry === \"function\") start_entry();\n",
+            "</script>\n",
+        )
+    );
+}
+
+#[test]
+fn fallible_bootstrap_failure_calls_once_and_publishes_nothing_even_with_zero_code() {
+    for is_module_script in [false, true] {
+        for reactive in [false, true] {
+            for slot_count in [0, 2] {
+                let slots = (0..slot_count)
+                    .map(|index| format!("moth-slot-{index}"))
+                    .collect::<Vec<_>>();
+                let bundle = r#"
+const events = [];
+let payload_reads = 0;
+const failure = { message: "<application-error>", code: 0 };
+function start_entry() {
+    events.push("start");
+    return { tag: "err", get value() { payload_reads++; return failure; } };
+}
+const document = {
+    getElementById(id) {
+        events.push("lookup:" + id);
+        return { insertAdjacentHTML(_, text) { events.push(text); } };
+    }
+};
+function __moth_mount_template_fragment(_, fragment) { events.push(fragment); }
+"#;
+                let html = render_runtime_bootstrap_script_html(
+                    "start_entry", bundle, &slots, is_module_script, reactive, true,
+                );
+                let output = run_bootstrap_scripts(
+                    &html,
+                    "console.log(JSON.stringify([events, payload_reads, failure.code]));",
+                    is_module_script,
+                );
+                assert_eq!(output.trim(), r#"[["start"],0,0]"#);
+            }
+        }
+    }
+}
+
+#[test]
+fn fallible_bootstrap_success_unwraps_once_and_hydrates_in_source_order() {
+    let slots = vec![String::from("moth-slot-0"), String::from("moth-slot-1")];
+    for is_module_script in [false, true] {
+        for reactive in [false, true] {
+            let bundle = r#"
+const events = [];
+function start_entry() {
+    events.push("start");
+    return {
+        tag: "ok",
+        get value() { events.push("unwrap"); return ["first", "second"]; }
+    };
+}
+const document = {
+    getElementById(id) {
+        return { id, insertAdjacentHTML(_, text) { events.push(id + ":" + text); } };
+    }
+};
+function __moth_mount_template_fragment(element, fragment) {
+    events.push(element.id + ":" + fragment);
+}
+"#;
+            let html = render_runtime_bootstrap_script_html(
+                "start_entry", bundle, &slots, is_module_script, reactive, true,
+            );
+            let output = run_bootstrap_scripts(
+                &html,
+                "console.log(JSON.stringify(events));",
+                is_module_script,
+            );
+            assert_eq!(
+                output.trim(),
+                r#"["start","unwrap","moth-slot-0:first","moth-slot-1:second"]"#
+            );
+        }
+    }
+}
+
+/// Executes the generated inline scripts in document order, preserving their shared scope.
+fn run_bootstrap_scripts(html: &str, summary: &str, is_module_script: bool) -> String {
+    let mut source = String::new();
+    for script in html.split("<script").skip(1) {
+        let (_, body) = script.split_once('>').expect("generated script has an opener");
+        let (body, _) = body.split_once("</script>").expect("generated script has a closer");
+        source.push_str(body);
+        source.push('\n');
+    }
+    source.push_str(summary);
+
+    let mut command = std::process::Command::new("node");
+    if is_module_script {
+        command.arg("--input-type=module");
+    }
+    let output = command
+        .args(["--eval", &source])
+        .output()
+        .expect("Node.js is required for bootstrap runtime tests");
+    assert!(
+        output.status.success(),
+        "Bootstrap runtime failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty(), "Startup must not report a terminal notice");
+    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
 }

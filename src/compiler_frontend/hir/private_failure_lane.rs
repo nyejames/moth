@@ -4,7 +4,7 @@
 //!       returns that failure through the existing fallible carrier. Callers branch
 //!       on the carrier. Builtin `Error!` returns the same `Error`. A compound
 //!       store conversion lowered as a trap is retargeted onto that same edge.
-//!       `start` traps until it receives its own `Error!` slot.
+//!       The synthetic start keeps its builtin slot only while an error edge escapes.
 //! WHY: a may-fail bit cannot construct the eventual `Error`. The lane reuses
 //!      `FallibleBranch` / `ReturnError` and the JS `{tag, value}` ABI. It is not a
 //!      source error slot and is not a public or foreign contract.
@@ -59,7 +59,8 @@ pub(crate) fn install_private_failure_lanes(
     installer.prepare_ids()?;
     installer.install_return_lanes()?;
     installer.rewrite_bodies()?;
-    installer.retarget_store_conversions()
+    installer.retarget_store_conversions()?;
+    installer.narrow_entry_return()
 }
 
 struct LaneInstaller<'a> {
@@ -286,10 +287,6 @@ impl LaneInstaller<'_> {
         let payload = self.unwrap_error(carrier_local, carrier_type, error_type, region);
         let terminator = if self.function_propagates_builtin_error(function_id)? {
             HirTerminator::ReturnError(payload)
-        } else if self.hir.start_function == Some(function_id) {
-            HirTerminator::RuntimeFailure {
-                message: "implicit builtin failure escaped to start".to_owned(),
-            }
         } else {
             return Err(CompilerError::compiler_error(
                 "private implicit failure reached a function with no Error! slot and no internal lane",
@@ -391,10 +388,42 @@ impl LaneInstaller<'_> {
         Ok(Some((error_block, *local, result.ty)))
     }
 
-    fn function_propagates_builtin_error(&self, function_id: FunctionId) -> Result<bool, CompilerError> {
-        if self.hir.start_function == Some(function_id) {
-            return Ok(false);
+    /// The AST entry always accepts builtin Error, but a dead error slot must not
+    /// introduce a backend ABI or runtime requirement. Narrow only after private
+    /// callees and statement-owned checks have installed their escaping edges.
+    fn narrow_entry_return(&mut self) -> Result<(), CompilerError> {
+        let Some(function_id) = self.hir.start_function else {
+            return Ok(());
+        };
+        let function_index = self.function_index(function_id)?;
+        let return_type = self.hir.functions[function_index].return_type;
+        let Some((success_type, _)) = self.type_environment.fallible_carrier_slots(return_type) else {
+            return Ok(());
+        };
+        let entry = self.hir.functions[function_index].entry;
+        let blocks = reachable_blocks(self.hir, entry);
+        if blocks.iter().any(|block_id| {
+            matches!(
+                self.hir.blocks[block_id.0 as usize].terminator,
+                HirTerminator::ReturnError(_)
+            )
+        }) {
+            return Ok(());
         }
+
+        self.hir.functions[function_index].return_type = success_type;
+        for block_id in blocks {
+            let terminator = &mut self.hir.blocks[block_id.0 as usize].terminator;
+            let previous = std::mem::replace(terminator, HirTerminator::Uninitialized);
+            *terminator = match previous {
+                HirTerminator::ReturnSuccess(value) => HirTerminator::Return(value),
+                other => other,
+            };
+        }
+        Ok(())
+    }
+
+    fn function_propagates_builtin_error(&self, function_id: FunctionId) -> Result<bool, CompilerError> {
         if self.lane_functions.contains(&function_id) {
             return Ok(true);
         }

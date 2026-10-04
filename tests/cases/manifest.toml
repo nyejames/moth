@@ -5102,11 +5102,11 @@ contract = "language.results.raw_carrier_return_rejected"
 role = "primary"
 
 [[case]]
-id = "result_postfix_in_start_code_rejected"
-path = "result_postfix_in_start_code_rejected"
-tags = ["integration", "results", "diagnostics"]
-contract = "language.results.propagation_without_error_slot_rejected"
-role = "boundary"
+id = "result_postfix_in_start_code_success"
+path = "result_postfix_in_start_code_success"
+tags = ["integration", "results", "entry-start", "runtime"]
+contract = "language.results.builtin_error_propagation_in_start"
+role = "primary"
 
 [[case]]
 id = "result_error_only_fallback_rejected"

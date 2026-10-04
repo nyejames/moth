@@ -135,6 +135,9 @@ impl<'hir> JsEmitter<'hir> {
         self.build_symbol_maps()?;
 
         let functions = self.functions_to_emit();
+        let start_is_fallible = functions.iter().any(|function| {
+            Some(function.id) == self.hir.start_function && self.function_is_fallible(function)
+        });
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
         let mut emitted_code_uses_numeric_helpers =
             self.emitted_functions_use_numeric_helpers(&functions)?;
@@ -183,12 +186,23 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line("");
             }
 
-            self.emit_line(&format!("{start_name}();"));
+            if start_is_fallible {
+                // Keep typed entry failure local to this invocation, without host exceptions.
+                self.emit_line("(function () {");
+                self.indent += 1;
+                self.emit_line(&format!("var moth_result = {start_name}();"));
+                self.emit_line("if (moth_result.tag !== \"ok\") return;");
+                self.indent -= 1;
+                self.emit_line("})();");
+            } else {
+                self.emit_line(&format!("{start_name}();"));
+            }
         }
 
         Ok(JsModule {
             source: self.out,
             function_name_by_id: self.function_name_by_id,
+            start_is_fallible,
             referenced_external_functions: self.referenced_external_functions,
         })
     }

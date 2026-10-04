@@ -139,7 +139,7 @@ impl<'hir> JsEmitter<'hir> {
         format!("__moth_reactive_binding({}, undefined)", source_id.0)
     }
 
-    fn function_is_fallible(&self, function: &HirFunction) -> bool {
+    pub(crate) fn function_is_fallible(&self, function: &HirFunction) -> bool {
         self.type_environment
             .is_fallible_carrier(function.return_type)
     }

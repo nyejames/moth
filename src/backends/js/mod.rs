@@ -194,6 +194,9 @@ pub struct JsModule {
     /// Complete JS source code.
     pub source: String,
     pub function_name_by_id: HashMap<FunctionId, String>,
+    /// Whether the emitted start returns the existing fallible carrier.
+    /// False when this bundle does not emit a start function.
+    pub start_is_fallible: bool,
     /// Set of external function IDs referenced while lowering emitted JS functions.
     /// WHY: the HTML builder uses this to decide which generated glue wrappers to emit.
     pub referenced_external_functions: HashSet<ExternalFunctionId>,

@@ -114,6 +114,52 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
     );
 }
 
+#[test]
+fn start_fallibility_metadata_uses_only_the_emitted_hir_return_type() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (mut type_environment, types) = build_type_environment();
+    let carrier = type_environment.intern_fallible_carrier(types.unit, types.string);
+    let mut module = module_with_unreachable_function(&mut path_fork, &mut string_table, types.unit);
+    module.functions[0].return_type = carrier;
+    module.blocks[0].terminator =
+        HirTerminator::ReturnSuccess(unit_expression(0, types.unit, RegionId(0)));
+    let lower = |module: &crate::compiler_frontend::hir::module::HirModule, config| {
+        lower_hir_to_js(
+            module,
+            &BorrowCheckReport::default(),
+            &NumericProofs::default(),
+            &string_table,
+            config,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("start metadata fixture should lower")
+    };
+    assert!(
+        lower(&module, default_config()).start_is_fallible,
+        "the HIR carrier type owns fallibility, not the absence of an error return in this fixture"
+    );
+
+    let facts = collect_module_function_link_facts(&module).expect("fixture should have link facts");
+    let reachability = collect_reachability_from_function_link_facts(&facts, &[FunctionId(1)])
+        .expect("helper-only selection should be valid");
+    let mut selected_config = default_config();
+    selected_config.function_emission_policy =
+        JsFunctionEmissionPolicy::Selected(reachability.backend_selection().clone());
+    let selected = lower(&module, selected_config);
+    assert!(!selected.start_is_fallible);
+    assert!(!selected.function_name_by_id.contains_key(&FunctionId(0)));
+
+    module.start_function = None;
+    assert!(!lower(&module, default_config()).start_is_fallible);
+
+    module.start_function = Some(FunctionId(0));
+    module.functions[0].return_type = types.unit;
+    module.blocks[0].terminator = HirTerminator::Return(unit_expression(0, types.unit, RegionId(0)));
+    assert!(!lower(&module, default_config()).start_is_fallible);
+}
+
 fn module_with_unreachable_function(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,

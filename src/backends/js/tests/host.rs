@@ -166,3 +166,75 @@ fn auto_invokes_start_function_when_enabled() {
 }
 
 // ---------------------------------------------------------------------------
+
+#[test]
+fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
+    for succeeds in [false, true] {
+        let mut path_fork = PathInternerFork::empty();
+        let mut string_table = StringTable::new();
+        let (type_environment, types) = build_type_environment();
+        let region = RegionId(0);
+        let terminator = if succeeds {
+            HirTerminator::ReturnSuccess(int_expression(2, 42, types.int, region))
+        } else {
+            HirTerminator::ReturnError(string_expression(2, "failure", types.string, region))
+        };
+        let block = HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![],
+            statements: vec![statement(
+                1,
+                HirStatementKind::Call {
+                    target: CallTarget::External(ExternalFunctionId::IoLine),
+                    args: vec![string_expression(1, "start", types.string, region)],
+                    result: None,
+                },
+            )],
+            terminator,
+        };
+        let function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![],
+            return_type: types.fallible_int_string,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            "start_main",
+            vec![block],
+            function,
+            &[],
+        );
+        let mut config = default_config();
+        config.auto_invoke_start = true;
+        let output = lower_hir_to_js(
+            &module,
+            &BorrowCheckReport::default(),
+            &NumericProofs::default(),
+            &string_table,
+            config,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("fallible start should lower");
+        assert!(output.start_is_fallible);
+        let start_name = expected_dev_function_name("start_main", 0);
+        assert!(output.source.ends_with(&format!(
+            "(function () {{\n    var moth_result = {start_name}();\n    if (moth_result.tag !== \"ok\") return;\n}})();\n"
+        )));
+
+        let runtime = std::process::Command::new("node")
+            .args(["--eval", &output.source])
+            .output()
+            .expect("Node.js is required for automatic start runtime tests");
+        assert!(
+            runtime.status.success(),
+            "Automatic start failed: {}",
+            String::from_utf8_lossy(&runtime.stderr)
+        );
+        assert_eq!(String::from_utf8(runtime.stdout).expect("UTF-8 output"), "start\n");
+        assert!(runtime.stderr.is_empty());
+    }
+}

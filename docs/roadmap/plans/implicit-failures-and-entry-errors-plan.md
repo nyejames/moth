@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. A later generated request reuses the declaring module's converged private-failure summary even when the public signature stays the same. start Error! is not implemented. Moth-to-foreign export has no implementation owner. Persistent artefact reuse remains deferred, so no second cache or compiled-artefact loader was added.
-- Current slice: Phase 5 fallible start and HTML publication.
-- Blockers: none for local rejection, facade rejection, or same-build generated-summary reuse.
-- Next action: give every applicable synthetic start its builtin Error! slot and publish HTML entry errors only after a successful invocation.
+- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. A later generated request reuses the declaring module's converged private-failure summary. Applicable synthetic start has a builtin Error! slot. HTML runtime fragments are published only after a successful invocation. Infallible and static starts keep the plain fragment return. Terminal reporting and the release fallback are not implemented.
+- Current slice: Phase 5 terminal reporting and release fallback.
+- Blockers: none for the start slot or success-only HTML publication.
+- Next action: report a failed entry on standard error with a nonzero status, and render the generic release fallback without application Error HTML.
 
 ## Goal and authority
 
@@ -887,11 +887,11 @@ failure, and diagnostics explain both the source and the valid repairs.
 
 Acceptance coverage: E01-E05.
 
-- [ ] Add top-level cases for implicit arithmetic failure, propagated Error!,
+- [x] Add top-level cases for implicit arithmetic failure, propagated Error!,
   local recovery, custom-error mismatch and an Error whose code is zero.
-- [ ] Give every applicable synthetic start its built-in Error! slot without
+- [x] Give every applicable synthetic start its built-in Error! slot without
   altering dependency activation, API-only roots or success-slot representation.
-- [ ] Make the generated HTML caller branch on entry outcome and publish all
+- [x] Make the generated HTML caller branch on entry outcome and publish all
   invocation-owned runtime fragments only on success.
 - [ ] Implement terminal reporting and the generic release fallback independently
   of application templates. Preserve static content and earlier explicit IO.
