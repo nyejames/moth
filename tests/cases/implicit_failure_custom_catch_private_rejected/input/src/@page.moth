@@ -1,0 +1,13 @@
+DomainError ::
+    Missing,
+;
+
+multiply |left Int, right Int| -> Int:
+    return left * right
+;
+
+as_domain_value |value Int| -> Int, DomainError!:
+    return value
+;
+
+value = as_domain_value(multiply(50000, 50000)) catch then 0

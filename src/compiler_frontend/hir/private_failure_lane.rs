@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use rustc_hash::FxHashSet;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -195,7 +196,8 @@ impl LaneInstaller<'_> {
             | HirStatementKind::FormatFloat { failure_mode, result, .. }
             | HirStatementKind::ValidateFloat { failure_mode, result, .. }
                 if self.lane_functions.contains(&function_id)
-                    && *failure_mode == NumericFailureMode::Trap =>
+                    && *failure_mode == NumericFailureMode::Trap
+                    && statement_has_implicit_failure(&statement.kind) =>
             {
                 let success_type = self.local_type(*result)?.ok_or_else(|| {
                     CompilerError::compiler_error("checked numeric result local has no type")
@@ -259,12 +261,13 @@ impl LaneInstaller<'_> {
         carrier_local: LocalId,
     ) -> Result<(), CompilerError> {
         let statement = &mut self.hir.blocks[block_id.0 as usize].statements[index];
+        let implicit_failure = statement_has_implicit_failure(&statement.kind);
         match &mut statement.kind {
             HirStatementKind::Call { result, .. } => *result = Some(carrier_local),
             HirStatementKind::NumericOp { failure_mode, result, .. }
             | HirStatementKind::RangeStepFailure { failure_mode, result, .. }
             | HirStatementKind::FormatFloat { failure_mode, result, .. }
-            | HirStatementKind::ValidateFloat { failure_mode, result, .. } => {
+            | HirStatementKind::ValidateFloat { failure_mode, result, .. } if implicit_failure => {
                 *failure_mode = NumericFailureMode::ReturnError;
                 *result = carrier_local;
             }
@@ -585,6 +588,19 @@ impl LaneInstaller<'_> {
 struct Producer {
     scalar_local: Option<LocalId>,
     success_type: TypeId,
+}
+
+/// Arithmetic statements contain only implicit causes. Other checked statements carry a
+/// range cause or a fixed integrity-guard code, whose classification owns lane eligibility.
+fn statement_has_implicit_failure(kind: &HirStatementKind) -> bool {
+    let code = match kind {
+        HirStatementKind::NumericOp { .. } => return true,
+        HirStatementKind::RangeStepFailure { cause, .. } => cause.builtin_error_code(),
+        HirStatementKind::FormatFloat { .. } => BuiltinErrorCode::FloatFormatInvariant,
+        HirStatementKind::ValidateFloat { .. } => BuiltinErrorCode::FloatBoundaryNonFinite,
+        _ => return false,
+    };
+    code.is_implicit_failure()
 }
 
 fn private_lane_functions(

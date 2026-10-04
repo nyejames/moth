@@ -1,0 +1,58 @@
+DomainError ::
+    Missing,
+;
+
+three || -> Int:
+    return 1 + 2
+;
+
+literal_three || -> Int:
+    return 3
+;
+
+recursive_three |again Bool| -> Int:
+    if again:
+        return recursive_three(false)
+    ;
+    return 3
+;
+
+as_domain_value |value Int| -> Int, DomainError!:
+    return value
+;
+
+recover_folded_after || -> Int:
+    return as_domain_value(three_after()) catch then 0
+;
+
+recover_literal_after || -> Int:
+    return as_domain_value(literal_three_after()) catch then 0
+;
+
+recover_recursive_after || -> Int:
+    return as_domain_value(recursive_three_after(true)) catch then 0
+;
+
+folded_before = as_domain_value(three()) catch then 0
+literal_before = as_domain_value(literal_three()) catch then 0
+recursive_before = as_domain_value(recursive_three(true)) catch then 0
+folded_after = recover_folded_after()
+literal_after = recover_literal_after()
+recursive_after = recover_recursive_after()
+
+three_after || -> Int:
+    return 1 + 2
+;
+
+literal_three_after || -> Int:
+    return 3
+;
+
+recursive_three_after |again Bool| -> Int:
+    if again:
+        return recursive_three_after(false)
+    ;
+    return 3
+;
+
+[: custom catch folded-before=[folded_before] literal-before=[literal_before] recursive-before=[recursive_before] folded-after=[folded_after] literal-after=[literal_after] recursive-after=[recursive_after]]

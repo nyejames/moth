@@ -21,7 +21,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
-    HirFunctionFailureFacts,
+    HirDeferredCustomCatchCheck, HirFunctionFailureFacts,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -167,6 +167,15 @@ impl<'a> HirBuilder<'a> {
             let contributors = self.project_failure_contributors(pending.body.implicit)?;
             let assertion_message_calls =
                 self.project_failure_contributors(pending.assertion_message_calls)?;
+            let mut deferred_custom_catches = Vec::with_capacity(pending.body.deferred_custom_catches.len());
+            for check in pending.body.deferred_custom_catches {
+                deferred_custom_catches.push(HirDeferredCustomCatchCheck {
+                    catch_span: check.catch_span,
+                    error_type_id: check.error_type_id,
+                    typed_producer_span: check.typed_producer_span,
+                    candidates: self.project_failure_contributors(check.candidates)?,
+                });
+            }
             self.module.function_failure_facts.insert(
                 function_id,
                 HirFunctionFailureFacts {
@@ -174,6 +183,7 @@ impl<'a> HirBuilder<'a> {
                     boundary,
                     contributors,
                     assertion_message_calls,
+                    deferred_custom_catches,
                 },
             );
         }

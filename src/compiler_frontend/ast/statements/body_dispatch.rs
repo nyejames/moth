@@ -451,7 +451,6 @@ pub(crate) fn parse_function_body_statements(
     {
         let facts = pending_function_failure_facts(&body_nodes, &context.template_ir_store.borrow())?;
         if facts.body.implicit.is_empty()
-            && !facts.body.checked_numeric_operation
             && facts.body.typed_errors.is_empty()
             && facts.assertion_message_calls.is_empty()
         {

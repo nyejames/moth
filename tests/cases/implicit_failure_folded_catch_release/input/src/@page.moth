@@ -1,0 +1,25 @@
+DomainError ::
+    Missing,
+;
+
+handler_runs ~= 0
+inline_value = 1 + 2 catch then 0
+block_value = 1 + 2 catch:
+    handler_runs = 1
+    then 0
+;
+bound_value = 1 + 2 catch |err|:
+    handler_runs = 2
+    then 0
+;
+
+three |left Int, right Int| -> Int, DomainError!:
+    value = 1 + 2 catch:
+        then left * right
+    ;
+    return value
+;
+
+custom_value = three(50000, 50000) catch then 0
+
+[: folded catch inline=[inline_value] block=[block_value] bound=[bound_value] custom=[custom_value] handler-runs=[handler_runs]]

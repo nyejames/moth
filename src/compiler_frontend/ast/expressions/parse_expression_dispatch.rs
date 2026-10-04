@@ -1231,7 +1231,7 @@ fn parse_cast_expression(
         }
         let error_type_id =
             compatible_expression_error_type(
-                &cast_expression, context, type_interner.environment(), string_table,
+                &mut cast_expression, context, type_interner.environment(), string_table,
                 Some(token_stream.current_span()),
             )?;
         let handler = parse_cast_catch_handling_suffix(

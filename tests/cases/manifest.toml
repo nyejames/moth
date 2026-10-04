@@ -12216,6 +12216,62 @@ contract = "language.numeric.expression_local_catch_recovery"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_custom_catch_infallible_private"
+path = "implicit_failure_custom_catch_infallible_private"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.results.custom_catch_accepts_infallible_private_helpers"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_infallible_private_release"
+path = "implicit_failure_custom_catch_infallible_private_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "release", "js-backend"]
+contract = "language.results.custom_catch_accepts_infallible_private_helpers"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_catch"
+path = "implicit_failure_folded_catch"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_catch_release"
+path = "implicit_failure_folded_catch_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "release", "js-backend"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_catch_handler_type_rejected"
+path = "implicit_failure_folded_catch_handler_type_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_literal_catch_rejected"
+path = "implicit_failure_literal_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.literal_does_not_make_catch_eligible"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_private_rejected"
+path = "implicit_failure_custom_catch_private_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.custom_catch_rejects_escaping_private_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_forwarded_private_rejected"
+path = "implicit_failure_custom_catch_forwarded_private_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.custom_catch_rejects_escaping_private_failure"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_private_chain"
 path = "implicit_failure_private_chain"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]

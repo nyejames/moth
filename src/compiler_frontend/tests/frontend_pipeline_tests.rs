@@ -1086,6 +1086,88 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     })), "the private multiply helper must return overflow instead of trapping");
 }
 
+#[test]
+fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
+    let mut project = failure_project(
+        "@test/default measure\n\
+         plain |value Float| -> String:\n\
+             label String = cast measure(value)\n    return label\n;\n\
+         escaping |value Float, left Int, right Int| -> String:\n\
+             label String = cast measure(value)\n\
+             product = left * right\n    return [: [label] [product]]\n;\n\
+         caught |value Float| -> String:\n\
+             label String = cast measure(value) * value catch then \"fallback\"\n\
+             return label\n;\n\
+         declared |value Float| -> String, Error!:\n\
+             label String = cast measure(value)\n    return label\n;\n",
+    );
+    Arc::make_mut(&mut project.frontend.external_package_registry)
+        .register_function(ExternalFunctionDef {
+            name: "measure".to_owned(),
+            parameters: vec![ExternalParameter {
+                language_type: ExternalSignatureType::NativeFloat,
+                access_kind: ExternalAccessKind::Shared,
+            }],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::NativeFloat)],
+            error_return_type: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("float host signature must register");
+    let ast = project.ast();
+    let lowered = project.frontend.with_compiler(|compiler| {
+        compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+    }).expect("float formatting and external validation must lower");
+    let mut hir = lowered.hir_module;
+    let mut type_environment = lowered.type_environment;
+    let mut report = project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("float integrity guards must pass borrow checking");
+    crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
+        &hir, &mut report,
+    ).expect("numeric failure summaries must converge");
+    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
+        &mut hir, &report, &mut type_environment,
+    ).expect("only implicit failures may join the private lane");
+    project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("integrity guards and installed numeric lanes must pass borrow checking");
+
+    for (name, expected_mode, escapes) in [
+        ("plain", NumericFailureMode::Trap, false),
+        ("escaping", NumericFailureMode::Trap, true),
+        ("caught", NumericFailureMode::Trap, false),
+        ("declared", NumericFailureMode::ReturnError, false),
+    ] {
+        let function = named_hir_function(&project, &hir, name);
+        assert_eq!(
+            report.analysis.public_call_summaries[&function.id].escapes_builtin_failure,
+            escapes,
+        );
+        let mut formatting = Vec::new();
+        let mut validation = Vec::new();
+        for block_id in reachable_block_ids(&hir, function.entry) {
+            for statement in &hir.blocks[block_id.0 as usize].statements {
+                match &statement.kind {
+                    HirStatementKind::FormatFloat { failure_mode, .. } => {
+                        formatting.push(*failure_mode);
+                    }
+                    HirStatementKind::ValidateFloat { failure_mode, .. } => {
+                        validation.push(*failure_mode);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(formatting, [expected_mode], "{name} must preserve its formatting contract");
+        assert_eq!(validation, [expected_mode], "{name} must preserve finite-value validation");
+    }
+    for name in ["escaping", "caught"] {
+        let function = named_hir_function(&project, &hir, name);
+        assert!(
+            function_numeric_ops_return_error(&hir, function.entry),
+            "{name} must still recover ordinary checked arithmetic",
+        );
+    }
+}
+
 
 #[test]
 fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
@@ -1311,6 +1393,46 @@ fn implicit_failure_catch_covers_multiply_and_add_not_only_last_operand() {
         }));
         assert!(expression.failure_facts.implicit.is_empty());
         project.lower_ast_result(ast).expect("the complete arithmetic catch must lower");
+    }
+}
+
+#[test]
+fn implicit_failure_folded_catch_preserves_eligibility_without_escaping_failure() {
+    for handler in ["catch then 0", "catch |err|:\n        then 0\n    ;"] {
+        let mut project = failure_project(&format!(
+            "three || -> Int:\n    value = 1 + 2 {handler}\n    return value\n;\n"
+        ));
+        let ast = project.ast();
+        let expression = initializer(&named_function_body(&project, &ast, "three")[0]);
+        let block = assert_catch_contract(expression, 0, &[], builtin_error_type_id(&project, &ast));
+        assert!(matches!(block.handled_value.kind, ExpressionKind::Int(3)));
+        assert!(block.handled_value.failure_facts.checked_numeric_operation);
+        assert!(expression.failure_facts.implicit.is_empty());
+
+        let hir = project.lower_ast_result(ast).expect("folding must preserve an authored checked catch");
+        let three = named_hir_function(&project, &hir, "three");
+        assert!(hir.function_failure_facts[&three.id].contributors.is_empty());
+    }
+}
+
+#[test]
+fn implicit_failure_folded_catch_still_type_checks_handler_values() {
+    for handler in [
+        "catch then \"wrong\"",
+        "catch |err|:\n        then \"wrong\"\n    ;",
+    ] {
+        let mut project = failure_project(&format!(
+            "three || -> Int:\n    value Int = 1 + 2 {handler}\n    return value\n;\n"
+        ));
+        let messages = project.ast_result().err().expect("an unreachable handler must still satisfy its receiving type");
+        let diagnostic = messages.error_diagnostics().next().expect("handler type mismatch");
+        assert_eq!(diagnostic.kind.code(), "MOTH-TYPE-0001");
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::TypeMismatch { expected, found, .. }
+                if expected == builtin_type_ids::INT && found == builtin_type_ids::STRING
+        ));
+        assert!(diagnostic.primary_span.is_some());
     }
 }
 
@@ -1596,7 +1718,7 @@ fn implicit_failure_custom_catch_accepts_known_infallible_private_operand() {
 }
 
 #[test]
-fn implicit_failure_custom_catch_rejects_numeric_private_operand() {
+fn implicit_failure_custom_catch_projects_private_compatibility_checks_into_hir() {
     for protected in ["multiply(left, right)", "forward(left, right)"] {
         let mut project = failure_project(&format!(
             "Failure = | message String |\n\
@@ -1606,17 +1728,40 @@ fn implicit_failure_custom_catch_rejects_numeric_private_operand() {
              recover |left Int, right Int| -> Int:\n\
                  return load({protected}) catch then 0\n;\n"
         ));
-        let messages = project.ast_result().err().expect("numeric private calls cannot share custom recovery");
-        let diagnostic = messages.error_diagnostics().next().expect("custom compatibility diagnosis");
+        let ast = project.ast();
+        let expression = returned_value(&named_function_body(&project, &ast, "recover")[0]);
+        let block = catch_block(expression);
+        let checks = &block.handled_value.failure_facts.deferred_custom_catches;
+        let [check] = checks.as_slice() else {
+            panic!("private call compatibility must be retained for exact callee convergence");
+        };
+        let error_type_id = block.handled_value.failure_facts.typed_errors[0].error_type_id;
+        assert_eq!(check.error_type_id, error_type_id);
+        assert!(check.catch_span.is_some());
+        assert!(check.typed_producer_span.is_some());
         assert!(matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidFallibleHandling {
-                reason: InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                    typed_producer_span: Some(_), implicit_producer_span: Some(_), ..
-                },
-            }
+            check.candidates.as_slice(),
+            [candidate] if matches!(candidate.source, ImplicitFailureSource::PrivateCall(_))
+                && candidate.span.is_some()
         ));
-        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
+        let catch_span = check.catch_span;
+        let typed_producer_span = check.typed_producer_span;
+        let private_call_span = check.candidates[0].span;
+
+        let hir = project.lower_ast_result(ast).expect("unresolved private compatibility must not diagnose before convergence");
+        let recover = named_hir_function(&project, &hir, "recover");
+        let checks = &hir.function_failure_facts[&recover.id].deferred_custom_catches;
+        let [check] = checks.as_slice() else {
+            panic!("HIR must preserve the deferred custom catch check");
+        };
+        assert_eq!(check.error_type_id, error_type_id);
+        assert_eq!(check.catch_span, catch_span);
+        assert_eq!(check.typed_producer_span, typed_producer_span);
+        assert!(matches!(
+            check.candidates.as_slice(),
+            [candidate] if matches!(candidate.source, HirBuiltinFailureSource::Call(_))
+                && candidate.span == private_call_span
+        ));
     }
 }
 
@@ -1977,7 +2122,7 @@ fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_co
 fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
     for prefix in ["", "export:\n"] {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
-        for expression in ["42", "identity(value)"] {
+        for expression in ["3", "identity(value)"] {
             let mut project = failure_project(&format!(
                 "{prefix}    identity |value Int| -> Int:\n        return value\n    ;\n{closing_export}\
                  bad |value Int| -> Int:\n    return {expression} catch then 0\n;\n"
@@ -2360,7 +2505,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
 }
 
 #[test]
-fn implicit_failure_custom_catch_keeps_external_float_checks_on_function_boundary() {
+fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
     let mut project = failure_project(
         "@test/default measure\n\
          Failure = | message String |\n\
@@ -2409,20 +2554,14 @@ fn implicit_failure_custom_catch_keeps_external_float_checks_on_function_boundar
         })
         .expect("float host signature must register");
     let ast = project.ast();
-    let hir = project.lower_ast_result(ast).expect("builtin Error catch must recover injected float checks");
+    let hir = project.lower_ast_result(ast).expect("builtin Error catch must not absorb injected float checks");
     let validation = hir.blocks.iter().flat_map(|block| &block.statements).find_map(|statement| {
         match &statement.kind {
-            HirStatementKind::ValidateFloat { failure_mode, result, .. } => Some((*failure_mode, *result)),
+            HirStatementKind::ValidateFloat { failure_mode, .. } => Some(*failure_mode),
             _ => None,
         }
     }).expect("external float result must still be boundary-validated");
-    assert_eq!(validation.0, NumericFailureMode::ReturnError);
-    let producer = hir.blocks.iter().find(|block| block.statements.iter().any(|statement| {
-        matches!(statement.kind, HirStatementKind::ValidateFloat { result, .. } if result == validation.1)
-    })).expect("float validation block");
-    let (_, error) = fallible_edges(producer, validation.1);
-    let (handler, _) = error_adapter(&hir, error, validation.1);
-    assert_ne!(handler, producer.id);
+    assert_eq!(validation, NumericFailureMode::Trap);
 
 }
 

@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -548,12 +549,19 @@ fn failure_facts(
         boundary,
         contributors: sources.into_iter().map(failure_contributor).collect(),
         assertion_message_calls: vec![],
+        deferred_custom_catches: vec![],
     }
 }
 
 #[test]
-fn numeric_failure_contributor_rejects_empty_or_non_numeric_catalog_codes() {
-    for codes in [vec![], vec![BuiltinErrorCode::Unsupported]] {
+fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
+    for codes in [
+        vec![],
+        vec![BuiltinErrorCode::Unsupported],
+        vec![BuiltinErrorCode::FloatBoundaryNonFinite],
+        vec![BuiltinErrorCode::FloatFormatInvariant],
+        vec![BuiltinErrorCode::IntOverflow, BuiltinErrorCode::FloatFormatInvariant],
+    ] {
         let mut hir = base_hir(&[], &[private_identity("producer")]);
         let mut facts = failure_facts(
             HirBuiltinFailureBoundary::InferPrivate,
@@ -680,7 +688,7 @@ fn omitted_assertion_calls_use_existing_generated_reverse_dependencies() {
         &public_origins,
         &private_identities,
     ).unwrap();
-    model.include_assertion_message_dependencies(
+    model.include_deferred_validation_dependencies(
         &base, &mut transaction, &public_origins, &private_identities,
     ).unwrap();
     assert_eq!(model.callers(ConvergenceNodeId(0)), Some(&[ConvergenceNodeId(1)][..]));

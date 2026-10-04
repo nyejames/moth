@@ -16,7 +16,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
     HandledFallibleHostFunctionCallInput,
 };
-use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    DeferredCustomCatchCheck, ExpressionFailureFacts, FailureDisposition, ImplicitFailureSource,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
 };
@@ -178,7 +180,7 @@ pub(crate) fn parse_completed_expression_catch(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    expression: Expression,
+    mut expression: Expression,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -200,7 +202,7 @@ pub(crate) fn parse_completed_expression_catch(
     }
 
     let error_type_id = compatible_expression_error_type(
-        &expression, context, type_interner.environment(), string_table,
+        &mut expression, context, type_interner.environment(), string_table,
         Some(token_stream.current_span()),
     )?;
     let result_type_ids = match &expression.kind {
@@ -257,17 +259,27 @@ pub(crate) fn complete_catch_failure_fact(
         FailureDisposition::HandledByCatch {
             error_type_id,
         };
-    if let FallibleHandling::Handler { body, .. } = &catch.handler {
-        expression.failure_facts =
-            pending_body_failure_facts(
-                body, &context.template_ir_store.borrow(),
-            )?;
-    }
+    expression.failure_facts = if let FallibleHandling::Handler { body, .. } = &catch.handler {
+        let handler_facts = pending_body_failure_facts(
+            body, &context.template_ir_store.borrow(),
+        )?;
+        if catch.handled_value.failure_facts.is_folded_numeric_catch_success() {
+            // The handler remains semantically checked but has no executable failure edge.
+            let mut facts = ExpressionFailureFacts::default();
+            facts.merge_deferred_catches_from(&handler_facts);
+            facts
+        } else {
+            handler_facts
+        }
+    } else {
+        ExpressionFailureFacts::default()
+    };
+    expression.failure_facts.merge_deferred_catches_from(&catch.handled_value.failure_facts);
     Ok(())
 }
 
 pub(crate) fn compatible_expression_error_type(
-    expression: &Expression,
+    expression: &mut Expression,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
@@ -304,14 +316,28 @@ pub(crate) fn compatible_expression_error_type(
             if !is_postfix_error_compatible(
                 builtin_error_type_id, first.error_type_id, type_environment,
             ) {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                        error_type_id: first.error_type_id,
-                        typed_producer_span: first.span,
-                        implicit_producer_span: facts.implicit.first().and_then(|producer| producer.span),
-                    },
+                if let Some(producer) = facts.implicit.iter().find(|producer| {
+                    matches!(producer.source, ImplicitFailureSource::NumericOperation)
+                }) {
+                    return Err(CompilerDiagnostic::invalid_fallible_handling(
+                        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                            error_type_id: first.error_type_id,
+                            typed_producer_span: first.span,
+                            implicit_producer_span: producer.span,
+                        },
+                        catch_span,
+                    ).into());
+                }
+
+                let check = DeferredCustomCatchCheck {
                     catch_span,
-                ).into());
+                    error_type_id: first.error_type_id,
+                    typed_producer_span: first.span,
+                    candidates: facts.implicit.clone(),
+                };
+                let error_type_id = first.error_type_id;
+                expression.failure_facts.deferred_custom_catches.push(check);
+                return Ok(error_type_id);
             }
         }
         return Ok(first.error_type_id);

@@ -206,11 +206,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
-            NumericFailureMode::ReturnError
-        } else {
-            self.select_numeric_failure_mode(span)?
-        };
+        let failure_mode = self.select_numeric_failure_mode(span)?;
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
@@ -288,11 +284,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
-            NumericFailureMode::ReturnError
-        } else {
-            self.select_numeric_failure_mode(span)?
-        };
+        let failure_mode = self.select_numeric_failure_mode(span)?;
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {

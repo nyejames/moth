@@ -219,11 +219,13 @@ pub(crate) fn unsupported_catch_diagnostic(
 fn catch_operand_has_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
+    allow_deferred_private_calls: bool,
 ) -> Result<bool, CompilerError> {
     let mut state = TraversalState {
         pending_facts: Some(ExpressionFailureFacts::default()),
         check_pending_failure: true,
         check_unsupported_failure: true,
+        allow_deferred_private_calls,
         ..TraversalState::default()
     };
     classify_expression(expression, template_ir_store, &mut state)?;
@@ -233,6 +235,7 @@ fn catch_operand_has_unsupported_failure(
 fn protected_operands_have_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
+    allow_deferred_private_calls: bool,
 ) -> Result<bool, CompilerError> {
     match &expression.kind {
         ExpressionKind::FunctionCall { args, .. }
@@ -240,33 +243,45 @@ fn protected_operands_have_unsupported_failure(
         | ExpressionKind::HandledFallibleFunctionCall { args, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
             for argument in args {
-                if catch_operand_has_unsupported_failure(&argument.value, template_ir_store)? {
+                if catch_operand_has_unsupported_failure(
+                    &argument.value, template_ir_store, allow_deferred_private_calls,
+                )? {
                     return Ok(true);
                 }
             }
         }
         ExpressionKind::HandledFallibleExpression { value, .. } => {
-            return protected_operands_have_unsupported_failure(value, template_ir_store);
+            return protected_operands_have_unsupported_failure(
+                value, template_ir_store, allow_deferred_private_calls,
+            );
         }
         ExpressionKind::MethodCall { receiver, args, .. }
         | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
         | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-            if catch_operand_has_unsupported_failure(receiver, template_ir_store)? {
+            if catch_operand_has_unsupported_failure(
+                receiver, template_ir_store, allow_deferred_private_calls,
+            )? {
                 return Ok(true);
             }
             for argument in args {
-                if catch_operand_has_unsupported_failure(&argument.value, template_ir_store)? {
+                if catch_operand_has_unsupported_failure(
+                    &argument.value, template_ir_store, allow_deferred_private_calls,
+                )? {
                     return Ok(true);
                 }
             }
         }
         ExpressionKind::Cast(cast) => {
-            return catch_operand_has_unsupported_failure(&cast.source, template_ir_store);
+            return catch_operand_has_unsupported_failure(
+                &cast.source, template_ir_store, allow_deferred_private_calls,
+            );
         }
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
                 if let ExpressionRpnItem::Operand(operand) = item
-                    && catch_operand_has_unsupported_failure(operand, template_ir_store)?
+                    && catch_operand_has_unsupported_failure(
+                        operand, template_ir_store, allow_deferred_private_calls,
+                    )?
                 {
                     return Ok(true);
                 }
@@ -288,6 +303,7 @@ struct TraversalState {
     unsupported_catch: Option<(&'static str, Option<SourceSpan>)>,
     check_pending_failure: bool,
     check_unsupported_failure: bool,
+    allow_deferred_private_calls: bool,
     has_pending_failure: bool,
     explicit_exit_only: bool,
 }
@@ -308,11 +324,15 @@ fn classify_expression(
             | ExpressionKind::RuntimeSlotApplicationHandoff(_)
     );
     if let Some(facts) = &mut state.pending_facts {
+        if !state.check_pending_failure && !state.check_catch_support {
+            facts.merge_deferred_catches_from(&expression.failure_facts);
+        }
         if !traverses_owned_payload && state.protected_failure_depth == 0 {
             if state.check_pending_failure {
                 let facts = &expression.failure_facts;
                 let pending_implicit = if state.check_unsupported_failure {
                     facts.disposition == FailureDisposition::Pending
+                        && !state.allow_deferred_private_calls
                         && facts.implicit.iter().any(|contributor| {
                             matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
                         })
@@ -580,15 +600,25 @@ fn classify_value_block(
             }
         }
         ValueBlock::Catch(value_catch) => {
+            if let Some(facts) = &mut state.pending_facts
+                && !state.check_pending_failure && !state.check_catch_support
+            {
+                facts.merge_deferred_catches_from(&value_catch.handled_value.failure_facts);
+            }
             if state.check_catch_support {
                 let protected = &value_catch.handled_value;
                 let unsupported_name = match &protected.kind {
+                    _ if protected.failure_facts.is_folded_numeric_catch_success() => None,
                     ExpressionKind::HandledFallibleFunctionCall { .. }
                     | ExpressionKind::HandledFallibleHostFunctionCall { .. }
                     | ExpressionKind::HandledFallibleExpression { .. }
                     | ExpressionKind::Cast(_)
                     | ExpressionKind::Runtime(_) => {
-                        protected_operands_have_unsupported_failure(protected, template_ir_store)?
+                        protected_operands_have_unsupported_failure(
+                            protected,
+                            template_ir_store,
+                            !protected.failure_facts.deferred_custom_catches.is_empty(),
+                        )?
                             .then_some("an expression with unsupported fallible operands or arguments")
                     }
                     ExpressionKind::FunctionCall { .. } => Some("an inferred-failure private call"),
@@ -623,7 +653,12 @@ fn classify_value_block(
                 }
             }
             if let FallibleHandling::Handler { body, .. } = &value_catch.handler {
-                return classify_nodes(body, template_ir_store, state);
+                let dead_handler = state.pending_facts.is_some()
+                    && value_catch.handled_value.failure_facts.is_folded_numeric_catch_success();
+                state.protected_failure_depth += usize::from(dead_handler);
+                let effect = classify_nodes(body, template_ir_store, state);
+                state.protected_failure_depth -= usize::from(dead_handler);
+                return effect;
             }
             Ok(None)
         }

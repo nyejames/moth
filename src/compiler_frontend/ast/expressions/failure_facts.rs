@@ -20,6 +20,8 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 pub(crate) struct ExpressionFailureFacts {
     pub(crate) implicit: Vec<ImplicitFailureContributor>,
     pub(crate) typed_errors: Vec<TypedErrorProducer>,
+    /// Custom catch compatibility waits for exact private-callee failure summaries.
+    pub(crate) deferred_custom_catches: Vec<DeferredCustomCatchCheck>,
     /// A checked operation remains catch-eligible even when constant folding discharges it.
     pub(crate) checked_numeric_operation: bool,
     /// Explicit `!`, `cast!` and `?` leave the function, never target an enclosing catch.
@@ -46,6 +48,14 @@ pub(crate) struct TypedErrorProducer {
     pub(crate) error_type_id: TypeId,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DeferredCustomCatchCheck {
+    pub(crate) catch_span: Option<SourceSpan>,
+    pub(crate) error_type_id: TypeId,
+    pub(crate) typed_producer_span: Option<SourceSpan>,
+    pub(crate) candidates: Vec<ImplicitFailureContributor>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FailureDisposition {
     #[default]
@@ -59,6 +69,7 @@ impl ExpressionFailureFacts {
     }
 
     pub(crate) fn merge_pending_from(&mut self, other: &Self) {
+        self.merge_deferred_catches_from(other);
         self.postfix_exit_span = self.postfix_exit_span.or(other.postfix_exit_span);
         if other.disposition != FailureDisposition::Pending {
             return;
@@ -75,6 +86,18 @@ impl ExpressionFailureFacts {
                 self.typed_errors.push(producer.clone());
             }
         }
+    }
+
+    pub(crate) fn merge_deferred_catches_from(&mut self, other: &Self) {
+        for check in &other.deferred_custom_catches {
+            if !self.deferred_custom_catches.contains(check) {
+                self.deferred_custom_catches.push(check.clone());
+            }
+        }
+    }
+
+    pub(crate) fn is_folded_numeric_catch_success(&self) -> bool {
+        self.checked_numeric_operation && self.implicit.is_empty() && self.typed_errors.is_empty()
     }
 
     pub(crate) fn record_numeric_operation(
@@ -211,8 +234,6 @@ impl ExpressionFailureFacts {
     }
 }
 
-/// Only arithmetic failures are implicit contributors. Codes 304 and 305 describe external
-/// boundary validation and defensive formatting invariants, not recoverable arithmetic work.
 fn numeric_failure_codes(operator: NumericOperator, domain: NumericScalar) -> Vec<BuiltinErrorCode> {
     let mut codes = Vec::new();
     if matches!(
@@ -232,6 +253,7 @@ fn numeric_failure_codes(operator: NumericOperator, domain: NumericScalar) -> Ve
     if domain.is_binary_float() && operator != NumericOperator::Negate {
         codes.push(BuiltinErrorCode::FloatNonFinite);
     }
+    debug_assert!(codes.iter().all(|code| code.is_implicit_failure()));
     codes
 }
 

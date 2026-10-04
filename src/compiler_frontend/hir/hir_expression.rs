@@ -857,6 +857,11 @@ impl<'a> HirBuilder<'a> {
         result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
         let protected = &value_catch.handled_value;
+        if protected.failure_facts.is_folded_numeric_catch_success() {
+            // AST already checked the handler. Folding removed all runtime producers, so there
+            // is no carrier or error edge to lower and the protected value is the whole result.
+            return self.lower_expression(protected);
+        }
         let err_type = match &protected.kind {
             ExpressionKind::HandledFallibleFunctionCall { name, .. } => {
                 let target = self.resolve_call_target_or_error(name, span)?;

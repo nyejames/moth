@@ -52,6 +52,22 @@ pub(crate) enum BuiltinErrorCode {
 }
 
 impl BuiltinErrorCode {
+    /// The single closed classification of failures inferred for checked arithmetic and ranges.
+    ///
+    /// Boundary validation and defensive formatting invariants are not implicit failures.
+    /// Their delivery remains governed by separately declared API contracts.
+    pub(crate) fn is_implicit_failure(self) -> bool {
+        matches!(
+            self,
+            Self::DivideByZero
+                | Self::IntOverflow
+                | Self::InvalidExponent
+                | Self::FloatNonFinite
+                | Self::InvalidRangeStep
+                | Self::RangeStepNoProgress
+        )
+    }
+
     /// The canonical unsigned runtime value this code carries in `Error.code`.
     pub(crate) fn as_u32(self) -> u32 {
         self as u32

@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " custom catch folded-before=3 literal-before=3 recursive-before=3 folded-after=3 literal-after=3 recursive-after=3"

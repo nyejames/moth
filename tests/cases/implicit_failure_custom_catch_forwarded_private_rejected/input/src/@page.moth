@@ -1,0 +1,19 @@
+DomainError ::
+    Missing,
+;
+
+as_domain_value |value Int| -> Int, DomainError!:
+    return value
+;
+
+forwarded |left Int, right Int| -> Int:
+    return as_domain_value(forward(left, right)) catch then 0
+;
+
+forward |left Int, right Int| -> Int:
+    return multiply(left, right)
+;
+
+multiply |left Int, right Int| -> Int:
+    return left * right
+;

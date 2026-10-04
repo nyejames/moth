@@ -15,7 +15,6 @@
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason, PremergeDiagnosticBatch, PremergeFailure,
@@ -269,9 +268,9 @@ impl ConvergenceModel {
             .collect()
     }
 
-    /// Keep statically omitted assertion messages in the existing summary dependency model.
-    /// These edges schedule validation only; they do not imply runtime execution or an escape.
-    fn include_assertion_message_dependencies(
+    /// Keep summary-dependent source checks in the existing dependency model, including work
+    /// that has no runtime edge. Validation edges alone do not imply execution or escaping failure.
+    fn include_deferred_validation_dependencies(
         &mut self,
         base: &HirModule,
         transaction: &mut GeneratedFunctionTransaction<'_>,
@@ -280,9 +279,9 @@ impl ConvergenceModel {
     ) -> Result<(), CompilerError> {
         for index in 0..self.nodes.len() {
             let mut targets = match &self.nodes[index].node {
-                ConvergenceNode::BaseModule => assertion_message_call_targets(base),
+                ConvergenceNode::BaseModule => deferred_validation_call_targets(base),
                 ConvergenceNode::Generated(identity) => {
-                    assertion_message_call_targets(&transaction.sidecar_mut(identity)?.module.executable.hir)
+                    deferred_validation_call_targets(&transaction.sidecar_mut(identity)?.module.executable.hir)
                 }
             };
             // An absent assertion-only summary diagnoses after convergence, rather than becoming
@@ -316,15 +315,19 @@ impl ConvergenceModel {
     }
 }
 
-fn assertion_message_call_targets(hir: &HirModule) -> Vec<(FunctionId, CallTarget)> {
-    hir.function_failure_facts.iter().flat_map(|(function, facts)| {
-        facts.assertion_message_calls.iter().filter_map(|contributor| {
-            match &contributor.source {
-                HirBuiltinFailureSource::Call(target) => Some((*function, target.clone())),
-                HirBuiltinFailureSource::NumericOperation => None,
+fn deferred_validation_call_targets(hir: &HirModule) -> Vec<(FunctionId, CallTarget)> {
+    let mut targets = Vec::new();
+    for (function, facts) in &hir.function_failure_facts {
+        let contributors = facts.assertion_message_calls.iter().chain(
+            facts.deferred_custom_catches.iter().flat_map(|check| &check.candidates),
+        );
+        for contributor in contributors {
+            if let HirBuiltinFailureSource::Call(target) = &contributor.source {
+                targets.push((*function, target.clone()));
             }
-        })
-    }).collect()
+        }
+    }
+    targets
 }
 
 fn add_model_edges(
@@ -403,7 +406,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         &base_private_identities,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-    convergence_model.include_assertion_message_dependencies(
+    convergence_model.include_deferred_validation_dependencies(
         hir_module,
         generated_transaction,
         &base_public_origins,
@@ -803,19 +806,11 @@ fn active_builtin_failure_contributor<'a>(
     for contributor in &facts.contributors {
         let active = match &contributor.source {
             HirBuiltinFailureSource::NumericOperation => {
-                if contributor.codes.is_empty() || contributor.codes.iter().any(|code| {
-                    !matches!(
-                        code,
-                        BuiltinErrorCode::DivideByZero
-                            | BuiltinErrorCode::IntOverflow
-                            | BuiltinErrorCode::InvalidExponent
-                            | BuiltinErrorCode::FloatNonFinite
-                            | BuiltinErrorCode::FloatBoundaryNonFinite
-                            | BuiltinErrorCode::FloatFormatInvariant
-                    )
-                }) {
+                if contributor.codes.is_empty()
+                    || contributor.codes.iter().any(|code| !code.is_implicit_failure())
+                {
                     return Err(CompilerError::compiler_error(
-                        "implicit numeric failure contributor must carry nonempty numeric builtin codes (300–305)",
+                        "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
                     ));
                 }
                 true
@@ -877,6 +872,25 @@ pub(crate) fn builtin_failure_diagnostic(
     let facts = hir.function_failure_facts.get(&function).ok_or_else(|| {
         CompilerError::compiler_error("builtin failure boundary lost its semantic facts")
     })?;
+    for check in &facts.deferred_custom_catches {
+        for candidate in &check.candidates {
+            let HirBuiltinFailureSource::Call(target) = &candidate.source else {
+                return Err(CompilerError::compiler_error(
+                    "deferred custom catch contributor is not a private call",
+                ));
+            };
+            if call_escapes_builtin_failure(hir, report, target)? {
+                return Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                        error_type_id: check.error_type_id,
+                        typed_producer_span: check.typed_producer_span,
+                        implicit_producer_span: candidate.span,
+                    },
+                    check.catch_span,
+                )));
+            }
+        }
+    }
     for contributor in &facts.assertion_message_calls {
         let HirBuiltinFailureSource::Call(target) = &contributor.source else {
             return Err(CompilerError::compiler_error(
