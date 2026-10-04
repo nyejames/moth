@@ -1013,12 +1013,21 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
         assert!(value.failure_facts.typed_errors.is_empty());
     }
 
-    let hir = project.lower_ast_result(ast).expect("existing numeric trap-mode programs must lower");
+    let lowered = project.frontend.with_compiler(|compiler| {
+        compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+    }).expect("private failure chain must lower");
+    let mut hir = lowered.hir_module;
+    let mut type_environment = lowered.type_environment;
     let mut report = project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
         .expect("ordinary numeric functions should pass borrow checking");
     crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
         &hir, &mut report,
     ).expect("private inferred failure summaries should converge");
+    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
+        &mut hir, &report, &mut type_environment,
+    ).expect("private failure lane must install");
+    project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("installed failure edges must pass borrow checking");
     for (name, expected_escape) in [
         ("multiply", true), ("first", true), ("second", true), ("safe_product", false),
     ] {
@@ -1035,10 +1044,40 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
             } else {
                 HirBuiltinFailureBoundary::BuiltinErrorSlot
             },
-            "Error! selects materialisation as a semantic contract, not runtime delivery",
+        );
+        let carrier = type_environment.fallible_carrier_slots(function.return_type);
+        assert!(carrier.is_some(), "{name} must expose builtin Error through one carrier");
+        assert!(
+            function_reaches_error_return(&hir, function.entry),
+            "{name} must return the existing Error on its own failure edge",
         );
     }
+    assert!(hir.blocks.iter().any(|block| block.statements.iter().any(|statement| {
+        matches!(statement.kind, HirStatementKind::NumericOp {
+            failure_mode: NumericFailureMode::ReturnError, ..
+        })
+    })), "the private multiply helper must return overflow instead of trapping");
+
 }
+fn function_reaches_error_return(hir: &HirModule, entry: BlockId) -> bool {
+    let mut pending = vec![entry];
+    let mut seen = Vec::new();
+    while let Some(block_id) = pending.pop() {
+        if seen.contains(&block_id) {
+            continue;
+        }
+        seen.push(block_id);
+        let Some(block) = hir.blocks.get(block_id.0 as usize) else {
+            continue;
+        };
+        if matches!(block.terminator, HirTerminator::ReturnError(_)) {
+            return true;
+        }
+        pending.extend(crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator));
+    }
+    false
+}
+
 
 #[test]
 fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_error_return() {

@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Expression-local catch lowers through a shared handler. Private propagation and start Error! are not implemented.
-- Current slice: Phase 3 private internal failure lane.
-- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap.
-- Next action: propagate inferred private failure through calls and materialise it at builtin Error!.
+- Status: active. Private inferred failure propagates through an internal carrier and materialises at builtin Error!. start Error! is not implemented.
+- Current slice: Phase 3 compound write-back and range failures.
+- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap. Compound write-back and range updates are not on the lane yet.
+- Next action: check compound assignment write-back and range-loop updates through the private failure lane.
 
 ## Goal and authority
 

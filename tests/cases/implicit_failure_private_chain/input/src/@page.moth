@@ -1,0 +1,21 @@
+multiply |left Int, right Int| -> Int:
+    return left * right
+;
+first |left Int, right Int| -> Int:
+    return multiply(left, right)
+;
+second |left Int, right Int| -> Int:
+    return first(left, right)
+;
+safe_product |left Int, right Int| -> Int, Error!:
+    return second(left, right)
+;
+overflow_code ~U32 = 0
+overflow = safe_product(2147483647, 2) catch |overflow_error|:
+    overflow_code = overflow_error.code
+    then 0
+;
+exact = safe_product(6, 7) catch then 0
+
+[: private failure code=[overflow_code] recovered=[overflow] exact=[exact]]
+

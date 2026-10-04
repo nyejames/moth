@@ -28,7 +28,7 @@ use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
 };
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
+use crate::compiler_frontend::hir::reachability::{HirModuleLinkFacts, collect_module_function_link_facts};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
@@ -382,7 +382,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     function_link_facts: &HirModuleLinkFacts,
     generated_transaction: &mut GeneratedFunctionTransaction<'_>,
     bootstrap_borrow_analysis: BorrowCheckReport,
-    type_environment: &TypeEnvironment,
+    type_environment: &mut TypeEnvironment,
     warnings: &[CompilerDiagnostic],
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<BorrowCheckReport, PremergeFailure> {
@@ -561,7 +561,55 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             Some(&source_owner),
         )?;
     }
+    let borrow_analysis = refresh_private_failure_lanes(
+        compiler, hir_module, &borrow_analysis, type_environment, warnings, None,
+    )?;
+    for node_id in convergence_model.generated_node_ids() {
+        let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
+            return Err(CompilerError::compiler_error(
+                "generated convergence node has no generated identity",
+            )
+            .into());
+        };
+        let identity = identity.clone();
+        let source_owner = FrozenIdentityHandle::for_domain(
+            identity.declaration().module_origin().package().clone(),
+        );
+        let sidecar = generated_transaction.sidecar_mut(&identity)?;
+        let report = refresh_private_failure_lanes(
+            compiler,
+            &mut sidecar.module.executable.hir,
+            &sidecar.module.executable.borrow_analysis,
+            &mut sidecar.module.executable.type_environment,
+            &sidecar.module.metadata.warnings,
+            Some(&source_owner),
+        )?;
+        sidecar.module.link_facts.functions =
+            collect_module_function_link_facts(&sidecar.module.executable.hir)
+                .map_err(PremergeFailure::Infrastructure)?;
+        sidecar.module.executable.borrow_analysis = report;
+    }
     Ok(borrow_analysis)
+}
+
+fn refresh_private_failure_lanes(
+    compiler: &mut CompilerFrontend<'_>,
+    hir: &mut HirModule,
+    report: &BorrowCheckReport,
+    type_environment: &mut TypeEnvironment,
+    warnings: &[CompilerDiagnostic],
+    source_owner: Option<&FrozenIdentityHandle>,
+) -> Result<BorrowCheckReport, PremergeFailure> {
+    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
+        hir,
+        report,
+        type_environment,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let mut refreshed = check_borrows(compiler, hir, warnings, source_owner)?;
+    infer_builtin_failure_summaries(hir, &mut refreshed)
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    Ok(refreshed)
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.

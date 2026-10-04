@@ -688,7 +688,7 @@ fn run_semantic_stages(
     )?;
     let HirLoweringResult {
         mut hir_module,
-        type_environment,
+        mut type_environment,
         metadata: lowering_metadata,
     } = hir_lowering;
 
@@ -734,7 +734,7 @@ fn run_semantic_stages(
         &function_link_facts,
         &mut generated_transaction,
         bootstrap_borrow_analysis,
-        &type_environment,
+        &mut type_environment,
         &warnings,
         #[cfg(feature = "timers")]
         timing_context,
@@ -813,9 +813,9 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
-    // Conservative bounded-integer proofs are computed once per executable from the validated
-    // HIR under the boundary profile, before publication pairs them immutably. Convergence only
-    // touched call summaries and the borrow report, so statement ids are final here.
+    // The private failure lane may have added blocks after the convergence model was built.
+    // Recollect link facts from the final CFG before proofs and publication.
+    let function_link_facts = collect_module_function_link_facts(&hir_module)?;
     let numeric_proofs = analyse_numeric_proofs(
         &hir_module,
         &type_environment,

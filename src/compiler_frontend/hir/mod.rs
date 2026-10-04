@@ -27,6 +27,7 @@ pub(crate) mod constants;
 pub(crate) mod expression_rewrite;
 pub(crate) mod expressions;
 pub(crate) mod failure_facts;
+pub(crate) mod private_failure_lane;
 pub(crate) mod functions;
 pub(crate) mod ids;
 pub(crate) mod module;
