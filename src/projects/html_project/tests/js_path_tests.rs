@@ -458,6 +458,10 @@ fn fallible_bootstrap_failure_reports_once_without_publishing_or_reading_payload
                         true,
                         release_build,
                     );
+                    assert!(caller.contains(
+                        "typeof globalThis.__moth_record_entry_failure === \"function\""
+                    ));
+                    assert!(caller.contains("globalThis.__moth_record_entry_failure();"));
                     assert!(caller.contains(&format!(
                         "process.stderr.write({ENTRY_FAILURE_NOTICE:?})"
                     )));
@@ -478,9 +482,14 @@ fn fallible_bootstrap_failure_reports_once_without_publishing_or_reading_payload
 const events = [];
 let payload_reads = 0;
 let error_message_reads = 0;
+let error_code_reads = 0;
+globalThis.__moth_record_entry_failure = () => {
+    if (process.exitCode !== undefined) throw new Error("Entry recording must precede host status");
+    events.push("entry-failure");
+};
 const failure = {
     get message() { error_message_reads++; return "<application-error>"; },
-    code: 0
+    get code() { error_code_reads++; return 0; }
 };
 function start_entry() {
     events.push("start");
@@ -524,7 +533,7 @@ function __moth_mount_template_fragment(_, fragment) { events.push(fragment); }
                         );
                         let output = run_bootstrap_scripts(
                             &html,
-                            "console.log(JSON.stringify([events, payload_reads, error_message_reads, failure.code, children[0] === static_content, children]));",
+                            "console.log(JSON.stringify([events, payload_reads, error_message_reads, error_code_reads, children[0] === static_content, children]));",
                             is_module_script,
                         );
                         assert_eq!(
@@ -540,13 +549,13 @@ function __moth_mount_template_fragment(_, fragment) { events.push(fragment); }
                             assert_eq!(
                                 stdout.trim(),
                                 format!(
-                                    r#"[["start","text-node"],0,0,0,true,[{{"nodeType":1,"outerHTML":"<main>static authored content</main>"}},{{"nodeType":3,"data":{RELEASE_ENTRY_FAILURE_NOTICE:?}}}]]"#
+                                    r#"[["start","entry-failure","text-node"],0,0,0,true,[{{"nodeType":1,"outerHTML":"<main>static authored content</main>"}},{{"nodeType":3,"data":{RELEASE_ENTRY_FAILURE_NOTICE:?}}}]]"#
                                 )
                             );
                         } else {
                             assert_eq!(
                                 stdout.trim(),
-                                r#"[["start"],0,0,0,true,[{"nodeType":1,"outerHTML":"<main>static authored content</main>"}]]"#
+                                r#"[["start","entry-failure"],0,0,0,true,[{"nodeType":1,"outerHTML":"<main>static authored content</main>"}]]"#
                             );
                         }
                     }
@@ -564,6 +573,7 @@ fn fallible_bootstrap_success_unwraps_once_and_hydrates_in_source_order() {
             for release_build in [false, true] {
                 let bundle = r#"
 const events = [];
+globalThis.__moth_record_entry_failure = () => events.push("entry-failure");
 function start_entry() {
     events.push("start");
     return {

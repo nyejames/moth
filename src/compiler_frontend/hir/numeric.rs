@@ -11,6 +11,7 @@
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
@@ -39,6 +40,22 @@ pub enum NumericFailureMode {
     /// WHY: custom fallible channels, top-level `start()`, and non-fallible functions cannot
     ///      represent numeric failures as user values, so the backend must halt.
     Trap,
+}
+
+/// Language-defined range guards, distinct from resource and invariant traps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeStepFailureCause {
+    ZeroStep,
+    NoProgress,
+}
+
+impl RangeStepFailureCause {
+    pub(crate) fn builtin_error_code(self) -> BuiltinErrorCode {
+        match self {
+            Self::ZeroStep => BuiltinErrorCode::InvalidRangeStep,
+            Self::NoProgress => BuiltinErrorCode::RangeStepNoProgress,
+        }
+    }
 }
 
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.

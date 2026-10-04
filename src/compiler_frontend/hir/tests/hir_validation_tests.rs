@@ -1520,8 +1520,8 @@ fn validator_accepts_format_float_return_error_with_carrier() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let span = None;
     let string_type = type_environment.builtins().string;
-    let int_type = type_environment.builtins().int;
-    let carrier_type = type_environment.intern_fallible_carrier(string_type, int_type);
+    let error_type = builtin_error_type_id(&mut type_environment);
+    let carrier_type = type_environment.intern_fallible_carrier(string_type, error_type);
 
     inject_float_statement(
         &mut module,

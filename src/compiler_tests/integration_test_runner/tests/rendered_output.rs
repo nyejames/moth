@@ -1476,6 +1476,8 @@ fn rendered_output_classic_and_module_harnesses_publish_one_safe_entry_failure()
         "const application_error = {{ message: 'application-secret', code: 0 }};\n\
          console.log('before');\n\
          document.getElementById('root').insertAdjacentHTML('beforeend', '<p>published</p>');\n\
+         globalThis.__moth_record_entry_failure();\n\
+         globalThis.__moth_record_entry_failure();\n\
          process.stderr.write({notice});\n\
          process.exitCode = 1;"
     );
@@ -1503,9 +1505,39 @@ fn rendered_output_classic_and_module_harnesses_publish_one_safe_entry_failure()
 }
 
 #[test]
+fn rendered_output_recorded_entry_failure_stays_terminal_after_queued_host_work() {
+    let script = "queueMicrotask(() => {\n\
+             console.log('after');\n\
+             document.getElementById('root').insertAdjacentHTML('beforeend', '<p>late</p>');\n\
+             throw new Error('late host fault');\n\
+         });\n\
+         setTimeout(() => console.log('timer'), 0);\n\
+         console.log('before');\n\
+         globalThis.__moth_record_entry_failure();";
+    for script_type in ["", " type=\"module\""] {
+        let script_block = format!("<script{script_type}>{script}</script>\n  </body>");
+        let html = VALID_HTML.replace("  </body>", &script_block);
+        let mut built = build_result_with_index_html(&html);
+        let output = execute_html_harness_for_test(&mut built)
+            .expect("later host work must not invalidate a recorded entry failure");
+        assert_eq!(
+            output.events(),
+            &[
+                RuntimeEvent::Console { text: "before".to_owned() },
+                RuntimeEvent::EntryFailure,
+            ],
+            "{script_type}",
+        );
+    }
+}
+
+#[test]
 fn rendered_output_entry_failure_precedes_output_and_runtime_expectation_mismatches() {
     let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("notice is a valid string");
-    let script = format!("console.log('before'); process.stderr.write({notice}); process.exitCode = 1;");
+    let script = format!(
+        "console.log('before'); globalThis.__moth_record_entry_failure(); \
+         process.stderr.write({notice}); process.exitCode = 1;"
+    );
     let generic_reason = format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end());
     for expectation in [
         RenderedOutputExpectation { exact: Some("before".to_owned()), ..Default::default() },
@@ -1528,6 +1560,32 @@ fn rendered_output_entry_failure_precedes_output_and_runtime_expectation_mismatc
 }
 
 #[test]
+fn rendered_output_recorded_entry_failure_survives_cleared_host_status() {
+    let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("notice is a valid string");
+    for presentation in [
+        format!("process.stderr.write({notice}); process.exitCode = 1; process.exitCode = 0;"),
+        String::new(),
+    ] {
+        let script = format!(
+            "console.log('before'); globalThis.__moth_record_entry_failure(); {presentation}"
+        );
+        let (passed, kind, reason) = validate_html_script(
+            &script,
+            RenderedOutputExpectation {
+                exact: Some("before".to_owned()),
+                ..Default::default()
+            },
+        );
+        assert!(!passed);
+        assert_eq!(kind, Some(FailureKind::EntryFailed), "{reason:?}");
+        assert_eq!(
+            reason,
+            Some(format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()))
+        );
+    }
+}
+
+#[test]
 fn rendered_output_zero_or_unset_exit_code_does_not_report_entry_failure() {
     for script in ["console.log('success');", "process.exitCode = 0; console.log('success');"] {
         let (passed, kind, reason) = validate_html_script(
@@ -1543,6 +1601,7 @@ fn rendered_output_zero_or_unset_exit_code_does_not_report_entry_failure() {
 fn rendered_output_unrelated_exit_code_is_a_host_fault() {
     for script in [
         "process.exitCode = 2; console.log('before');",
+        "process.stderr.write('Moth entry failed\\n'); process.exitCode = 1;",
         "process.stderr.write('Moth entry failed\\n'); process.exitCode = 2;",
         "process.stderr.write('other fault\\n'); process.exitCode = 1;",
     ] {
@@ -1572,7 +1631,10 @@ fn rendered_output_nonzero_exit_code_does_not_replace_an_uncaught_error() {
 #[test]
 fn html_wasm_harness_keeps_entry_failure_separate_from_runtime_errors_and_traps() {
     let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("notice is a valid string");
-    let script = format!("console.log('before'); process.stderr.write({notice}); process.exitCode = 1;");
+    let script = format!(
+        "console.log('before'); globalThis.__moth_record_entry_failure(); \
+         process.stderr.write({notice}); process.exitCode = 1;"
+    );
     let temp_dir = tempfile::tempdir().expect("temporary Wasm harness directory should exist");
     std::fs::write(temp_dir.path().join("page.js"), &script).expect("page script should be written");
     let output = execute_wasm_harness_for_test(temp_dir.path())

@@ -19,9 +19,10 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
@@ -57,6 +58,62 @@ impl<'a> HirBuilder<'a> {
                 self.emit_recoverable_numeric_value(op, operands, success_type, span)
             }
         }
+    }
+
+    /// Shares arithmetic's failure owner and carrier shape so private-lane installation can
+    /// retarget the producer without inspecting guard conditions or rendered messages.
+    pub(crate) fn emit_range_step_failure(
+        &mut self,
+        cause: RangeStepFailureCause,
+        span: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
+        let success_type = self.type_environment.builtins().bool;
+        let error_type = if failure_mode == NumericFailureMode::ReturnError {
+            Some(self.builtin_error_type_id(span)?)
+        } else {
+            None
+        };
+        let result_type = match error_type {
+            Some(error_type) => self
+                .type_environment
+                .intern_fallible_carrier(success_type, error_type),
+            None => success_type,
+        };
+        let result_local = self.allocate_temp_local(result_type, None)?;
+        self.emit_statement_kind_with_span(
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result: result_local,
+            },
+            span,
+            *span,
+        )?;
+        let block = self.current_block_id_or_error(span)?;
+        if let Some(error_type) = error_type {
+            let region = self.current_region_or_error(span)?;
+            let error_result = self.make_local_load_expression(result_local, result_type, &None, region);
+            let error_payload = self.make_expression(
+                span,
+                HirExpressionKind::FallibleUnwrapError { result: Box::new(error_result) },
+                error_type,
+                ValueKind::RValue,
+                region,
+            );
+            self.emit_terminator(block, HirTerminator::ReturnError(error_payload), span)?;
+        } else {
+            self.emit_terminator(
+                block,
+                HirTerminator::RuntimeFailure { message: cause.builtin_error_code().default_message().to_owned() },
+                span,
+            )?;
+        }
+        Ok(())
     }
 
     /// Emits a trapping numeric operation and returns the scalar success local load.

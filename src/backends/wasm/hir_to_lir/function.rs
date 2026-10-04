@@ -8,11 +8,14 @@ use crate::backends::wasm::hir_to_lir::ownership::insert_advisory_drops;
 use crate::backends::wasm::hir_to_lir::stmt::lower_statement;
 use crate::backends::wasm::hir_to_lir::terminator::lower_terminator;
 use crate::backends::wasm::lir::function::{WasmLirFunction, WasmLirFunctionOrigin};
+use crate::backends::wasm::lir::instructions::WasmLirTerminator;
 use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirSignature, WasmLocalRole};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub(crate) fn lower_function(
@@ -77,7 +80,14 @@ pub(crate) fn lower_function(
                 .clone();
 
         let mut lowered_statements = Vec::new();
+        let mut range_step_trap = false;
         for statement in &hir_block.statements {
+            if let HirStatementKind::RangeStepFailure { failure_mode, .. } = statement.kind {
+                range_step_trap = failure_mode == NumericFailureMode::Trap;
+                // This unconditional producer ends the block. Recoverable mode must reach
+                // the existing fallible-terminator rejection below, never the trap branch.
+                break;
+            }
             lower_statement(&mut function_context, statement, &mut lowered_statements)?;
         }
 
@@ -85,11 +95,15 @@ pub(crate) fn lower_function(
         // WHY: ownership remains optimization-only, but LIR still records possible drop sites for
         // ownership-aware runtime lowering.
         insert_advisory_drops(&function_context, *block_id, &mut lowered_statements);
-        let lowered_terminator = lower_terminator(
-            &mut function_context,
-            &hir_block.terminator,
-            &mut lowered_statements,
-        )?;
+        let lowered_terminator = if range_step_trap {
+            WasmLirTerminator::Trap
+        } else {
+            lower_terminator(
+                &mut function_context,
+                &hir_block.terminator,
+                &mut lowered_statements,
+            )?
+        };
 
         let Some(lir_block) = function_context.block_mut(*block_id) else {
             return Err(lir_transformation_error(format!(

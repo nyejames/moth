@@ -1425,7 +1425,7 @@ fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValue
             collect_expression_values(&end, out);
             collect_expression_values(&ascending, out);
         }
-        HirStatementKind::Drop(_) => {}
+        HirStatementKind::Drop(_) | HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_values(&value, out)
         }

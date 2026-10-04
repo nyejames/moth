@@ -455,7 +455,10 @@ Choose the narrowest field that owns the behaviour:
 - `runtime_trap_contains` protects an uncaught `WebAssembly.RuntimeError` message on `html_wasm`.
   It requires success mode and at least one non-empty fragment. It cannot accompany
   `runtime_error_contains`: a host trap never satisfies a Moth Error expectation.
-- Either terminal outcome ends the run. Text assertions check only output captured before it.
+- A returned entry `Error` is the third terminal outcome. Generated start callers record it when they
+  inspect the start result, so the harness never infers it from notice text or process status. Later
+  host output, faults or status changes cannot extend or erase it. The case reports `entry failed`.
+- Any terminal outcome ends the run. Text assertions check only output captured before it.
   An unrequested terminal outcome fails the case. Other engine errors, including `TypeError`,
   `WebAssembly.CompileError` and `WebAssembly.LinkError`, remain harness failures.
 

@@ -1,0 +1,55 @@
+walk |start F32, end F32, step F32| -> Int, Error!:
+    loop start to & end by step:
+        ignored = start
+    ;
+    return 99
+;
+private_walk |start F32, end F32, step F32| -> Int:
+    loop start to & end by step:
+        ignored = start
+    ;
+    return 99
+;
+safe_walk |start F32, end F32, step F32| -> Int, Error!:
+    return private_walk(start, end, step)
+;
+private_zero_walk |step Int| -> Int:
+    seen ~= 0
+    loop 0 to 2 by step:
+        seen = 99
+    ;
+    return seen
+;
+safe_zero_walk |step Int| -> Int, Error!:
+    return private_zero_walk(step)
+;
+float_zero_walk |step Float| -> Int, Error!:
+    loop 0.0 to 2.0 by step:
+        ignored = step
+    ;
+    return 99
+;
+f32_start F32 = 16777216.0
+f32_end F32 = 16777218.0
+f32_step F32 = 1.0
+code ~U32 = 0
+seen = walk(f32_start, f32_end, f32_step) catch |stall_error|:
+    code = stall_error.code
+    then -1
+;
+private_code ~U32 = 0
+private_seen = safe_walk(f32_start, f32_end, f32_step) catch |private_error|:
+    private_code = private_error.code
+    then -1
+;
+zero_code ~U32 = 0
+zero = safe_zero_walk(0) catch |zero_error|:
+    zero_code = zero_error.code
+    then -1
+;
+float_zero_code ~U32 = 0
+float_zero = float_zero_walk(0.0) catch |float_zero_error|:
+    float_zero_code = float_zero_error.code
+    then -1
+;
+[: stall recovered=[seen]/[private_seen] code=[code]/[private_code] zero=[zero] code=[zero_code] float_zero=[float_zero] code=[float_zero_code]]

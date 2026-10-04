@@ -25,6 +25,42 @@ pub fn for_each_terminator_target(terminator: &HirTerminator, mut visit: impl Fn
     });
 }
 
+/// Rewrite each successor block ID in place.
+pub fn for_each_terminator_target_mut(terminator: &mut HirTerminator, mut visit: impl FnMut(&mut BlockId)) {
+    match terminator {
+        HirTerminator::Jump { target, .. }
+        | HirTerminator::Break { target }
+        | HirTerminator::Continue { target } => visit(target),
+        HirTerminator::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            visit(then_block);
+            visit(else_block);
+        }
+        HirTerminator::FallibleBranch {
+            success_block,
+            error_block,
+            ..
+        } => {
+            visit(success_block);
+            visit(error_block);
+        }
+        HirTerminator::Match { arms, .. } => {
+            for arm in arms {
+                visit(&mut arm.body);
+            }
+        }
+        HirTerminator::Return(_)
+        | HirTerminator::ReturnSuccess(_)
+        | HirTerminator::ReturnError(_)
+        | HirTerminator::RuntimeFailure { .. }
+        | HirTerminator::Uninitialized
+        | HirTerminator::AssertFailure { .. } => {}
+    }
+}
+
 /// Fallible successor visitation for analysis passes that need error propagation while scanning.
 pub fn try_for_each_terminator_target<E>(
     terminator: &HirTerminator,

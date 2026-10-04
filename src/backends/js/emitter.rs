@@ -193,6 +193,11 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line(&format!("var moth_result = {start_name}();"));
                 self.emit_line("if (moth_result.tag !== \"ok\") {");
                 self.indent += 1;
+                self.emit_line("if (typeof globalThis.__moth_record_entry_failure === \"function\") {");
+                self.indent += 1;
+                self.emit_line("globalThis.__moth_record_entry_failure();");
+                self.indent -= 1;
+                self.emit_line("}");
                 self.emit_line("if (typeof process !== \"undefined\" && process.stderr) {");
                 self.indent += 1;
                 self.emit_line(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?});"));
@@ -308,6 +313,7 @@ impl<'hir> JsEmitter<'hir> {
                             self.config.numeric_profile.float_precision.into(),
                         ),
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
+                        HirStatementKind::RangeStepFailure { .. } => usage.range_step_failure = true,
                         _ => {}
                     }
                 }
@@ -391,7 +397,7 @@ impl<'hir> JsEmitter<'hir> {
                     || self.expression_uses_maps(end)
                     || self.expression_uses_maps(ascending)
             }
-            HirStatementKind::Drop(_) => false,
+            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => false,
         }
     }
 
@@ -548,7 +554,7 @@ impl<'hir> JsEmitter<'hir> {
                 self.record_expression_reactivity(end)?;
                 self.record_expression_reactivity(ascending)?;
             }
-            HirStatementKind::Drop(_) => {}
+            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
         }
 
         Ok(())
@@ -915,7 +921,7 @@ fn collect_statement_cast_policies(
             collect_expression_cast_policies(end, policies);
             collect_expression_cast_policies(ascending, policies);
         }
-        HirStatementKind::Drop(_) => {}
+        HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
     }
 }
 

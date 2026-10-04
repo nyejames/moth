@@ -1135,8 +1135,17 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
         "required range updates must return through the private lane",
     );
     assert!(
-        function_reaches_runtime_failure(&hir, walk.entry, "Loop step cannot be zero"),
-        "a zero step remains a compiler trap, not a numeric Error",
+        reachable_block_ids(&hir, walk.entry).into_iter().any(|block_id| {
+            hir.blocks[block_id.0 as usize].statements.iter().any(|statement| matches!(
+                statement.kind,
+                HirStatementKind::RangeStepFailure {
+                    cause: crate::compiler_frontend::hir::numeric::RangeStepFailureCause::ZeroStep,
+                    failure_mode: NumericFailureMode::ReturnError,
+                    ..
+                }
+            ))
+        }),
+        "a zero step must return builtin Error through the private failure lane",
     );
 }
 
@@ -1210,14 +1219,6 @@ fn function_numeric_ops_return_error(hir: &HirModule, entry: BlockId) -> bool {
     found
 }
 
-fn function_reaches_runtime_failure(hir: &HirModule, entry: BlockId, expected: &str) -> bool {
-    reachable_block_ids(hir, entry).into_iter().any(|block_id| {
-        matches!(
-            &hir.blocks[block_id.0 as usize].terminator,
-            HirTerminator::RuntimeFailure { message } if message == expected
-        )
-    })
-}
 
 fn reachable_block_ids(hir: &HirModule, entry: BlockId) -> Vec<BlockId> {
     let mut pending = vec![entry];

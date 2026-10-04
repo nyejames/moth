@@ -4486,10 +4486,10 @@ contract = "language.loops.fixed_numeric_range_runtime"
 role = "boundary"
 
 [[case]]
-id = "fixed_float_range_stall_runtime_trap"
-path = "fixed_float_range_stall_runtime_trap"
+id = "fixed_float_range_stall_recovery"
+path = "fixed_float_range_stall_recovery"
 tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
-contract = "language.loops.fixed_numeric_range_runtime"
+contract = "language.numeric.range_step_uses_builtin_failure"
 role = "boundary"
 
 [[case]]
@@ -12276,6 +12276,13 @@ id = "implicit_failure_range_update"
 path = "implicit_failure_range_update"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
 contract = "language.numeric.range_update_uses_private_failure_lane"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_range_step"
+path = "implicit_failure_range_step"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.range_step_uses_builtin_failure"
 role = "primary"
 
 

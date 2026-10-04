@@ -35,8 +35,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
-    ReachableNumericOpUse, ReachableReactiveSinkKind, ReachableReactiveSinkUse,
-    ReachableReactiveTemplateUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
+    ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableReactiveSinkKind,
+    ReachableReactiveSinkUse, ReachableReactiveTemplateUse, ReachableRuntimeCastForm,
+    ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -140,6 +141,11 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_float_statements(
                 &reachability.reachable_float_statements,
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_range_step_failures(
+                &reachability.reachable_range_step_failures,
                 input.target,
                 string_table,
             )?;
@@ -649,6 +655,28 @@ fn validate_wasm_float_statements(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
+/// Rejects recoverable range guards before generic Error construction is considered.
+fn validate_wasm_range_step_failures(
+    range_step_failures: &[ReachableRangeStepFailureUse],
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let Some(failure) = range_step_failures
+        .iter()
+        .find(|failure| failure.failure_mode == NumericFailureMode::ReturnError)
+    else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::RecoverableNumericFailure,
+        failure.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
 /// Reports the first reachable generic runtime value for the Wasm target.
 ///
 /// WHAT: generic nominal instances such as `Box of String` are valid HIR, but HTML-Wasm does not
@@ -1113,6 +1141,9 @@ where
             }
 
             None
+        }
+        HirStatementKind::RangeStepFailure { result, .. } => {
+            first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
         }
         HirStatementKind::FloatRangeCandidate {
             current,

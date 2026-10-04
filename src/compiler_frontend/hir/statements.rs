@@ -18,7 +18,7 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirMapOp};
 use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
@@ -131,6 +131,17 @@ pub enum HirStatementKind {
         /// The operand(s) to the operation.
         operands: HirNumericOperands,
         /// Local that receives the operation result or fallible carrier.
+        result: LocalId,
+    },
+
+    /// Produce the failure selected by a language-defined range-step guard.
+    ///
+    /// The enclosing CFG has already established zero step or lack of progress. Keeping this
+    /// producer statement-shaped lets the private failure lane retarget it exactly like NumericOp.
+    /// Its result follows NumericOp's scalar/carrier contract with Bool as the unused success type.
+    RangeStepFailure {
+        cause: RangeStepFailureCause,
+        failure_mode: NumericFailureMode,
         result: LocalId,
     },
 
@@ -249,7 +260,7 @@ impl HirStatement {
                     right.remap_string_ids(remap);
                 }
             },
-            HirStatementKind::Drop(_) => {}
+            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
         }
     }
 }

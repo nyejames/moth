@@ -77,7 +77,6 @@ fn run_wasm_harness_in(directory: &Path) -> Result<RenderedOutput, RenderHarness
     std::fs::File::create(&harness_path)
         .and_then(|mut harness| {
             harness.write_all(NODE_WASM_HARNESS_PREFIX.as_bytes())?;
-            harness.write_all(entry_notice_observer().as_bytes())?;
             harness.write_all(NODE_TERMINAL_PROTOCOL.as_bytes())?;
             harness.write_all(NODE_WASM_HARNESS_SUFFIX.as_bytes())
         })
@@ -538,28 +537,24 @@ pub(crate) fn execute_html_harness_for_test(
 
     execute_html_in_node(&index, &mut build_result.project.resource_inputs, None)
 }
-fn entry_notice_observer() -> String {
-    let notice = serde_json::to_string(ENTRY_FAILURE_NOTICE).expect("the entry notice is a string");
-    format!(
-        "const __moth_entry_notice_text = {notice};\n\
-         let __moth_entry_notice_seen = false;\n\
-         const __moth_stderr_write = process.stderr.write.bind(process.stderr);\n\
-         process.stderr.write = function (chunk, encoding, callback) {{\n\
-             if (chunk === __moth_entry_notice_text) __moth_entry_notice_seen = true;\n\
-             return __moth_stderr_write(chunk, encoding, callback);\n\
-         }};\n"
-    )
-}
-
 
 const NODE_TERMINAL_PROTOCOL: &str = r#"// A Moth runtime Error is a value thrown as `new Error(message)`; subclasses and
 // non-Wasm engine errors such as TypeError remain harness faults. Only the HTML-Wasm adapter
-// recognizes WebAssembly.RuntimeError as a Wasm trap. A returned entry error is the fixed
-// terminal notice plus status 1. Any other nonzero status is a host fault.
+// recognizes WebAssembly.RuntimeError as a Wasm trap. Generated callers record returned entry
+// failure directly, independently of terminal notice text and host process status. Recording
+// serializes the summary at once, so later host output, faults or status changes cannot follow
+// or erase the terminal entry_failure event.
 // Summary serialization is synchronous so queued host work cannot extend a terminal event prefix.
 let __moth_summary_error_hook = null;
 let __moth_runtime_trap_message_hook = null;
 let __moth_finished = false;
+let __moth_entry_failure_recorded = false;
+globalThis.__moth_record_entry_failure = () => {
+    if (__moth_entry_failure_recorded || __moth_finished) return;
+    __moth_entry_failure_recorded = true;
+    __moth_events.push({ type: 'entry_failure' });
+    __moth_write_summary();
+};
 function __moth_write_summary() {
     if (__moth_finished) return;
     if (__moth_summary_error_hook !== null) {
@@ -570,11 +565,7 @@ function __moth_write_summary() {
         }
     }
     const terminal_event = __moth_events.at(-1);
-    const returned_entry_error = __moth_entry_notice_seen && process.exitCode === 1
-        && terminal_event?.type !== 'runtime_error' && terminal_event?.type !== 'wasm_trap';
-    if (returned_entry_error) {
-        __moth_events.push({ type: 'entry_failure' });
-    } else if (typeof process.exitCode === "number" && process.exitCode !== 0
+    if (!__moth_entry_failure_recorded && typeof process.exitCode === "number" && process.exitCode !== 0
         && terminal_event?.type !== 'runtime_error' && terminal_event?.type !== 'wasm_trap') {
         __moth_report_harness_failure(new Error("host process status " + process.exitCode));
         return;
@@ -651,8 +642,7 @@ setImmediate(__moth_write_summary);
 "#;
 
     format!(
-        "{prefix}{}{NODE_TERMINAL_PROTOCOL}{random_setup}{}\n{suffix}",
-        entry_notice_observer(),
+        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}{}\n{suffix}",
         scripts.join("\n")
     )
 }
@@ -694,9 +684,8 @@ globalThis.document = {
         .expect("the inline module specifier is a valid string");
 
     format!(
-        "{prefix}{}{NODE_TERMINAL_PROTOCOL}{random_setup}import({module_specifier})\n\
+        "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}import({module_specifier})\n\
          .then(() => setImmediate(__moth_write_summary), __moth_handle_runtime_error);\n",
-        entry_notice_observer(),
     )
 }
 

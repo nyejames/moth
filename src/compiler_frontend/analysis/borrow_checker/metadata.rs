@@ -1165,6 +1165,7 @@ fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
             ..
         } => [Some(*local), None],
         HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::RangeStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => [Some(*result), None],
         HirStatementKind::FloatRangeCandidate {
@@ -1261,6 +1262,7 @@ fn collect_statement_loaded_locals(statement: &HirStatement, visitor: &mut impl 
             collect_expression_loaded_locals(expression, visitor);
         }
         HirStatementKind::Drop(local) => visitor(*local),
+        HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             visitor(*vec_local);
             collect_expression_loaded_locals(value, visitor);
@@ -1283,7 +1285,8 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             result: Some(local),
             ..
         } => visitor(*local),
-        HirStatementKind::NumericOp { result, .. } => visitor(*result),
+        HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::RangeStepFailure { result, .. } => visitor(*result),
         HirStatementKind::FloatRangeCandidate {
             candidate_result,
             in_range_result,

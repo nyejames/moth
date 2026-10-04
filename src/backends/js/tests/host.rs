@@ -226,6 +226,18 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         )
         .expect("fallible start should lower");
         assert!(output.start_is_fallible);
+        let caller = output
+            .source
+            .split("(function () {")
+            .last()
+            .expect("generated entry caller");
+        assert!(caller.contains(
+            "typeof globalThis.__moth_record_entry_failure === \"function\""
+        ));
+        assert!(caller.contains("globalThis.__moth_record_entry_failure();"));
+        assert!(!caller.contains("moth_result.value"));
+        assert!(!caller.contains(".message"));
+        assert!(!caller.contains(".code"));
 
         let runtime = std::process::Command::new("node")
             .args(["--eval", &output.source])

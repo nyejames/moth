@@ -191,6 +191,7 @@ impl LaneInstaller<'_> {
                 }))
             }
             HirStatementKind::NumericOp { failure_mode, result, .. }
+            | HirStatementKind::RangeStepFailure { failure_mode, result, .. }
             | HirStatementKind::FormatFloat { failure_mode, result, .. }
             | HirStatementKind::ValidateFloat { failure_mode, result, .. }
                 if self.lane_functions.contains(&function_id)
@@ -261,6 +262,7 @@ impl LaneInstaller<'_> {
         match &mut statement.kind {
             HirStatementKind::Call { result, .. } => *result = Some(carrier_local),
             HirStatementKind::NumericOp { failure_mode, result, .. }
+            | HirStatementKind::RangeStepFailure { failure_mode, result, .. }
             | HirStatementKind::FormatFloat { failure_mode, result, .. }
             | HirStatementKind::ValidateFloat { failure_mode, result, .. } => {
                 *failure_mode = NumericFailureMode::ReturnError;
@@ -662,7 +664,7 @@ fn note_statement_ids(kind: &HirStatementKind, next_value: &mut u32) {
             note_expression_id(end, next_value);
             note_expression_id(ascending, next_value);
         }
-        HirStatementKind::Drop(_) => {}
+        HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
     }
 }
 

@@ -325,45 +325,27 @@ impl<'a> HirValidator<'a> {
                     ));
                 }
 
-                self.require_local_id(*result, anchor)?;
+                self.validate_numeric_result_local(
+                    format_args!("NumericOp::{op}"),
+                    *failure_mode,
+                    *result,
+                    domain_type,
+                    anchor,
+                )?;
+            }
 
-                let Some(result_type) = self.local_types.get(result).copied() else {
-                    return Err(self
-                        .error_with_hir("NumericOp result local has no registered type", anchor));
-                };
-
-                match failure_mode {
-                    NumericFailureMode::Trap => {
-                        if result_type != domain_type {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "NumericOp::{op} Trap result local has the wrong success type"
-                                ),
-                                anchor,
-                            ));
-                        }
-                    }
-
-                    NumericFailureMode::ReturnError => {
-                        let Some((carrier_success_type, _)) =
-                            self.type_environment.fallible_carrier_slots(result_type)
-                        else {
-                            return Err(self.error_with_hir(
-                                "NumericOp ReturnError result local must have an internal fallible carrier type",
-                                anchor,
-                            ));
-                        };
-
-                        if carrier_success_type != domain_type {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "NumericOp::{op} ReturnError carrier has the wrong success type"
-                                ),
-                                anchor,
-                            ));
-                        }
-                    }
-                }
+            HirStatementKind::RangeStepFailure {
+                failure_mode,
+                result,
+                ..
+            } => {
+                self.validate_numeric_result_local(
+                    "RangeStepFailure",
+                    *failure_mode,
+                    *result,
+                    self.type_environment.builtins().bool,
+                    anchor,
+                )?;
             }
 
             HirStatementKind::FloatRangeCandidate {
@@ -673,6 +655,23 @@ impl<'a> HirValidator<'a> {
             ));
         }
 
+        self.validate_numeric_result_local(
+            statement_name,
+            failure_mode,
+            result,
+            success_type,
+            anchor,
+        )
+    }
+
+    fn validate_numeric_result_local(
+        &self,
+        statement_name: impl std::fmt::Display,
+        failure_mode: NumericFailureMode,
+        result: LocalId,
+        success_type: TypeId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
         self.require_local_id(result, anchor)?;
         let Some(result_type) = self.local_types.get(&result).copied() else {
             return Err(self.error_with_hir(
@@ -692,7 +691,7 @@ impl<'a> HirValidator<'a> {
             }
 
             NumericFailureMode::ReturnError => {
-                let Some((carrier_success_type, _)) =
+                let Some((carrier_success_type, carrier_error_type)) =
                     self.type_environment.fallible_carrier_slots(result_type)
                 else {
                     return Err(self.error_with_hir(
@@ -706,6 +705,25 @@ impl<'a> HirValidator<'a> {
                 if carrier_success_type != success_type {
                     return Err(self.error_with_hir(
                         format!("{statement_name} ReturnError carrier has the wrong success type"),
+                        anchor,
+                    ));
+                }
+
+                let builtin_error_identity =
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+                let Some(builtin_error_type) = self
+                    .type_environment
+                    .type_id_for_canonical_identity(&builtin_error_identity)
+                else {
+                    return Err(self.error_with_hir(
+                        format!("{statement_name} carrier requires the builtin Error type"),
+                        anchor,
+                    ));
+                };
+
+                if carrier_error_type != builtin_error_type {
+                    return Err(self.error_with_hir(
+                        format!("{statement_name} carrier has the wrong error type"),
                         anchor,
                     ));
                 }

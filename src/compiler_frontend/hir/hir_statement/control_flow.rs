@@ -1082,7 +1082,6 @@ impl<'a> HirBuilder<'a> {
             let remaining_id = self.module.blocks[position].id;
             self.block_index_by_id.insert(remaining_id, position);
         }
-
         Ok(true)
     }
 

@@ -511,6 +511,8 @@ impl<'a> HirBuilder<'a> {
         let warnings = self.ast_warnings.clone();
         let string_table = &*self.string_table;
         self.module.side_table = self.side_table;
+        // Construction may remove unused scaffolding blocks. Later passes index blocks by id.
+        self.module.compact_block_ids();
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
         //    compiler metadata (documentation fragments) is validated separately at the module

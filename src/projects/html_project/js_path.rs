@@ -573,6 +573,11 @@ fn append_runtime_bootstrap(
         ));
         html.push_str(&format!("{indent}if (moth_result.tag !== \"ok\") {{\n"));
         html.push_str(&format!(
+            "{indent}  if (typeof globalThis.__moth_record_entry_failure === \"function\") {{\n\
+             {indent}    globalThis.__moth_record_entry_failure();\n\
+             {indent}  }}\n"
+        ));
+        html.push_str(&format!(
             "{indent}  if (typeof process !== \"undefined\" && process.stderr) {{\n\
              {indent}    process.stderr.write({ENTRY_FAILURE_NOTICE:?});\n\
              {indent}    process.exitCode = 1;\n\

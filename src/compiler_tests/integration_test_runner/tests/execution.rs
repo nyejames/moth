@@ -558,6 +558,33 @@ fn synthetic_start_failure_publishes_no_staged_runtime_fragments() {
 }
 
 #[test]
+fn synthetic_start_dynamic_zero_range_step_is_entry_failure_without_body_output() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    for directory_entry in [true, false] {
+        let fixture = EntryFixture::new(
+            "step ~= 0\n\
+             loop 0 to 3 by step |value|:\n\
+                 io.line(\"range-body-ran\")\n\
+             ;\n",
+            directory_entry,
+        );
+        let mut built = fixture.build(&[]);
+        let rendered = execute_html_harness_for_test(&mut built)
+            .expect("zero range step must produce a valid entry failure summary");
+        assert_eq!(rendered.events(), &[RuntimeEvent::EntryFailure]);
+        assert_eq!(rendered.combined_output(), "", "zero step must fail before the loop body");
+        assert!(rendered.slot_outputs().is_empty(), "zero step must publish no loop-body fragments");
+        assert!(rendered.runtime_error_message().is_none(), "zero step is an entry failure, not an uncaught Error");
+
+        let expectation = output_expectation("range-body-ran");
+        let case = success_test_case(BackendId::Html, expectation.clone());
+        let result = validate_success_result(&case, built, &expectation);
+        assert!(!result.passed, "a zero-step start must not satisfy a success expectation");
+        assert_eq!(result.failure_kind, Some(FailureKind::EntryFailed));
+    }
+}
+
+#[test]
 fn synthetic_start_release_fallback_is_fixed_text_and_preserves_earlier_io() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let source = "load || -> String, Error!:\n\

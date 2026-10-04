@@ -233,6 +233,10 @@ impl<'a> BorrowChecker<'a> {
                         result: result_local,
                         ..
                     }
+                    | HirStatementKind::RangeStepFailure {
+                        result: result_local,
+                        ..
+                    }
                     | HirStatementKind::FormatFloat {
                         result: result_local,
                         ..
@@ -376,6 +380,10 @@ impl<'a> BorrowChecker<'a> {
                         ..
                     }
                     | HirStatementKind::NumericOp {
+                        result: operation_result,
+                        ..
+                    }
+                    | HirStatementKind::RangeStepFailure {
                         result: operation_result,
                         ..
                     }
