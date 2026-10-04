@@ -12251,6 +12251,20 @@ contract = "language.numeric.custom_error_slot_requires_failure_mapping"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_reexport_rejected"
+path = "implicit_failure_reexport_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "dependencies", "facade", "js-backend", "html-wasm"]
+contract = "language.numeric.reexport_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_package_facade_rejected"
+path = "implicit_failure_package_facade_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "dependencies", "facade", "js-backend", "html-wasm"]
+contract = "language.numeric.package_facade_failure_rejected"
+role = "primary"
+
+[[case]]
 id = "implicit_failure_compound_writeback"
 path = "implicit_failure_compound_writeback"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]

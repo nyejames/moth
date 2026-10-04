@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export or custom error slot that would let implicit failure escape is a source diagnostic with a witness, not a trap. start Error! is not implemented.
-- Current slice: Phase 4 remaining public-surface and compatibility checks.
-- Blockers: none for local export or custom-slot rejection.
-- Next action: prove re-exports, package facades and foreign projections cannot publish an unchecked implicit failure, then invalidate stale summaries and old artefacts.
+- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. start Error! is not implemented. Moth-to-foreign export has no implementation owner.
+- Current slice: Phase 4 compatibility invalidation.
+- Blockers: none for local, re-export, or package-facade rejection.
+- Next action: invalidate stale summaries and old artefacts when private failure or export semantics change, without a second cache.
 
 ## Goal and authority
 
