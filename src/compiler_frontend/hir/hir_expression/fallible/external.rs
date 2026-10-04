@@ -50,7 +50,7 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Emits an external fallible call carrier to the current block.
-    pub(super) fn emit_external_result_call_carrier_to_current_block(
+    pub(in crate::compiler_frontend::hir) fn emit_external_result_call_carrier_to_current_block(
         &mut self,
         id: crate::compiler_frontend::external_packages::ExternalFunctionId,
         args: &[CallArgument],

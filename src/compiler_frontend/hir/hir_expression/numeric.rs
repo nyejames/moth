@@ -43,7 +43,11 @@ impl<'a> HirBuilder<'a> {
         success_type: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
 
         match failure_mode {
             NumericFailureMode::Trap => {
@@ -106,7 +110,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
     /// Emits the `NumericOp` statement itself.
@@ -145,7 +149,11 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
@@ -206,7 +214,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
     /// Validates a `Float` value from an external/backend boundary before exposing it as an
@@ -223,7 +231,11 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {
@@ -284,7 +296,31 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
+    }
+
+    /// A catch continuation accepts builtin numeric failure only. Custom handlers keep
+    /// injected float boundary checks on the function-boundary continuation.
+    fn active_handler_accepts_builtin_failure(
+        &mut self,
+        span: &Option<SourceSpan>,
+    ) -> Result<bool, CompilerError> {
+        let Some(handler) = self.active_catch_handler else {
+            return Ok(false);
+        };
+        Ok(handler.error_type == self.builtin_error_type_id(span)?)
+    }
+
+    fn lower_numeric_carrier_to_success_value(
+        &mut self,
+        carrier: EmittedFallibleCarrier,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirExpression, CompilerError> {
+        if self.active_handler_accepts_builtin_failure(span)? {
+            self.lower_carrier_to_active_catch_success(carrier, span)
+        } else {
+            self.lower_fallible_carrier_to_success_value(carrier, span)
+        }
     }
 
     /// Emits the `ValidateFloat` statement itself.

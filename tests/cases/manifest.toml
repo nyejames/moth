@@ -12209,6 +12209,13 @@ contract = "language.numeric.runtime_error_fn_recovered"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_expression_catch"
+path = "implicit_failure_expression_catch"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.expression_local_catch_recovery"
+role = "primary"
+
+[[case]]
 id = "numeric_failure_known_int32_overflow_rejected"
 path = "numeric_failure_known_int32_overflow_rejected"
 tags = ["integration", "language", "numeric", "const-eval", "diagnostics"]

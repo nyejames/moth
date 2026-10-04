@@ -216,20 +216,21 @@ pub(crate) fn unsupported_catch_diagnostic(
     }))
 }
 
-fn catch_operand_has_pending_failure(
+fn catch_operand_has_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
 ) -> Result<bool, CompilerError> {
     let mut state = TraversalState {
         pending_facts: Some(ExpressionFailureFacts::default()),
         check_pending_failure: true,
+        check_unsupported_failure: true,
         ..TraversalState::default()
     };
     classify_expression(expression, template_ir_store, &mut state)?;
     Ok(state.has_pending_failure)
 }
 
-fn protected_operands_have_pending_failure(
+fn protected_operands_have_unsupported_failure(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
 ) -> Result<bool, CompilerError> {
@@ -239,28 +240,37 @@ fn protected_operands_have_pending_failure(
         | ExpressionKind::HandledFallibleFunctionCall { args, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
             for argument in args {
-                if catch_operand_has_pending_failure(&argument.value, template_ir_store)? {
+                if catch_operand_has_unsupported_failure(&argument.value, template_ir_store)? {
                     return Ok(true);
                 }
             }
         }
         ExpressionKind::HandledFallibleExpression { value, .. } => {
-            return protected_operands_have_pending_failure(value, template_ir_store);
+            return protected_operands_have_unsupported_failure(value, template_ir_store);
         }
         ExpressionKind::MethodCall { receiver, args, .. }
         | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
         | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-            if catch_operand_has_pending_failure(receiver, template_ir_store)? {
+            if catch_operand_has_unsupported_failure(receiver, template_ir_store)? {
                 return Ok(true);
             }
             for argument in args {
-                if catch_operand_has_pending_failure(&argument.value, template_ir_store)? {
+                if catch_operand_has_unsupported_failure(&argument.value, template_ir_store)? {
                     return Ok(true);
                 }
             }
         }
         ExpressionKind::Cast(cast) => {
-            return catch_operand_has_pending_failure(&cast.source, template_ir_store);
+            return catch_operand_has_unsupported_failure(&cast.source, template_ir_store);
+        }
+        ExpressionKind::Runtime(rpn) => {
+            for item in &rpn.items {
+                if let ExpressionRpnItem::Operand(operand) = item
+                    && catch_operand_has_unsupported_failure(operand, template_ir_store)?
+                {
+                    return Ok(true);
+                }
+            }
         }
         _ => {}
     }
@@ -277,6 +287,7 @@ struct TraversalState {
     check_catch_support: bool,
     unsupported_catch: Option<(&'static str, Option<SourceSpan>)>,
     check_pending_failure: bool,
+    check_unsupported_failure: bool,
     has_pending_failure: bool,
     explicit_exit_only: bool,
 }
@@ -299,9 +310,18 @@ fn classify_expression(
     if let Some(facts) = &mut state.pending_facts {
         if !traverses_owned_payload && state.protected_failure_depth == 0 {
             if state.check_pending_failure {
-                state.has_pending_failure = expression.failure_facts.has_pending_implicit()
-                    || (expression.failure_facts.disposition == FailureDisposition::Pending
-                        && !expression.failure_facts.typed_errors.is_empty());
+                let facts = &expression.failure_facts;
+                let pending_implicit = if state.check_unsupported_failure {
+                    facts.disposition == FailureDisposition::Pending
+                        && facts.implicit.iter().any(|contributor| {
+                            matches!(contributor.source, ImplicitFailureSource::PrivateCall(_))
+                        })
+                } else {
+                    facts.has_pending_implicit()
+                };
+                state.has_pending_failure = pending_implicit
+                    || (facts.disposition == FailureDisposition::Pending
+                        && !facts.typed_errors.is_empty());
             } else if !state.check_catch_support {
                 facts.merge_pending_from(&expression.failure_facts);
             }
@@ -566,11 +586,11 @@ fn classify_value_block(
                     ExpressionKind::HandledFallibleFunctionCall { .. }
                     | ExpressionKind::HandledFallibleHostFunctionCall { .. }
                     | ExpressionKind::HandledFallibleExpression { .. }
-                    | ExpressionKind::Cast(_) => {
-                        protected_operands_have_pending_failure(protected, template_ir_store)?
-                            .then_some("an expression with fallible operands or arguments")
+                    | ExpressionKind::Cast(_)
+                    | ExpressionKind::Runtime(_) => {
+                        protected_operands_have_unsupported_failure(protected, template_ir_store)?
+                            .then_some("an expression with unsupported fallible operands or arguments")
                     }
-                    ExpressionKind::Runtime(_) => Some("an arithmetic expression"),
                     ExpressionKind::FunctionCall { .. } => Some("an inferred-failure private call"),
                     _ => Some("this protected expression"),
                 };

@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Phase 2 semantic facts are recorded. Runtime delivery is not implemented.
-- Current slice: Phase 3 explicit lowering and backend delivery.
-- Blockers: none for Phase 3. Numeric trap dispatch remains until the lowering phase replaces it.
-- Next action: lower the recorded failure facts without changing source acceptance.
+- Status: active. Expression-local catch lowers through a shared handler. Private propagation and start Error! are not implemented.
+- Current slice: Phase 3 private internal failure lane.
+- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap.
+- Next action: propagate inferred private failure through calls and materialise it at builtin Error!.
 
 ## Goal and authority
 

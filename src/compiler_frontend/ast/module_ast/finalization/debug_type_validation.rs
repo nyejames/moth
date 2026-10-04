@@ -584,6 +584,12 @@ fn expression_is_recovering_catch_subject(
         {
             return false;
         }
+        // An infallible conversion can still recover checked work in its operand.
+        if matches!(&expression.kind, ExpressionKind::Cast(cast)
+            if matches!(cast.handling, CastHandling::Infallible))
+        {
+            return true;
+        }
         if !matches!(
             expression.kind,
             ExpressionKind::HandledFallibleFunctionCall { .. }

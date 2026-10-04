@@ -208,6 +208,9 @@ pub struct HirBuilder<'a> {
     ///      results; HIR lowering needs to intercept those statements and wire them to the
     ///      shared merge locals.
     pub(super) active_value_block_target: Option<ValueBlockTarget>,
+
+    /// Expression-local continuation, installed only while protected work is lowered.
+    pub(super) active_catch_handler: Option<CatchHandlerTarget>,
 }
 
 /// Target state for value-block lowering inside `HirBuilder`.
@@ -219,6 +222,13 @@ pub struct HirBuilder<'a> {
 pub(super) struct ValueBlockTarget {
     pub result_locals: Vec<LocalId>,
     pub merge_block: BlockId,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CatchHandlerTarget {
+    pub block: BlockId,
+    pub error_local: LocalId,
+    pub error_type: TypeId,
 }
 
 // WHAT: generates a typed `allocate_*_id` method for each HIR entity kind.
@@ -298,6 +308,7 @@ impl<'a> HirBuilder<'a> {
             loop_targets: vec![],
             entry_fragment_vec_local: None,
             active_value_block_target: None,
+            active_catch_handler: None,
         }
     }
 
@@ -361,6 +372,17 @@ impl<'a> HirBuilder<'a> {
 
         self.active_value_block_target = previous_target;
 
+        result
+    }
+
+    pub(super) fn with_active_catch_handler<T>(
+        &mut self,
+        target: CatchHandlerTarget,
+        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, CompilerError>,
+    ) -> Result<T, CompilerError> {
+        let previous_handler = self.active_catch_handler.replace(target);
+        let result = emit(self);
+        self.active_catch_handler = previous_handler;
         result
     }
 

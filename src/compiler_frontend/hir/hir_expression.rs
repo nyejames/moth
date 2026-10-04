@@ -19,7 +19,7 @@
 
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
 use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
+    Expression, ExpressionKind, FallibleExpressionHandling,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -66,7 +66,7 @@ mod runtime;
 mod templates;
 mod types;
 
-use self::fallible::{EmittedFallibleCarrier, FallibleCarrierBranchingContext};
+use self::fallible::EmittedFallibleCarrier;
 pub(crate) use self::fallible::{ExternalFallibleCallLoweringInput, FallibleBranchingContext};
 
 #[derive(Debug, Clone)]
@@ -775,14 +775,16 @@ impl<'a> HirBuilder<'a> {
             | ExpressionKind::ChoiceConstruct { fields, .. } => fields
                 .iter()
                 .any(|field| self.expression_needs_current_block_lowering(&field.value)),
-            ExpressionKind::Runtime(nodes) => nodes.items.iter().any(|item| match item {
-                ExpressionRpnItem::Operand(expression) => {
-                    self.expression_needs_current_block_lowering(expression)
-                }
-                ExpressionRpnItem::Operator { .. } => false,
-                // Resolution removes pending literals before this stage.
-                ExpressionRpnItem::PendingNumericLiteral { .. } => false,
-            }),
+            ExpressionKind::Runtime(nodes) => {
+                self.active_catch_handler.is_some()
+                    || nodes.items.iter().any(|item| match item {
+                        ExpressionRpnItem::Operand(expression) => {
+                            self.expression_needs_current_block_lowering(expression)
+                        }
+                        ExpressionRpnItem::Operator { .. }
+                        | ExpressionRpnItem::PendingNumericLiteral { .. } => false,
+                    })
+            }
             ExpressionKind::Template(_) => true,
             ExpressionKind::RuntimeTemplateHandoff(_)
             | ExpressionKind::RuntimeSlotApplicationHandoff(_) => true,
@@ -847,103 +849,115 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// Lowers a catch recovery block whose handler body is owned by `ValueCatchBlock`.
-    ///
-    /// WHAT: dispatches to the same carrier-branching helpers used by statement catch lowering,
-    /// but supplies the handler body from the value block instead of from an expression variant.
+    /// Installs one continuation before lowering the entire protected expression.
     fn lower_value_block_catch(
         &mut self,
         value_catch: &ValueCatchBlock,
         span: &Option<SourceSpan>,
         result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
-        let result_type_ids = &value_catch.result_type_ids;
-        let value_required = !result_type_ids.is_empty();
-        let handled_span = value_catch.handled_value.span;
-
-        match &value_catch.handled_value.kind {
-            ExpressionKind::HandledFallibleFunctionCall {
-                name,
-                args,
-                result_type_ids: call_result_type_ids,
-                ..
-            } => {
+        let protected = &value_catch.handled_value;
+        let err_type = match &protected.kind {
+            ExpressionKind::HandledFallibleFunctionCall { name, .. } => {
                 let target = self.resolve_call_target_or_error(name, span)?;
-                let (carrier_type, ok_type, err_type) =
-                    self.result_call_carrier_slots(&target, span)?;
-                let requested_ok_type = self.lower_call_result_type(call_result_type_ids, span)?;
-                if requested_ok_type != ok_type {
-                    return_hir_transformation_error!(
-                        "Value catch call lowered with mismatched success type",
-                        self.hir_error_location(span)
-                    );
-                }
-
-                self.lower_handled_fallible_call_with_branching(
-                    target,
-                    args,
-                    FallibleBranchingContext {
-                        result_type_ids,
-                        handling: &value_catch.handler,
-                        carrier_type,
-                        ok_type,
-                        err_type,
-                        value_required,
-                        span: &handled_span,
-                        validate_float_success: false,
-                    },
-                )
+                self.result_call_carrier_slots(&target, span)?.2
             }
-
-            ExpressionKind::HandledFallibleHostFunctionCall {
-                id,
-                args,
-                result_type_ids: call_result_type_ids,
-                error_type_id,
-                ..
-            } => {
-                let (carrier_type, ok_type, err_type) = self.fallible_call_carrier_from_slots(
-                    call_result_type_ids,
-                    *error_type_id,
-                    span,
-                )?;
-                self.lower_handled_fallible_call_with_branching(
-                    CallTarget::External(*id),
-                    args,
-                    FallibleBranchingContext {
-                        result_type_ids,
-                        handling: &value_catch.handler,
-                        carrier_type,
-                        ok_type,
-                        err_type,
-                        value_required,
-                        span: &handled_span,
-                        validate_float_success: self.type_id_is_float(ok_type),
-                    },
-                )
+            ExpressionKind::HandledFallibleHostFunctionCall { error_type_id, .. } => {
+                self.lower_type_id(*error_type_id, span)?
             }
-
-            ExpressionKind::HandledFallibleExpression { value, .. } => self
-                .lower_recovering_fallible_expression(
-                    value,
-                    &value_catch.handler,
-                    result_type_ids,
-                    value_required,
-                    &handled_span,
-                ),
-
-            ExpressionKind::Cast(cast) => self.lower_recovering_cast_expression(
-                cast,
-                &value_catch.handler,
-                result_type_id,
-                &handled_span,
-            ),
-
+            ExpressionKind::HandledFallibleExpression { value, .. } => {
+                let carrier_type = self.lower_type_id(value.type_id, span)?;
+                self.type_environment.fallible_carrier_slots(carrier_type)
+                    .ok_or_else(|| CompilerError::compiler_error(
+                        "Recovering expression has no fallible carrier",
+                    ))?.1
+            }
+            ExpressionKind::Runtime(_) | ExpressionKind::Cast(_) => {
+                self.builtin_error_type_id(span)?
+            }
             _ => return_hir_transformation_error!(
                 "Value catch block did not contain a recoverable expression",
                 self.hir_error_location(span)
             ),
+        };
+
+        // Cast recovery merges inner target values before applying an optional receiving wrap.
+        let inner_result_type_ids;
+        let result_type_ids = if let ExpressionKind::Cast(cast) = &protected.kind
+            && cast.requires_optional_wrap_after_cast
+        {
+            inner_result_type_ids = self.handled_expression_result_type_ids(cast.target_type_id);
+            &inner_result_type_ids
+        } else {
+            &value_catch.result_type_ids
+        };
+        let lowered = self.lower_fallible_carrier_with_branching(
+            FallibleBranchingContext {
+                result_type_ids,
+                handling: &value_catch.handler,
+                err_type,
+                span,
+            },
+            |builder| builder.lower_catch_protected_expression(protected, result_type_ids),
+        )?;
+        if let ExpressionKind::Cast(cast) = &protected.kind
+            && cast.requires_optional_wrap_after_cast
+        {
+            let value = self.wrap_cast_result_optional_if_needed(lowered.value, result_type_id, span)?;
+            return Ok(LoweredExpression { prelude: lowered.prelude, value });
         }
+        Ok(lowered)
+    }
+
+    fn lower_catch_protected_expression(
+        &mut self,
+        protected: &Expression,
+        result_type_ids: &[FrontendTypeId],
+    ) -> Result<LoweredExpression, CompilerError> {
+        let span = &protected.span;
+        let carrier = match &protected.kind {
+            ExpressionKind::HandledFallibleFunctionCall { name, args, .. } => {
+                let target = self.resolve_call_target_or_error(name, span)?;
+                self.emit_result_call_carrier_to_current_block(target, args, result_type_ids, span)?
+            }
+            ExpressionKind::HandledFallibleHostFunctionCall {
+                id, args, result_type_ids: call_result_type_ids, error_type_id, ..
+            } => self.emit_external_result_call_carrier_to_current_block(
+                *id, args, call_result_type_ids, *error_type_id, span,
+            )?,
+            ExpressionKind::HandledFallibleExpression { value, .. } => {
+                return self.lower_recovering_fallible_expression(value, result_type_ids, span);
+            }
+            ExpressionKind::Cast(cast) => {
+                if matches!(cast.handling, CastHandling::Infallible) {
+                    // Optional wrapping belongs after the shared merge, not only to success.
+                    return self.lower_cast_expression(cast, cast.target_type_id, span);
+                }
+                match &cast.evidence {
+                    ResolvedCastEvidence::Builtin { policy } => {
+                        self.emit_builtin_cast_carrier(cast, *policy, span)?
+                    }
+                    ResolvedCastEvidence::UserDefined { method_path, .. } => {
+                        let target = self.resolve_call_target_or_error(method_path, span)?;
+                        let argument = CallArgument::positional(
+                            (*cast.source).clone(), CallAccessMode::Shared, *span,
+                        );
+                        self.emit_user_defined_cast_call_carrier(target, &argument, span)?
+                    }
+                    ResolvedCastEvidence::GenericBound { .. } => return_hir_transformation_error!(
+                        "Generic-bound cast evidence reached recovering HIR lowering",
+                        self.hir_error_location(span)
+                    ),
+                }
+            }
+            ExpressionKind::Runtime(_) => return self.lower_expression(protected),
+            _ => return_hir_transformation_error!(
+                "Unsupported protected expression reached catch lowering",
+                self.hir_error_location(span)
+            ),
+        };
+        let value = self.lower_carrier_to_active_catch_success(carrier, span)?;
+        Ok(LoweredExpression { prelude: vec![], value })
     }
 
     // -------------------------
@@ -1188,116 +1202,6 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// Lowers `cast ... catch:` using the handler body stored by `ValueCatchBlock`.
-    fn lower_recovering_cast_expression(
-        &mut self,
-        cast: &ResolvedCastExpression,
-        handler: &FallibleHandling,
-        expr_type_id: FrontendTypeId,
-        span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
-        match &cast.evidence {
-            ResolvedCastEvidence::Builtin { policy } => {
-                let carrier = self.emit_builtin_cast_carrier(cast, *policy, span)?;
-                self.lower_cast_catch_with_optional_wrap(
-                    carrier,
-                    handler,
-                    expr_type_id,
-                    cast.target_type_id,
-                    cast.requires_optional_wrap_after_cast,
-                    span,
-                )
-            }
-
-            ResolvedCastEvidence::UserDefined { method_path, .. } => {
-                let call_target = self.resolve_call_target_or_error(method_path, span)?;
-                let source_argument =
-                    CallArgument::positional((*cast.source).clone(), CallAccessMode::Shared, *span);
-                let carrier =
-                    self.emit_user_defined_cast_call_carrier(call_target, &source_argument, span)?;
-                self.lower_cast_catch_with_optional_wrap(
-                    carrier,
-                    handler,
-                    expr_type_id,
-                    cast.target_type_id,
-                    cast.requires_optional_wrap_after_cast,
-                    span,
-                )
-            }
-
-            ResolvedCastEvidence::GenericBound { .. } => Err(CompilerError::new(
-                "Generic-bound cast evidence reached recovering HIR lowering",
-                self.hir_error_location(span),
-                crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
-            )),
-        }
-    }
-
-    /// Lowers the catch/recovery path for a fallible cast carrier.
-    ///
-    /// WHAT: reuses the shared fallible branching helper, optionally wrapping the
-    ///      merged result in `some(...)` when the receiving context is an optional type.
-    /// WHY: in a `T?` receiving context both the cast success and the catch handler
-    ///      produce the inner `T`. Lowering with inner result locals keeps the catch
-    ///      handler's `then` value type-compatible with the merge, and wrapping the
-    ///      merged inner value ensures both control paths produce `T?`.
-    fn lower_cast_catch_with_optional_wrap(
-        &mut self,
-        carrier: EmittedFallibleCarrier,
-        handling: &FallibleHandling,
-        expr_type_id: FrontendTypeId,
-        target_type_id: FrontendTypeId,
-        requires_optional_wrap_after_cast: bool,
-        span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
-        let current_block = self.current_block_id_or_error(span)?;
-
-        if !requires_optional_wrap_after_cast {
-            let result_type_ids = self.handled_expression_result_type_ids(expr_type_id);
-            return self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
-                current_block,
-                result_local: carrier.result_local,
-                handled_result: FallibleBranchingContext {
-                    result_type_ids: &result_type_ids,
-                    handling,
-                    carrier_type: carrier.carrier_type,
-                    ok_type: carrier.ok_type,
-                    err_type: carrier.err_type,
-                    value_required: true,
-                    span,
-                    validate_float_success: false,
-                },
-            });
-        }
-
-        // For an optional receiving context, lower the branching with inner target result
-        // locals so the catch handler's `then` value is the same type as the success payload.
-        // After the merge, wrap the unified inner value into `some(...)` to produce `T?`.
-        let inner_result_type_ids = self.handled_expression_result_type_ids(target_type_id);
-        let inner_lowered =
-            self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
-                current_block,
-                result_local: carrier.result_local,
-                handled_result: FallibleBranchingContext {
-                    result_type_ids: &inner_result_type_ids,
-                    handling,
-                    carrier_type: carrier.carrier_type,
-                    ok_type: carrier.ok_type,
-                    err_type: carrier.err_type,
-                    value_required: true,
-                    span,
-                    validate_float_success: false,
-                },
-            })?;
-
-        let wrapped_value =
-            self.wrap_cast_result_optional_if_needed(inner_lowered.value, expr_type_id, span)?;
-
-        Ok(LoweredExpression {
-            prelude: inner_lowered.prelude,
-            value: wrapped_value,
-        })
-    }
 
     /// Emits a user-defined cast method call that returns a fallible carrier.
     fn emit_user_defined_cast_call_carrier(

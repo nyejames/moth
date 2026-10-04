@@ -37,7 +37,13 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidReturnShapeReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalAccessKind, ExternalFunctionDef,
+    ExternalFunctionLowerings, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+};
+use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
@@ -48,6 +54,10 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
+use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
@@ -782,8 +792,8 @@ fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flo
     );
 }
 
-// Phase 2 protects frontend semantic ownership. Arithmetic-wide catches below deliberately
-// stop at AST facts and assert the HIR unsupported-shape diagnosis, not runtime recovery.
+// These tests protect failure facts crossing the AST-to-HIR boundary. Expression-local
+// numeric producers lower to explicit recovery CFG; nested typed and inferred calls remain gated.
 
 fn failure_project(source: &str) -> FrontendProject {
     FrontendProject::new(
@@ -893,7 +903,7 @@ fn assert_fallible_reason(messages: &CompilerMessages, expected: InvalidFallible
 fn assert_catch_lowering_is_deferred(project: &mut FrontendProject, ast: Ast) {
     let messages = project
         .lower_ast_result(ast)
-        .expect_err("expression-wide recovery must not pretend to be delivered at runtime");
+        .expect_err("unsupported nested or inferred-failure producers must remain rejected");
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert!(!diagnostics.is_empty());
     for diagnostic in diagnostics {
@@ -906,6 +916,74 @@ fn assert_catch_lowering_is_deferred(project: &mut FrontendProject, ast: Ast) {
         assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0051");
         assert!(diagnostic.primary_span.is_some());
     }
+}
+
+fn hir_block(hir: &HirModule, id: BlockId) -> &HirBlock {
+    hir.blocks.iter().find(|block| block.id == id).expect("CFG block must exist")
+}
+
+fn loaded_local(expression: &HirExpression) -> LocalId {
+    let HirExpressionKind::Load(HirPlace::Local(local)) = &expression.kind else {
+        panic!("carrier must be loaded from its producer local");
+    };
+    *local
+}
+
+fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, LocalId) {
+    let producers = hir.blocks.iter().flat_map(|block| {
+        block.statements.iter().filter_map(move |statement| match &statement.kind {
+            HirStatementKind::NumericOp { op, failure_mode, result, .. }
+                if op.operator == operator =>
+            {
+                assert_eq!(*failure_mode, NumericFailureMode::ReturnError);
+                Some((block, *result))
+            }
+            _ => None,
+        })
+    }).collect::<Vec<_>>();
+    assert_eq!(producers.len(), 1, "expected exactly one {operator:?} producer");
+    producers[0]
+}
+
+fn fallible_edges(block: &HirBlock, carrier: LocalId) -> (BlockId, BlockId) {
+    let HirTerminator::FallibleBranch { result, success_block, error_block } = &block.terminator else {
+        panic!("recoverable producer must branch before its payload is consumed");
+    };
+    assert_eq!(loaded_local(result), carrier);
+    for statement in &block.statements {
+        if let HirStatementKind::Assign { value, .. } = &statement.kind {
+            match &value.kind {
+                HirExpressionKind::FallibleUnwrapSuccess { result }
+                | HirExpressionKind::FallibleUnwrapError { result } => {
+                    assert_ne!(loaded_local(result), carrier,
+                        "a producer must branch before either payload is assigned");
+                }
+                _ => {}
+            }
+        }
+    }
+    (*success_block, *error_block)
+}
+
+// Every producer has its own error adapter. Only that edge may unwrap its carrier,
+// then assign the common handler's Error slot before entering the handler once.
+fn error_adapter(hir: &HirModule, error_block: BlockId, carrier: LocalId) -> (BlockId, LocalId) {
+    let adapter = hir_block(hir, error_block);
+    let [statement] = adapter.statements.as_slice() else {
+        panic!("error adapter must only initialise the handler's error slot");
+    };
+    let HirStatementKind::Assign { target: HirPlace::Local(error_local), value } = &statement.kind else {
+        panic!("error adapter must assign the shared error local");
+    };
+    let HirExpressionKind::FallibleUnwrapError { result } = &value.kind else {
+        panic!("error adapter must unwrap the producer's failure payload");
+    };
+    assert_eq!(loaded_local(result), carrier);
+    let HirTerminator::Jump { target, .. } = &adapter.terminator else {
+        panic!("error adapter must enter the common handler");
+    };
+    assert_ne!(*target, error_block);
+    (*target, *error_local)
 }
 
 #[test]
@@ -997,7 +1075,7 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
     assert!(error.is_some());
     assert!(matches!(body[0].kind, NodeKind::ReturnError(_)));
     assert!(expression.failure_facts.implicit.is_empty());
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    project.lower_ast_result(ast).expect("numeric catch mapping to a custom error must lower");
 }
 
 #[test]
@@ -1017,8 +1095,149 @@ fn implicit_failure_catch_covers_multiply_and_add_not_only_last_operand() {
                 && producer.codes == [BuiltinErrorCode::IntOverflow]
         }));
         assert!(expression.failure_facts.implicit.is_empty());
-        assert_catch_lowering_is_deferred(&mut project, ast);
+        project.lower_ast_result(ast).expect("the complete arithmetic catch must lower");
     }
+}
+
+#[test]
+fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_handler() {
+    let mut project = failure_project(
+        "total |left Int, right Int, offset Int| -> Int:\n\
+             value = left * right + offset catch then 0\n    return value\n;\n",
+    );
+    let ast = project.ast();
+    let error_type = builtin_error_type_id(&project, &ast);
+    let hir = project.lower_ast_result(ast).expect("two-operation numeric recovery must lower");
+    let numeric_count = hir.blocks.iter().flat_map(|block| &block.statements)
+        .filter(|statement| matches!(statement.kind, HirStatementKind::NumericOp { .. })).count();
+    assert_eq!(numeric_count, 2, "each protected operation must execute exactly once");
+
+    let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (add, add_carrier) = numeric_producer(&hir, NumericOperator::Add);
+    assert_ne!(multiply_carrier, add_carrier);
+    let (multiply_success, multiply_error) = fallible_edges(multiply, multiply_carrier);
+    let (add_success, add_error) = fallible_edges(add, add_carrier);
+    assert_eq!(multiply_success, add.id, "addition must execute only after multiplication succeeds");
+    assert_ne!(multiply_error, add_error, "each error payload needs its own adapter");
+
+    let predecessors = hir.blocks.iter().filter(|block| match &block.terminator {
+        HirTerminator::FallibleBranch { success_block, error_block, .. } =>
+            *success_block == add.id || *error_block == add.id,
+        HirTerminator::Jump { target, .. } => *target == add.id,
+        _ => false,
+    }).map(|block| block.id).collect::<Vec<_>>();
+    assert_eq!(predecessors, [multiply.id], "no other edge may reach the second operation");
+
+    let (handler, error_local) = error_adapter(&hir, multiply_error, multiply_carrier);
+    assert_eq!(error_adapter(&hir, add_error, add_carrier), (handler, error_local));
+    assert_ne!(handler, multiply.id);
+    assert_ne!(handler, add.id);
+    assert_ne!(error_local, multiply_carrier);
+    assert_ne!(error_local, add_carrier);
+
+    let add_left = add.statements.iter().find_map(|statement| match &statement.kind {
+        HirStatementKind::NumericOp { operands: HirNumericOperands::Binary { left, .. }, .. } =>
+            Some(left),
+        _ => None,
+    }).expect("addition must consume the multiplication success value");
+    let HirExpressionKind::FallibleUnwrapSuccess { result } = &add_left.kind else {
+        panic!("the first success edge must unwrap multiplication before adding");
+    };
+    assert_eq!(loaded_local(result), multiply_carrier);
+    assert_eq!(add_left.ty, builtin_type_ids::INT);
+
+    let success = hir_block(&hir, add_success);
+    let (success_local, success_value) = success.statements.iter().find_map(|statement| {
+        match &statement.kind {
+            HirStatementKind::Assign { target: HirPlace::Local(local), value }
+                if matches!(value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. }) =>
+                Some((*local, value)),
+            _ => None,
+        }
+    }).expect("the final success edge must initialise the catch success slot");
+    let HirExpressionKind::FallibleUnwrapSuccess { result } = &success_value.kind else {
+        panic!("final success assignment must unwrap the addition carrier");
+    };
+    assert_eq!(loaded_local(result), add_carrier);
+    assert_eq!(success_value.ty, builtin_type_ids::INT);
+    assert_ne!(success_local, error_local);
+    assert_ne!(success_local, multiply_carrier);
+    assert_ne!(success_local, add_carrier);
+
+    let handler_block = hir_block(&hir, handler);
+    assert!(handler_block.statements.iter().any(|statement| matches!(
+        &statement.kind,
+        HirStatementKind::Assign { target: HirPlace::Local(local), value }
+            if *local == success_local && matches!(value.kind, HirExpressionKind::Int(0))
+    )), "recovery must initialise the same success slot without reading a failed success payload");
+    let HirTerminator::Jump { target: success_merge, .. } = &success.terminator else {
+        panic!("successful evaluation must reach the catch merge");
+    };
+    let HirTerminator::Jump { target: recovery_merge, .. } = &handler_block.terminator else {
+        panic!("recovery must reach the catch merge");
+    };
+    assert_eq!(success_merge, recovery_merge);
+
+    for (local, expected_type) in [(success_local, builtin_type_ids::INT), (error_local, error_type)] {
+        let declaration = hir.blocks.iter().flat_map(|block| &block.locals)
+            .find(|declaration| declaration.id == local).expect("catch slots must be declared");
+        assert_eq!(declaration.ty, expected_type);
+    }
+    for (producer, carrier) in [(multiply, multiply_carrier), (add, add_carrier)] {
+        let declaration = hir.blocks.iter().flat_map(|block| &block.locals)
+            .find(|declaration| declaration.id == carrier).expect("numeric carrier must be declared");
+        assert_ne!(declaration.ty, builtin_type_ids::INT);
+        assert_ne!(declaration.ty, error_type);
+        let HirTerminator::FallibleBranch { result, .. } = &producer.terminator else {
+            panic!("numeric carrier must be tested before any slot is defined");
+        };
+        assert_eq!(result.ty, declaration.ty);
+    }
+    for adapter_id in [multiply_error, add_error] {
+        let adapter = hir_block(&hir, adapter_id);
+        assert!(adapter.statements.iter().all(|statement| matches!(
+            &statement.kind,
+            HirStatementKind::Assign { target: HirPlace::Local(local), value }
+                if *local == error_local
+                    && value.ty == error_type
+                    && matches!(value.kind, HirExpressionKind::FallibleUnwrapError { .. })
+        )), "error edges must define only the Error slot, never the success slot");
+    }
+    for success_block in [add, success] {
+        assert!(success_block.statements.iter().all(|statement| !matches!(
+            &statement.kind,
+            HirStatementKind::Assign { target: HirPlace::Local(local), .. } if *local == error_local
+        )), "success edges must not initialise the Error slot");
+    }
+    assert!(handler_block.statements.iter().all(|statement| !matches!(
+        &statement.kind,
+        HirStatementKind::Assign { value, .. }
+            if matches!(value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+    )), "the handler must never consume a failed producer's success payload");
+}
+
+#[test]
+fn implicit_failure_nested_handler_catch_uses_its_own_error_continuation() {
+    let mut project = failure_project(
+        "recover |left Int, right Int| -> Int:\n\
+             value = left * right catch:\n\
+                 recovered = left // right catch then 7\n        then recovered\n\
+             ;\n    return value\n;\n",
+    );
+    let hir = project.hir();
+    let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, multiply_error) = fallible_edges(multiply, multiply_carrier);
+    let (outer_handler, outer_error_slot) = error_adapter(&hir, multiply_error, multiply_carrier);
+    let (divide, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
+    assert_eq!(divide.id, outer_handler);
+    let (_, divide_error) = fallible_edges(divide, divide_carrier);
+    let (inner_handler, inner_error_slot) = error_adapter(&hir, divide_error, divide_carrier);
+    assert_ne!(inner_handler, outer_handler, "nested handler failure must not restart outer recovery");
+    assert_ne!(inner_error_slot, outer_error_slot, "nested catches must not overwrite outer error slots");
+    assert!(hir_block(&hir, inner_handler).statements.iter().any(|statement| matches!(
+        &statement.kind,
+        HirStatementKind::Assign { value, .. } if matches!(value.kind, HirExpressionKind::Int(7))
+    )));
 }
 
 #[test]
@@ -1050,7 +1269,11 @@ fn implicit_failure_catch_covers_private_operands_arguments_and_typed_call() {
         }
         assert!(expression.failure_facts.implicit.is_empty());
         assert!(expression.failure_facts.typed_errors.is_empty());
-        assert_catch_lowering_is_deferred(&mut project, ast);
+        if protected.contains("multiply(") {
+            assert_catch_lowering_is_deferred(&mut project, ast);
+        } else {
+            project.lower_ast_result(ast).expect("typed calls with pending numeric arguments must lower");
+        }
     }
 }
 
@@ -1246,7 +1469,24 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
     assert_eq!(expression.type_id, u8_type);
     assert!(cast.source.failure_facts.checked_numeric_operation);
     assert!(expression.failure_facts.implicit.is_empty());
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    project.lower_ast_result(ast).expect("cast catch must cover numeric operands and conversion");
+
+    let mut project = failure_project(
+        "widen |left Int, right Int| -> Float:\n\
+             value Float = cast left * right catch then 0.0\n    return value\n;\n",
+    );
+    let ast = project.ast();
+    let expression = initializer(&named_function_body(&project, &ast, "widen")[0]);
+    let block = assert_catch_contract(expression, 1, &[], builtin_error_type_id(&project, &ast));
+    let ExpressionKind::Cast(cast) = &block.handled_value.kind else {
+        panic!("infallible conversion must retain its pending numeric operand");
+    };
+    assert_eq!(cast.source_type_id, builtin_type_ids::INT);
+    assert_eq!(cast.target_type_id, builtin_type_ids::FLOAT);
+    let hir = project.lower_ast_result(ast).expect("infallible cast must still recover operand failures");
+    let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, error) = fallible_edges(multiply, carrier);
+    error_adapter(&hir, error, carrier);
 
     let mut project = failure_project(
         "bad |values {Int}| -> Int:\n    return cast values catch then 0\n;\n",
@@ -1292,7 +1532,7 @@ fn implicit_failure_bound_catch_has_error_fields_unbound_catch_has_no_binding() 
     };
     assert!(error.is_none(), "unbound implicit recovery must not invent an observable error local");
     assert!(matches!(body.as_slice(), [node] if matches!(node.kind, NodeKind::ThenValue(_))));
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    project.lower_ast_result(ast).expect("bound and unbound arithmetic recovery must lower");
 }
 
 #[test]
@@ -1309,7 +1549,7 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
         let ast = project.ast();
         let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
         assert_catch_contract(expression, 1, &[], builtin_error_type_id(&project, &ast));
-        assert_catch_lowering_is_deferred(&mut project, ast);
+        project.lower_ast_result(ast).expect("producing and terminal arithmetic handlers must lower");
     }
 
     let mut project = failure_project(
@@ -1372,7 +1612,7 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
         panic!("fallback must produce both slots");
     };
     assert_eq!(values.expressions.iter().map(|value| value.type_id).collect::<Vec<_>>(), block.result_type_ids);
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    project.lower_ast_result(ast).expect("multi-success typed recovery must sequence numeric arguments");
 
     let mut project = failure_project(
         "pair |value Int| -> Int, String, Error!:\n    return value, \"ok\"\n;\n\
@@ -1428,7 +1668,21 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
     assert_eq!(expression.failure_facts.implicit[0].source, ImplicitFailureSource::NumericOperation);
     assert!(expression.failure_facts.implicit[0].codes.contains(&BuiltinErrorCode::DivideByZero));
     assert_eq!(expression.failure_facts.disposition, FailureDisposition::Pending);
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    let hir = project.lower_ast_result(ast).expect("handler failure must use the enclosing Error! boundary");
+    let (multiply_block, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, multiply_error) = fallible_edges(multiply_block, multiply_carrier);
+    let (handler, _) = error_adapter(&hir, multiply_error, multiply_carrier);
+    let (divide_block, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
+    assert_eq!(divide_block.id, handler, "handler arithmetic must execute inside the handler");
+    let (_, divide_error) = fallible_edges(divide_block, divide_carrier);
+    let error_block = hir_block(&hir, divide_error);
+    let HirTerminator::ReturnError(error) = &error_block.terminator else {
+        panic!("handler failure must return outward, not re-enter its own handler");
+    };
+    assert!(matches!(
+        &error.kind,
+        HirExpressionKind::FallibleUnwrapError { result } if loaded_local(result) == divide_carrier
+    ));
 
     let mut project = failure_project(
         "Failure = | message String |\n\
@@ -1473,7 +1727,7 @@ fn implicit_failure_catch_keeps_comma_and_logical_line_boundaries() {
     assert_eq!(values[0].failure_facts.implicit.len(), 1);
     assert_catch_contract(&values[1], 1, &[], error_type_id);
     assert!(values[1].failure_facts.implicit.is_empty());
-    assert_catch_lowering_is_deferred(&mut project, ast);
+    project.lower_ast_result(ast).expect("independently delimited numeric catches must lower");
 }
 
 #[test]
@@ -1820,6 +2074,160 @@ fn implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation
     );
     let messages = project.ast_result().err().expect("a statement boundary must not drop an argument's typed error");
     assert_fallible_reason(&messages, InvalidFallibleHandlingReason::UnhandledErrorReturn);
+}
+
+#[test]
+fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
+    let mut project = failure_project(
+        "@test/default consume\n\
+         recover |left Int, right Int|:\n\
+             consume(left * right) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
+    );
+    let host_id = Arc::make_mut(&mut project.frontend.external_package_registry)
+        .register_function(ExternalFunctionDef {
+            name: "consume".to_owned(),
+            parameters: vec![ExternalParameter {
+                language_type: ExternalSignatureType::NativeInt,
+                access_kind: ExternalAccessKind::Shared,
+            }],
+            returns: vec![],
+            error_return_type: Some(ExternalSignatureType::BuiltinError),
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("fallible host test signature must register");
+    let ast = project.ast();
+    let NodeKind::ExpressionStatement(expression) =
+        &named_function_body(&project, &ast, "recover")[0].kind
+    else {
+        panic!("zero-success host recovery must remain an expression statement");
+    };
+    let error_type = builtin_error_type_id(&project, &ast);
+    let block = assert_catch_contract(expression, 1, &[error_type], error_type);
+    assert!(matches!(
+        block.handled_value.kind, ExpressionKind::HandledFallibleHostFunctionCall { .. }
+    ));
+    assert!(block.result_type_ids.is_empty(), "host recovery must not invent success slots");
+    let hir = project.lower_ast_result(ast).expect("numeric host arguments must support local recovery");
+    let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (success, error) = fallible_edges(multiply, carrier);
+    let handler_slot = error_adapter(&hir, error, carrier);
+    let host_block = hir_block(&hir, success);
+    let host_carrier = host_block.statements.iter().find_map(|statement| match &statement.kind {
+        HirStatementKind::Call { target: CallTarget::External(id), result: Some(result), .. }
+            if *id == host_id => Some(*result),
+        _ => None,
+    }).expect("the protected host call must execute only after its numeric argument succeeds");
+    let (_, host_error) = fallible_edges(host_block, host_carrier);
+    assert_eq!(error_adapter(&hir, host_error, host_carrier), handler_slot,
+        "host and numeric failures must initialise the same handler Error slot");
+}
+
+#[test]
+fn implicit_failure_custom_catch_keeps_external_float_checks_on_function_boundary() {
+    let mut project = failure_project(
+        "@test/default measure\n\
+         Failure = | message String |\n\
+         load |value Float| -> Float, Failure!:\n    return value\n;\n\
+         recover |value Float| -> Float:\n\
+             result = load(measure(value)) catch then 0.0\n    return result\n;\n",
+    );
+    Arc::make_mut(&mut project.frontend.external_package_registry)
+        .register_function(ExternalFunctionDef {
+            name: "measure".to_owned(),
+            parameters: vec![ExternalParameter {
+                language_type: ExternalSignatureType::NativeFloat,
+                access_kind: ExternalAccessKind::Shared,
+            }],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::NativeFloat)],
+            error_return_type: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("float host signature must register");
+    let ast = project.ast();
+    let hir = project.lower_ast_result(ast).expect("custom catch must not absorb injected float checks");
+    let validation = hir.blocks.iter().flat_map(|block| &block.statements).find_map(|statement| {
+        match &statement.kind {
+            HirStatementKind::ValidateFloat { failure_mode, .. } => Some(*failure_mode),
+            _ => None,
+        }
+    }).expect("external float result must still be boundary-validated");
+    assert_eq!(validation, NumericFailureMode::Trap);
+
+    let mut project = failure_project(
+        "@test/default measure\n\
+         load |value Float| -> Float, Error!:\n    return value\n;\n\
+         recover |value Float| -> Float:\n\
+             result = load(measure(value)) catch then 0.0\n    return result\n;\n",
+    );
+    Arc::make_mut(&mut project.frontend.external_package_registry)
+        .register_function(ExternalFunctionDef {
+            name: "measure".to_owned(),
+            parameters: vec![ExternalParameter {
+                language_type: ExternalSignatureType::NativeFloat,
+                access_kind: ExternalAccessKind::Shared,
+            }],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::NativeFloat)],
+            error_return_type: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("float host signature must register");
+    let ast = project.ast();
+    let hir = project.lower_ast_result(ast).expect("builtin Error catch must recover injected float checks");
+    let validation = hir.blocks.iter().flat_map(|block| &block.statements).find_map(|statement| {
+        match &statement.kind {
+            HirStatementKind::ValidateFloat { failure_mode, result, .. } => Some((*failure_mode, *result)),
+            _ => None,
+        }
+    }).expect("external float result must still be boundary-validated");
+    assert_eq!(validation.0, NumericFailureMode::ReturnError);
+    let producer = hir.blocks.iter().find(|block| block.statements.iter().any(|statement| {
+        matches!(statement.kind, HirStatementKind::ValidateFloat { result, .. } if result == validation.1)
+    })).expect("float validation block");
+    let (_, error) = fallible_edges(producer, validation.1);
+    let (handler, _) = error_adapter(&hir, error, validation.1);
+    assert_ne!(handler, producer.id);
+
+}
+
+
+#[test]
+fn implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments() {
+    for (source, statement_index, has_success) in [
+        (
+            "recover |left Int, right Int| -> Int:\n\
+                 items {Int} = {9}\n\
+                 value = items.get(left * right) catch then 0\n    return value\n;\n",
+            1,
+            true,
+        ),
+        (
+            "recover |left Int, right Int|:\n\
+                 items ~{Int} = {9}\n\
+                 ~items.set(0, left * right) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
+            1,
+            false,
+        ),
+    ] {
+        let mut project = failure_project(source);
+        let ast = project.ast();
+        let statement = &named_function_body(&project, &ast, "recover")[statement_index];
+        let expression = if has_success {
+            initializer(statement)
+        } else {
+            let NodeKind::ExpressionStatement(expression) = &statement.kind else {
+                panic!("zero-success builtin recovery must remain an expression statement");
+            };
+            expression
+        };
+        let error_type = builtin_error_type_id(&project, &ast);
+        let block = assert_catch_contract(expression, 1, &[error_type], error_type);
+        assert!(matches!(block.handled_value.kind, ExpressionKind::HandledFallibleExpression { .. }));
+        assert_eq!(block.result_type_ids.len(), usize::from(has_success));
+        let hir = project.lower_ast_result(ast).expect("builtin catch must sequence numeric arguments");
+        let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
+        let (_, error) = fallible_edges(multiply, carrier);
+        error_adapter(&hir, error, carrier);
+    }
 }
 
 #[test]
