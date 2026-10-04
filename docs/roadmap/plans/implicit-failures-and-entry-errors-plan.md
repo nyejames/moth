@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. start Error! is not implemented. Moth-to-foreign export has no implementation owner.
-- Current slice: Phase 4 compatibility invalidation.
-- Blockers: none for local, re-export, or package-facade rejection.
-- Next action: invalidate stale summaries and old artefacts when private failure or export semantics change, without a second cache.
+- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. A later generated request reuses the declaring module's converged private-failure summary even when the public signature stays the same. start Error! is not implemented. Moth-to-foreign export has no implementation owner. Persistent artefact reuse remains deferred, so no second cache or compiled-artefact loader was added.
+- Current slice: Phase 5 fallible start and HTML publication.
+- Blockers: none for local rejection, facade rejection, or same-build generated-summary reuse.
+- Next action: give every applicable synthetic start its builtin Error! slot and publish HTML entry errors only after a successful invocation.
 
 ## Goal and authority
 
@@ -877,7 +877,7 @@ Acceptance coverage: F02-F03, D02-D04 and M02.
   publication. Cover re-exports, package surfaces and foreign projections.
 - [ ] Install structured diagnostics for the complete diagnostic table. Keep
   bounded deterministic witness paths and eliminate redundant private-hop spam.
-- [ ] Update the existing interface/implementation/entry compatibility owners
+- [x] Update the existing interface/implementation/entry compatibility owners
   and tests for stale summaries, generated identities and old artefacts.
 
 Exit: a successful published module cannot leak an unrepresented recoverable

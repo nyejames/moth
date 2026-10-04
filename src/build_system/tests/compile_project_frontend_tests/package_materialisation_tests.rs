@@ -1,8 +1,15 @@
 use super::*;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationSemantics, PublicFunctionCategory,
+};
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use moth_lexical::numeric::profile::NumericProfile;
 #[test]
@@ -1412,6 +1419,141 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
         }
     }
     assert_eq!((inferred_roots, error_slot_roots), (1, 1));
+}
+
+#[test]
+fn implicit_failure_later_generated_request_reuses_converged_private_helper_summary() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let dir = temp_dir.path().to_path_buf();
+    let src = dir.join("src");
+    let helper = src.join("helper");
+    fs::create_dir_all(&helper).expect("should create declaring module");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        helper.join("@mod.moth"),
+        r#"multiply |left Int, right Int| -> Int:
+    return left * right
+;
+
+export:
+    product type T |marker T, left Int, right Int| -> Int, Error!:
+        return multiply(left, right)
+    ;
+;
+"#,
+    )
+    .expect("should write uninstantiated public generic and private helper");
+    fs::write(
+        src.join("@page.moth"),
+        "@helper product\n\
+         use_product || -> Int, Error!:\n    return product(0, 2, 3)!\n;\n\
+         result = use_product() catch then 0\n",
+    )
+    .expect("should write later generated requester");
+
+    let mut config = Config::new(dir);
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("later public generic request should compile with the private failure contract");
+    assert!(
+        !frontend.has_diagnosed_or_blocked(),
+        "both declaring module and later requester must compile without source diagnoses",
+    );
+
+    let declaring_artefact = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact.interface.declarations.iter().any(|declaration| {
+                matches!(
+                    &declaration.origin,
+                    OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
+                )
+            })
+        })
+        .expect("declaring module should publish product");
+    assert_eq!(
+        declaring_artefact.interface.declarations.len(),
+        1,
+        "multiply must remain private to the declaring module",
+    );
+    let declaration = &declaring_artefact.interface.declarations[0];
+    let PublicDeclarationSemantics::Function(product) = &declaration.semantics else {
+        panic!("product must retain its public function contract");
+    };
+    assert!(matches!(
+        product.category,
+        PublicFunctionCategory::GenericTemplate(_),
+    ));
+    assert_eq!(
+        product.error_return,
+        Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)),
+        "product must keep its public Error! slot",
+    );
+
+    let context = declaring_artefact
+        .module
+        .metadata
+        .materialisation_context
+        .as_ref()
+        .expect("uninstantiated product must publish its declaring materialisation context");
+    let declaring_hir = &declaring_artefact.module.executable.hir;
+    assert!(
+        declaring_hir.function_ids_by_generated.is_empty(),
+        "the declaring module must not instantiate product",
+    );
+    let multiply = declaring_hir
+        .function_ids_by_private_origin
+        .keys()
+        .find(|identity| identity.defining_name() == "multiply")
+        .expect("declaring module must retain multiply's private identity");
+    assert!(
+        context
+            .private_callable_summary(multiply)
+            .expect("declaring context must retain multiply's exact summary")
+            .escapes_builtin_failure,
+        "the published declaring context must replace multiply's signature-only bootstrap false",
+    );
+    let mut sidecars = frontend.project.generated.sidecars();
+    let sidecar = sidecars.next().expect("the page request should materialise product");
+    assert!(sidecars.next().is_none(), "only product should be generated");
+    let executable = &sidecar.module.executable;
+    let hir = &executable.hir;
+    let root = *hir
+        .function_ids_by_generated
+        .get(&sidecar.identity)
+        .expect("product sidecar must resolve to its exact generated root");
+    let facts = &hir.function_failure_facts[&root];
+    assert_eq!(facts.contributors.len(), 1);
+    let contributor = &facts.contributors[0];
+    let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source else {
+        panic!("later product request must retain its private-call contributor: {contributor:?}");
+    };
+    assert_eq!(helper, multiply, "the sidecar must call the declaring private multiply");
+    assert!(
+        hir.module_private_call_summaries[multiply].escapes_builtin_failure,
+        "the later page request must consume the converged private summary, not bootstrap false",
+    );
+    assert_eq!(facts.boundary, HirBuiltinFailureBoundary::BuiltinErrorSlot);
+    assert!(
+        !executable.borrow_analysis.analysis.public_call_summaries[&root].escapes_builtin_failure,
+        "product must consume private failure through Error! without widening its public effect",
+    );
 }
 
 #[test]
