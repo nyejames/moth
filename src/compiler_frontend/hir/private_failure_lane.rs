@@ -2,8 +2,9 @@
 //!
 //! WHAT: after summary convergence, a private function that escapes builtin failure
 //!       returns that failure through the existing fallible carrier. Callers branch
-//!       on the carrier. Builtin `Error!` returns the same `Error`. `start` traps
-//!       on the error edge until it receives its own `Error!` slot.
+//!       on the carrier. Builtin `Error!` returns the same `Error`. A compound
+//!       store conversion lowered as a trap is retargeted onto that same edge.
+//!       `start` traps until it receives its own `Error!` slot.
 //! WHY: a may-fail bit cannot construct the eventual `Error`. The lane reuses
 //!      `FallibleBranch` / `ReturnError` and the JS `{tag, value}` ABI. It is not a
 //!      source error slot and is not a public or foreign contract.
@@ -57,7 +58,8 @@ pub(crate) fn install_private_failure_lanes(
     };
     installer.prepare_ids()?;
     installer.install_return_lanes()?;
-    installer.rewrite_bodies()
+    installer.rewrite_bodies()?;
+    installer.retarget_store_conversions()
 }
 
 struct LaneInstaller<'a> {
@@ -326,6 +328,67 @@ impl LaneInstaller<'_> {
         block.statements = suffix;
         block.terminator = terminator;
         Ok(())
+    }
+
+    /// A compound store conversion is lowered before the lane exists, so its error
+    /// edge is still a trap. The target assign already sits on the success continuation.
+    fn retarget_store_conversions(&mut self) -> Result<(), CompilerError> {
+        let lane_functions = self.lane_functions.iter().copied().collect::<Vec<_>>();
+        for function_id in lane_functions {
+            let entry = self.function_entry(function_id)?;
+            let blocks = reachable_blocks(self.hir, entry);
+            for block_id in blocks {
+                let Some((error_block, carrier_local, carrier_type)) =
+                    self.store_conversion_trap(block_id)?
+                else {
+                    continue;
+                };
+                let error_type = self.builtin_error_type()?;
+                let region = self.hir.blocks[error_block.0 as usize].region;
+                let payload = self.unwrap_error(carrier_local, carrier_type, error_type, region);
+                self.hir.blocks[error_block.0 as usize].terminator =
+                    HirTerminator::ReturnError(payload);
+            }
+        }
+        Ok(())
+    }
+
+    fn store_conversion_trap(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<(BlockId, LocalId, TypeId)>, CompilerError> {
+        let HirTerminator::FallibleBranch {
+            result, error_block, ..
+        } = &self.hir.blocks[block_id.0 as usize].terminator
+        else {
+            return Ok(None);
+        };
+        let error_block = *error_block;
+        let HirTerminator::RuntimeFailure { message } =
+            &self.hir.blocks[error_block.0 as usize].terminator
+        else {
+            return Ok(None);
+        };
+        if message != "Compound assignment conversion failed" {
+            return Err(CompilerError::compiler_error(
+                "private failure lane found an unexpected runtime failure on a fallible branch",
+            ));
+        }
+        let HirExpressionKind::Load(HirPlace::Local(local)) = &result.kind else {
+            return Err(CompilerError::compiler_error(
+                "compound write-back branch does not load its conversion carrier",
+            ));
+        };
+        if self
+            .type_environment
+            .fallible_carrier_slots(result.ty)
+            .is_none()
+        {
+            return Err(CompilerError::compiler_error(
+                "compound write-back carrier is not a fallible result",
+            ));
+        }
+        Ok(Some((error_block, *local, result.ty)))
     }
 
     fn function_propagates_builtin_error(&self, function_id: FunctionId) -> Result<bool, CompilerError> {

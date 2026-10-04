@@ -1057,7 +1057,155 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
             failure_mode: NumericFailureMode::ReturnError, ..
         })
     })), "the private multiply helper must return overflow instead of trapping");
+}
 
+
+#[test]
+fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
+    let mut project = failure_project(
+        "bump |amount U8| -> U8:\n\
+             total ~U8 = 200\n\
+             total += amount\n\
+             return total\n;\n\
+         safe_bump |amount U8| -> U8, Error!:\n\
+             return bump(amount)\n;\n\
+         walk |start Int, end Int| -> Int:\n\
+             seen ~Int = 0\n\
+             loop start to & end |value|:\n\
+                 seen = value\n\
+             ;\n\
+             return seen\n;\n\
+         safe_walk |start Int, end Int| -> Int, Error!:\n\
+             return walk(start, end)\n;\n",
+    );
+    let ast = project.ast();
+    let lowered = project.frontend.with_compiler(|compiler| {
+        compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+    }).expect("compound write-back and range updates must lower");
+    let mut hir = lowered.hir_module;
+    let mut type_environment = lowered.type_environment;
+    let mut report = project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("statement-owned checks must pass borrow checking");
+    crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries(
+        &hir, &mut report,
+    ).expect("statement-owned failure summaries must converge");
+    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
+        &mut hir, &report, &mut type_environment,
+    ).expect("statement-owned checks must join the private failure lane");
+    project.frontend.with_compiler(|compiler| compiler.check_borrows(&hir))
+        .expect("retargeted write-back and range edges must pass borrow checking");
+
+    let bump = named_hir_function(&project, &hir, "bump");
+    assert!(report.analysis.public_call_summaries[&bump.id].escapes_builtin_failure);
+    assert!(
+        store_conversion_returns_before_assign(&hir, bump.entry),
+        "compound write-back must return the conversion error and assign only on success",
+    );
+    let walk = named_hir_function(&project, &hir, "walk");
+    assert!(report.analysis.public_call_summaries[&walk.id].escapes_builtin_failure);
+    assert!(
+        function_numeric_ops_return_error(&hir, walk.entry),
+        "required range updates must return through the private lane",
+    );
+    assert!(
+        function_reaches_runtime_failure(&hir, walk.entry, "Loop step cannot be zero"),
+        "a zero step remains a compiler trap, not a numeric Error",
+    );
+}
+
+fn named_hir_function<'a>(
+    project: &FrontendProject,
+    hir: &'a HirModule,
+    name: &str,
+) -> &'a crate::compiler_frontend::hir::functions::HirFunction {
+    hir.functions.iter().find(|function| {
+        hir.side_table.function_name_path(function.id)
+            .and_then(|path| project.frontend.path_fork.component(path))
+            .is_some_and(|component| project.frontend.string_table.resolve(component) == name)
+    }).expect("authored function must lower")
+}
+
+fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bool {
+    let mut found = false;
+    for block_id in reachable_block_ids(hir, entry) {
+        let block = &hir.blocks[block_id.0 as usize];
+        let Some(carrier) = block.statements.iter().find_map(|statement| match &statement.kind {
+            HirStatementKind::CastOp { result: Some(local), .. } => Some(*local),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let HirTerminator::FallibleBranch { success_block, error_block, .. } = &block.terminator else {
+            return false;
+        };
+        if !matches!(
+            hir.blocks[error_block.0 as usize].terminator,
+            HirTerminator::ReturnError(_)
+        ) {
+            return false;
+        }
+        if hir.blocks[error_block.0 as usize].statements.iter().any(|statement| {
+            matches!(statement.kind, HirStatementKind::Assign { .. })
+        }) {
+            return false;
+        }
+        let assigned_on_success = hir.blocks[success_block.0 as usize].statements.iter().any(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Assign { value, .. }
+                    if matches!(
+                        &value.kind,
+                        HirExpressionKind::FallibleUnwrapSuccess { result }
+                            if loaded_local(result) == carrier
+                    )
+            )
+        });
+        if !assigned_on_success {
+            return false;
+        }
+        found = true;
+    }
+    found
+}
+
+fn function_numeric_ops_return_error(hir: &HirModule, entry: BlockId) -> bool {
+    let mut found = false;
+    for block_id in reachable_block_ids(hir, entry) {
+        for statement in &hir.blocks[block_id.0 as usize].statements {
+            if let HirStatementKind::NumericOp { failure_mode, .. } = &statement.kind {
+                if *failure_mode != NumericFailureMode::ReturnError {
+                    return false;
+                }
+                found = true;
+            }
+        }
+    }
+    found
+}
+
+fn function_reaches_runtime_failure(hir: &HirModule, entry: BlockId, expected: &str) -> bool {
+    reachable_block_ids(hir, entry).into_iter().any(|block_id| {
+        matches!(
+            &hir.blocks[block_id.0 as usize].terminator,
+            HirTerminator::RuntimeFailure { message } if message == expected
+        )
+    })
+}
+
+fn reachable_block_ids(hir: &HirModule, entry: BlockId) -> Vec<BlockId> {
+    let mut pending = vec![entry];
+    let mut seen = Vec::new();
+    while let Some(block_id) = pending.pop() {
+        if seen.contains(&block_id) {
+            continue;
+        }
+        seen.push(block_id);
+        let Some(block) = hir.blocks.get(block_id.0 as usize) else {
+            continue;
+        };
+        pending.extend(crate::compiler_frontend::hir::utils::terminator_targets(&block.terminator));
+    }
+    seen
 }
 fn function_reaches_error_return(hir: &HirModule, entry: BlockId) -> bool {
     let mut pending = vec![entry];

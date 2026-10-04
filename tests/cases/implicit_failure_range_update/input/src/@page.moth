@@ -1,0 +1,28 @@
+walk |start Int, end Int, step Int| -> Int:
+    seen ~Int = 0
+    loop start to end by step |value|:
+        seen = value
+    ;
+    return seen
+;
+safe_walk |start Int, end Int, step Int| -> Int, Error!:
+    return walk(start, end, step)
+;
+endpoint || -> Int:
+    visited ~Int = 0
+    loop 2147483645 to & 2147483647 |value|:
+        visited = visited + 1
+    ;
+    return visited
+;
+safe_endpoint || -> Int, Error!:
+    return endpoint()
+;
+code ~U32 = 0
+failed = safe_walk(10, 0, -2147483648) catch |overflow_error|:
+    code = overflow_error.code
+    then 0
+;
+visited = safe_endpoint() catch then -1
+
+[: range update code=[code] failed=[failed] visited=[visited]]

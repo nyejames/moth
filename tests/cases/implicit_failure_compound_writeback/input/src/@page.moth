@@ -1,0 +1,34 @@
+risky |amount U8| -> U8, Error!:
+    wide U32 = amount + 200
+    return cast! wide
+;
+bump |amount U8| -> U8:
+    total ~U8 = 200
+    total += amount
+    return total
+;
+safe_bump |amount U8| -> U8, Error!:
+    return bump(amount)
+;
+adjust |extra U8| -> U8:
+    total ~U8 = 250
+    total += risky(extra) catch then extra
+    return total
+;
+safe_adjust |extra U8| -> U8, Error!:
+    return adjust(extra)
+;
+kept U8 = 100
+code ~U32 = 0
+recovered = safe_bump(kept) catch |overflow_error|:
+    code = overflow_error.code
+    then kept
+;
+exact = safe_bump(20) catch then 0
+rhs_code ~U32 = 0
+adjusted = safe_adjust(10) catch |writeback_error|:
+    rhs_code = writeback_error.code
+    then 250
+;
+
+[: compound write-back code=[code] recovered=[recovered] exact=[exact] rhs=[rhs_code] adjusted=[adjusted]]

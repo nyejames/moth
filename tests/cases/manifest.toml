@@ -12222,6 +12222,20 @@ tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"
 contract = "language.numeric.private_failure_propagates_to_error_slot"
 role = "primary"
 
+[[case]]
+id = "implicit_failure_compound_writeback"
+path = "implicit_failure_compound_writeback"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.compound_writeback_uses_private_failure_lane"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_range_update"
+path = "implicit_failure_range_update"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.range_update_uses_private_failure_lane"
+role = "primary"
+
 
 [[case]]
 id = "numeric_failure_known_int32_overflow_rejected"

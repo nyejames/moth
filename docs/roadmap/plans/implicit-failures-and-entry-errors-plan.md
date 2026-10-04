@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure propagates through an internal carrier and materialises at builtin Error!. start Error! is not implemented.
-- Current slice: Phase 3 compound write-back and range failures.
-- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap. Compound write-back and range updates are not on the lane yet.
-- Next action: check compound assignment write-back and range-loop updates through the private failure lane.
+- Status: active. Private inferred failure, including compound write-back and required range updates, propagates through an internal carrier and materialises at builtin Error!. start Error! is not implemented.
+- Current slice: Phase 3 backend rejection of unsupported failure shapes.
+- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap. Unsupported backend facilities are not yet diagnosed as a dedicated rejection.
+- Next action: reject unsupported backend failure shapes instead of disguising them as numeric traps.
 
 ## Goal and authority
 
