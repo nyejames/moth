@@ -832,7 +832,7 @@ impl<'a> HirValidator<'a> {
 
             HirTerminator::RuntimeFailure { .. } => {
                 // Compiler-generated runtime failures are valid terminal terminators.
-                // They carry backend-facing text only, not HIR expressions.
+                // A typed cause is lowering metadata, not an additional runtime value use.
             }
 
             HirTerminator::AssertFailure {

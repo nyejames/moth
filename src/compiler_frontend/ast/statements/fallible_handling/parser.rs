@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
+use crate::compiler_frontend::ast::expressions::failure_classification::{
     explicit_propagation_catch_diagnostic, pending_body_failure_facts,
 };
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     HandledFallibleHostFunctionCallInput,
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::{
-    DeferredCustomCatchCheck, ExpressionFailureFacts, FailureDisposition, ImplicitFailureSource,
+    DeferredCustomCatchCheck, ExpressionFailureFacts, FailureDisposition,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
@@ -265,16 +265,13 @@ pub(crate) fn complete_catch_failure_fact(
         )?;
         if catch.handled_value.failure_facts.is_folded_numeric_catch_success() {
             // The handler remains semantically checked but has no executable failure edge.
-            let mut facts = ExpressionFailureFacts::default();
-            facts.merge_deferred_catches_from(&handler_facts);
-            facts
+            ExpressionFailureFacts::default()
         } else {
             handler_facts
         }
     } else {
         ExpressionFailureFacts::default()
     };
-    expression.failure_facts.merge_deferred_catches_from(&catch.handled_value.failure_facts);
     Ok(())
 }
 
@@ -292,23 +289,21 @@ pub(crate) fn compatible_expression_error_type(
     }
 
     let facts = &expression.failure_facts;
-    let first = facts.typed_errors.first();
+    let first = facts.summary.first_typed;
     if let Some(first) = first {
-        for producer in &facts.typed_errors[1..] {
-            if producer.error_type_id != first.error_type_id {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
-                        first_error_type_id: first.error_type_id,
-                        second_error_type_id: producer.error_type_id,
-                        first_producer_span: first.span,
-                        second_producer_span: producer.span,
-                    },
-                    catch_span,
-                ).into());
-            }
+        if let Some(producer) = facts.summary.conflicting_typed {
+            return Err(CompilerDiagnostic::invalid_fallible_handling(
+                InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                    first_error_type_id: first.error_type_id,
+                    second_error_type_id: producer.error_type_id,
+                    first_producer_span: first.span,
+                    second_producer_span: producer.span,
+                },
+                catch_span,
+            ).into());
         }
 
-        if !facts.implicit.is_empty() {
+        if facts.summary.first_implicit.is_some() {
             let builtin_error_type_id =
                 resolve_builtin_error_type_typed(
                     context, expression.span, string_table,
@@ -316,9 +311,7 @@ pub(crate) fn compatible_expression_error_type(
             if !is_postfix_error_compatible(
                 builtin_error_type_id, first.error_type_id, type_environment,
             ) {
-                if let Some(producer) = facts.implicit.iter().find(|producer| {
-                    matches!(producer.source, ImplicitFailureSource::NumericOperation)
-                }) {
+                if let Some(producer) = facts.summary.first_numeric {
                     return Err(CompilerDiagnostic::invalid_fallible_handling(
                         InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
                             error_type_id: first.error_type_id,
@@ -333,17 +326,16 @@ pub(crate) fn compatible_expression_error_type(
                     catch_span,
                     error_type_id: first.error_type_id,
                     typed_producer_span: first.span,
-                    candidates: facts.implicit.clone(),
                 };
                 let error_type_id = first.error_type_id;
-                expression.failure_facts.deferred_custom_catches.push(check);
+                expression.failure_facts.deferred_custom_catch = Some(check);
                 return Ok(error_type_id);
             }
         }
         return Ok(first.error_type_id);
     }
 
-    if facts.checked_numeric_operation || !facts.implicit.is_empty() {
+    if facts.checked_numeric_operation || facts.summary.first_implicit.is_some() {
         return Ok(
             resolve_builtin_error_type_typed(
                 context, expression.span, string_table,

@@ -519,7 +519,7 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::Uninitialized => Err(CompilerError::compiler_error(
                 "JavaScript backend: structured lowering encountered Uninitialized terminator",
             )),
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)
             }
             HirTerminator::AssertFailure {
@@ -698,7 +698,7 @@ impl<'hir> JsEmitter<'hir> {
                 Ok(BranchTermination::Terminated)
             }
 
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)?;
                 Ok(BranchTermination::Terminated)
             }

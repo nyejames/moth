@@ -1,7 +1,8 @@
-//! Expression-owned failure contributors, independent of the expression's success type.
+//! Origin-owned failure witnesses and compact expression compatibility summaries.
 //!
-//! AST typing records checked work before folding. Folding discharges runtime contributors but
-//! preserves catch eligibility. Catch disposition applies to protected work, never its handler.
+//! Ancestors retain only the first diagnostic witnesses and eligibility metadata. The semantic
+//! classifier collects origin witnesses once for function projection; folding discharges only
+//! the checked work it owns. Catch disposition protects work, never its handler.
 
 use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
@@ -18,10 +19,12 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ExpressionFailureFacts {
+    pub(crate) summary: FailureSummary,
+    /// Witnesses introduced at this expression, never copies of descendants' witnesses.
     pub(crate) implicit: Vec<ImplicitFailureContributor>,
-    pub(crate) typed_errors: Vec<TypedErrorProducer>,
-    /// Custom catch compatibility waits for exact private-callee failure summaries.
-    pub(crate) deferred_custom_catches: Vec<DeferredCustomCatchCheck>,
+    pub(crate) typed_error: Option<TypedErrorProducer>,
+    /// Stored at the protected expression; candidates are collected there during projection.
+    pub(crate) deferred_custom_catch: Option<DeferredCustomCatchCheck>,
     /// A checked operation remains catch-eligible even when constant folding discharges it.
     pub(crate) checked_numeric_operation: bool,
     /// Explicit `!`, `cast!` and `?` leave the function, never target an enclosing catch.
@@ -29,10 +32,24 @@ pub(crate) struct ExpressionFailureFacts {
     pub(crate) disposition: FailureDisposition,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FailureSummary {
+    pub(crate) first_implicit: Option<ImplicitFailureContributorSummary>,
+    pub(crate) first_numeric: Option<ImplicitFailureContributorSummary>,
+    pub(crate) first_private_call: Option<ImplicitFailureContributorSummary>,
+    pub(crate) first_typed: Option<TypedErrorProducer>,
+    pub(crate) conflicting_typed: Option<TypedErrorProducer>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ImplicitFailureContributorSummary {
+    pub(crate) span: Option<SourceSpan>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ImplicitFailureContributor {
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) codes: Vec<BuiltinErrorCode>,
+    pub(crate) codes: &'static [BuiltinErrorCode],
     pub(crate) source: ImplicitFailureSource,
 }
 
@@ -42,20 +59,50 @@ pub(crate) enum ImplicitFailureSource {
     PrivateCall(PathId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TypedErrorProducer {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) error_type_id: TypeId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DeferredCustomCatchCheck {
     pub(crate) catch_span: Option<SourceSpan>,
     pub(crate) error_type_id: TypeId,
     pub(crate) typed_producer_span: Option<SourceSpan>,
-    pub(crate) candidates: Vec<ImplicitFailureContributor>,
 }
 
+impl FailureSummary {
+    pub(crate) fn merge_from(&mut self, other: &Self) {
+        self.first_implicit = self.first_implicit.or(other.first_implicit);
+        self.first_numeric = self.first_numeric.or(other.first_numeric);
+        self.first_private_call = self.first_private_call.or(other.first_private_call);
+        if let Some(first) = self.first_typed {
+            if self.conflicting_typed.is_none() {
+                self.conflicting_typed = match other.first_typed {
+                    Some(producer) if producer.error_type_id != first.error_type_id => Some(producer),
+                    _ => other.conflicting_typed,
+                };
+            }
+        } else {
+            self.first_typed = other.first_typed;
+            self.conflicting_typed = other.conflicting_typed;
+        }
+    }
+
+    fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
+        let witness = Some(ImplicitFailureContributorSummary { span: contributor.span });
+        self.first_implicit = self.first_implicit.or(witness);
+        match contributor.source {
+            ImplicitFailureSource::NumericOperation => {
+                self.first_numeric = self.first_numeric.or(witness);
+            }
+            ImplicitFailureSource::PrivateCall(_) => {
+                self.first_private_call = self.first_private_call.or(witness);
+            }
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FailureDisposition {
     #[default]
@@ -65,39 +112,55 @@ pub(crate) enum FailureDisposition {
 
 impl ExpressionFailureFacts {
     pub(crate) fn has_pending_implicit(&self) -> bool {
-        self.disposition == FailureDisposition::Pending && !self.implicit.is_empty()
+        self.disposition == FailureDisposition::Pending && self.summary.first_implicit.is_some()
     }
 
+    /// Constant-cost metadata join. Origin witnesses and deferred checks never leave their owner.
     pub(crate) fn merge_pending_from(&mut self, other: &Self) {
-        self.merge_deferred_catches_from(other);
         self.postfix_exit_span = self.postfix_exit_span.or(other.postfix_exit_span);
         if other.disposition != FailureDisposition::Pending {
             return;
         }
-
         self.checked_numeric_operation |= other.checked_numeric_operation;
-        for contributor in &other.implicit {
-            if !self.implicit.contains(contributor) {
-                self.implicit.push(contributor.clone());
-            }
-        }
-        for producer in &other.typed_errors {
-            if !self.typed_errors.contains(producer) {
-                self.typed_errors.push(producer.clone());
-            }
+        self.summary.merge_from(&other.summary);
+    }
+
+    pub(crate) fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
+        self.summary.record_implicit(contributor);
+        self.implicit.push(contributor);
+    }
+
+    pub(crate) fn record_typed_error(&mut self, producer: TypedErrorProducer) {
+        self.summary.merge_from(&FailureSummary {
+            first_typed: Some(producer),
+            ..FailureSummary::default()
+        });
+        self.typed_error = Some(producer);
+    }
+
+    /// Folding transfers surviving operator witnesses to the reduced expression by move.
+    pub(crate) fn take_origin_work_from(&mut self, mut other: Self) {
+        self.checked_numeric_operation |= other.checked_numeric_operation;
+        for contributor in other.implicit.drain(..) {
+            self.record_implicit(contributor);
         }
     }
 
-    pub(crate) fn merge_deferred_catches_from(&mut self, other: &Self) {
-        for check in &other.deferred_custom_catches {
-            if !self.deferred_custom_catches.contains(check) {
-                self.deferred_custom_catches.push(check.clone());
-            }
+    /// The caller retains eligibility while discarding folded operator witnesses.
+    pub(crate) fn refresh_origin_summary(&mut self) {
+        self.summary = FailureSummary::default();
+        for contributor in &self.implicit {
+            self.summary.record_implicit(*contributor);
+        }
+        if let Some(producer) = self.typed_error {
+            self.summary.first_typed = Some(producer);
         }
     }
 
     pub(crate) fn is_folded_numeric_catch_success(&self) -> bool {
-        self.checked_numeric_operation && self.implicit.is_empty() && self.typed_errors.is_empty()
+        self.checked_numeric_operation
+            && self.summary.first_implicit.is_none()
+            && self.summary.first_typed.is_none()
     }
 
     pub(crate) fn record_numeric_operation(
@@ -112,7 +175,7 @@ impl ExpressionFailureFacts {
         }
 
         self.checked_numeric_operation = true;
-        self.implicit.push(ImplicitFailureContributor {
+        self.record_implicit(ImplicitFailureContributor {
             span,
             codes,
             source: ImplicitFailureSource::NumericOperation,
@@ -167,11 +230,11 @@ impl ExpressionFailureFacts {
                     // Compound stores check the numeric destination domain. Explicit casts keep
                     // their distinct typed Error producer rather than entering this lane.
                     let codes = if target.is_binary_float() {
-                        vec![BuiltinErrorCode::FloatNonFinite]
+                        &[BuiltinErrorCode::FloatNonFinite][..]
                     } else {
-                        vec![BuiltinErrorCode::IntOverflow]
+                        &[BuiltinErrorCode::IntOverflow][..]
                     };
-                    facts.implicit.push(ImplicitFailureContributor {
+                    facts.record_implicit(ImplicitFailureContributor {
                         span: cast.span,
                         codes,
                         source: ImplicitFailureSource::NumericOperation,
@@ -234,27 +297,39 @@ impl ExpressionFailureFacts {
     }
 }
 
-fn numeric_failure_codes(operator: NumericOperator, domain: NumericScalar) -> Vec<BuiltinErrorCode> {
-    let mut codes = Vec::new();
-    if matches!(
+fn numeric_failure_codes(
+    operator: NumericOperator,
+    domain: NumericScalar,
+) -> &'static [BuiltinErrorCode] {
+    let divides = matches!(
         operator,
         NumericOperator::Divide | NumericOperator::IntegerDivide | NumericOperator::Remainder
-    ) {
-        codes.push(BuiltinErrorCode::DivideByZero);
+    );
+    if domain.is_binary_float() {
+        if divides {
+            return &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::FloatNonFinite];
+        }
+        return if operator == NumericOperator::Negate {
+            &[]
+        } else {
+            &[BuiltinErrorCode::FloatNonFinite]
+        };
     }
-    if domain.is_integer()
-        && !matches!(operator, NumericOperator::Divide | NumericOperator::Remainder)
-    {
-        codes.push(BuiltinErrorCode::IntOverflow);
+    if domain.is_integer() {
+        return match operator {
+            NumericOperator::Divide | NumericOperator::Remainder => &[BuiltinErrorCode::DivideByZero],
+            NumericOperator::IntegerDivide => &[BuiltinErrorCode::DivideByZero, BuiltinErrorCode::IntOverflow],
+            NumericOperator::Power => &[BuiltinErrorCode::IntOverflow, BuiltinErrorCode::InvalidExponent],
+            _ => &[BuiltinErrorCode::IntOverflow],
+        };
     }
-    if operator == NumericOperator::Power && !domain.is_binary_float() {
-        codes.push(BuiltinErrorCode::InvalidExponent);
+    if divides {
+        &[BuiltinErrorCode::DivideByZero]
+    } else if operator == NumericOperator::Power {
+        &[BuiltinErrorCode::InvalidExponent]
+    } else {
+        &[]
     }
-    if domain.is_binary_float() && operator != NumericOperator::Negate {
-        codes.push(BuiltinErrorCode::FloatNonFinite);
-    }
-    debug_assert!(codes.iter().all(|code| code.is_implicit_failure()));
-    codes
 }
 
 #[cfg(test)]

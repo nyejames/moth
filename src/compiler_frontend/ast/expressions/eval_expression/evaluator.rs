@@ -199,6 +199,7 @@ pub fn evaluate_expression(
         operation_failure_facts
             .implicit
             .retain(|contributor| remaining_operator_spans.contains(&contributor.span));
+        operation_failure_facts.refresh_origin_summary();
     }
 
     // Fully folded to a single compile-time value: hand the folded operand back by move.
@@ -210,7 +211,7 @@ pub fn evaluate_expression(
             )
             .into());
         };
-        expression.failure_facts.merge_pending_from(&operation_failure_facts);
+        expression.failure_facts.take_origin_work_from(operation_failure_facts);
         return Ok(expression);
     }
 
@@ -236,7 +237,7 @@ pub fn evaluate_expression(
         value_mode,
         stack_span.or(span),
     )?;
-    expression.failure_facts.merge_pending_from(&operation_failure_facts);
+    expression.failure_facts.take_origin_work_from(operation_failure_facts);
     Ok(expression)
 }
 

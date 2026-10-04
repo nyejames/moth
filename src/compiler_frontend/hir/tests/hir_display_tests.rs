@@ -45,6 +45,7 @@ fn runtime_failure_message_display_escapes_debug_text() {
     let display = HirDisplayContext::new(&string_table, &path_fork);
     let rendered = display.render_terminator(&HirTerminator::RuntimeFailure {
         message: "quoted \"message\"\nnext".to_owned(),
+        cause: None,
     });
 
     assert_eq!(

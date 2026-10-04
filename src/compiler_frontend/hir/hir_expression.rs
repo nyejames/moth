@@ -1106,10 +1106,9 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredExpression, CompilerError> {
         let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
         let failure_mode = self.select_numeric_failure_mode(span)?;
-        let success_value = self.lower_fallible_carrier_to_success_value_with_runtime_failure(
+        let success_value = self.lower_store_conversion_carrier_to_success_value(
             carrier,
             failure_mode,
-            "Compound assignment conversion failed",
             span,
         )?;
         let value = self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;

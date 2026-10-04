@@ -422,7 +422,7 @@ impl Expression {
         mut self,
         error_type_id: TypeId,
     ) -> Self {
-        self.failure_facts.typed_errors.push(TypedErrorProducer {
+        self.failure_facts.record_typed_error(TypedErrorProducer {
             span: self.span,
             error_type_id,
         });
@@ -430,9 +430,9 @@ impl Expression {
     }
 
     pub(crate) fn with_private_call_failure_candidate(mut self, path: PathId) -> Self {
-        self.failure_facts.implicit.push(ImplicitFailureContributor {
+        self.failure_facts.record_implicit(ImplicitFailureContributor {
             span: self.span,
-            codes: Vec::new(),
+            codes: &[],
             source: ImplicitFailureSource::PrivateCall(path),
         });
         self
@@ -443,7 +443,7 @@ impl Expression {
         if self.failure_facts.disposition != FailureDisposition::Pending {
             return None;
         }
-        self.failure_facts.typed_errors.first().map(|producer| {
+        self.failure_facts.summary.first_typed.map(|producer| {
             CompilerDiagnostic::invalid_fallible_handling(
                 InvalidFallibleHandlingReason::UnhandledErrorReturn,
                 producer.span.or(self.span),

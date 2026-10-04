@@ -11,7 +11,7 @@
 
 use std::collections::VecDeque;
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -32,8 +32,9 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::hir::utils::terminator_targets;
+use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 
 /// Give escaping private functions one internal builtin-`Error` lane and make
@@ -47,21 +48,27 @@ pub(crate) fn install_private_failure_lanes(
     let builtin_error = type_environment.type_id_for_canonical_identity(
         &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
     );
-    let mut installer = LaneInstaller {
-        hir,
-        report,
-        type_environment,
-        lane_functions,
-        builtin_error,
-        next_local: 0,
-        next_node: 0,
-        next_value: 0,
-    };
-    installer.prepare_ids()?;
-    installer.install_return_lanes()?;
-    installer.rewrite_bodies()?;
-    installer.retarget_store_conversions()?;
-    installer.narrow_entry_return()
+    {
+        let mut installer = LaneInstaller {
+            hir,
+            report,
+            type_environment,
+            lane_functions,
+            builtin_error,
+            local_types: FxHashMap::default(),
+            next_local: 0,
+            next_node: 0,
+            next_value: 0,
+        };
+        installer.prepare_ids()?;
+        installer.install_return_lanes()?;
+        installer.rewrite_bodies()?;
+        installer.retarget_store_conversions()?;
+        installer.narrow_entry_return()?;
+    }
+
+    // Rewrites finish before analysis can consume the final base or generated body.
+    validate_hir_module(hir, type_environment)
 }
 
 struct LaneInstaller<'a> {
@@ -70,6 +77,7 @@ struct LaneInstaller<'a> {
     type_environment: &'a mut TypeEnvironment,
     lane_functions: FxHashSet<FunctionId>,
     builtin_error: Option<TypeId>,
+    local_types: FxHashMap<LocalId, TypeId>,
     next_local: u32,
     next_node: u32,
     next_value: u32,
@@ -86,7 +94,15 @@ impl LaneInstaller<'_> {
                     "private failure lane install requires dense HIR block ids",
                 ));
             }
-            note_block_ids(block, &mut next_local, &mut next_node, &mut next_value);
+            for local in &block.locals {
+                next_local = next_local.max(local.id.0.saturating_add(1));
+                self.local_types.insert(local.id, local.ty);
+            }
+            for statement in &block.statements {
+                next_node = next_node.max(statement.id.0.saturating_add(1));
+                note_statement_ids(&statement.kind, &mut next_value);
+            }
+            note_terminator_ids(&block.terminator, &mut next_value);
         }
         self.next_local = next_local;
         self.next_node = next_node;
@@ -172,14 +188,14 @@ impl LaneInstaller<'_> {
                     return Ok(None);
                 }
                 if let Some(local) = result
-                    && self.local_type(*local)?.is_some_and(|ty| {
+                    && self.local_type(*local).is_some_and(|ty| {
                         self.type_environment.fallible_carrier_slots(ty).is_some()
                     })
                 {
                     return Ok(None);
                 }
                 let success_type = match result {
-                    Some(local) => self.local_type(*local)?.ok_or_else(|| {
+                    Some(local) => self.local_type(*local).ok_or_else(|| {
                         CompilerError::compiler_error(
                             "private failure call result local has no type",
                         )
@@ -199,7 +215,7 @@ impl LaneInstaller<'_> {
                     && *failure_mode == NumericFailureMode::Trap
                     && statement_has_implicit_failure(&statement.kind) =>
             {
-                let success_type = self.local_type(*result)?.ok_or_else(|| {
+                let success_type = self.local_type(*result).ok_or_else(|| {
                     CompilerError::compiler_error("checked numeric result local has no type")
                 })?;
                 Ok(Some(Producer {
@@ -338,59 +354,32 @@ impl LaneInstaller<'_> {
         let lane_functions = self.lane_functions.iter().copied().collect::<Vec<_>>();
         for function_id in lane_functions {
             let entry = self.function_entry(function_id)?;
-            let blocks = reachable_blocks(self.hir, entry);
-            for block_id in blocks {
-                let Some((error_block, carrier_local, carrier_type)) =
-                    self.store_conversion_trap(block_id)?
+            for block_id in reachable_blocks(self.hir, entry) {
+                let HirTerminator::RuntimeFailure {
+                    cause: Some(RuntimeFailureCause::StoreConversion { carrier }),
+                    ..
+                } = self.hir.blocks[block_id.0 as usize].terminator
                 else {
                     continue;
                 };
+                let carrier_type = self.local_types.get(&carrier).copied().ok_or_else(|| {
+                    CompilerError::compiler_error("compound write-back carrier has no local type")
+                })?;
                 let error_type = self.builtin_error_type()?;
-                let region = self.hir.blocks[error_block.0 as usize].region;
-                let payload = self.unwrap_error(carrier_local, carrier_type, error_type, region);
-                self.hir.blocks[error_block.0 as usize].terminator =
+                if self.type_environment.fallible_carrier_slots(carrier_type)
+                    .is_none_or(|(_, error)| error != error_type)
+                {
+                    return Err(CompilerError::compiler_error(
+                        "compound write-back carrier must contain builtin Error",
+                    ));
+                }
+                let region = self.hir.blocks[block_id.0 as usize].region;
+                let payload = self.unwrap_error(carrier, carrier_type, error_type, region);
+                self.hir.blocks[block_id.0 as usize].terminator =
                     HirTerminator::ReturnError(payload);
             }
         }
         Ok(())
-    }
-
-    fn store_conversion_trap(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<(BlockId, LocalId, TypeId)>, CompilerError> {
-        let HirTerminator::FallibleBranch {
-            result, error_block, ..
-        } = &self.hir.blocks[block_id.0 as usize].terminator
-        else {
-            return Ok(None);
-        };
-        let error_block = *error_block;
-        let HirTerminator::RuntimeFailure { message } =
-            &self.hir.blocks[error_block.0 as usize].terminator
-        else {
-            return Ok(None);
-        };
-        if message != "Compound assignment conversion failed" {
-            return Err(CompilerError::compiler_error(
-                "private failure lane found an unexpected runtime failure on a fallible branch",
-            ));
-        }
-        let HirExpressionKind::Load(HirPlace::Local(local)) = &result.kind else {
-            return Err(CompilerError::compiler_error(
-                "compound write-back branch does not load its conversion carrier",
-            ));
-        };
-        if self
-            .type_environment
-            .fallible_carrier_slots(result.ty)
-            .is_none()
-        {
-            return Err(CompilerError::compiler_error(
-                "compound write-back carrier is not a fallible result",
-            ));
-        }
-        Ok(Some((error_block, *local, result.ty)))
     }
 
     /// The AST entry always accepts builtin Error, but a dead error slot must not
@@ -488,19 +477,14 @@ impl LaneInstaller<'_> {
         Ok(self.hir.functions[self.function_index(function_id)?].entry)
     }
 
-    fn local_type(&self, local_id: LocalId) -> Result<Option<TypeId>, CompilerError> {
-        Ok(self
-            .hir
-            .blocks
-            .iter()
-            .flat_map(|block| &block.locals)
-            .find(|local| local.id == local_id)
-            .map(|local| local.ty))
+    fn local_type(&self, local_id: LocalId) -> Option<TypeId> {
+        self.local_types.get(&local_id).copied()
     }
 
     fn allocate_local(&mut self, block_id: BlockId, ty: TypeId, region: RegionId) -> LocalId {
         let id = LocalId(self.next_local);
         self.next_local += 1;
+        self.local_types.insert(id, ty);
         self.hir.blocks[block_id.0 as usize].locals.push(HirLocal {
             id,
             ty,
@@ -633,17 +617,6 @@ fn private_lane_functions(
         }
     }
     Ok(lane_functions)
-}
-
-fn note_block_ids(block: &HirBlock, next_local: &mut u32, next_node: &mut u32, next_value: &mut u32) {
-    for local in &block.locals {
-        *next_local = (*next_local).max(local.id.0.saturating_add(1));
-    }
-    for statement in &block.statements {
-        *next_node = (*next_node).max(statement.id.0.saturating_add(1));
-        note_statement_ids(&statement.kind, next_value);
-    }
-    note_terminator_ids(&block.terminator, next_value);
 }
 
 fn note_statement_ids(kind: &HirStatementKind, next_value: &mut u32) {

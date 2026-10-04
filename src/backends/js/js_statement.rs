@@ -1039,7 +1039,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             }
 
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)?;
             }
 

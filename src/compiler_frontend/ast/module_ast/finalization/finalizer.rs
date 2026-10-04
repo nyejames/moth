@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::const_values::body_local::insert_body_local_c
 use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
@@ -275,7 +275,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // The authored assertion message must remain available to the authoritative AST
         // type/TIR boundary validation above. Only after that validation succeeds may AST
         // finalization discard compile-time-inactive executable message state.
-        discard_inactive_assertion_messages(&mut emitted.ast);
+        discard_inactive_assertion_messages(&mut emitted.ast)
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.path_fork

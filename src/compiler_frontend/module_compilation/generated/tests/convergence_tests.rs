@@ -102,6 +102,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
             .collect(),
         terminator: HirTerminator::RuntimeFailure {
             message: "test convergence model".to_owned(),
+            cause: None,
         },
     });
     collect_module_function_link_facts(&module).expect("test HIR should produce link facts")

@@ -9,7 +9,7 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
@@ -206,7 +206,7 @@ impl<'a> HirBuilder<'a> {
             contributors.push(HirBuiltinFailureContributor {
                 source,
                 span: contributor.span,
-                codes: contributor.codes,
+                codes: contributor.codes.to_vec(),
             });
         }
         Ok(contributors)

@@ -597,6 +597,7 @@ impl<'a> HirBuilder<'a> {
                 no_match_block_id,
                 HirTerminator::RuntimeFailure {
                     message: "No match arm selected".to_owned(),
+                    cause: None,
                 },
                 span,
             )?;

@@ -7,7 +7,7 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
@@ -450,8 +450,8 @@ pub(crate) fn parse_function_body_statements(
         && let Some(functions) = &context.known_infallible_functions
     {
         let facts = pending_function_failure_facts(&body_nodes, &context.template_ir_store.borrow())?;
-        if facts.body.implicit.is_empty()
-            && facts.body.typed_errors.is_empty()
+        if !facts.body.summary.has_pending_implicit()
+            && facts.body.summary.summary.first_typed.is_none()
             && facts.assertion_message_calls.is_empty()
         {
             functions.borrow_mut().insert(context.scope);

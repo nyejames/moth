@@ -556,7 +556,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!("return! {}", self.render_expression(value))
             }
             HirTerminator::Uninitialized => "uninitialized".to_owned(),
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 format!("runtime_failure \"{}\"", message.escape_debug())
             }
             HirTerminator::AssertFailure {

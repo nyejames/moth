@@ -16,7 +16,7 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::return_hir_transformation_error;
@@ -165,11 +165,10 @@ impl<'a> HirBuilder<'a> {
     ///       delegating to ordinary fallible propagation for builtin `Error!`.
     /// WHY: implicit compound-store conversions use the same enclosing-function policy as checked
     ///      arithmetic while remaining distinct from a user-authored `cast!` expression.
-    pub(crate) fn lower_fallible_carrier_to_success_value_with_runtime_failure(
+    pub(crate) fn lower_store_conversion_carrier_to_success_value(
         &mut self,
         result_carrier: EmittedFallibleCarrier,
         failure_mode: NumericFailureMode,
-        failure_message: &str,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
         if failure_mode == NumericFailureMode::ReturnError {
@@ -187,7 +186,10 @@ impl<'a> HirBuilder<'a> {
         self.emit_terminator_with_span(
             branch.error_block,
             HirTerminator::RuntimeFailure {
-                message: failure_message.to_owned(),
+                message: "Compound assignment conversion failed".to_owned(),
+                cause: Some(RuntimeFailureCause::StoreConversion {
+                    carrier: result_carrier.result_local,
+                }),
             },
             span,
             *span,

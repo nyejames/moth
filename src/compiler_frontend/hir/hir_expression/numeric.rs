@@ -109,7 +109,10 @@ impl<'a> HirBuilder<'a> {
         } else {
             self.emit_terminator(
                 block,
-                HirTerminator::RuntimeFailure { message: cause.builtin_error_code().default_message().to_owned() },
+                HirTerminator::RuntimeFailure {
+                    message: cause.builtin_error_code().default_message().to_owned(),
+                    cause: None,
+                },
                 span,
             )?;
         }

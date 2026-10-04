@@ -123,8 +123,8 @@ pub(crate) fn resolve_cast_expression(
         && selection.fallible.is_none()
         && selection.infallible.is_some()
         && (source.failure_facts.checked_numeric_operation
-            || !source.failure_facts.implicit.is_empty()
-            || !source.failure_facts.typed_errors.is_empty());
+            || source.failure_facts.summary.first_implicit.is_some()
+            || source.failure_facts.summary.first_typed.is_some());
 
     let evidence = match handling {
         CastHandling::Infallible => match selection.infallible {

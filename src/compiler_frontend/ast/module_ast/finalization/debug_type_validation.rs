@@ -17,9 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
-use crate::compiler_frontend::ast::expressions::failure_facts::{
-    FailureDisposition, ImplicitFailureSource,
-};
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -569,22 +567,20 @@ fn expression_is_recovering_catch_subject(
         let builtin_error = context.type_environment.type_id_for_canonical_identity(
             &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
         );
-        let implicit_is_compatible = expression.failure_facts.implicit.is_empty()
+        let facts = &expression.failure_facts;
+        let implicit_is_compatible = facts.summary.first_implicit.is_none()
             || Some(error_type_id) == builtin_error
-            || expression.failure_facts.implicit.iter().all(|candidate| {
-                matches!(candidate.source, ImplicitFailureSource::PrivateCall(_))
-                    && expression.failure_facts.deferred_custom_catches.iter().any(|check| {
-                        check.error_type_id == error_type_id && check.candidates.contains(candidate)
-                    })
+            || (facts.summary.first_numeric.is_none()
+                && facts.deferred_custom_catch.is_some_and(|check| {
+                    check.error_type_id == error_type_id
+                }));
+        let typed_errors_are_compatible = facts.summary.conflicting_typed.is_none()
+            && facts.summary.first_typed.is_none_or(|producer| {
+                producer.error_type_id == error_type_id
             });
-        let typed_errors_are_compatible = expression
-            .failure_facts
-            .typed_errors
-            .iter()
-            .all(|producer| producer.error_type_id == error_type_id);
-        let is_eligible = expression.failure_facts.checked_numeric_operation
-            || !expression.failure_facts.implicit.is_empty()
-            || !expression.failure_facts.typed_errors.is_empty();
+        let is_eligible = facts.checked_numeric_operation
+            || facts.summary.first_implicit.is_some()
+            || facts.summary.first_typed.is_some();
         if !implicit_is_compatible
             || !typed_errors_are_compatible
             || !is_eligible
