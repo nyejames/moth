@@ -1,5 +1,5 @@
 export:
     double |x Int| -> Int:
-        return x * 2
+        return x * 2 catch then 0
     ;
 ;

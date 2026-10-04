@@ -19,9 +19,10 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
@@ -57,6 +58,68 @@ impl<'a> HirBuilder<'a> {
                 self.emit_recoverable_numeric_value(op, operands, success_type, span)
             }
         }
+    }
+
+    /// Shares arithmetic's failure owner and carrier shape so private-lane installation can
+    /// retarget the producer without inspecting guard conditions or rendered messages.
+    pub(crate) fn emit_range_step_failure(
+        &mut self,
+        cause: RangeStepFailureCause,
+        span: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
+        let success_type = self.type_environment.builtins().bool;
+        let error_type = if failure_mode == NumericFailureMode::ReturnError {
+            Some(self.builtin_error_type_id(span)?)
+        } else {
+            None
+        };
+        let result_type = match error_type {
+            Some(error_type) => self
+                .type_environment
+                .intern_fallible_carrier(success_type, error_type),
+            None => success_type,
+        };
+        let result_local = self.allocate_temp_local(result_type, None)?;
+        self.emit_statement_kind_with_span(
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result: result_local,
+            },
+            span,
+            *span,
+        )?;
+        let block = self.current_block_id_or_error(span)?;
+        if let Some(error_type) = error_type {
+            let region = self.current_region_or_error(span)?;
+            let error_result =
+                self.make_local_load_expression(result_local, result_type, &None, region);
+            let error_payload = self.make_expression(
+                span,
+                HirExpressionKind::FallibleUnwrapError {
+                    result: Box::new(error_result),
+                },
+                error_type,
+                ValueKind::RValue,
+                region,
+            );
+            self.emit_terminator(block, HirTerminator::ReturnError(error_payload), span)?;
+        } else {
+            self.emit_terminator(
+                block,
+                HirTerminator::RuntimeFailure {
+                    message: cause.builtin_error_code().default_message().to_owned(),
+                    cause: None,
+                },
+                span,
+            )?;
+        }
+        Ok(())
     }
 
     /// Emits a trapping numeric operation and returns the scalar success local load.
@@ -149,11 +212,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
-            NumericFailureMode::ReturnError
-        } else {
-            self.select_numeric_failure_mode(span)?
-        };
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
@@ -231,11 +290,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
-            NumericFailureMode::ReturnError
-        } else {
-            self.select_numeric_failure_mode(span)?
-        };
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {
@@ -383,15 +438,16 @@ impl<'a> HirBuilder<'a> {
         let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
         let operands = HirNumericOperands::Binary { left, right };
         let failure_mode = self.select_numeric_failure_mode(span)?;
-        let no_span = None;
 
+        // Generated updates still belong to the authored loop/assignment. Preserve that
+        // producer span so a target capability rejection never points at anonymous scaffolding.
         if matches!(failure_mode, NumericFailureMode::Trap) {
-            return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
+            return self.emit_numeric_op_statement(op, failure_mode, operands, target, span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, &no_span)?;
+        let success_type = self.checked_numeric_result_type(op, span)?;
         let success_value =
-            self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
+            self.emit_recoverable_numeric_value(op, operands, success_type, span)?;
         self.emit_assign_local_statement(target, success_value, span)
     }
 
@@ -409,23 +465,33 @@ impl<'a> HirBuilder<'a> {
         self.lower_type_id(domain_type, span)
     }
 
+    /// Formatting and incoming-value guards are integrity checks, not implicit numeric failure.
+    /// Only a source-declared builtin Error! contract makes these guards recoverable. The exact
+    /// start identity is retained from the compiler-generated AST entry, not inferred from a name.
+    fn select_float_integrity_failure_mode(
+        &mut self,
+        span: &Option<SourceSpan>,
+    ) -> Result<NumericFailureMode, CompilerError> {
+        let function_id = self.current_function_id_or_error(span)?;
+        if self.module.start_function == Some(function_id) {
+            return Ok(NumericFailureMode::Trap);
+        }
+
+        self.select_numeric_failure_mode(span)
+    }
+
     /// Selects the numeric failure mode for the current function context.
     ///
-    /// WHAT: returns `ReturnError` only when the enclosing function has an internal fallible carrier
-    ///       whose error slot is exactly builtin `Error`. Top-level `start()`, non-fallible functions,
-    ///       and custom error channels all use `Trap`.
-    /// WHY: only builtin `Error!` can represent numeric failures as user-recoverable values; other
-    ///      contexts have no channel for the failure.
+    /// WHAT: returns `ReturnError` when the signature's fallible carrier has builtin `Error`.
+    ///       Other signatures initially use `Trap`.
+    /// WHY: the private failure lane later installs inferred delivery for private no-slot
+    ///      functions. Custom error slots require frontend-validated local recovery or explicit
+    ///      mapping, never automatic conversion.
     pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {
         let current_function_id = self.current_function_id_or_error(span)?;
-        // Entry `start()` is implicitly non-fallible regardless of its carrier shape.
-        if Some(current_function_id) == self.module.start_function {
-            return Ok(NumericFailureMode::Trap);
-        }
-
         let function = self.function_by_id_or_error(current_function_id, span)?;
         let Some((_, error_type)) = self
             .type_environment

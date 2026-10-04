@@ -7,12 +7,13 @@ warnings = "forbid"
 rendered_output_contains = ["compound i32=42 i8-to-i32=-118 u16-to-i32=65536 u64-high=9223372036854775809"]
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = ["compound i32=42 i8-to-i32=-118 u16-to-i32=65536 u64-high=9223372036854775809"]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
-[[backends.html_wasm.artifact_assertions]]
-path = "page.wasm"
-kind = "wasm"
-validate_wasm = true
-must_export = ["moth_start"]
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@page.moth"
+line = 11
+column = 5

@@ -5,5 +5,5 @@ Counter = |
 |
 
 bump |value ~Counter|:
-    value.step = value.step + 1
+    value.step = value.step + 1 catch then 0
 ;

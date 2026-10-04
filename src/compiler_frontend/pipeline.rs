@@ -20,12 +20,12 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
+use crate::compiler_frontend::ast::expressions::failure_classification::unsupported_catch_diagnostic;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::unsupported_catch_diagnostic;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,

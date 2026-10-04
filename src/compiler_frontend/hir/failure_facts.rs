@@ -15,6 +15,16 @@ pub(crate) struct HirFunctionFailureFacts {
     pub(crate) contributors: Vec<HirBuiltinFailureContributor>,
     /// Deferred assertion-message checks are not escaping function producers.
     pub(crate) assertion_message_calls: Vec<HirBuiltinFailureContributor>,
+    /// Catch compatibility is validated after private-call failure summaries converge.
+    pub(crate) deferred_custom_catches: Vec<HirDeferredCustomCatchCheck>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HirDeferredCustomCatchCheck {
+    pub(crate) catch_span: Option<SourceSpan>,
+    pub(crate) error_type_id: TypeId,
+    pub(crate) typed_producer_span: Option<SourceSpan>,
+    pub(crate) candidates: Vec<HirBuiltinFailureContributor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +42,10 @@ pub(crate) struct HirBuiltinFailureContributor {
     pub(crate) codes: Vec<BuiltinErrorCode>,
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "contributors are matched by reference during convergence; boxing would allocate per call contributor"
+)]
 #[derive(Debug, Clone)]
 pub(crate) enum HirBuiltinFailureSource {
     NumericOperation,

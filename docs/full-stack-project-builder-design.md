@@ -4,7 +4,7 @@
 >
 > This document does not define source syntax. Request directives, response-contract spelling, template wiring syntax, authentication APIs and other user-facing forms remain open design. Examples in this document are architectural, not proposed Moth syntax.
 >
-> The full-stack builder may eventually be built into the main Moth project or live as a separate Rust project that consumes the Moth compiler and build system as a library. The architecture must support either placement.
+> The full-stack builder uses the public Rust project-builder SDK. It may live in the main Moth repository or as an independent Rust project. In either placement, `moth-builder` composes the canonical Moth compiler/build services rather than implementing another frontend or build pipeline.
 
 ## Goals
 
@@ -209,7 +209,7 @@ Sharing source does not imply shared memory, shared runtime state or identical t
 
 ## Rust host boundary
 
-The server runtime host is expected to be written in Rust and use the Moth compiler and build system as libraries.
+The full-stack build tool uses `moth-builder` and therefore the canonical Moth compiler/build services. A deployed Rust server that executes already-built Moth Wasm can depend on `moth-host` and its chosen Wasm engine without linking the compiler or `moth-builder`.
 
 The host owns platform work that should not become ambient Moth language behaviour, including:
 
@@ -226,7 +226,7 @@ Moth server code sees only the typed capabilities the builder intentionally expo
 
 The exact Wasm engine is not architectural. Wasmer, Wasmtime or another suitable runtime may implement the same host contract.
 
-The exact repository placement is also open. The full-stack builder may live in the main Moth repository or as an independent Rust project. Moth's public builder API should make either choice practical.
+The exact repository placement is also open. The same `moth-builder` contract supports an in-tree or independent full-stack builder without changing Moth semantics.
 
 ## Request lifecycle and Wasm instances
 
@@ -275,7 +275,7 @@ The runtime host owns platform execution:
 - server process integration
 - host imports
 - privileged capabilities
-- request runtime context
+- request host environment
 - deployment adapters
 
 These boundaries should remain explicit if the builder is moved to a separate repository.
@@ -327,27 +327,25 @@ Templates remain ordinary strings. Static fragments stay compiler-produced folde
 
 ## Builder API requirement
 
-This design places an important requirement on the compiler and build system even before the full-stack builder is implemented.
+The full-stack builder uses the same public Rust SDK as other Moth project builders.
 
-A Rust project builder must be able to consume Moth as a library without depending on unstable compiler internals.
+`moth-builder` owns the ergonomic build-time surface: frozen `BuilderDefinition` capability registration, success-only `CompiledProject` assembly views, validated `BuildContext` lowering/resource services, output records and the canonical project-tool driver. It depends on the one Moth compiler/build implementation rather than reproducing its semantic types or analyses.
 
-The public builder boundary should eventually make it practical to:
+`moth-host` owns compiler-independent host-package declarations and runtime contracts. A host package is declared once and supplies the same semantic binding identities during compilation and runtime adapter installation. Opaque host resources use typed runtime-scoped handles. Rust host functions use the closed checked signature profile documented by the project-builder developer reference.
 
-- declare a builder capability surface
-- register builder-owned source and binding packages
-- register supported compiler-known source kinds
-- register constrained builder directives
-- register external import providers
-- describe builder configuration
-- compile a project through the canonical graph and compiler services
-- consume immutable entry, request and package assemblies
-- add builder-defined callable roots and lifecycle roots
+The SDK must make it practical to:
+
+- register source packages, host packages, compiler-known source adapters and constrained directives
+- declare one builder configuration surface and explicit root purposes
+- consume immutable entry, request and package assemblies without compiler-local stores
+- add builder lifecycle roots through the normal lifetime-analysis contract
 - request validated target lowering without reconstructing compiler analysis
-- consume folded builder metadata and template fragments
-- plan resources and output records through build-owned services
-- return output artefacts without taking ownership of compiler internals
+- consume folded builder metadata, template plans and structural resources
+- return output artefacts while the build system retains manifest and filesystem ownership
+- reuse the same core command meanings from standalone builder CLIs or lower-level embedding APIs
+- deploy a Rust host for prebuilt Wasm without linking the compiler
 
-This public boundary should be strong enough for an out-of-tree builder even if the first full-stack implementation stays in the main repository.
+The public boundary is deliberately opinionated. Builders cannot install arbitrary parser, HIR mutation or backend-lowering callbacks.
 
 ## Non-goals
 

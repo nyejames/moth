@@ -75,6 +75,7 @@ pub(crate) mod expressions {
     pub(crate) mod expression_test_support;
     pub(crate) mod expression_types;
     pub(crate) mod external_namespace_members;
+    pub(crate) mod failure_classification;
     pub(crate) mod failure_facts;
     pub(crate) mod function_calls;
     pub(crate) mod generic_nominal_inference;

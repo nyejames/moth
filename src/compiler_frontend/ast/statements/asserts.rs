@@ -13,7 +13,6 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     assert_message_escape_diagnostic, assertion_condition_is_statically_true,
-    pending_expression_failure_facts,
 };
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
@@ -24,6 +23,7 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_expression_failure_facts;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -136,10 +136,10 @@ pub(crate) fn parse_assert_statement(
     {
         return Err(diagnostic.into());
     }
-    message.failure_facts = pending_expression_failure_facts(
-        &message,
-        &context.template_ir_store.borrow(),
-    )?;
+    let pending = pending_expression_failure_facts(&message, &context.template_ir_store.borrow())?;
+    message.failure_facts.summary = pending.summary;
+    message.failure_facts.checked_numeric_operation = pending.checked_numeric_operation;
+    message.failure_facts.postfix_exit_span = pending.postfix_exit_span;
 
     // Reject `assert(...)!` — assert is not a fallible expression.
     if token_stream.current_tag() == TokenTag::BANG {

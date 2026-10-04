@@ -13,7 +13,7 @@ use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -31,15 +31,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[path = "return_alias.rs"]
 mod return_alias;
 
-/// Per-block liveness facts for one function.
+/// Per-block read liveness and direct-assignment facts for one function.
 ///
-/// WHAT: the locals a block reads before redefining them, and the locals it redefines outright.
-/// WHY: future-use propagation is a liveness problem. Without the definition kill it collapses into
-/// "used anywhere reachable from here", which keeps a rebound alias active across a loop back-edge
-/// even though every path redefines it before the next read.
+/// Read liveness kills the incoming value at a definition so rebound locals do not stay live
+/// across backedges. Direct assignments remain separate: the borrow-state consumer decides
+/// whether assigning a local writes through a source alias rather than rebinding storage.
 struct BlockLiveness {
     upward_exposed_reads: RootSet,
     definitions: RootSet,
+    direct_assignments: RootSet,
 }
 
 impl BlockLiveness {
@@ -47,6 +47,7 @@ impl BlockLiveness {
         Self {
             upward_exposed_reads: RootSet::empty(local_count),
             definitions: RootSet::empty(local_count),
+            direct_assignments: RootSet::empty(local_count),
         }
     }
 
@@ -63,13 +64,15 @@ impl BlockLiveness {
     }
 }
 
-/// Selects how a block combines the liveness facts of its successors.
+/// Selects successor combination and the owned block facts to propagate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SuccessorCombine {
-    /// MAY future use: a root survives when any successor still reads it.
+enum BlockPropagation {
+    /// MAY future read, with definition kills.
     AnyPath,
-    /// MUST future use: a root survives only when every successor still reads it.
+    /// MUST future read, with definition kills.
     EveryPath,
+    /// MAY direct assignment reachability, without definition kills.
+    AnyAssignment,
 }
 
 impl<'a> BorrowChecker<'a> {
@@ -814,25 +817,40 @@ impl<'a> BorrowChecker<'a> {
             );
         }
 
+        // Share lexical visibility with forward state kills so a later loop-local declaration
+        // cannot keep the previous iteration's alias active across its region exit.
+        let visible_locals_by_block =
+            self.build_visibility_masks(function.id, &local_regions, reachable_blocks)?;
+
         let (may_use_from_block, must_use_from_block) = compute_future_use_sets(
             local_ids.len(),
             reachable_blocks,
             &block_successors,
             &block_liveness,
+            &visible_locals_by_block,
+        );
+        let may_assign_from_block = propagate_block_facts(
+            local_ids.len(),
+            reachable_blocks,
+            &block_successors,
+            &block_liveness,
+            &visible_locals_by_block,
+            BlockPropagation::AnyAssignment,
         );
 
         Ok(FunctionLayout::new(FunctionLayoutInputs {
             local_ids,
             local_mutable,
-            local_regions,
             local_first_write_order,
             local_last_use_order,
             statement_order_by_id,
             terminator_order_by_block,
             block_local_max_use_order,
             block_successors,
+            visible_locals_by_block,
             may_use_from_block,
             must_use_from_block,
+            may_assign_from_block,
         }))
     }
 
@@ -905,10 +923,10 @@ impl<'a> BorrowChecker<'a> {
         Ok(source_roots_by_local)
     }
 
-    pub(super) fn build_visibility_masks(
+    fn build_visibility_masks(
         &self,
-        function_id: crate::compiler_frontend::hir::ids::FunctionId,
-        layout: &FunctionLayout,
+        function_id: FunctionId,
+        local_regions: &[RegionId],
         reachable_blocks: &[BlockId],
     ) -> Result<FxHashMap<BlockId, RootSet>, BorrowCheckError> {
         // A local is visible in a block when local.region is an ancestor
@@ -917,9 +935,9 @@ impl<'a> BorrowChecker<'a> {
 
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function_id)?;
-            let mut mask = RootSet::empty(layout.local_count());
+            let mut mask = RootSet::empty(local_regions.len());
 
-            for (local_index, local_region) in layout.local_regions.iter().enumerate() {
+            for (local_index, local_region) in local_regions.iter().enumerate() {
                 if self.is_region_ancestor_of(
                     *local_region,
                     block.region,
@@ -994,6 +1012,7 @@ fn compute_future_use_sets(
     reachable_blocks: &[BlockId],
     block_successors: &FxHashMap<BlockId, Vec<BlockId>>,
     block_liveness: &FxHashMap<BlockId, BlockLiveness>,
+    visible_locals_by_block: &FxHashMap<BlockId, RootSet>,
 ) -> (FxHashMap<BlockId, RootSet>, FxHashMap<BlockId, RootSet>) {
     // WHAT: derives per-block MAY/MUST future-use summaries by backward liveness propagation.
     // WHY: transfer needs O(1) future-use classification when deciding borrow versus move, and
@@ -1003,37 +1022,40 @@ fn compute_future_use_sets(
     //
     //      live_in[b]  = upward_exposed_reads[b] | (live_out[b] & !definitions[b])
     //      live_out[b] = combine over successors: union for MAY, intersection for MUST
-    let may_use_from_block = propagate_block_liveness(
+    let may_use_from_block = propagate_block_facts(
         local_count,
         reachable_blocks,
         block_successors,
         block_liveness,
-        SuccessorCombine::AnyPath,
+        visible_locals_by_block,
+        BlockPropagation::AnyPath,
     );
 
-    let must_use_from_block = propagate_block_liveness(
+    let must_use_from_block = propagate_block_facts(
         local_count,
         reachable_blocks,
         block_successors,
         block_liveness,
-        SuccessorCombine::EveryPath,
+        visible_locals_by_block,
+        BlockPropagation::EveryPath,
     );
 
     (may_use_from_block, must_use_from_block)
 }
 
-fn propagate_block_liveness(
+fn propagate_block_facts(
     local_count: usize,
     reachable_blocks: &[BlockId],
     block_successors: &FxHashMap<BlockId, Vec<BlockId>>,
     block_liveness: &FxHashMap<BlockId, BlockLiveness>,
-    combine: SuccessorCombine,
+    visible_locals_by_block: &FxHashMap<BlockId, RootSet>,
+    propagation: BlockPropagation,
 ) -> FxHashMap<BlockId, RootSet> {
     // MAY grows from nothing; MUST shrinks from everything so loops converge on the roots that
     // survive on every path rather than on the first path visited.
-    let seed = match combine {
-        SuccessorCombine::AnyPath => RootSet::empty(local_count),
-        SuccessorCombine::EveryPath => RootSet::full(local_count),
+    let seed = match propagation {
+        BlockPropagation::AnyPath | BlockPropagation::AnyAssignment => RootSet::empty(local_count),
+        BlockPropagation::EveryPath => RootSet::full(local_count),
     };
 
     let mut live_in = FxHashMap::default();
@@ -1051,11 +1073,24 @@ fn propagate_block_liveness(
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
 
-            let mut next = combine_successor_liveness(local_count, successors, &live_in, combine);
+            let mut next = combine_successor_facts(local_count, successors, &live_in, propagation);
 
             if let Some(liveness) = block_liveness.get(block_id) {
-                next.subtract_with(&liveness.definitions);
-                next.union_with(&liveness.upward_exposed_reads);
+                match propagation {
+                    BlockPropagation::AnyPath | BlockPropagation::EveryPath => {
+                        next.subtract_with(&liveness.definitions);
+                        next.union_with(&liveness.upward_exposed_reads);
+                    }
+
+                    // Assignment can be a source alias holder use even when no old value is read.
+                    // Keep this reachability fact independent of definition-killing read liveness.
+                    BlockPropagation::AnyAssignment => {
+                        next.union_with(&liveness.direct_assignments);
+                        if let Some(mask) = visible_locals_by_block.get(block_id) {
+                            next.intersect_with(mask);
+                        }
+                    }
+                }
             }
 
             let should_update = live_in
@@ -1073,19 +1108,19 @@ fn propagate_block_liveness(
     live_in
 }
 
-fn combine_successor_liveness(
+fn combine_successor_facts(
     local_count: usize,
     successors: &[BlockId],
     live_in: &FxHashMap<BlockId, RootSet>,
-    combine: SuccessorCombine,
+    propagation: BlockPropagation,
 ) -> RootSet {
     // An exit block has no successor, so nothing is required after it on either lattice.
     if successors.is_empty() {
         return RootSet::empty(local_count);
     }
 
-    match combine {
-        SuccessorCombine::AnyPath => {
+    match propagation {
+        BlockPropagation::AnyPath | BlockPropagation::AnyAssignment => {
             let mut union = RootSet::empty(local_count);
             for successor in successors {
                 if let Some(successor_live_in) = live_in.get(successor) {
@@ -1095,7 +1130,7 @@ fn combine_successor_liveness(
             union
         }
 
-        SuccessorCombine::EveryPath => {
+        BlockPropagation::EveryPath => {
             let mut intersection = RootSet::full(local_count);
             for successor in successors {
                 match live_in.get(successor) {
@@ -1118,6 +1153,15 @@ fn record_statement_liveness(
     liveness: &mut BlockLiveness,
 ) {
     let defined_locals = statement_defined_locals(statement);
+
+    if let HirStatementKind::Assign {
+        target: HirPlace::Local(local_id),
+        ..
+    } = &statement.kind
+        && let Some(index) = local_index_by_id.get(local_id).copied()
+    {
+        liveness.direct_assignments.insert(index);
+    }
 
     collect_statement_loaded_locals(statement, &mut |local_id| {
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
@@ -1165,6 +1209,7 @@ fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
             ..
         } => [Some(*local), None],
         HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::RangeStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => [Some(*result), None],
         HirStatementKind::FloatRangeCandidate {
@@ -1261,6 +1306,7 @@ fn collect_statement_loaded_locals(statement: &HirStatement, visitor: &mut impl 
             collect_expression_loaded_locals(expression, visitor);
         }
         HirStatementKind::Drop(local) => visitor(*local),
+        HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             visitor(*vec_local);
             collect_expression_loaded_locals(value, visitor);
@@ -1283,7 +1329,8 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             result: Some(local),
             ..
         } => visitor(*local),
-        HirStatementKind::NumericOp { result, .. } => visitor(*result),
+        HirStatementKind::NumericOp { result, .. }
+        | HirStatementKind::RangeStepFailure { result, .. } => visitor(*result),
         HirStatementKind::FloatRangeCandidate {
             candidate_result,
             in_range_result,

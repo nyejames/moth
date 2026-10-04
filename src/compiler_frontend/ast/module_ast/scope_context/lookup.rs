@@ -250,7 +250,8 @@ impl ScopeContext {
             return false;
         };
         let known_infallible = |path| {
-            self.known_infallible_functions.as_ref()
+            self.known_infallible_functions
+                .as_ref()
                 .is_some_and(|functions| functions.borrow().contains(&path))
         };
         if known_infallible(path) {
@@ -267,7 +268,10 @@ impl ScopeContext {
                 }
                 SourceFunctionTarget::ModulePrivate { .. } => true,
                 SourceFunctionTarget::Generated { identity, .. } => {
-                    matches!(identity.declaration(), GeneratedDeclarationIdentity::ModulePrivate(_))
+                    matches!(
+                        identity.declaration(),
+                        GeneratedDeclarationIdentity::ModulePrivate(_)
+                    )
                 }
                 SourceFunctionTarget::Imported { .. } => false,
             };
@@ -282,10 +286,16 @@ impl ScopeContext {
 
         // Ordinary top-level targets have header-owned source membership. Body-local functions
         // have no header signature row and are necessarily private to their enclosing body.
-        if let Some(source) = lookups.module_symbols.canonical_source_by_symbol_path.get(&path) {
+        if let Some(source) = lookups
+            .module_symbols
+            .canonical_source_by_symbol_path
+            .get(&path)
+        {
             return lookups.module_symbols.module_file_paths.contains(source);
         }
-        !lookups.resolved_function_signatures_by_path.contains_key(&path)
+        !lookups
+            .resolved_function_signatures_by_path
+            .contains_key(&path)
             && !lookups.module_symbols.module_file_paths.is_empty()
     }
 

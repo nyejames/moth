@@ -76,6 +76,7 @@ struct BackendExpectationToml {
     runtime_error_contains: Option<Vec<String>>,
     #[serde(default)]
     runtime_trap_contains: Option<Vec<String>>,
+    entry_error_code: Option<u32>,
     #[serde(default)]
     math_random_samples: Option<Vec<f64>>,
     #[serde(default)]
@@ -311,6 +312,7 @@ fn parse_matrix_expectation_file(
                 contains_exactly_once: backend_expectation.rendered_output_contains_exactly_once,
                 runtime_error_contains: backend_expectation.runtime_error_contains,
                 runtime_trap_contains: backend_expectation.runtime_trap_contains,
+                entry_error_code: backend_expectation.entry_error_code,
                 math_random_samples: backend_expectation.math_random_samples,
             },
         )?;
@@ -346,8 +348,8 @@ fn parse_matrix_expectation_file(
                 "Expectation file '{}' {} uses mode = \"failure\" and must not set \
                  'rendered_output_exact', 'rendered_output_contains', \
                  'rendered_output_not_contains', 'rendered_output_contains_in_order', \
-                 'rendered_output_contains_exactly_once', 'runtime_error_contains', or \
-                 'runtime_trap_contains'.",
+                 'rendered_output_contains_exactly_once', 'runtime_error_contains', \
+                 'runtime_trap_contains', or 'entry_error_code'.",
                 path.display(),
                 context
             )));
@@ -922,6 +924,7 @@ struct AuthoredRenderedOutput {
     contains_exactly_once: Option<Vec<String>>,
     runtime_error_contains: Option<Vec<String>>,
     runtime_trap_contains: Option<Vec<String>>,
+    entry_error_code: Option<u32>,
     math_random_samples: Option<Vec<f64>>,
 }
 
@@ -938,11 +941,22 @@ fn parse_rendered_output_expectation(
         contains_exactly_once,
         runtime_error_contains,
         runtime_trap_contains,
+        entry_error_code,
         math_random_samples,
     } = authored;
     if runtime_error_contains.is_some() && runtime_trap_contains.is_some() {
         return Err(FixtureLoadError::expectation_contract(format!(
             "Expectation file '{}' {} must not combine 'runtime_trap_contains' with 'runtime_error_contains'.",
+            path.display(),
+            context
+        )));
+    }
+
+    if entry_error_code.is_some()
+        && (runtime_error_contains.is_some() || runtime_trap_contains.is_some())
+    {
+        return Err(FixtureLoadError::expectation_contract(format!(
+            "Expectation file '{}' {} must not combine 'entry_error_code' with 'runtime_error_contains' or 'runtime_trap_contains'.",
             path.display(),
             context
         )));
@@ -1058,6 +1072,7 @@ fn parse_rendered_output_expectation(
         contains_exactly_once,
         runtime_error_contains,
         runtime_trap_contains,
+        entry_error_code,
         math_random_samples,
     })
 }

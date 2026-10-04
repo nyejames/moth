@@ -237,12 +237,12 @@ fn parse_catch_fallible_handler_body(
 
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table, path_fork);
-    if site.value_required {
-        handler_context.active_value_target = Some(ActiveValueProductionTarget::known(
-            site.success_result_type_ids.to_vec(),
-            ValueReceiverKind::CatchHandler,
-        ));
-    }
+    // Even an error-only catch owns its zero success slots. A `then` must diagnose that
+    // contract rather than target an enclosing value block or report a crossed boundary.
+    handler_context.active_value_target = Some(ActiveValueProductionTarget::known(
+        site.success_result_type_ids.to_vec(),
+        ValueReceiverKind::CatchHandler,
+    ));
 
     if let Some(error_binding) = &error {
         let error_data_type =

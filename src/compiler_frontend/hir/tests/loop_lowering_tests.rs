@@ -14,7 +14,9 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
+};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -383,10 +385,20 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         _ => panic!("expected runtime zero-check branch"),
     };
 
-    assert!(matches!(
-        module.blocks[panic_block.0 as usize].terminator,
-        HirTerminator::RuntimeFailure { .. }
-    ));
+    assert!(
+        module.blocks[panic_block.0 as usize]
+            .statements
+            .iter()
+            .any(|statement| matches!(
+                statement.kind,
+                HirStatementKind::RangeStepFailure {
+                    cause: RangeStepFailureCause::ZeroStep,
+                    failure_mode: NumericFailureMode::Trap,
+                    ..
+                }
+            )),
+        "a function without Error! or a private lane keeps a typed fatal guard"
+    );
 }
 
 #[test]

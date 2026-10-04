@@ -1,170 +1,179 @@
-## Assembly and runtime output
+## Compiled projects, assemblies and runtime output
 
-`CompiledProject` is the builder-facing view of successful compiler and graph
-results. Its entries, package surface, metadata and resources stay paired with
-the compilation that owns them. Handles from one compilation cannot be resolved
-against another compilation's similarly numbered objects.
+A `CompiledProject` is a success-only, immutable builder-facing view over Moth's
+published compiler/build results. It does not copy compiler stores into a
+second project model.
 
-### Choose an assembly, not a compiler stage
+### Consume explicit assemblies
 
-Use `entries` to inspect selected executable entries and `require_package` when
-the builder requires a project facade. Builder-defined callable roots are
-selected through their explicit purpose or binding contract. The build driver
-computes their reachable functions, generated instances, resource uses and
-runtime requirements from compiler-owned facts.
+A builder asks for assemblies selected by its registered purposes or package
+facade:
 
-The builder doesn't guess entry status from a filename, nonempty HIR or the
-presence of a template. An API-only support module remains API-only. Importing
-a module exposes its legal declarations without activating dormant root work.
-A Moth package export isn't automatically a native host export, foreign
-component interface or network endpoint.
+[codeblock, $code("rust"):
+    let package = project.require_package()?;
 
-Use `BuildContext` lowering services for those assemblies. A request to
-`compile_wasm` asks for validated Wasm output, including its runtime contract.
-A browser assembly uses the browser compilation service and its JS/Wasm policy.
-The service rejects unsupported reachable capabilities before emission.
-
-These services own the compiler handoff. They arrange link-level lifetime
-validation, capability checks, target partitioning and physical memory planning
-before lowering. The builder supplies its lifecycle and output policies but
-never selects a memory strategy, manufactures call summaries or repackages
-numeric proof tables.
-
-### Read constant and runtime templates
-
-An entry's template assembly view exposes folded fragments, runtime fragment
-positions and the executable entry contract. It contains no AST or template-IR
-handles.
-
-A constant top-level template is already a folded string value. It may still
-contain structural resource or site-root pieces whose final characters depend
-on output placement. Use the context's structural-string rendering service to
-resolve those pieces. Plain-text extraction is valid only when every piece has
-concrete characters.
-
-A runtime template is executable Moth code that produces a string. It isn't a
-second build-time template evaluator. Runtime top-level templates contribute to
-the normal entry's fragment result collection.
-
-Each folded fragment records how many runtime fragments precede it. For a
-constant fragment A, a runtime fragment B and another constant fragment C, the
-assembly records:
-
-[codeblock, $code("text"):
-    A: before runtime position 0
-    B: runtime position 0
-    C: before runtime position 1
+    for game in project.roots("game") {
+        build_game(game, context)?;
+    }
 ]
 
-The shared assembly service interleaves the folded strings and successful
-runtime results in source order. It doesn't need to recover their positions
-from rendered HTML or executable IR.
+An assembly exposes stable identity, validated builder metadata, reachable
+capabilities, structural resources and the compiler-owned entry/package
+contract needed by `BuildContext`.
 
-A direct `.mtf` compilation uses the named template service when only folded
-content is needed. That service doesn't run a full backend pipeline or invent a
-page URL context. It returns structural content and the retained facts the
-builder needs to place its resources.
+It does not expose donor-local HIR IDs, `TypeEnvironment`, borrow side tables,
+numeric-proof tables, mutable interners or package registries.
 
-### Consume the entry outcome
+### Template assembly
 
-A normal executable entry's generated `start` has built-in `Error!` alongside
-its fragment-collection success slots. The generated runtime caller invokes it
-once for that entry activation and branches on the typed outcome.
+When a purpose consumes top-level template output, the builder reads an
+`EntryTemplatePlan`.
 
-Only success publishes that invocation's runtime fragments. On error, discard
-unpublished runtime results and leave existing static content in place. Read
-neither undefined success slots nor a partial fragment list as success. The
-failure is a program execution result, not a failed compiler invocation.
+The plan provides:
 
-Fragment staging isn't rollback. Earlier explicit IO, host calls and DOM
-changes remain done. The host doesn't retry startup, continue later statements
-or turn an error into a successful empty page. Error code zero remains an error
-when it arrives on the error channel.
+- compile-time folded fragments
+- runtime fragment slot count
+- insertion order between static fragments and runtime slots
+- the active `start` identity when runtime work exists
+- structural resource/site-root pieces that still require an output context
 
-An embedding host delivers the failure to its caller. A terminal host reports
-failure and uses a nonzero exit status independently of the error code. A web
-host uses its application-safe failure presentation instead of inserting raw
-error messages as HTML. Assertions and unexpected startup faults remain
-distinct from the declared error result. The wrapper owns this invocation,
-not every later callback or unrelated script.
+The builder never reparses templates or scans HIR to recover this information.
 
-A wholly static page doesn't acquire mandatory application runtime code just
-because the entry contract has an error channel. Reuse and runtime emission
-remain reachability-driven.
+### Runtime `start` outcome
 
-### Declare lifecycles without fixing the Wasm engine
+An executable normal-root `start` has its ordinary success slots plus the
+compiler-owned built-in `Error!` channel.
 
-A builder's consumer contract supplies lifecycle roots such as an entry,
-request, frame or host-owned arena. These tell the compiler which execution
-lifetimes apply. They don't weaken source ownership rules or allow retained
-values to escape invalid lifetimes.
+Generated runtime code publishes invocation-owned runtime fragments only after
+`start` succeeds. On `Error`, unpublished runtime fragments are discarded.
+Earlier explicit IO or host calls are not rolled back.
 
-A lifecycle root is not an instruction to create one Wasm instance. Hosts can
-use separately created, pooled or longer-lived instances when they preserve
-isolation, valid access and required cleanup. Persistent host resources and
-request-scoped context need explicit owners even when the compiled module bytes
-are reused.
+A Moth `Error`, Rust host fault, assertion/trap and compiler failure remain
+different outcomes. Builders consume the typed entry result rather than
+catching Moth errors as host exceptions.
 
-The Rust host installs typed imports and executes compiled Moth through a
-compatible runtime adapter. Wasmer, Wasmtime and other engine choices belong to
-the embedding integration, not to Moth source semantics. The adapter validates
-the artefact's host contract before calling an export. Sharing source between
-browser and server doesn't share memory or runtime authority.
+### BuildContext lowering services
 
-### Plan resources before materialising them
+`BuildContext` owns the validated services needed to turn an assembly into a
+physical artefact. Normal project builders request operations such as:
 
-Resource origins, byte sources, destination paths and rendered URLs are
-different facts. The compiler retains semantic origins and authored uses. The
-builder supplies output placement and URL context. The central output system
-owns reads, writes, conflicts and manifests.
+[codeblock, $code("rust"):
+    let wasm = context.compile_wasm(assembly)?;
+    let javascript = context.compile_javascript(assembly)?;
+]
 
-Use output and resource planning services to reserve the consuming artefact
-and its context before lowering any URL-dependent code. A page URL context is
-the document, while a standalone stylesheet uses its own location. A builder
-that cannot supply a valid context reports an unsupported use rather than
-guessing a root slash or treating a resource reference as ordinary text.
+The service performs target validation, ABI/layout selection, memory-plan
+selection, backend lowering and artefact verification required by that target.
 
-All output destinations are preflighted before ordinary resource bytes are
-read or hashed. Unused resources may remain tracked inputs without being read
-or emitted. The build system deduplicates compatible resource origins and
-rejects conflicting output owners. Runtime assets, source resources and builder
-artefacts use the same ownership rules.
+A builder cannot bypass mandatory borrow/lifetime validation or supply raw HIR
+to a lowerer through the high-level SDK.
 
-`BuildArtifacts` records the result. The output writer validates relative paths
-and configured-root containment, retains manifest ownership and removes only
-stale files owned by the corresponding successful build. A builder cannot
-compose with another builder by silently overwriting its outputs.
+### Lifecycle roots
 
-### Preserve failure categories
+Builders may supply lifecycle roots defined by their application contract, such
+as page, request, frame, mount or arena lifetimes. They are inputs to Moth's
+normal link/lifetime analysis, not exceptions to it.
 
-The SDK preserves the difference between a source diagnostic, an operational
-build failure and a compiler bug. Authored locations and typed reasons travel
-with diagnostics through the public reporting view. Builder code doesn't need
-the compiler's interner tables to produce a useful report.
+A lifecycle root never grants permission to retain an otherwise invalid
+reference or invent a hidden owner.
 
-Runtime `moth::host::Error` values and entry failures belong to execution, not
-to `moth::builder::Error` as an alternative compiler diagnostic. Rust adapter
-faults also don't acquire a typed Moth error channel that the binding never
-declared. The host's fault policy handles them at its owned execution boundary.
+### Structural strings and resources
 
-### Test the boundary through the public API
+File/resource values retain semantic resource or site-root pieces until the
+builder supplies the final output context. Builders use `BuildContext` resource
+and structural-string services rather than scanning rendered text.
 
-Compile representative projects through `build_project` and inspect their
-artefacts and diagnostics. Exercise the same definition and assembly services
-used by the application rather than constructing HIR or fake compiler results.
-Use temporary output roots when testing writing and cleanup.
+Resource planning preserves exact reachable unions. Unused resources may
+remain watch inputs but are not emitted merely because they were discovered.
 
-A builder's tests should cover successful registration and duplicate rejection,
-unsupported capabilities, required configuration, const/runtime fragment
-ordering, startup success and error, resource-context failures and output
-ownership conflicts.
+The central output owner validates paths and collisions before resource bytes
+are read or written.
 
-Host-binding tests also cover Rust signatures rejected at compile time and
-actual calls through the selected runtime adapter. Verify malformed values,
-non-finite float results, stale or foreign resource handles, conflicting mutable
-access and missing host context. Descriptor inspection alone doesn't test ABI
-conversion or runtime lifetime safety.
+### Build artefacts
 
-Keep the host package interface and installed implementations consistent across
-build and runtime tests. A function that type-checks in Moth still needs a valid
-implementation in the execution environment that will call it.
+`BuildArtifacts` contains output records and builder-owned launch/development
+metadata. It does not write files directly.
+
+Builder identity, build profile and artefact ownership enter the output
+manifest through stable `BuilderId`, not a closed `BuilderKind` enum.
+
+The output system remains responsible for:
+
+- path containment and conflict validation
+- file creation and replacement
+- resource materialisation
+- manifest ownership
+- stale-output cleanup after successful replacement
+- preserving diagnostics and warnings across late output failures
+
+### Host contract metadata in Wasm
+
+A Moth Wasm artefact that reaches Rust host bindings carries a versioned Moth
+host-contract custom section. The section records the selected numeric profile,
+host ABI version and exact reachable host binding identities/fingerprints.
+
+`moth-host` validates this section before application code executes. It rejects
+a missing required binding, changed contract, incompatible host ABI or numeric
+profile mismatch before normal invocation.
+
+The section contains stable semantic/runtime contract data, never Rust
+function addresses or compiler-local IDs.
+
+### Runtime installation
+
+`moth-host` does not choose a Wasm engine. It validates the artefact contract,
+owns host environments and handle tables, and supplies the checked import
+adapters needed by an embedding runtime.
+
+A server, game engine or another deployed Rust application can therefore use
+prebuilt Moth Wasm with `moth-host` without linking the compiler.
+
+One runtime instance has one concrete host environment. Different runtime
+domains may install different `HostPackage<Env>` sets. A package's semantic
+projection remains the same one used during compilation.
+
+### Panic and fault containment
+
+Expected host failure uses `moth_host::Error`.
+
+When Rust unwinding is enabled, host dispatch contains a Rust panic at the
+outer binding boundary and reports a structured host fault. It does not turn
+the panic into Moth `Error!` or resume the Moth call.
+
+With `panic = "abort"`, Rust's abort policy is unchanged.
+
+### Canonical command driver and development
+
+`moth_builder::run` uses the same command parser and command contracts as the
+Moth project tool.
+
+`build` and `check` share config/input/profile processing. `dev` shares the
+canonical build/watch lifecycle and lets a builder supply only its
+application-specific development runtime. `new` uses a builder-provided
+scaffold hook under the canonical command shape.
+
+A builder can expose extra tooling only under the `builder` subcommand scope.
+It cannot shadow or redefine a Moth core command.
+
+The lower-level request APIs expose the same operations for engines, editors
+and other applications that already own their process.
+
+### Testing a builder
+
+Use `moth-builder` test helpers to compile temporary real projects through the
+same compiler/build services used by the driver.
+
+Prefer end-to-end checks for source-visible behaviour:
+
+- package and directive availability
+- root-purpose selection
+- target capability rejection
+- emitted artefact contracts
+- resource/output placement
+- runtime entry success/error behaviour
+
+Use focused Rust tests for SDK-only invariants such as definition collisions,
+host signature diagnostics, handle-table liveness and contract fingerprints.
+
+Do not test a builder by constructing HIR or mutating compiler registries
+directly.

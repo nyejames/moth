@@ -51,6 +51,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
 
+- [Rust project-builder SDK](./plans/rust-project-builder-sdk-plan.md) - Add the opinionated public Rust builder API, compiler-independent host runtime and checked host-binding profile after the final Wasm host-import ABI is available. Preserve one canonical compiler/build implementation while making out-of-tree builders and compiler-free deployed hosts practical.
+
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
 - TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
@@ -263,6 +265,10 @@ After the canvas reachability refactor:
 ---
 
 # Future Design Notes
+
+## Full-stack project builder
+
+The [full-stack project builder design](../full-stack-project-builder-design.md) owns the accepted direction for Moth's comprehensive web builder: HTML-first applications, explicit typed request roots, statically linked hypermedia actions, typed APIs, client islands and Rust-hosted server Moth. The Rust project-builder SDK is the shared builder/host foundation for that work. Full-stack request syntax, response contracts and deployment policy remain owned by that design rather than the SDK plan.
 
 ## Package manager ideas
 

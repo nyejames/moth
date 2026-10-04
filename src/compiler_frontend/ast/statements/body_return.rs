@@ -43,8 +43,7 @@ pub(crate) fn parse_return_statement(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    if context.expected_result_type_ids.is_empty()
-        && context.expected_error_type.is_none()
+    if !context.inside_authored_function
         && !matches!(
             context.kind,
             ContextKind::Function | ContextKind::CatchHandler

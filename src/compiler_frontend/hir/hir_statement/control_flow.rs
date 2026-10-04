@@ -597,6 +597,7 @@ impl<'a> HirBuilder<'a> {
                 no_match_block_id,
                 HirTerminator::RuntimeFailure {
                     message: "No match arm selected".to_owned(),
+                    cause: None,
                 },
                 span,
             )?;
@@ -1082,7 +1083,6 @@ impl<'a> HirBuilder<'a> {
             let remaining_id = self.module.blocks[position].id;
             self.block_index_by_id.insert(remaining_id, position);
         }
-
         Ok(true)
     }
 

@@ -294,6 +294,7 @@ pub(super) fn parse_map_builtin_member_typed(
     );
     let builtin_expression = finish_pending_receiver_call_expression(
         builtin_expression,
+        member_name,
         token_stream,
         type_interner,
     );

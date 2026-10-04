@@ -5,6 +5,7 @@
 //! while preserving structured diagnostics across compiler stages.
 
 use super::*;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::source::SourceSpan;
 
 // -------------------------------
@@ -1365,7 +1366,7 @@ pub enum NonExhaustiveMatchReason {
     MissingOptionPatterns,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InvalidFallibleHandlingReason {
     CatchOutsideBoundary,
     ExpectedCatchBlockOrHandler,
@@ -1409,18 +1410,30 @@ pub enum InvalidFallibleHandlingReason {
     },
     UnhandledBuiltinFailureInCustomErrorFunction {
         error_type_id: TypeId,
-        implicit_producer_span: Option<SourceSpan>,
+        witness: BuiltinFailureWitness,
     },
     UnhandledBuiltinFailureInExportedFunction {
-        implicit_producer_span: Option<SourceSpan>,
+        witness: BuiltinFailureWitness,
     },
     UnsupportedCatchExpressionShape {
         expression_name: StringId,
     },
 }
 
+/// Boundary-inward evidence for one escaping built-in failure.
+///
+/// Producers retain at most the first three private call sites, then the terminal numeric/range
+/// operation separately. An unresolved or cyclic chain has no invented origin or cause codes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuiltinFailureWitness {
+    pub codes: Vec<BuiltinErrorCode>,
+    pub call_spans: Vec<Option<SourceSpan>>,
+    pub origin_span: Option<SourceSpan>,
+    pub elided_call_hops: u32,
+}
+
 impl InvalidFallibleHandlingReason {
-    pub(crate) fn message(self) -> &'static str {
+    pub(crate) fn message(&self) -> &'static str {
         match self {
             InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes { .. } => {
                 "This catch protects producers with incompatible typed errors. Split the work into separately handled expressions or convert the errors explicitly."
@@ -1430,7 +1443,9 @@ impl InvalidFallibleHandlingReason {
                 "This catch mixes a custom typed error with implicit built-in failure. Split the work into separately handled expressions or convert the errors explicitly."
             }
 
-            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction { .. } => {
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                ..
+            } => {
                 "Implicit built-in failure cannot escape through a custom error slot. Recover locally with catch or convert the failure explicitly with catch and return!."
             }
 

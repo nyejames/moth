@@ -2,10 +2,11 @@
 
 ## Status
 
-- Status: active. Private inferred failure materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. An export, module re-export, or package facade that would let implicit failure escape is a source diagnostic with a witness, not a published interface. start Error! is not implemented. Moth-to-foreign export has no implementation owner.
-- Current slice: Phase 4 compatibility invalidation.
-- Blockers: none for local, re-export, or package-facade rejection.
-- Next action: invalidate stale summaries and old artefacts when private failure or export semantics change, without a second cache.
+- Status: active, partial JS/HTML delivery through corrections R1-R7. Private inferred failure and typed compound write-back failure reach builtin Error!. Dynamic invalid range steps return Error codes 306/307. Supported expression-wide catches include folded eligible numeric work, and converged summaries decide custom-error catch conflicts. Export/custom E! diagnostics carry bounded typed witnesses. Synthetic start has builtin Error!, and HTML publishes runtime fragments only after success. Failed entries report a fixed notice and a structural outcome. Float formatting/boundary guards are not implicit failures: they trap unless a declared builtin Error! contract returns them.
+- Dormant generic validation resolves retained private generic/concrete bodies to an AST-local monotone failure closure, including transitive numeric witnesses. Symbolic bound receiver calls use the requirement's declared error contract. Typed-call catch capability checks resolve private operands against complete local body facts before rejecting unsupported recovery.
+- Current slice: Phase 6 dev browser and terminal reports.
+- Blockers: none for Phase 6. Delivery gates remain for direct inferred-failure private-call catches and several composite operand/call shapes before HIR. Wasm explicitly rejects recoverable numeric failure, without trap fallback. Dev browser/terminal reporting remains undelivered. Wrapping, resource-recovery effects, grouped handlers and rewind stay outside this plan.
+- Next action: show a returned start Error in the existing dev presentation and report it once to the terminal without failing the completed build.
 
 ## Goal and authority
 
@@ -852,6 +853,15 @@ outcome. No source-defined result wrapper, failure trait or new directive exists
 
 Acceptance coverage: F01, F04-F07, C01-C11, B01, B03 and M01 at runtime/HIR level.
 
+Delivered JS/HTML subset: private-call propagation and builtin Error
+materialisation, typed compound write-back conversion failure, recoverable range
+step/update failure and supported expression catches, including folded eligible
+numeric catches. Float formatting and boundary-validation guards are not implicit
+failures: they trap unless a declared builtin Error! contract returns them.
+The pre-HIR shape gate still rejects direct inferred-failure private-call catches
+and several composite operand/call shapes. These checklist items remain open
+where they require that broader delivery or cross-backend parity.
+
 - [ ] Add HIR continuation and materialisation cases before modifying lowering.
   Include failed arguments, abandoned temporaries, handler failures and failed
   compound write-back.
@@ -859,10 +869,10 @@ Acceptance coverage: F01, F04-F07, C01-C11, B01, B03 and M01 at runtime/HIR leve
   internal failure/typed errors through the current ABI owners.
 - [ ] Thread new error edges through validation, borrowing, result provenance,
   retention summaries and cleanup. Preserve individual commit guarantees.
-- [ ] Update supported JS and Wasm paths together. Remove superseded numeric
-  trap-default dispatch and helpers made obsolete by the new delivery model.
-- [ ] Add parity fixtures and explicit target-rejection fixtures for unavailable
-  combinations. Keep resource faults and assertions outside normal catch.
+- [x] Deliver the supported JS paths and explicit Wasm recoverable-numeric
+  capability rejection. Remove numeric trap-default delivery from those JS paths.
+- [ ] Complete backend parity fixtures and delivery for unavailable combinations.
+  Keep resource faults and assertions outside normal catch.
 
 Exit: supported generated programs implement the new outcomes and ordering.
 Unimplemented backend facilities are diagnosed, not disguised as numeric traps.
@@ -871,13 +881,17 @@ Unimplemented backend facilities are diagnosed, not disguised as numeric traps.
 
 Acceptance coverage: F02-F03, D02-D04 and M02.
 
-- [ ] Add export/custom-slot rejection cases with expected labels, reason and
-  useful repair guidance, including private-call chains and receiver exposure.
-- [ ] Validate exposed source and generated contracts before interface
-  publication. Cover re-exports, package surfaces and foreign projections.
-- [ ] Install structured diagnostics for the complete diagnostic table. Keep
-  bounded deterministic witness paths and eliminate redundant private-hop spam.
-- [ ] Update the existing interface/implementation/entry compatibility owners
+- [x] Add export/custom-slot rejection cases with expected labels, typed cause
+  and repair guidance, including private-call chains and receiver/generated exposure.
+- [x] Reject escaping failure before source/generated interface publication,
+  including module re-exports and package facades.
+- [ ] Add a rejection case for a later generated request. Its success path already
+  reuses the declaring module's converged private-failure summary.
+- [ ] Complete coverage of every exposed foreign projection and diagnostic-table row.
+- [x] Carry deterministic cycle-safe witnesses with at most three private call
+  hops followed by the originating operation, typed builtin causes and an
+  elided-hop count. Preserve donor ownership and missing-summary conservatism.
+- [x] Update the existing interface/implementation/entry compatibility owners
   and tests for stale summaries, generated identities and old artefacts.
 
 Exit: a successful published module cannot leak an unrepresented recoverable
@@ -887,15 +901,15 @@ failure, and diagnostics explain both the source and the valid repairs.
 
 Acceptance coverage: E01-E05.
 
-- [ ] Add top-level cases for implicit arithmetic failure, propagated Error!,
+- [x] Add top-level cases for implicit arithmetic failure, propagated Error!,
   local recovery, custom-error mismatch and an Error whose code is zero.
-- [ ] Give every applicable synthetic start its built-in Error! slot without
+- [x] Give every applicable synthetic start its built-in Error! slot without
   altering dependency activation, API-only roots or success-slot representation.
-- [ ] Make the generated HTML caller branch on entry outcome and publish all
+- [x] Make the generated HTML caller branch on entry outcome and publish all
   invocation-owned runtime fragments only on success.
-- [ ] Implement terminal reporting and the generic release fallback independently
+- [x] Implement terminal reporting and the generic release fallback independently
   of application templates. Preserve static content and earlier explicit IO.
-- [ ] Update current harnesses/consumers to inspect outcomes, not only stdout or
+- [x] Update current harnesses/consumers to inspect outcomes, not only stdout or
   fragments. Test once-only execution and absence of retries or partial output.
 
 Exit: short top-level programs remain terse and a failed invocation is never

@@ -570,7 +570,10 @@ pub fn fold_compile_time_expression(
                     expression.span,
                 ),
             };
-            if matches!(folded_expression.kind, ExpressionKind::HandledFallibleExpression { .. }) {
+            if matches!(
+                folded_expression.kind,
+                ExpressionKind::HandledFallibleExpression { .. }
+            ) {
                 // Pending receiver calls own their producers on this wrapper, not its carrier
                 // operand. Rebuilding the folded value must preserve that selected identity,
                 // catch disposition and authored propagation span.

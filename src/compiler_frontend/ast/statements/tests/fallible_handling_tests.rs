@@ -13,10 +13,12 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
     InvalidReturnShapeReason, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // --------------------------
 //  Catch handler with fallback
@@ -87,6 +89,34 @@ fn parses_catch_handler_fallback_that_reads_error_binding() {
         body.last().map(|node| &node.kind),
         Some(NodeKind::ThenValue(_))
     ));
+}
+
+#[test]
+fn preserves_u32_peer_and_fallback_literal_types_in_expression_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "increment |code U32| -> U32:\n    return code + 1\n;\n\
+         recover |code U32| -> U32:\n    return code + 1 catch then 0\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected recovered return");
+    };
+    let u32_type_id = builtin_type_ids::fixed_scalar(FixedScalar::U32);
+    assert_eq!(values[0].type_id, u32_type_id);
+    let ExpressionKind::ValueBlock { block } = &values[0].kind else {
+        panic!("expected expression catch");
+    };
+    let ValueBlock::Catch(catch) = block.as_ref() else {
+        panic!("expected catch value block");
+    };
+    assert_eq!(catch.handled_value.type_id, u32_type_id);
+    let FallibleHandling::Handler { body, .. } = &catch.handler else {
+        panic!("expected recovery handler");
+    };
+    let NodeKind::ThenValue(fallback) = &body[0].kind else {
+        panic!("expected literal fallback");
+    };
+    assert_eq!(fallback.expressions[0].type_id, u32_type_id);
 }
 
 #[test]

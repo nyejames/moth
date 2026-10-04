@@ -2,7 +2,6 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0051"]
-message_contains = ["Recover locally", "Error!"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
@@ -18,11 +17,22 @@ path = "input/@page.moth"
 line = 11
 column = 16
 
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@page.moth"
+line = 6
+column = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 3
+path = "input/@page.moth"
+line = 2
+column = 17
+
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0051"]
-message_contains = ["Recover locally", "Error!"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
@@ -37,3 +47,15 @@ occurrence = 1
 path = "input/@page.moth"
 line = 11
 column = 16
+
+[[backends.html_wasm.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+path = "input/@page.moth"
+line = 6
+column = 12
+
+[[backends.html_wasm.diagnostic_assertions.secondary_labels]]
+occurrence = 3
+path = "input/@page.moth"
+line = 2
+column = 17

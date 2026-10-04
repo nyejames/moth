@@ -33,7 +33,8 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidFallibleHandlingReason,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidBuiltinCallReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
@@ -421,20 +422,23 @@ impl Expression {
     pub(crate) fn with_typed_error_producer(
         mut self,
         error_type_id: TypeId,
+        builtin_name: Option<StringId>,
     ) -> Self {
-        self.failure_facts.typed_errors.push(TypedErrorProducer {
+        self.failure_facts.record_typed_error(TypedErrorProducer {
             span: self.span,
             error_type_id,
+            builtin_name,
         });
         self
     }
 
     pub(crate) fn with_private_call_failure_candidate(mut self, path: PathId) -> Self {
-        self.failure_facts.implicit.push(ImplicitFailureContributor {
-            span: self.span,
-            codes: Vec::new(),
-            source: ImplicitFailureSource::PrivateCall(path),
-        });
+        self.failure_facts
+            .record_implicit(ImplicitFailureContributor {
+                span: self.span,
+                codes: &[],
+                source: ImplicitFailureSource::PrivateCall(path),
+            });
         self
     }
 
@@ -443,11 +447,20 @@ impl Expression {
         if self.failure_facts.disposition != FailureDisposition::Pending {
             return None;
         }
-        self.failure_facts.typed_errors.first().map(|producer| {
-            CompilerDiagnostic::invalid_fallible_handling(
-                InvalidFallibleHandlingReason::UnhandledErrorReturn,
-                producer.span.or(self.span),
-            )
+        self.failure_facts.summary.first_typed.map(|producer| {
+            let span = producer.span.or(self.span);
+            if let Some(builtin_name) = producer.builtin_name {
+                CompilerDiagnostic::invalid_builtin_call(
+                    InvalidBuiltinCallReason::UnhandledFallibleCall,
+                    Some(builtin_name),
+                    span,
+                )
+            } else {
+                CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::UnhandledErrorReturn,
+                    span,
+                )
+            }
         })
     }
 
@@ -1059,7 +1072,8 @@ impl Expression {
                     "only propagating fallible expressions carry a postfix span"
                 );
                 *propagation_span = span;
-                self.failure_facts.postfix_exit_span = span.or(self.failure_facts.postfix_exit_span);
+                self.failure_facts.postfix_exit_span =
+                    span.or(self.failure_facts.postfix_exit_span);
             }
             _ => debug_assert!(
                 false,

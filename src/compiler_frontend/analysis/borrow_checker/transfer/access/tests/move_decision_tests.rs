@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::compiler_frontend::analysis::borrow_checker::state::FunctionLayoutInputs;
-use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
 
 #[test]
@@ -32,15 +32,16 @@ fn path_dependent_future_use_falls_back_to_borrow() {
     let layout = FunctionLayout::new(FunctionLayoutInputs {
         local_ids: vec![LocalId(0)],
         local_mutable: vec![true],
-        local_regions: vec![RegionId(0)],
         local_first_write_order: vec![0],
         local_last_use_order: vec![-1],
         statement_order_by_id: FxHashMap::<HirNodeId, i32>::default(),
         terminator_order_by_block: FxHashMap::default(),
         block_local_max_use_order,
         block_successors,
+        visible_locals_by_block: FxHashMap::default(),
         may_use_from_block,
         must_use_from_block,
+        may_assign_from_block: FxHashMap::default(),
     });
 
     assert_eq!(layout.future_use_kind(BlockId(0), 0, 0), FutureUseKind::May);

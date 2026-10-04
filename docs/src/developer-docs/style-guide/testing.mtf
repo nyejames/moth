@@ -442,7 +442,8 @@ contractual.
 Choose the narrowest field that owns the behaviour:
 
 - `rendered_output_exact` protects the complete combined output and is mutually exclusive with other
-  text-output fields. It may accompany `runtime_error_contains` or `runtime_trap_contains`.
+  text-output fields. It may accompany `runtime_error_contains`, `runtime_trap_contains` or
+  `entry_error_code`.
   Exact comparison normalizes line endings only and preserves every other whitespace difference.
 - `rendered_output_contains_in_order` protects the relative order of two or more fragments.
 - `rendered_output_contains_exactly_once` protects activation, mounting and helper output from
@@ -455,7 +456,12 @@ Choose the narrowest field that owns the behaviour:
 - `runtime_trap_contains` protects an uncaught `WebAssembly.RuntimeError` message on `html_wasm`.
   It requires success mode and at least one non-empty fragment. It cannot accompany
   `runtime_error_contains`: a host trap never satisfies a Moth Error expectation.
-- Either terminal outcome ends the run. Text assertions check only output captured before it.
+- `entry_error_code` expects a returned entry `Error` with exactly that `U32` code, including `0`.
+  Compilation must succeed, so use `mode = "success"`. It cannot accompany `runtime_error_contains`
+  or `runtime_trap_contains`. Generated start callers record the canonical code when they inspect
+  the start result, so notice text, process status, host exceptions and Wasm traps cannot satisfy it.
+  Later host output, faults or status changes cannot extend or erase this terminal outcome.
+- Any terminal outcome ends the run. Text assertions check only output captured before it.
   An unrequested terminal outcome fails the case. Other engine errors, including `TypeError`,
   `WebAssembly.CompileError` and `WebAssembly.LinkError`, remain harness failures.
 
@@ -469,13 +475,24 @@ Choose the narrowest field that owns the behaviour:
     rendered_output_contains_exactly_once = ["active-root", "mounted"]
 ]
 
-Use a runtime-error contract when the case's intended result is a terminating runtime failure:
+Use a returned-entry contract for an unchecked numeric failure propagated to start. Exact empty
+output also protects success-only runtime fragment publication:
 
 [codeblock, $code("toml"):
     [backends.html]
     mode = "success"
     warnings = "forbid"
-    runtime_error_contains = ["Int operation overflowed"]
+    entry_error_code = 301
+    rendered_output_exact = ""
+]
+
+Use a runtime-error contract for an intended fatal integrity guard or assertion:
+
+[codeblock, $code("toml"):
+    [backends.html]
+    mode = "success"
+    warnings = "forbid"
+    runtime_error_contains = ["assertion failed"]
 ]
 
 Use a separate Wasm trap contract for an emitted checked stop. A different engine trap, such as

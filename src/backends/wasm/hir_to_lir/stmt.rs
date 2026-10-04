@@ -133,6 +133,9 @@ pub(crate) fn lower_statement(
                 )
             }
         }
+        HirStatementKind::RangeStepFailure { .. } => Err(lir_transformation_error(
+            "Range-step failure must be lowered as a block terminator",
+        )),
         HirStatementKind::FloatRangeCandidate {
             current,
             step,

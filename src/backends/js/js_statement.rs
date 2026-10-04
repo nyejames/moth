@@ -103,6 +103,19 @@ impl<'hir> JsEmitter<'hir> {
                 )?;
             }
 
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result,
+            } => {
+                let error_code = cause.builtin_error_code();
+                let helper_call = format!(
+                    "__moth_error_result({:?}, {})",
+                    error_code.default_message(),
+                    error_code.as_u32(),
+                );
+                self.emit_numeric_carrier_assignment(helper_call, *failure_mode, *result)?;
+            }
             HirStatementKind::FloatRangeCandidate {
                 current,
                 step,
@@ -1030,7 +1043,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             }
 
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)?;
             }
 

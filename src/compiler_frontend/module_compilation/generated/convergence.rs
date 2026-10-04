@@ -15,12 +15,12 @@
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason, PremergeDiagnosticBatch, PremergeFailure,
-};
 use crate::compiler_frontend::compiler_messages::compiler_errors::RenderTypeContext;
+use crate::compiler_frontend::compiler_messages::{
+    BuiltinFailureWitness, CompilerDiagnostic, InvalidFallibleHandlingReason,
+    PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
@@ -28,7 +28,9 @@ use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
 };
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::{HirModuleLinkFacts, collect_module_function_link_facts};
+use crate::compiler_frontend::hir::reachability::{
+    HirModuleLinkFacts, collect_module_function_link_facts,
+};
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::Module;
 use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
@@ -180,7 +182,11 @@ impl ConvergenceModel {
             caller_ids.dedup();
         }
 
-        Ok(Self { nodes, callers, ids_by_generated })
+        Ok(Self {
+            nodes,
+            callers,
+            ids_by_generated,
+        })
     }
 
     pub(crate) fn node_count(&self) -> usize {
@@ -269,9 +275,9 @@ impl ConvergenceModel {
             .collect()
     }
 
-    /// Keep statically omitted assertion messages in the existing summary dependency model.
-    /// These edges schedule validation only; they do not imply runtime execution or an escape.
-    fn include_assertion_message_dependencies(
+    /// Keep summary-dependent source checks in the existing dependency model, including work
+    /// that has no runtime edge. Validation edges alone do not imply execution or escaping failure.
+    fn include_deferred_validation_dependencies(
         &mut self,
         base: &HirModule,
         transaction: &mut GeneratedFunctionTransaction<'_>,
@@ -280,10 +286,10 @@ impl ConvergenceModel {
     ) -> Result<(), CompilerError> {
         for index in 0..self.nodes.len() {
             let mut targets = match &self.nodes[index].node {
-                ConvergenceNode::BaseModule => assertion_message_call_targets(base),
-                ConvergenceNode::Generated(identity) => {
-                    assertion_message_call_targets(&transaction.sidecar_mut(identity)?.module.executable.hir)
-                }
+                ConvergenceNode::BaseModule => deferred_validation_call_targets(base),
+                ConvergenceNode::Generated(identity) => deferred_validation_call_targets(
+                    &transaction.sidecar_mut(identity)?.module.executable.hir,
+                ),
             };
             // An absent assertion-only summary diagnoses after convergence, rather than becoming
             // an invented false summary or an executable generated-call dependency.
@@ -316,15 +322,22 @@ impl ConvergenceModel {
     }
 }
 
-fn assertion_message_call_targets(hir: &HirModule) -> Vec<(FunctionId, CallTarget)> {
-    hir.function_failure_facts.iter().flat_map(|(function, facts)| {
-        facts.assertion_message_calls.iter().filter_map(|contributor| {
-            match &contributor.source {
-                HirBuiltinFailureSource::Call(target) => Some((*function, target.clone())),
-                HirBuiltinFailureSource::NumericOperation => None,
+fn deferred_validation_call_targets(hir: &HirModule) -> Vec<(FunctionId, CallTarget)> {
+    let mut targets = Vec::new();
+    for (function, facts) in &hir.function_failure_facts {
+        let contributors = facts.assertion_message_calls.iter().chain(
+            facts
+                .deferred_custom_catches
+                .iter()
+                .flat_map(|check| &check.candidates),
+        );
+        for contributor in contributors {
+            if let HirBuiltinFailureSource::Call(target) = &contributor.source {
+                targets.push((*function, target.clone()));
             }
-        })
-    }).collect()
+        }
+    }
+    targets
 }
 
 fn add_model_edges(
@@ -376,6 +389,10 @@ fn add_model_edges(
 }
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "convergence keeps the frontend, base HIR, link facts, generated transaction, bootstrap borrow report, mutable type environment, warnings and the timers-only context as separate borrows"
+)]
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
     compiler: &mut CompilerFrontend<'_>,
     hir_module: &mut HirModule,
@@ -403,7 +420,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         &base_private_identities,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-    convergence_model.include_assertion_message_dependencies(
+    convergence_model.include_deferred_validation_dependencies(
         hir_module,
         generated_transaction,
         &base_public_origins,
@@ -562,7 +579,12 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         )?;
     }
     let borrow_analysis = refresh_private_failure_lanes(
-        compiler, hir_module, &borrow_analysis, type_environment, warnings, None,
+        compiler,
+        hir_module,
+        &borrow_analysis,
+        type_environment,
+        warnings,
+        None,
     )?;
     for node_id in convergence_model.generated_node_ids() {
         let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
@@ -803,19 +825,14 @@ fn active_builtin_failure_contributor<'a>(
     for contributor in &facts.contributors {
         let active = match &contributor.source {
             HirBuiltinFailureSource::NumericOperation => {
-                if contributor.codes.is_empty() || contributor.codes.iter().any(|code| {
-                    !matches!(
-                        code,
-                        BuiltinErrorCode::DivideByZero
-                            | BuiltinErrorCode::IntOverflow
-                            | BuiltinErrorCode::InvalidExponent
-                            | BuiltinErrorCode::FloatNonFinite
-                            | BuiltinErrorCode::FloatBoundaryNonFinite
-                            | BuiltinErrorCode::FloatFormatInvariant
-                    )
-                }) {
+                if contributor.codes.is_empty()
+                    || contributor
+                        .codes
+                        .iter()
+                        .any(|code| !code.is_implicit_failure())
+                {
                     return Err(CompilerError::compiler_error(
-                        "implicit numeric failure contributor must carry nonempty numeric builtin codes (300–305)",
+                        "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
                     ));
                 }
                 true
@@ -831,6 +848,68 @@ fn active_builtin_failure_contributor<'a>(
     Ok(first)
 }
 
+/// Retain a bounded source witness without changing the converged failure facts or summaries.
+///
+/// The first active contributor at each hop is deterministic. Continue past the label bound to
+/// retain the actual operation and its codes; a cycle or a foreign leaf has no invented origin.
+fn builtin_failure_witness<'a>(
+    hir: &'a HirModule,
+    report: &'a BorrowCheckReport,
+    function: FunctionId,
+    mut contributor: &'a HirBuiltinFailureContributor,
+) -> Result<BuiltinFailureWitness, CompilerError> {
+    const MAX_CALL_HOPS: usize = 3;
+
+    let mut witness = BuiltinFailureWitness {
+        codes: Vec::new(),
+        call_spans: Vec::new(),
+        origin_span: None,
+        elided_call_hops: 0,
+    };
+    let mut visited = FxHashSet::default();
+    visited.insert(function);
+
+    loop {
+        let target = match &contributor.source {
+            HirBuiltinFailureSource::NumericOperation => {
+                witness.codes = contributor.codes.clone();
+                witness.origin_span = contributor.span;
+                return Ok(witness);
+            }
+
+            HirBuiltinFailureSource::Call(target) => target,
+        };
+        if witness.call_spans.len() < MAX_CALL_HOPS {
+            witness.call_spans.push(contributor.span);
+        } else {
+            witness.elided_call_hops += 1;
+        }
+
+        // Stable identities resolve only when this HIR owns the callee's semantic facts.
+        // Other generated/provider executables remain summary leaves, not donor-local IDs.
+        let callee = match target {
+            CallTarget::Local(function) => Some(*function),
+            CallTarget::ModulePrivate(identity) => {
+                hir.function_ids_by_private_origin.get(identity).copied()
+            }
+            CallTarget::Generated(identity) => hir.function_ids_by_generated.get(identity).copied(),
+            CallTarget::CrossModule(_) | CallTarget::External(_) => None,
+        };
+        let Some(callee) = callee else {
+            return Ok(witness);
+        };
+        if !visited.insert(callee) {
+            return Ok(witness);
+        }
+        contributor =
+            active_builtin_failure_contributor(hir, report, callee)?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "escaping builtin failure summary has no active semantic contributor",
+                )
+            })?;
+    }
+}
+
 /// Join immutable semantic failure facts into the exact summaries computed for this queue node.
 ///
 /// Local recursion reaches its finite boolean fixed point here; generated and provider calls
@@ -840,24 +919,37 @@ pub(crate) fn infer_builtin_failure_summaries(
     report: &mut BorrowCheckReport,
 ) -> Result<(), CompilerError> {
     for function in &hir.functions {
-        let summary = report.analysis.public_call_summaries.get_mut(&function.id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "implicit builtin failure analysis is missing call summary for {:?}",
-                function.id
-            ))
-        })?;
+        let summary = report
+            .analysis
+            .public_call_summaries
+            .get_mut(&function.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "implicit builtin failure analysis is missing call summary for {:?}",
+                    function.id
+                ))
+            })?;
         summary.escapes_builtin_failure = false;
     }
     loop {
         let mut changed = false;
         for function in &hir.functions {
             let active = active_builtin_failure_contributor(hir, report, function.id)?.is_some();
-            let infer = hir.function_failure_facts.get(&function.id).is_some_and(|facts| {
-                matches!(facts.boundary, HirBuiltinFailureBoundary::InferPrivate)
-            });
-            let summary = report.analysis.public_call_summaries.get_mut(&function.id).ok_or_else(|| {
-                CompilerError::compiler_error("implicit builtin failure analysis lost a call summary")
-            })?;
+            let infer = hir
+                .function_failure_facts
+                .get(&function.id)
+                .is_some_and(|facts| {
+                    matches!(facts.boundary, HirBuiltinFailureBoundary::InferPrivate)
+                });
+            let summary = report
+                .analysis
+                .public_call_summaries
+                .get_mut(&function.id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "implicit builtin failure analysis lost a call summary",
+                    )
+                })?;
             if infer && active && !summary.escapes_builtin_failure {
                 summary.escapes_builtin_failure = true;
                 changed = true;
@@ -877,6 +969,25 @@ pub(crate) fn builtin_failure_diagnostic(
     let facts = hir.function_failure_facts.get(&function).ok_or_else(|| {
         CompilerError::compiler_error("builtin failure boundary lost its semantic facts")
     })?;
+    for check in &facts.deferred_custom_catches {
+        for candidate in &check.candidates {
+            let HirBuiltinFailureSource::Call(target) = &candidate.source else {
+                return Err(CompilerError::compiler_error(
+                    "deferred custom catch contributor is not a private call",
+                ));
+            };
+            if call_escapes_builtin_failure(hir, report, target)? {
+                return Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                        error_type_id: check.error_type_id,
+                        typed_producer_span: check.typed_producer_span,
+                        implicit_producer_span: candidate.span,
+                    },
+                    check.catch_span,
+                )));
+            }
+        }
+    }
     for contributor in &facts.assertion_message_calls {
         let HirBuiltinFailureSource::Call(target) = &contributor.source else {
             return Err(CompilerError::compiler_error(
@@ -902,16 +1013,18 @@ pub(crate) fn builtin_failure_diagnostic(
         HirBuiltinFailureBoundary::CustomErrorSlot(error_type_id) => {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 error_type_id,
-                implicit_producer_span: contributor.span,
+                witness: builtin_failure_witness(hir, report, function, contributor)?,
             }
         }
         HirBuiltinFailureBoundary::ExportedNoSlot => {
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                implicit_producer_span: contributor.span,
+                witness: builtin_failure_witness(hir, report, function, contributor)?,
             }
         }
     };
-    Ok(Some(CompilerDiagnostic::invalid_fallible_handling(reason, facts.span)))
+    Ok(Some(CompilerDiagnostic::invalid_fallible_handling(
+        reason, facts.span,
+    )))
 }
 
 fn validate_builtin_failure_boundaries(

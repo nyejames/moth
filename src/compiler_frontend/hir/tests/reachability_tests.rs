@@ -638,6 +638,7 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
                 vec![],
                 HirTerminator::RuntimeFailure {
                     message: "stop".to_owned(),
+                    cause: None,
                 },
             ),
         ],

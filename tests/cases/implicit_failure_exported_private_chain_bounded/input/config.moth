@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_exported_private_chain_bounded",
+    entry_root = "src",
+)
+html #= ()

@@ -1,0 +1,39 @@
+direct_walk |step Int| -> Int, Error!:
+    seen ~= 0
+    loop 0 to 2 by step:
+        seen = 99
+    ;
+    return seen
+;
+private_walk |step Int| -> Int:
+    seen ~= 0
+    loop 0 to 2 by step:
+        seen = 99
+    ;
+    return seen
+;
+safe_walk |step Int| -> Int, Error!:
+    return private_walk(step)
+;
+show_direct |step Int| -> String, Error!:
+    ignored = direct_walk(step)!
+    return ""
+;
+show_private |step Int| -> String, Error!:
+    ignored = safe_walk(step)!
+    return ""
+;
+direct = direct_walk(0) catch |direct_error|:
+    then -1
+;
+direct_message = show_direct(0) catch |direct_message_error|:
+    then direct_message_error.message
+;
+private_result = safe_walk(0) catch |private_error|:
+    then -1
+;
+private_message = show_private(0) catch |private_message_error|:
+    then private_message_error.message
+;
+
+[: range step direct=[direct] private=[private_result] message=[direct_message]/[private_message]]

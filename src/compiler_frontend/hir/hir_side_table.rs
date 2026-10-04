@@ -221,6 +221,43 @@ impl HirSideTable {
         self.reactive_template_by_value.clear();
     }
 
+    /// Rewrites block locations after unused scaffolding blocks are removed.
+    ///
+    /// Locations for removed blocks are dropped. Surviving ids keep their source spans.
+    pub(crate) fn remap_block_ids(&mut self, remap: &FxHashMap<BlockId, BlockId>) {
+        let remap_location = |location: HirLocation| match location {
+            HirLocation::Block(id) => remap.get(&id).copied().map(HirLocation::Block),
+            HirLocation::Terminator(id) => remap.get(&id).copied().map(HirLocation::Terminator),
+            other => Some(other),
+        };
+        self.ast_to_hir = std::mem::take(&mut self.ast_to_hir)
+            .into_iter()
+            .filter_map(|(span, locations)| {
+                let locations = locations
+                    .into_iter()
+                    .filter_map(remap_location)
+                    .collect::<Vec<_>>();
+                (!locations.is_empty()).then_some((span, locations))
+            })
+            .collect();
+        self.hir_to_ast = std::mem::take(&mut self.hir_to_ast)
+            .into_iter()
+            .filter_map(|(location, span)| {
+                remap_location(location).map(|location| (location, span))
+            })
+            .collect();
+        self.hir_to_source = std::mem::take(&mut self.hir_to_source)
+            .into_iter()
+            .filter_map(|(location, span)| {
+                remap_location(location).map(|location| (location, span))
+            })
+            .collect();
+        self.terminator_spans = std::mem::take(&mut self.terminator_spans)
+            .into_iter()
+            .filter_map(|(id, span)| remap.get(&id).copied().map(|id| (id, span)))
+            .collect();
+    }
+
     /// Remap every path identity retained by HIR side metadata after a module-local path merge.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if remap.is_identity() {

@@ -27,7 +27,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
-use crate::compiler_frontend::hir::numeric::HirNumericOp;
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, RangeStepFailureCause};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
@@ -237,13 +237,14 @@ impl<'a> HirBuilder<'a> {
         // Dynamic `by` expressions still need a runtime zero check before entering the loop.
         self.emit_jump_from_current_block(runtime.blocks.step_zero_check, span_ref, "for.enter")?;
 
-        self.emit_range_loop_zero_step_guard(runtime, span_ref)?;
+        let step_span = range.step.as_ref().and_then(|step| step.span);
+        self.emit_range_loop_zero_step_guard(runtime, &step_span)?;
         self.emit_range_loop_step_magnitude_normalization(runtime, span_ref)?;
         self.emit_range_loop_header_checks(range, runtime, span_ref, span)?;
         let step_block_is_reachable =
             self.lower_range_loop_body_with_emitter(bindings, runtime, span_ref, &mut emit_body)?;
         if step_block_is_reachable {
-            self.emit_range_loop_step(runtime, range.end_kind, span_ref)?;
+            self.emit_range_loop_step(runtime, range.end_kind, span_ref, &step_span)?;
         } else {
             self.discard_unreachable_range_step_blocks(blocks, span_ref)?;
         }
@@ -573,8 +574,7 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        // Generated safety guard: the zero-step check and its `RuntimeFailure`
-        // are compiler scaffolding and stay spanless.
+        // Retain the authored step span: this is a language-defined failure, not an invariant trap.
         let RangeLoopRuntime {
             blocks,
             locals,
@@ -622,13 +622,7 @@ impl<'a> HirBuilder<'a> {
         );
 
         self.set_current_block(blocks.step_zero_failure, span_ref)?;
-        self.emit_terminator(
-            blocks.step_zero_failure,
-            HirTerminator::RuntimeFailure {
-                message: "Loop step cannot be zero".to_owned(),
-            },
-            span_ref,
-        )
+        self.emit_range_step_failure(RangeStepFailureCause::ZeroStep, span_ref)
     }
 
     fn emit_range_loop_step_magnitude_normalization(
@@ -636,8 +630,8 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        // Generated normalization: magnitude/direction CFG and checked numeric
-        // step updates are compiler scaffolding and stay spanless.
+        // Keep normalization CFG scaffolding separate from the checked step producer, whose
+        // authored loop span must survive for failure and backend-capability diagnostics.
         let RangeLoopRuntime {
             blocks,
             locals,
@@ -907,6 +901,7 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         end_kind: RangeEndKind,
         span_ref: &Option<SourceSpan>,
+        step_span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let RangeLoopRuntime {
             blocks,
@@ -943,13 +938,7 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         self.set_current_block(blocks.step_stall_failure, span_ref)?;
-        self.emit_terminator(
-            blocks.step_stall_failure,
-            HirTerminator::RuntimeFailure {
-                message: "Floating-point range step made no progress".to_owned(),
-            },
-            span_ref,
-        )?;
+        self.emit_range_step_failure(RangeStepFailureCause::NoProgress, step_span)?;
 
         self.set_current_block(blocks.step_commit, span_ref)?;
         let commit_region = self.current_region_or_error(span_ref)?;

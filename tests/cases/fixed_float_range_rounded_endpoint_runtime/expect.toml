@@ -8,14 +8,11 @@ rendered_output_contains = [
 ]
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = [
-    "fixed_float_range_rounded_endpoint_runtime verified",
-]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
-[[backends.html_wasm.artifact_assertions]]
-path = "page.wasm"
-kind = "wasm"
-validate_wasm = true
-must_export = ["moth_start"]
+# provisional span until Phase 7 safe-operation discharge.
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"

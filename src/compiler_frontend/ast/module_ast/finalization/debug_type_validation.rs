@@ -271,11 +271,7 @@ fn debug_validate_expression_type_id(
     expression: &Expression,
     context: &DebugTypeValidationContext,
 ) {
-    debug_validate_expression_type_id_with_context(
-        expression,
-        context,
-        context.recovery_context,
-    );
+    debug_validate_expression_type_id_with_context(expression, context, context.recovery_context);
 }
 
 fn debug_validate_expression_type_id_with_context(
@@ -567,16 +563,21 @@ fn expression_is_recovering_catch_subject(
         let builtin_error = context.type_environment.type_id_for_canonical_identity(
             &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
         );
-        let implicit_is_compatible = expression.failure_facts.implicit.is_empty()
-            || Some(error_type_id) == builtin_error;
-        let typed_errors_are_compatible = expression
-            .failure_facts
-            .typed_errors
-            .iter()
-            .all(|producer| producer.error_type_id == error_type_id);
-        let is_eligible = expression.failure_facts.checked_numeric_operation
-            || !expression.failure_facts.implicit.is_empty()
-            || !expression.failure_facts.typed_errors.is_empty();
+        let facts = &expression.failure_facts;
+        let implicit_is_compatible = facts.summary.first_implicit.is_none()
+            || Some(error_type_id) == builtin_error
+            || (facts.summary.first_numeric.is_none()
+                && facts
+                    .deferred_custom_catch
+                    .is_some_and(|check| check.error_type_id == error_type_id));
+        let typed_errors_are_compatible = facts.summary.conflicting_typed.is_none()
+            && facts
+                .summary
+                .first_typed
+                .is_none_or(|producer| producer.error_type_id == error_type_id);
+        let is_eligible = facts.checked_numeric_operation
+            || facts.summary.first_implicit.is_some()
+            || facts.summary.first_typed.is_some();
         if !implicit_is_compatible
             || !typed_errors_are_compatible
             || !is_eligible

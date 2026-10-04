@@ -1,0 +1,8 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = " folded catch inline=3 block=3 bound=3 custom=3 handler-runs=0"

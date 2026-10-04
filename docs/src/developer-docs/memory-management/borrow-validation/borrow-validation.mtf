@@ -306,6 +306,7 @@ The current root approximation is centred on `LocalId`. Fields and indexes resol
 ### Future-use transfer and joins
 
 The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Branches are visited independently. Joins conservatively combine incoming alpha states and root sets, retaining activity when any incoming path may still use an alias. Loops use the same fixed-point transfer until the current result stabilises.
+Cross-block traversal ordinals don't prove alias activity: source-semantic conflicts use point-specific CFG future-use facts and write-through assignments reachable within lexical visibility for mutable source aliases, so a predecessor visited after its merge cannot prolong an alias whose final access has passed.
 
 Branch-local aliases are removed when they leave visibility. The current transfer implementation records returns, breaks and region exits for advisory cleanup-candidate generation. An infinite path without an exit doesn't receive an exit candidate merely because it loops.
 

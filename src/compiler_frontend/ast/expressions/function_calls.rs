@@ -242,15 +242,17 @@ pub(crate) fn finish_function_call_expression(
         );
     }
 
-    Ok(Expression::handled_fallible_function_call_with_typed_arguments(
-        call.name,
-        call.args,
-        call.result_type_ids,
-        FallibleExpressionHandling::Recover,
-        type_interner.environment_mut_for_derived_types(),
-        call.call_span,
+    Ok(
+        Expression::handled_fallible_function_call_with_typed_arguments(
+            call.name,
+            call.args,
+            call.result_type_ids,
+            FallibleExpressionHandling::Recover,
+            type_interner.environment_mut_for_derived_types(),
+            call.call_span,
+        )
+        .with_typed_error_producer(error_return_type_id, None),
     )
-    .with_typed_error_producer(error_return_type_id))
 }
 
 #[allow(
@@ -487,18 +489,20 @@ fn finish_external_function_call_expression(
             );
         }
 
-        return Ok(Expression::handled_fallible_host_function_call_with_typed_arguments(
-            HandledFallibleHostFunctionCallInput {
-                id: call.name,
-                args: call.args,
-                result_type_ids: call.result_type_ids,
-                error_type_id: call.error_type_id,
-                handling: FallibleExpressionHandling::Recover,
-                span: call.call_span,
-            },
-            type_interner.environment_mut_for_derived_types(),
-        )
-        .with_typed_error_producer(error_type_id));
+        return Ok(
+            Expression::handled_fallible_host_function_call_with_typed_arguments(
+                HandledFallibleHostFunctionCallInput {
+                    id: call.name,
+                    args: call.args,
+                    result_type_ids: call.result_type_ids,
+                    error_type_id: call.error_type_id,
+                    handling: FallibleExpressionHandling::Recover,
+                    span: call.call_span,
+                },
+                type_interner.environment_mut_for_derived_types(),
+            )
+            .with_typed_error_producer(error_type_id, None),
+        );
     }
 
     if token_stream.current_tag() == TokenTag::BANG {

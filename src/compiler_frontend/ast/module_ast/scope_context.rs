@@ -494,6 +494,12 @@ pub struct ScopeContext {
     /// must validate against the function return contract rather than the
     /// immediate expression receiver.
     pub current_function_return_type_ids: Vec<TypeId>,
+    /// Whether this scope is inside an authored function body.
+    ///
+    /// WHAT: set for source functions and copied into their child scopes.
+    /// WHY: synthetic start exposes builtin Error! for postfix propagation, but
+    ///      that slot must not make a root `return` look like an authored return.
+    pub(crate) inside_authored_function: bool,
 
     /// Active value-production target for `then` statements in the current scope.
     ///
@@ -539,6 +545,7 @@ impl Clone for ScopeContext {
             expected_result_type_ids: self.expected_result_type_ids.clone(),
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: self.active_value_target.clone(),
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -753,6 +760,7 @@ impl ScopeContext {
         )));
         let root_frame_id = arena.borrow_mut().alloc_root_frame_with_capacity(0);
         record_scope_frame_depth(0);
+        let inside_authored_function = matches!(kind, ContextKind::Function);
 
         ScopeContext {
             kind,
@@ -769,6 +777,7 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: None,
             current_function_return_type_ids: Vec::new(),
+            inside_authored_function,
             active_value_target: None,
             active_generic_type_context: None,
             generic_template_validation: false,
@@ -829,6 +838,7 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             // Branch-like child scopes inherit value production so ordinary nested
             // `if`/match paths can produce for the nearest active value block.
             // Barriers such as loops, functions, conditions, and templates keep
@@ -878,6 +888,7 @@ impl ScopeContext {
             expected_result_type_ids: expected_result_type_ids.clone(),
             expected_error_type,
             current_function_return_type_ids: expected_result_type_ids,
+            inside_authored_function: true,
             active_value_target: None,
             active_generic_type_context: None,
             generic_template_validation: false,
@@ -915,6 +926,7 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -964,6 +976,7 @@ impl ScopeContext {
             expected_result_type_ids: vec![],
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -1003,6 +1016,7 @@ impl ScopeContext {
             expected_result_type_ids: Vec::new(),
             expected_error_type: parent.expected_error_type,
             current_function_return_type_ids: parent.current_function_return_type_ids.clone(),
+            inside_authored_function: parent.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: parent.active_generic_type_context.clone(),
             generic_template_validation: parent.generic_template_validation,

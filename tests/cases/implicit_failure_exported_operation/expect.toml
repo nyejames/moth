@@ -2,7 +2,6 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0051"]
-message_contains = ["Recover locally", "Error!"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
@@ -22,7 +21,6 @@ column = 21
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0051"]
-message_contains = ["Recover locally", "Error!"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0051"

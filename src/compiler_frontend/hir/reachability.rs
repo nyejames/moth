@@ -18,7 +18,7 @@ use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -82,6 +82,7 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
+    pub(crate) reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
     pub(crate) reachable_float_statements: Vec<ReachableFloatStatementUse>,
     pub(crate) reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
     reachable_function_provenance: SyntheticInterfaceProvenance,
@@ -150,6 +151,7 @@ struct HirBlockRuntimeFacts {
     reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     reachable_numeric_ops: Vec<ReachableNumericOpUse>,
+    reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
     reachable_float_statements: Vec<ReachableFloatStatementUse>,
     reachable_assertion_messages: Vec<ReachableAssertionMessageUse>,
 }
@@ -436,6 +438,14 @@ pub(crate) struct ReachableNumericOpUse {
     pub(crate) span: Option<SourceSpan>,
 }
 
+/// A reachable range guard with its exact failure contract and source anchor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReachableRangeStepFailureUse {
+    pub(crate) cause: RangeStepFailureCause,
+    pub(crate) failure_mode: NumericFailureMode,
+    pub(crate) span: Option<SourceSpan>,
+}
+
 /// A reachable compiler-owned Float formatting or validation statement.
 ///
 /// WHY: backend feature validation needs the statement's exact failure mode and source span to
@@ -668,6 +678,8 @@ impl HirReachability {
             .extend(direct.reachable_runtime_casts.iter().cloned());
         self.reachable_numeric_ops
             .extend(direct.reachable_numeric_ops.iter().cloned());
+        self.reachable_range_step_failures
+            .extend(direct.reachable_range_step_failures.iter().cloned());
         self.reachable_float_statements
             .extend(direct.reachable_float_statements.iter().cloned());
         self.reachable_assertion_messages
@@ -883,6 +895,20 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         self.collect_runtime_feature_uses_from_expression(right, span);
                     }
                 }
+            }
+
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                ..
+            } => {
+                self.direct_facts.reachable_range_step_failures.push(
+                    ReachableRangeStepFailureUse {
+                        cause: *cause,
+                        failure_mode: *failure_mode,
+                        span,
+                    },
+                );
             }
 
             HirStatementKind::CastOp { policy, source, .. } => {

@@ -183,6 +183,8 @@ impl BlockAnalyser<'_> {
                 // unwraps it. No value-specific fact survives the statement.
                 self.cache = None;
             }
+            // Range guards always fail and have no numeric success interval to retain.
+            HirStatementKind::RangeStepFailure { .. } => self.cache = None,
             // Calls, side-effect expressions, map operations, drops, float helpers and every
             // other unsupported statement conservatively drop value-specific facts.
             _ => self.cache = None,

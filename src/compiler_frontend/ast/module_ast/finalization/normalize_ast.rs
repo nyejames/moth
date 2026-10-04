@@ -54,6 +54,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::collect_expression_failure_facts;
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::module_ast::environment::ResolvedPublicTypeRootKind;
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
@@ -817,46 +818,49 @@ fn normalize_call_argument_values(
 ///       TypeId validation pass. This AST-owned cleanup runs after that pass and before const
 ///       facts, HIR, generated requests, link facts, target facts, or backend work can observe
 ///       the completed AST.
-pub(super) fn discard_inactive_assertion_messages(ast: &mut [AstNode]) {
+pub(super) fn discard_inactive_assertion_messages(
+    ast: &mut [AstNode],
+) -> Result<(), CompilerError> {
     for node in ast {
-        discard_inactive_assertion_messages_in_node(node);
+        discard_inactive_assertion_messages_in_node(node)?;
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
+fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) -> Result<(), CompilerError> {
     match &mut node.kind {
         NodeKind::Function(_, signature, body) => {
-            discard_inactive_assertion_messages_in_signature(signature);
-            discard_inactive_assertion_messages(body);
+            discard_inactive_assertion_messages_in_signature(signature)?;
+            discard_inactive_assertion_messages(body)?;
         }
 
         NodeKind::VariableDeclaration(declaration) => {
-            discard_inactive_assertion_messages_in_expression(&mut declaration.value);
+            discard_inactive_assertion_messages_in_expression(&mut declaration.value)?;
         }
 
         NodeKind::Return(values) => {
             for value in values {
-                discard_inactive_assertion_messages_in_expression(value);
+                discard_inactive_assertion_messages_in_expression(value)?;
             }
         }
 
         NodeKind::ReturnError(value)
         | NodeKind::PushStartRuntimeFragment(value)
         | NodeKind::ExpressionStatement(value) => {
-            discard_inactive_assertion_messages_in_expression(value);
+            discard_inactive_assertion_messages_in_expression(value)?;
         }
 
         NodeKind::ThenValue(produced_values) => {
             for expression in &mut produced_values.expressions {
-                discard_inactive_assertion_messages_in_expression(expression);
+                discard_inactive_assertion_messages_in_expression(expression)?;
             }
         }
 
         NodeKind::If(condition, then_body, else_body, _) => {
-            discard_inactive_assertion_messages_in_expression(condition);
-            discard_inactive_assertion_messages(then_body);
+            discard_inactive_assertion_messages_in_expression(condition)?;
+            discard_inactive_assertion_messages(then_body)?;
             if let Some(else_body) = else_body {
-                discard_inactive_assertion_messages(else_body);
+                discard_inactive_assertion_messages(else_body)?;
             }
         }
 
@@ -866,33 +870,33 @@ fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
             default,
             ..
         } => {
-            discard_inactive_assertion_messages_in_expression(scrutinee);
+            discard_inactive_assertion_messages_in_expression(scrutinee)?;
             for arm in arms {
-                discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern);
+                discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern)?;
                 if let Some(guard) = &mut arm.guard {
-                    discard_inactive_assertion_messages_in_expression(guard);
+                    discard_inactive_assertion_messages_in_expression(guard)?;
                 }
-                discard_inactive_assertion_messages(&mut arm.body);
+                discard_inactive_assertion_messages(&mut arm.body)?;
             }
             if let Some(default) = default {
-                discard_inactive_assertion_messages(default);
+                discard_inactive_assertion_messages(default)?;
             }
         }
 
-        NodeKind::LexicalScope { body } => discard_inactive_assertion_messages(body),
+        NodeKind::LexicalScope { body } => discard_inactive_assertion_messages(body)?,
 
         NodeKind::RangeLoop {
             bindings,
             range,
             body,
         } => {
-            discard_inactive_assertion_messages_in_loop_bindings(bindings);
-            discard_inactive_assertion_messages_in_expression(&mut range.start);
-            discard_inactive_assertion_messages_in_expression(&mut range.end);
+            discard_inactive_assertion_messages_in_loop_bindings(bindings)?;
+            discard_inactive_assertion_messages_in_expression(&mut range.start)?;
+            discard_inactive_assertion_messages_in_expression(&mut range.end)?;
             if let Some(step) = &mut range.step {
-                discard_inactive_assertion_messages_in_expression(step);
+                discard_inactive_assertion_messages_in_expression(step)?;
             }
-            discard_inactive_assertion_messages(body);
+            discard_inactive_assertion_messages(body)?;
         }
 
         NodeKind::CollectionLoop {
@@ -900,55 +904,64 @@ fn discard_inactive_assertion_messages_in_node(node: &mut AstNode) {
             iterable,
             body,
         } => {
-            discard_inactive_assertion_messages_in_loop_bindings(bindings);
-            discard_inactive_assertion_messages_in_expression(iterable);
-            discard_inactive_assertion_messages(body);
+            discard_inactive_assertion_messages_in_loop_bindings(bindings)?;
+            discard_inactive_assertion_messages_in_expression(iterable)?;
+            discard_inactive_assertion_messages(body)?;
         }
 
         NodeKind::WhileLoop(condition, body) => {
-            discard_inactive_assertion_messages_in_expression(condition);
-            discard_inactive_assertion_messages(body);
+            discard_inactive_assertion_messages_in_expression(condition)?;
+            discard_inactive_assertion_messages(body)?;
         }
 
         NodeKind::Assert { condition, message } => {
-            discard_inactive_assertion_messages_in_expression(condition);
+            discard_inactive_assertion_messages_in_expression(condition)?;
             if assertion_condition_is_statically_true(condition) {
-                replace_inactive_assertion_message(message);
+                replace_inactive_assertion_message(message)?;
             } else {
-                discard_inactive_assertion_messages_in_expression(message);
+                discard_inactive_assertion_messages_in_expression(message)?;
             }
         }
 
         NodeKind::StructDefinition(_, fields) => {
             for field in fields {
-                discard_inactive_assertion_messages_in_expression(&mut field.value);
+                discard_inactive_assertion_messages_in_expression(&mut field.value)?;
             }
         }
 
         NodeKind::Assignment { value, .. } | NodeKind::MultiBind { value, .. } => {
-            discard_inactive_assertion_messages_in_expression(value);
+            discard_inactive_assertion_messages_in_expression(value)?;
         }
 
         NodeKind::Break | NodeKind::Continue => {}
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_signature(signature: &mut FunctionSignature) {
+fn discard_inactive_assertion_messages_in_signature(
+    signature: &mut FunctionSignature,
+) -> Result<(), CompilerError> {
     for parameter in &mut signature.parameters {
-        discard_inactive_assertion_messages_in_expression(&mut parameter.value);
+        discard_inactive_assertion_messages_in_expression(&mut parameter.value)?;
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_loop_bindings(bindings: &mut LoopBindings) {
+fn discard_inactive_assertion_messages_in_loop_bindings(
+    bindings: &mut LoopBindings,
+) -> Result<(), CompilerError> {
     if let Some(item) = &mut bindings.item {
-        discard_inactive_assertion_messages_in_expression(&mut item.value);
+        discard_inactive_assertion_messages_in_expression(&mut item.value)?;
     }
     if let Some(index) = &mut bindings.index {
-        discard_inactive_assertion_messages_in_expression(&mut index.value);
+        discard_inactive_assertion_messages_in_expression(&mut index.value)?;
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_match_pattern(pattern: &mut MatchPattern) {
+fn discard_inactive_assertion_messages_in_match_pattern(
+    pattern: &mut MatchPattern,
+) -> Result<(), CompilerError> {
     match pattern {
         MatchPattern::Literal(expression)
         | MatchPattern::OptionValue {
@@ -956,20 +969,23 @@ fn discard_inactive_assertion_messages_in_match_pattern(pattern: &mut MatchPatte
         }
         | MatchPattern::Relational {
             value: expression, ..
-        } => discard_inactive_assertion_messages_in_expression(expression),
+        } => discard_inactive_assertion_messages_in_expression(expression)?,
 
         MatchPattern::ChoiceVariant { .. }
         | MatchPattern::OptionNone { .. }
         | MatchPattern::OptionPresentCapture { .. } => {}
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression) {
+fn discard_inactive_assertion_messages_in_expression(
+    expression: &mut Expression,
+) -> Result<(), CompilerError> {
     match &mut expression.kind {
         ExpressionKind::Runtime(rpn) => {
             for item in &mut rpn.items {
                 if let ExpressionRpnItem::Operand(expression) = item {
-                    discard_inactive_assertion_messages_in_expression(expression);
+                    discard_inactive_assertion_messages_in_expression(expression)?;
                 }
             }
         }
@@ -977,30 +993,30 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
         ExpressionKind::Copy(_) => {}
 
         ExpressionKind::FieldAccess { base, .. } => {
-            discard_inactive_assertion_messages_in_expression(base);
+            discard_inactive_assertion_messages_in_expression(base)?;
         }
 
         ExpressionKind::MethodCall { receiver, args, .. }
         | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
         | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-            discard_inactive_assertion_messages_in_expression(receiver);
-            discard_inactive_assertion_messages_in_call_arguments(args);
+            discard_inactive_assertion_messages_in_expression(receiver)?;
+            discard_inactive_assertion_messages_in_call_arguments(args)?;
         }
 
         ExpressionKind::Function(signature) => {
-            discard_inactive_assertion_messages_in_signature(signature);
+            discard_inactive_assertion_messages_in_signature(signature)?;
         }
 
         ExpressionKind::FunctionCall { args, .. }
         | ExpressionKind::HostFunctionCall { args, .. }
         | ExpressionKind::HandledFallibleFunctionCall { args, .. }
         | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
-            discard_inactive_assertion_messages_in_call_arguments(args);
+            discard_inactive_assertion_messages_in_call_arguments(args)?;
         }
 
         ExpressionKind::Collection(items) => {
             for item in items {
-                discard_inactive_assertion_messages_in_expression(item);
+                discard_inactive_assertion_messages_in_expression(item)?;
             }
         }
 
@@ -1009,74 +1025,74 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
         | ExpressionKind::AnonymousConstRecord { fields }
         | ExpressionKind::ChoiceConstruct { fields, .. } => {
             for field in fields {
-                discard_inactive_assertion_messages_in_expression(&mut field.value);
+                discard_inactive_assertion_messages_in_expression(&mut field.value)?;
             }
         }
 
         ExpressionKind::Range(start, end) => {
-            discard_inactive_assertion_messages_in_expression(start);
-            discard_inactive_assertion_messages_in_expression(end);
+            discard_inactive_assertion_messages_in_expression(start)?;
+            discard_inactive_assertion_messages_in_expression(end)?;
         }
 
         ExpressionKind::ValueBlock { block } => match block.as_mut() {
             ValueBlock::If(value_if) => {
-                discard_inactive_assertion_messages_in_expression(&mut value_if.condition);
-                discard_inactive_assertion_messages(&mut value_if.then_body);
-                discard_inactive_assertion_messages(&mut value_if.else_body);
+                discard_inactive_assertion_messages_in_expression(&mut value_if.condition)?;
+                discard_inactive_assertion_messages(&mut value_if.then_body)?;
+                discard_inactive_assertion_messages(&mut value_if.else_body)?;
             }
 
             ValueBlock::LexicalScope(value_lexical_scope) => {
-                discard_inactive_assertion_messages(&mut value_lexical_scope.body);
+                discard_inactive_assertion_messages(&mut value_lexical_scope.body)?;
             }
 
             ValueBlock::Match(value_match) => {
-                discard_inactive_assertion_messages_in_expression(&mut value_match.scrutinee);
+                discard_inactive_assertion_messages_in_expression(&mut value_match.scrutinee)?;
                 for arm in &mut value_match.arms {
-                    discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern);
+                    discard_inactive_assertion_messages_in_match_pattern(&mut arm.pattern)?;
                     if let Some(guard) = &mut arm.guard {
-                        discard_inactive_assertion_messages_in_expression(guard);
+                        discard_inactive_assertion_messages_in_expression(guard)?;
                     }
-                    discard_inactive_assertion_messages(&mut arm.body);
+                    discard_inactive_assertion_messages(&mut arm.body)?;
                 }
                 if let Some(default) = &mut value_match.default {
-                    discard_inactive_assertion_messages(default);
+                    discard_inactive_assertion_messages(default)?;
                 }
             }
 
             ValueBlock::Catch(value_catch) => {
-                discard_inactive_assertion_messages_in_expression(&mut value_catch.handled_value);
-                discard_inactive_assertion_messages_in_fallible_handling(&mut value_catch.handler);
+                discard_inactive_assertion_messages_in_expression(&mut value_catch.handled_value)?;
+                discard_inactive_assertion_messages_in_fallible_handling(&mut value_catch.handler)?;
             }
         },
 
         ExpressionKind::MapLiteral(entries) => {
             for entry in entries {
-                discard_inactive_assertion_messages_in_expression(&mut entry.key);
-                discard_inactive_assertion_messages_in_expression(&mut entry.value);
+                discard_inactive_assertion_messages_in_expression(&mut entry.key)?;
+                discard_inactive_assertion_messages_in_expression(&mut entry.value)?;
             }
         }
 
         ExpressionKind::OptionPropagation { value }
         | ExpressionKind::Coerced { value, .. }
         | ExpressionKind::HandledFallibleExpression { value, .. } => {
-            discard_inactive_assertion_messages_in_expression(value);
+            discard_inactive_assertion_messages_in_expression(value)?;
         }
 
         ExpressionKind::Cast(cast) => {
-            discard_inactive_assertion_messages_in_expression(&mut cast.source);
+            discard_inactive_assertion_messages_in_expression(&mut cast.source)?;
         }
 
         #[cfg(test)]
         ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-            discard_inactive_assertion_messages_in_expression(value);
+            discard_inactive_assertion_messages_in_expression(value)?;
         }
 
         ExpressionKind::RuntimeTemplateHandoff(handoff) => {
-            discard_inactive_assertion_messages_in_runtime_template_handoff(handoff);
+            discard_inactive_assertion_messages_in_runtime_template_handoff(handoff)?;
         }
 
         ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
-            discard_inactive_assertion_messages_in_runtime_slot_handoff(handoff);
+            discard_inactive_assertion_messages_in_runtime_slot_handoff(handoff)?;
         }
 
         ExpressionKind::Template(_)
@@ -1092,54 +1108,61 @@ fn discard_inactive_assertion_messages_in_expression(expression: &mut Expression
         | ExpressionKind::Char(_)
         | ExpressionKind::Reference(_) => {}
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_call_arguments(arguments: &mut [CallArgument]) {
+fn discard_inactive_assertion_messages_in_call_arguments(
+    arguments: &mut [CallArgument],
+) -> Result<(), CompilerError> {
     for argument in arguments {
-        discard_inactive_assertion_messages_in_expression(&mut argument.value);
+        discard_inactive_assertion_messages_in_expression(&mut argument.value)?;
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_fallible_handling(handling: &mut FallibleHandling) {
+fn discard_inactive_assertion_messages_in_fallible_handling(
+    handling: &mut FallibleHandling,
+) -> Result<(), CompilerError> {
     if let FallibleHandling::Handler { body, .. } = handling {
-        discard_inactive_assertion_messages(body);
+        discard_inactive_assertion_messages(body)?;
     }
+    Ok(())
 }
 
 fn discard_inactive_assertion_messages_in_runtime_template_handoff(
     handoff: &mut OwnedRuntimeTemplateHandoff,
-) {
-    runtime_handoff::walk_owned_runtime_template_handoff_mut(handoff, &mut |node| {
-        discard_inactive_assertion_messages_in_owned_runtime_node(node);
-        Ok::<(), std::convert::Infallible>(())
-    })
-    .expect("owned runtime template handoff walker cannot fail");
+) -> Result<(), CompilerError> {
+    runtime_handoff::walk_owned_runtime_template_handoff_mut(
+        handoff,
+        &mut discard_inactive_assertion_messages_in_owned_runtime_node,
+    )
 }
 
 fn discard_inactive_assertion_messages_in_runtime_slot_handoff(
     handoff: &mut OwnedRuntimeSlotApplicationHandoff,
-) {
-    runtime_handoff::walk_owned_runtime_slot_application_handoff_mut(handoff, &mut |node| {
-        discard_inactive_assertion_messages_in_owned_runtime_node(node);
-        Ok::<(), std::convert::Infallible>(())
-    })
-    .expect("owned runtime slot handoff walker cannot fail");
+) -> Result<(), CompilerError> {
+    runtime_handoff::walk_owned_runtime_slot_application_handoff_mut(
+        handoff,
+        &mut discard_inactive_assertion_messages_in_owned_runtime_node,
+    )
 }
 
-fn discard_inactive_assertion_messages_in_owned_runtime_node(node: &mut OwnedRuntimeTemplateNode) {
+fn discard_inactive_assertion_messages_in_owned_runtime_node(
+    node: &mut OwnedRuntimeTemplateNode,
+) -> Result<(), CompilerError> {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-            discard_inactive_assertion_messages_in_expression(expression);
+            discard_inactive_assertion_messages_in_expression(expression)?;
         }
 
         OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
             for branch in branches {
-                discard_inactive_assertion_messages_in_branch_selector(&mut branch.selector);
+                discard_inactive_assertion_messages_in_branch_selector(&mut branch.selector)?;
             }
         }
 
         OwnedRuntimeTemplateNode::Loop { header, .. } => {
-            discard_inactive_assertion_messages_in_loop_header(header);
+            discard_inactive_assertion_messages_in_loop_header(header)?;
         }
 
         OwnedRuntimeTemplateNode::Sequence { .. }
@@ -1152,38 +1175,45 @@ fn discard_inactive_assertion_messages_in_owned_runtime_node(node: &mut OwnedRun
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_branch_selector(selector: &mut TemplateBranchSelector) {
+fn discard_inactive_assertion_messages_in_branch_selector(
+    selector: &mut TemplateBranchSelector,
+) -> Result<(), CompilerError> {
     match selector {
         TemplateBranchSelector::Bool(condition) => {
-            discard_inactive_assertion_messages_in_expression(condition);
+            discard_inactive_assertion_messages_in_expression(condition)?;
         }
         TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
-            discard_inactive_assertion_messages_in_expression(scrutinee);
-            discard_inactive_assertion_messages_in_match_pattern(pattern);
+            discard_inactive_assertion_messages_in_expression(scrutinee)?;
+            discard_inactive_assertion_messages_in_match_pattern(pattern)?;
         }
     }
+    Ok(())
 }
 
-fn discard_inactive_assertion_messages_in_loop_header(header: &mut TemplateLoopHeader) {
+fn discard_inactive_assertion_messages_in_loop_header(
+    header: &mut TemplateLoopHeader,
+) -> Result<(), CompilerError> {
     match header {
         TemplateLoopHeader::Conditional { condition } => {
-            discard_inactive_assertion_messages_in_expression(condition);
+            discard_inactive_assertion_messages_in_expression(condition)?;
         }
         TemplateLoopHeader::Range { bindings, range } => {
-            discard_inactive_assertion_messages_in_loop_bindings(bindings);
-            discard_inactive_assertion_messages_in_expression(&mut range.start);
-            discard_inactive_assertion_messages_in_expression(&mut range.end);
+            discard_inactive_assertion_messages_in_loop_bindings(bindings)?;
+            discard_inactive_assertion_messages_in_expression(&mut range.start)?;
+            discard_inactive_assertion_messages_in_expression(&mut range.end)?;
             if let Some(step) = &mut range.step {
-                discard_inactive_assertion_messages_in_expression(step);
+                discard_inactive_assertion_messages_in_expression(step)?;
             }
         }
         TemplateLoopHeader::Collection { bindings, iterable } => {
-            discard_inactive_assertion_messages_in_loop_bindings(bindings);
-            discard_inactive_assertion_messages_in_expression(iterable);
+            discard_inactive_assertion_messages_in_loop_bindings(bindings)?;
+            discard_inactive_assertion_messages_in_expression(iterable)?;
         }
     }
+    Ok(())
 }
 
 /// Replaces a fully validated inactive assertion message with the canonical typed `none` shape.
@@ -1192,7 +1222,9 @@ fn discard_inactive_assertion_messages_in_loop_header(header: &mut TemplateLoopH
 ///       reactive metadata, synthetic provenance, and TIR-backed expression identity.
 /// WHY: a compile-time-true assertion remains frontend-valid but publishes no message value or
 ///      downstream executable fact. The existing resolved optional type identity is retained.
-fn replace_inactive_assertion_message(message: &mut Expression) {
+fn replace_inactive_assertion_message(message: &mut Expression) -> Result<(), CompilerError> {
+    // This late pass only sees normalized, owned runtime handoffs, never TIR references.
+    let pending = collect_expression_failure_facts(message, &TemplateIrStore::new())?;
     let mut inert_message = Expression::new(
         ExpressionKind::OptionNone,
         message.span,
@@ -1200,16 +1232,16 @@ fn replace_inactive_assertion_message(message: &mut Expression) {
         message.diagnostic_type.clone(),
         ValueMode::ImmutableOwned,
     );
-    // Inactive execution publishes no message value, but unresolved private-call validation
-    // still needs its expression-owned candidates until semantic summary convergence.
-    inert_message.failure_facts.implicit = std::mem::take(&mut message.failure_facts.implicit);
-    inert_message.failure_facts.implicit.retain(|contributor| {
-        matches!(
-            contributor.source,
-            ImplicitFailureSource::PrivateCall(_)
-        )
-    });
+    // Inactive execution publishes no message value, but private calls anywhere in the removed
+    // subtree still need their origin witnesses until exact semantic summary convergence.
+    // The inert node replaces the entire subtree, so it becomes the sole durable witness owner.
+    for contributor in pending.implicit {
+        if matches!(contributor.source, ImplicitFailureSource::PrivateCall(_)) {
+            inert_message.failure_facts.record_implicit(contributor);
+        }
+    }
     *message = inert_message;
+    Ok(())
 }
 
 #[derive(Debug)]

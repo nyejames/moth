@@ -20,9 +20,10 @@ use crate::compiler_frontend::hir::constants::HirModuleConst;
 use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
-use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::HirStruct;
+use crate::compiler_frontend::hir::utils::for_each_terminator_target_mut;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -164,6 +165,42 @@ impl HirModule {
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.side_table.remap_path_ids(remap);
         self.const_facts.remap_path_ids(remap);
+    }
+
+    /// Renumber blocks so `blocks[index].id == BlockId(index)`.
+    ///
+    /// HIR construction removes unused scaffolding blocks after other blocks already exist,
+    /// which leaves gaps. The builder calls this once construction is done, before validation.
+    pub(crate) fn compact_block_ids(&mut self) {
+        if self
+            .blocks
+            .iter()
+            .enumerate()
+            .all(|(index, block)| block.id == BlockId(index as u32))
+        {
+            return;
+        }
+
+        let remap = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| (block.id, BlockId(index as u32)))
+            .collect::<FxHashMap<_, _>>();
+        for block in &mut self.blocks {
+            block.id = remap[&block.id];
+            // Removed blocks have no incoming edges. Any unknown target is left for validation.
+            for_each_terminator_target_mut(&mut block.terminator, |target| {
+                *target = remap.get(target).copied().unwrap_or(*target);
+            });
+        }
+        for function in &mut self.functions {
+            function.entry = remap
+                .get(&function.entry)
+                .copied()
+                .unwrap_or(function.entry);
+        }
+        self.side_table.remap_block_ids(&remap);
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {

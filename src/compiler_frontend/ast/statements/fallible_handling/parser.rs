@@ -7,16 +7,18 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
-    explicit_propagation_catch_diagnostic, pending_body_failure_facts,
-};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
     HandledFallibleHostFunctionCallInput,
 };
-use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
+use crate::compiler_frontend::ast::expressions::failure_classification::{
+    explicit_propagation_catch_diagnostic, pending_body_failure_facts,
+};
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    DeferredCustomCatchCheck, ExpressionFailureFacts, FailureDisposition,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
 };
@@ -178,7 +180,7 @@ pub(crate) fn parse_completed_expression_catch(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    expression: Expression,
+    mut expression: Expression,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -187,34 +189,61 @@ pub(crate) fn parse_completed_expression_catch(
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOutsideBoundary,
             Some(token_stream.current_span()),
-        ).into());
+        )
+        .into());
     }
 
     // Existing first-class carriers still use their established recovery representation.
-    if type_interner.environment().is_fallible_carrier(expression.type_id) {
+    if type_interner
+        .environment()
+        .is_fallible_carrier(expression.type_id)
+    {
         let value_required = expression.type_id != type_interner.environment().builtins().none;
         return parse_fallible_handling_suffix_for_expression(
-            token_stream, context, type_interner, expression, value_required,
-            true, string_table, path_fork,
+            token_stream,
+            context,
+            type_interner,
+            expression,
+            value_required,
+            true,
+            string_table,
+            path_fork,
         );
     }
 
     let error_type_id = compatible_expression_error_type(
-        &expression, context, type_interner.environment(), string_table,
+        &mut expression,
+        context,
+        type_interner.environment(),
+        string_table,
         Some(token_stream.current_span()),
     )?;
     let result_type_ids = match &expression.kind {
-        ExpressionKind::FunctionCall { result_type_ids, .. }
-        | ExpressionKind::HostFunctionCall { result_type_ids, .. }
-        | ExpressionKind::MethodCall { result_type_ids, .. }
-        | ExpressionKind::CollectionBuiltinCall { result_type_ids, .. }
-        | ExpressionKind::MapBuiltinCall { result_type_ids, .. }
-        | ExpressionKind::HandledFallibleFunctionCall { result_type_ids, .. }
-        | ExpressionKind::HandledFallibleHostFunctionCall { result_type_ids, .. } => {
-            result_type_ids.clone()
+        ExpressionKind::FunctionCall {
+            result_type_ids, ..
         }
+        | ExpressionKind::HostFunctionCall {
+            result_type_ids, ..
+        }
+        | ExpressionKind::MethodCall {
+            result_type_ids, ..
+        }
+        | ExpressionKind::CollectionBuiltinCall {
+            result_type_ids, ..
+        }
+        | ExpressionKind::MapBuiltinCall {
+            result_type_ids, ..
+        }
+        | ExpressionKind::HandledFallibleFunctionCall {
+            result_type_ids, ..
+        }
+        | ExpressionKind::HandledFallibleHostFunctionCall {
+            result_type_ids, ..
+        } => result_type_ids.clone(),
         ExpressionKind::HandledFallibleExpression { value, .. }
-            if type_interner.environment().is_fallible_carrier(value.type_id) =>
+            if type_interner
+                .environment()
+                .is_fallible_carrier(value.type_id) =>
         {
             fallible_success_type_ids(value.type_id, type_interner.environment())
         }
@@ -254,83 +283,101 @@ pub(crate) fn complete_catch_failure_fact(
         return Ok(());
     };
     catch.handled_value.failure_facts.disposition =
-        FailureDisposition::HandledByCatch {
-            error_type_id,
-        };
-    if let FallibleHandling::Handler { body, .. } = &catch.handler {
-        expression.failure_facts =
-            pending_body_failure_facts(
-                body, &context.template_ir_store.borrow(),
-            )?;
-    }
+        FailureDisposition::HandledByCatch { error_type_id };
+    expression.failure_facts = if let FallibleHandling::Handler { body, .. } = &catch.handler {
+        let handler_facts = pending_body_failure_facts(body, &context.template_ir_store.borrow())?;
+        if catch
+            .handled_value
+            .failure_facts
+            .is_folded_numeric_catch_success()
+        {
+            // The handler remains semantically checked but has no executable failure edge.
+            ExpressionFailureFacts::default()
+        } else {
+            handler_facts
+        }
+    } else {
+        ExpressionFailureFacts::default()
+    };
     Ok(())
 }
 
 pub(crate) fn compatible_expression_error_type(
-    expression: &Expression,
+    expression: &mut Expression,
     context: &ScopeContext,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
     catch_span: Option<SourceSpan>,
 ) -> Result<TypeId, ExpressionParseError> {
-    if let Some(diagnostic) = explicit_propagation_catch_diagnostic(
-        expression, &context.template_ir_store.borrow(),
-    )? {
+    if let Some(diagnostic) =
+        explicit_propagation_catch_diagnostic(expression, &context.template_ir_store.borrow())?
+    {
         return Err(diagnostic.into());
     }
 
     let facts = &expression.failure_facts;
-    let first = facts.typed_errors.first();
+    let first = facts.summary.first_typed;
     if let Some(first) = first {
-        for producer in &facts.typed_errors[1..] {
-            if producer.error_type_id != first.error_type_id {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
-                        first_error_type_id: first.error_type_id,
-                        second_error_type_id: producer.error_type_id,
-                        first_producer_span: first.span,
-                        second_producer_span: producer.span,
-                    },
-                    catch_span,
-                ).into());
-            }
+        if let Some(producer) = facts.summary.conflicting_typed {
+            return Err(CompilerDiagnostic::invalid_fallible_handling(
+                InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                    first_error_type_id: first.error_type_id,
+                    second_error_type_id: producer.error_type_id,
+                    first_producer_span: first.span,
+                    second_producer_span: producer.span,
+                },
+                catch_span,
+            )
+            .into());
         }
 
-        if !facts.implicit.is_empty() {
+        if facts.summary.first_implicit.is_some() {
             let builtin_error_type_id =
-                resolve_builtin_error_type_typed(
-                    context, expression.span, string_table,
-                )?.type_id;
+                resolve_builtin_error_type_typed(context, expression.span, string_table)?.type_id;
             if !is_postfix_error_compatible(
-                builtin_error_type_id, first.error_type_id, type_environment,
+                builtin_error_type_id,
+                first.error_type_id,
+                type_environment,
             ) {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                        error_type_id: first.error_type_id,
-                        typed_producer_span: first.span,
-                        implicit_producer_span: facts.implicit.first().and_then(|producer| producer.span),
-                    },
+                if let Some(producer) = facts.summary.first_numeric {
+                    return Err(CompilerDiagnostic::invalid_fallible_handling(
+                        InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                            error_type_id: first.error_type_id,
+                            typed_producer_span: first.span,
+                            implicit_producer_span: producer.span,
+                        },
+                        catch_span,
+                    )
+                    .into());
+                }
+
+                let check = DeferredCustomCatchCheck {
                     catch_span,
-                ).into());
+                    error_type_id: first.error_type_id,
+                    typed_producer_span: first.span,
+                };
+                let error_type_id = first.error_type_id;
+                expression.failure_facts.deferred_custom_catch = Some(check);
+                return Ok(error_type_id);
             }
         }
         return Ok(first.error_type_id);
     }
 
-    if facts.checked_numeric_operation || !facts.implicit.is_empty() {
+    if facts.checked_numeric_operation || facts.summary.first_implicit.is_some() {
         return Ok(
-            resolve_builtin_error_type_typed(
-                context, expression.span, string_table,
-            )?.type_id,
+            resolve_builtin_error_type_typed(context, expression.span, string_table)?.type_id,
         );
     }
 
     Err(CompilerDiagnostic::invalid_fallible_handling(
         super::non_fallible_handler_reason(
-            TokenTag::CATCH, type_environment.is_option(expression.type_id),
+            TokenTag::CATCH,
+            type_environment.is_option(expression.type_id),
         ),
         catch_span,
-    ).into())
+    )
+    .into())
 }
 
 #[allow(
@@ -420,7 +467,8 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                     success_type_diagnostic_spelling,
                     expression_span,
                 );
-                handled_expression = handled_expression.with_typed_error_producer(error_return_type_id);
+                handled_expression =
+                    handled_expression.with_typed_error_producer(error_return_type_id, None);
 
                 let mut recovered =
                     wrap_catch_expression(handled_expression, handling, success_result_type_ids);

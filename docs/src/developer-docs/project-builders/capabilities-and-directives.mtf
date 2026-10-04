@@ -1,153 +1,168 @@
-## Configuration and directives
+## Builder capabilities and directives
 
-A builder definition describes a constrained source surface. Rust helpers make
-that description convenient while Moth owns parsing, typing, folding and the
-retained facts consumed by later stages.
+`BuilderDefinition` is the ergonomic public layer over Moth's canonical
+capability surface. It declares source-visible policy. Compiler/build session
+state is created later and remains internal.
 
-### Describe builder configuration
+### One project configuration surface
 
-Use the configuration helper for builder-owned settings:
+A builder may declare one canonical project-configuration directive:
 
 [codeblock, $code("rust"):
-    let definition = BuilderDefinition::new("game")
-        .config("game", |config| {
+    BuilderDefinition::new("com.example.game", BuilderApiVersion::V1)
+        .config("game_builder", |config| {
             config.string("asset_root").default("assets");
             config.bool("debug_overlay").default(false);
         })
-        .finish()?;
 ]
 
-The closure constructs a schema. It isn't a callback executed during Moth
-expression evaluation. The helper records field names, value types, required
-or optional status and defaults in the normal configuration contract.
-`finish` validates the definition. Authored values then use the compiler's
-configuration service and produce typed builder settings.
+The active driver has already selected the builder. The directive configures
+that builder rather than selecting or loading one.
 
-A default satisfies an omitted permitted value. It doesn't replace malformed
-input or an explicitly supplied value. Missing required values, unknown fields,
-duplicate names and invalid value domains are errors. Optionality and omission
-are separate rules rather than an instruction to deep-merge records.
+One builder has one project-config schema. A builder cannot register several
+unrelated config-only namespaces with precedence rules between them.
 
-`game` names a builder-owned configuration contract. This helper doesn't add
-arbitrary fields to the compiler-owned `$project` signature or reinstate a
-separate configuration expression language. Configuration stays a
-self-contained compile-time source. It doesn't run host functions, import
-application modules or perform runtime requests.
+The compiler owns directive parsing, argument routing, compile-time folding and
+source diagnostics. The SDK helpers build the compiler's schema types rather
+than introducing another config parser.
 
-The selected builder is settled before configuration compilation. A setting
-doesn't silently select another builder or physical backend. Explicit source
-input contracts, project metadata and builder-provided globals retain their
-separate receiving rules. A builder global is stable semantic configuration,
-not a way to expose host architecture, secrets or operating-system identity to
-source evaluation.
+### Primitive build globals
 
-### Add a metadata directive
+A builder may supply explicitly registered primitive build globals through the
+same compiler-owned input contracts. They represent stable semantic
+configuration.
 
-Metadata directives describe facts a builder consumes. For example, a module
-may declare a bundle label through a root-local directive. Its Rust definition
-specifies the name, permitted context and typed argument:
+They cannot expose the selected backend, operating system, CPU architecture or
+another physical target fact to Moth source.
+
+### Register root purposes
+
+Builders declare application entry purposes instead of scanning compiled source
+for conventions:
 
 [codeblock, $code("rust"):
-    use moth::builder::{
-        DirectiveArgument, DirectiveContext, MetadataDirective,
-    };
-
-    let bundle = MetadataDirective::new("bundle")
-        .context(DirectiveContext::ModuleRoot)
-        .argument(DirectiveArgument::string("name").required())
-        .finish()?;
-
-    let definition = BuilderDefinition::new("game")
-        .metadata_directive(bundle)
-        .finish()?;
+    BuilderDefinition::new("com.example.game", BuilderApiVersion::V1)
+        .root_purpose(
+            RootPurpose::new("game")
+                .directive("game")
+                .field("name", BuilderValueType::String),
+        )
 ]
 
-The compiler recognises the directive through its registered descriptor,
-validates placement, parses arguments with the shared argument owner and folds
-their compile-time values. `CompiledProject` exposes the resulting metadata
-through its registered metadata views, paired with authored locations and
-typed argument access. The builder consumes those facts rather than scanning
-source, matching reserved constant names or inspecting generated strings.
+The compiler owns the directive grammar, placement rules, argument typing and
+folding. Stage 0 retains validated root-purpose metadata and link planning
+creates explicit assemblies from it.
 
-This example declares metadata only. It doesn't create an execution entry.
-A root-purpose registration also needs a consumer contract that defines entry
-selection, signature, lifecycle and outcome handling. A function declaration
-modifier or a semantic block requires its own compiler-owned contract.
-Registering a name isn't permission to invent one.
+A builder never searches HIR, reserved constants or rendered strings to decide
+whether a module is an entry.
 
-### Keep directive powers bounded
+A normal root with runtime/output activity but no applicable purpose remains a
+diagnostic. A module may create several assemblies only when the registered
+purpose contract explicitly permits it.
 
-A descriptor fixes the directive's context, form, argument contract and
-processing role. A builder can provide template formatting and consume
-configuration, metadata and permitted root-purpose facts. It cannot use that
-registration to rewrite a function, change nominal type identity, alter exports,
-mutate HIR or relax borrow and lifetime validation.
+### Template directives
 
-The registry rejects duplicate and compiler-owned names. Unknown directives,
-wrong placement and an unavailable selected capability remain distinct errors.
-Ordinary static conditional code doesn't suppress frontend validation.
-Structural exclusion belongs to the compiler's pre-graph feature-selection
-contract, not to a builder callback or configuration Boolean.
+Template directives use the compiler's existing template-head machinery.
+Builders register constrained descriptors for argument shape, body mode,
+compatibility and formatter behaviour.
 
-Metadata preserves its declared scope. Project settings don't automatically
-merge with root metadata. A provider's metadata isn't inherited by its
-consumer. Repeated directive occurrences are accepted only when their
-registered cardinality allows them.
+They do not receive arbitrary AST/HIR mutation callbacks. Frontend-owned names
+cannot be overridden.
 
-### Register template behaviour
+A formatter may transform template content through its documented string
+contract. It cannot change declaration identity, visibility, borrow semantics
+or executable control flow.
 
-Use `template_directive` with a template descriptor to supply a formatter and
-its permitted argument and body-mode contracts. Body modes, head compatibility,
-whitespace policy and formatting effects come from the compiler's supported
-vocabulary. They aren't an arbitrary lexer or grammar plugin.
+### General builder directives
 
-The compiler owns argument typing and the structural template input. A
-formatter consumes its documented view and preserves structural resource and
-site-root anchors when composing output. It doesn't replace those anchors with
-guessed URLs or mutate the compiler's template store. Invalid arguments produce
-located diagnostics through the normal compiler path.
+Builder-owned general directives follow the same rule: the builder declares a
+name, legal context, argument signature, attachment form and retained metadata
+shape. The compiler performs syntax, placement, typing and folding once.
 
-Template directives remain head operations. They don't make a String into a
-component instance, subscription or saved renderer. A directive that generates
-HTML still needs the appropriate escaping for each output context. Returning
-HTML is not proof that interpolated text is safe to insert as markup.
+The builder receives validated metadata. It never receives parser tokens or a
+mutable semantic tree to reinterpret.
 
-Source-backed Moth helpers are the simpler choice when ordinary template
-composition and functions already express the operation. Use a Rust formatter
-only for behaviour that belongs at the formatting boundary.
+### Source file kinds
 
-### Select source adapters and external providers
+A builder can opt into compiler-known source adapters such as Moth templates and
+plain Markdown:
 
-`moth_templates` and `markdown` enable compiler-known source adapters. An `.mtf`
-file contributes its const-required content through normal module compilation.
-A `.md` file contributes rendered content. Registering a filename extension
-doesn't add a new Moth declaration grammar.
+[codeblock, $code("rust"):
+    BuilderDefinition::new("com.example.site", BuilderApiVersion::V1)
+        .moth_templates()
+        .markdown()
+]
 
-Use `external_import_provider` for a foreign file format that supplies a typed
-binding surface. The provider declares its stable kind and supported
-extensions. It receives a resolved source request and returns typed package
-facts, diagnostics and any runtime asset requirements.
+This is selection among Moth-supported adapters. It is not a plugin mechanism
+for teaching the compiler an arbitrary new language grammar.
 
-Provider code can parse its own foreign format. It doesn't reparse Moth imports
-or perform another module-discovery pass. Source identity, package registration,
-tracked input access and diagnostic locations come from the supplied services,
-not from private string or path interners.
+Foreign files whose meaning comes from another implementation use an external
+import provider instead.
 
-Registration conflicts are diagnosed rather than resolved by whichever
-provider runs first. Provider work records all semantic inputs needed for
-invalidation. Runtime assets share ordinary resource and output ownership with
-directly registered host packages. Their consumers don't reconstruct imports
-by scanning emitted JavaScript, HTML or Wasm.
+### External import providers
 
-### Reuse the selected surface for tools
+An advanced builder may register a provider for an explicit-extension foreign
+file kind. The public provider API exposes stable logical paths, package
+registration services, runtime-asset registration and structured diagnostics.
 
-Checking and editor analysis use the same builder definition as compilation.
-Tooling can add analysis and validation roots without creating a competing
-package registry or output builder. A directive or binding has the same meaning
-in an editor, a check and a release build.
+It does not expose the compiler's string/path interners or mutable
+`ExternalPackageRegistry` directly.
 
-A definition becomes immutable before source compilation. Changes to packages,
-signatures, directives or relevant configuration invalidate the affected
-semantic or physical work through the normal dependency facts. Runtime state,
-function-pointer addresses and absolute installation paths aren't stable
-semantic fingerprint keys.
+A provider returns one typed package/runtime description. It cannot reopen Moth
+source discovery, parse declarations or mutate an already compiled module.
+
+### Source packages
+
+`SourcePackage` registers a Builder/MothSource package. The package source
+remains ordinary Moth and receives the selected boundary `NumericProfile`.
+
+A package that needs project-specific compile-time values uses an explicit
+builder synthetic interface with tracked provenance. It does not inherit the
+application's private `@project` interface.
+
+### Host packages
+
+`BuilderDefinition::host_package` consumes the semantic projection of a
+`moth_host::HostPackage<Env>`. The Rust environment type and runtime adapter are
+erased from compiler-facing project state, while the package's stable semantic
+identities and target implementations are retained.
+
+The same host-package declaration is installed by the deployed runtime.
+
+### Target implementations
+
+One host binding has one Moth semantic contract and may provide several
+physical implementations. Target selection may change implementation but never
+the Moth signature.
+
+Each implementation declares a compiler-owned implementation category and its
+required capabilities. Examples include a Rust/Wasm host import and a
+registered JavaScript module export.
+
+The set of implementation categories is closed. Builders cannot install an
+arbitrary HIR/backend callback or custom lowerer. A new physical integration
+requires a Moth-owned implementation category.
+
+Package names do not imply target affinity. Target validation consumes the
+registered implementation and capability metadata.
+
+If a reachable binding has no compatible implementation, or its required host
+capability is unavailable, compilation reports a target diagnostic before
+lowering.
+
+### Definition validation
+
+`finish` performs cross-registration checks after local Rust macro checks have
+already run. Definition diagnostics include:
+
+- invalid or conflicting builder identity/API version
+- package, namespace, function, constant and type collisions
+- attempts to override compiler-owned names
+- more than one builder config surface
+- invalid config defaults or root-purpose schemas
+- conflicting target implementations
+- source-kind/provider conflicts
+- incompatible host-package semantic definitions
+
+These are structured SDK diagnostics rather than opaque strings. They identify
+the relevant registration names and the corrective action where practical.

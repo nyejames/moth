@@ -9,8 +9,8 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::assertion_message_effects::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
 };
@@ -21,7 +21,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
-    HirFunctionFailureFacts,
+    HirDeferredCustomCatchCheck, HirFunctionFailureFacts,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirStableFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -142,12 +142,15 @@ impl<'a> HirBuilder<'a> {
 
     /// Freeze expression-owned failure facts while the completed AST is still available.
     /// Exact exportedness is joined by origin assignment after this body projection.
-    pub(super) fn project_function_failure_facts(&mut self, ast: &Ast) -> Result<(), CompilerError> {
-        let builtin_error_type = self
-            .type_environment
-            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
-                CanonicalBuiltinType::Error,
-            ));
+    pub(super) fn project_function_failure_facts(
+        &mut self,
+        ast: &Ast,
+    ) -> Result<(), CompilerError> {
+        let builtin_error_type =
+            self.type_environment
+                .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                    CanonicalBuiltinType::Error,
+                ));
         // Completed AST contains owned runtime handoffs, never unresolved TIR references.
         let template_ir_store = TemplateIrStore::new();
 
@@ -157,9 +160,6 @@ impl<'a> HirBuilder<'a> {
             };
             let function_id = self.resolve_function_id_or_error(path, &node.span)?;
             let boundary = match signature.error_return_type_id() {
-                _ if self.module.start_function == Some(function_id) => {
-                    HirBuiltinFailureBoundary::BuiltinErrorSlot
-                }
                 Some(error_type) if Some(error_type) == builtin_error_type => {
                     HirBuiltinFailureBoundary::BuiltinErrorSlot
                 }
@@ -170,6 +170,16 @@ impl<'a> HirBuilder<'a> {
             let contributors = self.project_failure_contributors(pending.body.implicit)?;
             let assertion_message_calls =
                 self.project_failure_contributors(pending.assertion_message_calls)?;
+            let mut deferred_custom_catches =
+                Vec::with_capacity(pending.body.deferred_custom_catches.len());
+            for check in pending.body.deferred_custom_catches {
+                deferred_custom_catches.push(HirDeferredCustomCatchCheck {
+                    catch_span: check.catch_span,
+                    error_type_id: check.error_type_id,
+                    typed_producer_span: check.typed_producer_span,
+                    candidates: self.project_failure_contributors(check.candidates)?,
+                });
+            }
             self.module.function_failure_facts.insert(
                 function_id,
                 HirFunctionFailureFacts {
@@ -177,6 +187,7 @@ impl<'a> HirBuilder<'a> {
                     boundary,
                     contributors,
                     assertion_message_calls,
+                    deferred_custom_catches,
                 },
             );
         }
@@ -191,7 +202,9 @@ impl<'a> HirBuilder<'a> {
         let mut contributors = Vec::with_capacity(pending.len());
         for contributor in pending {
             let source = match contributor.source {
-                ImplicitFailureSource::NumericOperation => HirBuiltinFailureSource::NumericOperation,
+                ImplicitFailureSource::NumericOperation => {
+                    HirBuiltinFailureSource::NumericOperation
+                }
                 ImplicitFailureSource::PrivateCall(path) => HirBuiltinFailureSource::Call(
                     self.resolve_call_target_or_error(&path, &contributor.span)?,
                 ),
@@ -199,7 +212,7 @@ impl<'a> HirBuilder<'a> {
             contributors.push(HirBuiltinFailureContributor {
                 source,
                 span: contributor.span,
-                codes: contributor.codes,
+                codes: contributor.codes.to_vec(),
             });
         }
         Ok(contributors)

@@ -416,8 +416,10 @@ fn materialise_generated_request_inner<'build>(
                     "Generated HIR omitted its requested root failure facts",
                 ))
             })?;
-        if matches!(request.identity.declaration(), GeneratedDeclarationIdentity::Public(_))
-            && root_failure_facts.boundary == HirBuiltinFailureBoundary::InferPrivate
+        if matches!(
+            request.identity.declaration(),
+            GeneratedDeclarationIdentity::Public(_)
+        ) && root_failure_facts.boundary == HirBuiltinFailureBoundary::InferPrivate
         {
             root_failure_facts.boundary = HirBuiltinFailureBoundary::ExportedNoSlot;
         }

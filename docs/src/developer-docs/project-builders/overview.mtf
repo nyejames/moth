@@ -1,48 +1,80 @@
 # Rust project-builder API
 
-This directory owns the public Rust project-builder tutorial and its SDK
-contracts. Read `creating-a-builder.mtf` for the complete path from a definition
-to output, then the focused references below.
+This directory owns the public Rust project-builder tutorial and the accepted
+SDK contract for building Moth project tools in Rust.
 
-`@page.moth` owns website composition. It doesn't import this routing reference.
-The examples use the `moth::builder` and `moth::host` public facades. Physical
-crate placement doesn't change compiler, builder or runtime ownership.
+Read `creating-a-builder.mtf` first. The focused references then cover Rust host
+packages, builder capabilities, compiled assemblies and runtime integration.
+
+## Crate ownership
+
+The public API is split by responsibility:
+
+- `moth-builder` is the high-level project-builder SDK. It depends on the
+  canonical `moth` compiler/build library and provides the builder pattern,
+  compiled-project views, output services and canonical project-tool driver.
+- `moth-host` owns compiler-independent host-package descriptions, runtime
+  adapters, host environments, opaque handle tables and artefact/runtime
+  contract validation. A deployed Rust application can depend on it without
+  linking the compiler.
+- `moth-host-macros` implements the Rust attributes and binding macro. It is an
+  implementation crate re-exported by `moth-host`, not a second user-facing API.
+- `moth` remains the one language/compiler implementation. `moth-builder`
+  composes its services rather than reinterpreting Moth semantics.
+
+The crates are modular to keep dependencies and runtime deployments small. They
+are deliberately not competing implementations of Moth.
 
 ## Reading routes
 
-- Builder lifecycle and public API: `creating-a-builder.mtf`
-- Source packages, Rust attributes, supported signatures, resources and context:
-  `host-packages.mtf`
-- Configuration, metadata directives, formatters, source adapters and import
-  providers: `capabilities-and-directives.mtf`
-- Assemblies, template fragments, entry errors, lifecycles, lowering, resources,
-  output and testing: `assemblies-and-runtime.mtf`
+- Builder lifecycle, definition, driver and low-level embedding:
+  `creating-a-builder.mtf`
+- Source packages, Rust host functions, supported signatures, host environments
+  and opaque resources: `host-packages.mtf`
+- Configuration, directives, root purposes, source adapters, import providers
+  and target implementations: `capabilities-and-directives.mtf`
+- Compiled-project views, template plans, entry errors, lowering, resources,
+  outputs and runtime contracts: `assemblies-and-runtime.mtf`
 
 ## Shared authorities
 
-`docs/compiler-design-overview.md` owns semantic compilation, identities,
-result slots, validated compiler handoffs and the normal-root entry contract.
-`docs/build-system-design.md` owns graph orchestration, package topology,
-configuration, assembly, lifecycle inputs and output ownership.
+`docs/compiler-design-overview.md` owns semantic compilation, canonical types,
+result slots, validated compiler handoffs and normal-root execution.
 
-Exact source directive contracts belong to
-`docs/src/docs/directives/directives.mtf`. Language and memory references remain
-authoritative for value semantics. This SDK supplies constrained registrations
-and consumer services rather than an alternate source language.
+`docs/build-system-design.md` owns Stage 0, builder selection, configuration,
+package topology, entry/link planning, lifecycle inputs and output ownership.
 
-## Boundary rules
+Exact directive grammar belongs to `docs/src/docs/directives/directives.mtf`.
+Language, package and memory references remain authoritative for source
+semantics. The SDK supplies constrained registration and consumer services. It
+does not add another parser, type system, borrow model or backend.
 
-The definition helpers produce one frozen capability surface. Public compiled
-views borrow or reference their owning results without duplicating semantic
-stores. Lowering services keep HIR, type environments, interners and analysis
-side tables out of the ordinary builder API.
+## Rules to keep in mind
 
-Rust host attributes generate checked descriptors and adapters over the same
-manual binding path. Registration is explicit. Rust signatures use the closed
-host profile, not guessed layouts or source generation. A host binding isn't a
-network route or a portable browser implementation.
+A `BuilderDefinition` is immutable after validation. Per-build caches and
+resolution state belong to the compiler/build session rather than the
+definition.
 
-Normal-root startup preserves its success fragment slots and built-in Error!
-channel. Publication waits for success and never implies rollback of prior IO.
-Templates remain strings. Resource strings retain their structural origins
-until a valid output context supplies their characters.
+Builder-facing project views never expose donor-local HIR indexes, mutable
+`TypeEnvironment`s, string/path interners or analysis side tables. The SDK asks
+the compiler for validated operations such as lowering an assembly.
+
+A Rust host annotation generates structured metadata and a checked adapter. It
+does not generate Moth source, scan the crate for registrations or expose a
+network endpoint. Every package, namespace and binding remains explicitly
+registered.
+
+A Rust host package describes one Moth semantic surface. Physical target
+implementations may differ, but parameter, result, error and access semantics
+do not.
+
+Opaque host resources are runtime-scoped typed handles. They compare by handle
+identity with `is` and `is not`, but gain no ordering, arithmetic, map-key or
+other language operations automatically.
+
+Normal-root startup retains its success slots and built-in `Error!` channel.
+Runtime results are published only after a successful invocation. A typed Moth
+error, host fault and compiler failure remain distinct outcomes.
+
+Templates remain ordinary strings and structural resource pieces retain their
+origin until a builder supplies a valid output context.

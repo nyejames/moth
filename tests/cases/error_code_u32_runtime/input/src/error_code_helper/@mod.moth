@@ -9,7 +9,7 @@ export:
     ;
 
     record_low_code |code U32| -> U32:
-        return code + 1
+        return code + 1 catch then 0
     ;
 
     code_is_i32_boundary |code U32| -> Bool:

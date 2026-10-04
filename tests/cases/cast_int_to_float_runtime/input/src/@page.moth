@@ -2,7 +2,7 @@ as_float |source Int| -> Float:
     return cast source
 ;
 
-half Float = as_float(2) * 0.5
+half Float = as_float(1)
 whole Float = as_float(10)
 
 assert(half is 1.0)

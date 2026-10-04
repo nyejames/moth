@@ -48,7 +48,11 @@ use crate::compiler_frontend::headers::binding_environment::{
 };
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+#[cfg(test)]
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
+#[cfg(test)]
+use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
     StableModuleOriginIdentity,
@@ -121,6 +125,23 @@ impl ModuleMaterialisationContext {
             .iter()
             .enumerate()
             .map(|(index, artefact)| (&artefact.declaration_identity, index))
+    }
+
+    /// Observe the frozen private contract without rebuilding the declaring environment.
+    #[cfg(test)]
+    pub(crate) fn private_callable_summary(
+        &self,
+        identity: &ModulePrivateExecutableIdentity,
+    ) -> Option<&PublicCallSummary> {
+        self.artefacts
+            .iter()
+            .flat_map(|artefact| artefact.callables.iter())
+            .find_map(|callable| match &callable.target {
+                StableFunctionTarget::ModulePrivate(private) if private == identity => {
+                    Some(&callable.summary)
+                }
+                _ => None,
+            })
     }
 
     /// Materialise the exact template row selected by the boundary publication index.

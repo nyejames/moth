@@ -412,6 +412,22 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
 
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result,
+            } => {
+                format!(
+                    "{} = range_step_failure_{:?}_{}()",
+                    self.local_label(*result),
+                    cause,
+                    match failure_mode {
+                        NumericFailureMode::ReturnError => "err",
+                        NumericFailureMode::Trap => "trap",
+                    }
+                )
+            }
+
             HirStatementKind::FloatRangeCandidate {
                 current,
                 step,
@@ -540,7 +556,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!("return! {}", self.render_expression(value))
             }
             HirTerminator::Uninitialized => "uninitialized".to_owned(),
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 format!("runtime_failure \"{}\"", message.escape_debug())
             }
             HirTerminator::AssertFailure {

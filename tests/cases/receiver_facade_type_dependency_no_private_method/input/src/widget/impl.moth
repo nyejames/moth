@@ -3,5 +3,5 @@ Counter = |
 |
 
 tick |this Counter| -> Int:
-    return this.count + 1
+    return this.count + 1 catch then 0
 ;

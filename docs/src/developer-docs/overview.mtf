@@ -27,9 +27,8 @@ For design-boundary questions, read the public Design Scope authority at
 
 For build-system or project orchestration questions, read `docs/build-system-design.md`.
 
-For the public Rust builder API, use
-`docs/src/developer-docs/project-builders/overview.mtf`. The tutorial starts at
-`docs/src/developer-docs/project-builders/creating-a-builder.mtf`.
+For Rust project-builder SDK, host-package and embedding questions, read
+`docs/src/developer-docs/project-builders/overview.mtf` and its routed tutorial pages.
 
 ## Compiler flow
 

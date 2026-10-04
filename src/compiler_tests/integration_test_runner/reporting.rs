@@ -456,6 +456,9 @@ fn success_assertion_kinds(
     if !expectation.rendered_output.runtime_trap_contains.is_empty() {
         kinds.push("rendered_output_runtime_trap_contains");
     }
+    if expectation.rendered_output.entry_error_code.is_some() {
+        kinds.push("entry_error_code");
+    }
     if !expectation.artifacts_must_not_exist.is_empty() {
         kinds.push("artifact_absence");
     }
@@ -894,6 +897,7 @@ fn failure_kind_label(kind: FailureKind) -> &'static str {
         FailureKind::RenderedOutputExactMismatch => "rendered output exact mismatch",
         FailureKind::RenderedOutputOrderMismatch => "rendered output order mismatch",
         FailureKind::RenderedOutputMultiplicityMismatch => "rendered output multiplicity mismatch",
+        FailureKind::EntryFailed => "entry failed",
         FailureKind::HarnessFailed => "harness error",
         FailureKind::ExpectationViolation => "expectation violation",
     }

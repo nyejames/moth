@@ -12,6 +12,7 @@ use super::super::types::{
 use super::super::{
     BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, SummaryCounts, TestCaseSpec,
 };
+use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project};
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
@@ -552,4 +553,39 @@ fn terse_mixed_results_preserve_case_order_and_summary() {
         output[0]
     );
     assert_eq!(output[2], "Tests: 1/2 correct, 1 incorrect in 1.00s.");
+}
+
+#[test]
+fn terse_entry_failure_uses_its_own_label_and_generic_notice() {
+    let case = success_case("failed_entry", BackendId::Html);
+    let result = CaseExecutionResult {
+        passed: false,
+        panic_message: None,
+        build_result: Some(minimal_build_result()),
+        messages: None,
+        failure_reason: Some(format!(
+            "rendered_output: {}",
+            ENTRY_FAILURE_NOTICE.trim_end()
+        )),
+        failure_kind: Some(FailureKind::EntryFailed),
+    };
+    let output = format_single_case(case, result, false);
+
+    assert!(output[0].contains("[entry failed]"), "{output:?}");
+    assert!(
+        output
+            .iter()
+            .any(|line| line.contains(ENTRY_FAILURE_NOTICE.trim_end())),
+        "{output:?}"
+    );
+    assert!(
+        output
+            .iter()
+            .all(|line| !line.contains("application-secret")),
+        "{output:?}"
+    );
+    assert_eq!(
+        serde_json::to_string(&FailureKind::EntryFailed).expect("failure kind must serialize"),
+        "\"entry_failed\"",
+    );
 }

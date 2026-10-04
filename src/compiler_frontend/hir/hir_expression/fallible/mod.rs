@@ -122,7 +122,10 @@ impl<'a> HirBuilder<'a> {
             );
         }
         let value = self.lower_carrier_to_active_catch_success(result_carrier, source_span)?;
-        Ok(LoweredExpression { prelude: vec![], value })
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
     }
 
     pub(crate) fn lower_handled_fallible_call_expression(
