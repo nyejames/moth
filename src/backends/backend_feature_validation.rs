@@ -115,10 +115,11 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
-            // statement casts, unsupported formatting, generic values and later Error-value/
-            // fallible-control-flow checks. Trap-mode Float formatting and finite validation run
-            // natively.
+            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric
+            // failure, statement casts, unsupported formatting, generic values and later
+            // Error-value/fallible-control-flow checks. Trap-mode Float formatting and
+            // finite validation run natively. Supported trap-mode arithmetic is not a
+            // stand-in for recoverable failure delivery.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -551,43 +552,57 @@ fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile
     )
 }
 
-/// Reports the first reachable checked numeric operation outside Wasm's trap-mode integer and
-/// binary32/binary64 paths.
+/// Reports the first reachable checked numeric operation Wasm cannot deliver.
 ///
-/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError and F16-domain
-///       operations remain target-gated independently of direct F16 values.
-/// WHY: lowerers receive only operations whose exact failure mode and semantic precision they
-///      implement, using the operation/domain facts retained by HIR reachability.
+/// WHAT: trap-mode operations outside integer and binary32/binary64 paths stay
+///       `CheckedNumericOperations`. Recoverable failure on an otherwise supported
+///       operation is rejected as its own failure shape.
+/// WHY: Wasm implements those trap-mode operations. Reporting recoverable delivery
+///      as a numeric-operation limit disguises the unsupported failure shape as a trap.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
     numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(numeric_op) = numeric_ops
-        .iter()
-        .find(|numeric_op| !wasm_supports_checked_numeric_op(numeric_op, numeric_profile))
-    else {
+    let Some((numeric_op, reason)) = numeric_ops.iter().find_map(|numeric_op| {
+        wasm_numeric_rejection(numeric_op, numeric_profile).map(|reason| (numeric_op, reason))
+    }) else {
         return Ok(());
     };
 
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        reason,
         numeric_op.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-fn wasm_supports_checked_numeric_op(
+/// Classifies one reachable numeric operation for the Wasm target.
+///
+/// WHAT: an unimplemented trap-mode domain or operator keeps the operation limit.
+///       `ReturnError` on a supported operation is a recoverable-failure rejection.
+/// WHY: operation limits retain priority when both apply, such as F16 in `ReturnError`
+///      mode. Supported trap-mode arithmetic is not reported as unsupported.
+fn wasm_numeric_rejection(
+    numeric_op: &ReachableNumericOpUse,
+    numeric_profile: NumericProfile,
+) -> Option<UnsupportedBackendFeatureReason> {
+    if !wasm_supports_trap_numeric_op(numeric_op, numeric_profile) {
+        return Some(UnsupportedBackendFeatureReason::CheckedNumericOperations);
+    }
+    if numeric_op.failure_mode != NumericFailureMode::Trap {
+        return Some(UnsupportedBackendFeatureReason::RecoverableNumericFailure);
+    }
+    None
+}
+
+fn wasm_supports_trap_numeric_op(
     numeric_op: &ReachableNumericOpUse,
     numeric_profile: NumericProfile,
 ) -> bool {
-    if numeric_op.failure_mode != NumericFailureMode::Trap {
-        return false;
-    }
-
     if numeric_op.op.domain.is_integer() {
         return true;
     }

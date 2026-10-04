@@ -795,7 +795,7 @@ fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
         assert_unsupported_feature(
             &diagnostic,
             &mut string_table,
-            UnsupportedBackendFeatureReason::CheckedNumericOperations,
+            UnsupportedBackendFeatureReason::RecoverableNumericFailure,
         );
     }
 }
@@ -892,6 +892,35 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     );
     assert_unsupported_feature(
         &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+    );
+
+    let recoverable = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![numeric_op_statement_with_failure(
+                10,
+                HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Fixed(FixedScalar::F16),
+                },
+                None,
+                NumericFailureMode::ReturnError,
+            )],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let recoverable_diagnostic = wasm_feature_validation_diagnostic(
+        &recoverable,
+        &type_environment,
+        &mut string_table,
+        "Wasm should keep an unimplemented F16 domain ahead of recoverable failure delivery",
+    );
+    assert_unsupported_feature(
+        &recoverable_diagnostic,
         &mut string_table,
         UnsupportedBackendFeatureReason::CheckedNumericOperations,
     );
@@ -1401,12 +1430,12 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
         &numeric_module,
         &type_environment,
         &mut string_table,
-        "checked numeric failures should retain precedence over Error values and fallible terminators",
+        "recoverable numeric failure should retain precedence over Error values and fallible terminators",
     );
     assert_unsupported_feature(
         &numeric_diagnostic,
         &mut string_table,
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        UnsupportedBackendFeatureReason::RecoverableNumericFailure,
     );
 
     let cast_result_type =

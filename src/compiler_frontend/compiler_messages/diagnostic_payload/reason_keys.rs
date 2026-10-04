@@ -845,6 +845,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::ReactiveTemplateRuntime => "unsupported_backend_feature.reactive_template_runtime",
     &UnsupportedBackendFeatureReason::RuntimeCasts => "unsupported_backend_feature.runtime_casts",
     &UnsupportedBackendFeatureReason::CheckedNumericOperations => "unsupported_backend_feature.checked_numeric_operations",
+    &UnsupportedBackendFeatureReason::RecoverableNumericFailure => "unsupported_backend_feature.recoverable_numeric_failure",
     &UnsupportedBackendFeatureReason::FloatFormatting => "unsupported_backend_feature.float_formatting",
     &UnsupportedBackendFeatureReason::FloatBoundaryValidation => "unsupported_backend_feature.float_boundary_validation",
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",

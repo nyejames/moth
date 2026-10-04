@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: active. Private inferred failure, including compound write-back and required range updates, propagates through an internal carrier and materialises at builtin Error!. start Error! is not implemented.
-- Current slice: Phase 3 backend rejection of unsupported failure shapes.
-- Blockers: none for the private lane. Uncaught start, custom E! and exported no-slot arithmetic still trap. Unsupported backend facilities are not yet diagnosed as a dedicated rejection.
-- Next action: reject unsupported backend failure shapes instead of disguising them as numeric traps.
+- Status: active. Private inferred failure, including compound write-back and required range updates, propagates through an internal carrier and materialises at builtin Error!. Wasm rejects recoverable numeric failure as its own target diagnostic. start Error! is not implemented.
+- Current slice: Phase 4 public boundary validation and diagnostics.
+- Blockers: none for the private lane or Wasm failure-shape rejection. Uncaught start, custom E! and exported no-slot arithmetic still trap.
+- Next action: reject an export or custom error slot that lets implicit failure escape unrepresented.
 
 ## Goal and authority
 
