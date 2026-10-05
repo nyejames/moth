@@ -403,7 +403,7 @@ fn add_model_edges(
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
     compiler: &mut CompilerFrontend<'_>,
     hir_module: &mut HirModule,
-    function_link_facts: &HirModuleLinkFacts,
+    function_link_facts: &mut HirModuleLinkFacts,
     generated_transaction: &mut GeneratedFunctionTransaction<'_>,
     bootstrap_borrow_analysis: BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
@@ -589,15 +589,20 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             Some(&source_owner),
         )?;
     }
-    let borrow_analysis = refresh_private_failure_lanes(
+    // Unchanged base HIR keeps the link facts the service collected before convergence.
+    let refreshed = refresh_private_failure_lanes(
         compiler,
         hir_module,
         &borrow_analysis,
         type_environment,
         warnings,
         None,
-    )?
-    .unwrap_or(borrow_analysis);
+    )?;
+    if let Some(report) = refreshed {
+        *function_link_facts = collect_module_function_link_facts(hir_module)
+            .map_err(PremergeFailure::Infrastructure)?;
+        borrow_analysis = report;
+    }
     for node_id in convergence_model.generated_node_ids() {
         let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
             return Err(CompilerError::compiler_error(

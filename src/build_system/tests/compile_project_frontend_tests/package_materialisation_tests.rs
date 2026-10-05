@@ -9,6 +9,8 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
+use crate::compiler_frontend::hir::numeric::NumericFailureMode;
+use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, PublicFunctionCategory,
 };
@@ -533,6 +535,100 @@ independent_result Int = independent(42)
         Some(exact_summary),
         "the sidecar should receive the exact active-base public summary"
     );
+}
+
+/// Assert a published module's link facts select exactly its final HIR CFG.
+///
+/// WHY: link facts are collected before convergence and refreshed only when private failure
+/// lane installation rewrites the HIR, so a stale collection would select pre-install blocks.
+#[track_caller]
+fn assert_link_facts_match_final_cfg(
+    module: &crate::compiler_frontend::module_compilation::Module,
+) {
+    let hir = &module.executable.hir;
+    let all_functions = hir
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .collect::<Vec<_>>();
+    let reachability =
+        collect_reachability_from_function_link_facts(&module.link_facts.functions, &all_functions)
+            .expect("published link facts should cover every HIR function");
+    reachability
+        .backend_selection()
+        .validate_for_hir(hir)
+        .expect("published link facts should describe the final CFG");
+}
+
+#[test]
+fn published_link_facts_follow_private_failure_lane_rewrites() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let generic_identity = "identity type T |value T| -> T:\n    return value\n;\n\n";
+    // The first module installs a private failure lane; the second leaves its HIR unchanged.
+    for (source, installs_lane) in [
+        (
+            "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
+             safe_product |left Int, right Int| -> Int, Error!:\n    return multiply(left, right)\n;\n\n\
+             product = safe_product(6, 7) catch then 0\n\
+             same Int = identity(product)\n\
+             [: product=[same]]\n",
+            true,
+        ),
+        ("same Int = identity(42)\n[: same=[same]]\n", false),
+    ] {
+        let _temp = tempfile::tempdir().expect("should create temp dir");
+        let dir = _temp.path().to_path_buf();
+        fs::write(
+            dir.join("config.moth"),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(
+            dir.join("@page.moth"),
+            format!("{generic_identity}{source}"),
+        )
+        .expect("should write link-fact fixture");
+
+        let mut config = Config::new(dir.clone());
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        let mut string_table = StringTable::new();
+        let frontend = compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut string_table,
+        )
+        .expect("link-fact fixture should compile");
+
+        let base_module = &frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .next()
+            .expect("project should retain a base module")
+            .module;
+        let has_failure_lane = base_module.executable.hir.blocks.iter().any(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(
+                    statement.kind,
+                    HirStatementKind::NumericOp {
+                        failure_mode: NumericFailureMode::ReturnError,
+                        ..
+                    }
+                )
+            })
+        });
+        assert_eq!(has_failure_lane, installs_lane);
+        assert_link_facts_match_final_cfg(base_module);
+
+        let mut sidecar_count = 0;
+        for sidecar in frontend.project.generated.sidecars() {
+            assert_link_facts_match_final_cfg(&sidecar.module);
+            sidecar_count += 1;
+        }
+        assert_eq!(sidecar_count, 1, "the identity request needs one sidecar");
+    }
 }
 
 #[test]
