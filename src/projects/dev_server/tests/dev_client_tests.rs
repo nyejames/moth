@@ -1,6 +1,6 @@
 //! Execute the served dev client with a minimal DOM to protect observable reporting behaviour.
 
-use super::dev_client_snippet;
+use super::{DEV_CLIENT_MARKER, dev_client_snippet};
 use std::process::Command;
 
 const PAGE_HARNESS: &str = r#"
@@ -44,13 +44,18 @@ function textFor(tab, tag, className) {
 }
 "#;
 
-fn run_client_test(snippet: &str, assertions: &str) -> Vec<u8> {
-    let script = snippet
-        .split_once("<script>\n")
+/// Run the dev client injected into `html` (a snippet or a whole served page) under Node.
+///
+/// The harness exposes `page(clientScript, ...)`; each tab's `sources[n].listeners.generation`
+/// receives the server's generation events.
+pub(in crate::projects::dev_server) fn run_client_test(html: &str, assertions: &str) -> Vec<u8> {
+    let script = html
+        .split_once(&format!("{DEV_CLIENT_MARKER}\n<script>\n"))
         .expect("client script starts")
         .1
-        .strip_suffix("</script>\n")
-        .expect("client script ends");
+        .split_once("</script>\n")
+        .expect("client script ends")
+        .0;
     let quoted_script = serde_json::Value::String(script.to_owned());
     let node_script = format!(
         "{PAGE_HARNESS}\nconst clientScript = {quoted_script};\n(async () => {{\n{assertions}\nawait new Promise(resolve => setImmediate(resolve));\n}})().catch(error => {{ process.stderr.write(String(error.stack)); process.exitCode = 1; }});"
@@ -70,7 +75,7 @@ fn run_client_test(snippet: &str, assertions: &str) -> Vec<u8> {
 #[test]
 fn entry_error_is_literal_prominent_and_reported_once_with_hot_reload() {
     run_client_test(
-        &dev_client_snippet("/docs", Some((7, "guide/index.html"))),
+        &dev_client_snippet("/docs", 7, Some("guide/index.html")),
         r#"
 const tab = page(clientScript);
 const hostile = '<img src=x onerror="alert(1)"></script> & application text';
@@ -97,7 +102,9 @@ assert.deepEqual(JSON.parse(tab.requests[0].options.body), {build: 7, entry: 'gu
 assert.equal(tab.sources.length, 1);
 assert.equal(tab.sources[0].path, '/docs/__moth/events');
 assert.equal(tab.sources[0].closed, false);
-tab.sources[0].listeners.reload();
+tab.sources[0].listeners.generation({data: '7'});
+assert.equal(tab.reloads(), 0, 'the current generation keeps the failed invocation');
+tab.sources[0].listeners.generation({data: '8'});
 assert.equal(tab.reloads(), 1);
 assert.equal(tab.context.onerror, undefined);
 assert.equal(tab.context.onunhandledrejection, undefined);
@@ -108,7 +115,7 @@ assert.equal(tab.context.onunhandledrejection, undefined);
 #[test]
 fn startup_categories_and_independent_tabs_keep_invocations_local() {
     run_client_test(
-        &dev_client_snippet("/", Some((9, "index.html"))),
+        &dev_client_snippet("/", 9, Some("index.html")),
         r#"
 const assertion = page(clientScript), fault = page(clientScript);
 assert.equal(fault.requests.length, 0);
@@ -136,7 +143,7 @@ assert.equal(JSON.parse(fault.requests[0].options.body).category, 'startup_fault
 #[test]
 fn transport_failures_and_hostile_thrown_values_never_recurse_or_throw() {
     run_client_test(
-        &dev_client_snippet("/", Some((2, "index.html"))),
+        &dev_client_snippet("/", 2, Some("index.html")),
         r#"
 for (const transport of ['reject', 'throw']) {
   const tab = page(clientScript, transport);
@@ -158,7 +165,7 @@ for (const transport of ['reject', 'throw']) {
 #[test]
 fn client_bounds_unicode_and_json_expansion_and_preserves_build_identity() {
     run_client_test(
-        &dev_client_snippet("/", Some((u64::MAX, "index.html"))),
+        &dev_client_snippet("/", u64::MAX, Some("index.html")),
         r#"
 for (const message of ['😀'.repeat(5000), '\u0000'.repeat(5000)]) {
   const tab = page(clientScript, 'accept');
@@ -183,7 +190,7 @@ assert.match(JSON.parse(insecure.requests[0].options.body).invocation, /^[A-Za-z
 #[test]
 fn lone_surrogates_are_normalized_into_server_decodable_report_text() {
     let body = run_client_test(
-        &dev_client_snippet("/", Some((1, "index.html"))),
+        &dev_client_snippet("/", 1, Some("index.html")),
         r#"
 const tab = page(clientScript, 'accept');
 const message = '\ud800+\udfff+😀';
@@ -204,7 +211,8 @@ process.stdout.write(tab.requests[0].options.body);
 fn script_metadata_cannot_end_the_injected_script() {
     let snippet = dev_client_snippet(
         "/preview<!--<ScRiPt></script>",
-        Some((3, "hostile<!--<script></script>.html")),
+        3,
+        Some("hostile<!--<script></script>.html"),
     );
     assert_eq!(snippet.matches("</script>").count(), 1);
     assert_eq!(snippet.matches("<script").count(), 1);
@@ -224,13 +232,61 @@ assert.equal(JSON.parse(tab.requests[0].options.body).entry, 'hostile<!--<script
 #[test]
 fn server_error_pages_install_only_hot_reload() {
     run_client_test(
-        &dev_client_snippet("/", None),
+        &dev_client_snippet("/", 4, None),
         r#"
 const tab = page(clientScript);
 assert.equal(tab.context.__moth_record_entry_failure, undefined);
 assert.equal(tab.context.__moth_record_startup_fault, undefined);
 assert.equal(tab.sources.length, 1);
 assert.equal(tab.requests.length, 0);
+// A diagnostics page reloads only once a different generation is published.
+tab.sources[0].listeners.generation({data: '4'});
+assert.equal(tab.reloads(), 0);
+tab.sources[0].listeners.generation({data: '5'});
+assert.equal(tab.reloads(), 1);
+"#,
+    );
+}
+
+#[test]
+fn generation_announcements_reload_only_on_an_exact_mismatch() {
+    // WHAT: the page compares the server's announced generation as exact text.
+    // WHY: reconnecting to the same build must not loop, a missed publication must catch up,
+    //      and u64 identities above 2^53 must not collapse through JS Number rounding.
+    run_client_test(
+        &dev_client_snippet("/", u64::MAX - 1, Some("index.html")),
+        r#"
+const tab = page(clientScript);
+for (let reconnect = 0; reconnect < 3; reconnect++) {
+  tab.sources[0].listeners.generation({data: '18446744073709551614'});
+}
+assert.equal(tab.reloads(), 0);
+tab.sources[0].listeners.generation({data: '18446744073709551615'});
+assert.equal(tab.reloads(), 1);
+"#,
+    );
+}
+
+#[test]
+fn failed_invocation_keeps_its_report_through_transport_loss_until_a_new_generation() {
+    // WHAT: an entry failure while the report request and the SSE stream are both lost.
+    // WHY: transport loss neither retries startup nor clears the local view. Only a different
+    //      generation starts a fresh invocation through ordinary reload.
+    run_client_test(
+        &dev_client_snippet("/", 12, Some("index.html")),
+        r#"
+const tab = page(clientScript, 'reject');
+tab.context.__moth_record_entry_failure(301, 'Integer overflow', null);
+await new Promise(resolve => setImmediate(resolve));
+tab.context.__moth_record_entry_failure(301, 'Integer overflow', null);
+tab.sources[0].listeners.generation({data: '12'});
+assert.equal(tab.reloads(), 0);
+assert.equal(tab.root.children.length, 1);
+assert.equal(textFor(tab, 'h1'), 'Entry Error');
+assert.equal(tab.requests.length, 1);
+assert.equal(tab.errors.length, 1);
+tab.sources[0].listeners.generation({data: '13'});
+assert.equal(tab.reloads(), 1);
 "#,
     );
 }

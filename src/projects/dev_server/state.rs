@@ -15,7 +15,8 @@ use std::sync::mpsc::SyncSender;
 #[derive(Debug)]
 pub struct SseClient {
     pub id: u64,
-    pub sender: SyncSender<String>,
+    /// Wakes the connection's writer to announce the current published generation.
+    pub sender: SyncSender<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,11 +93,15 @@ impl<'de> Deserialize<'de> for RuntimeReportCategory {
     }
 }
 
+/// Points where tests pause a reader that captures published state: an HTTP GET before and
+/// inside the publication lock, and an SSE connection between registration and its first
+/// generation read.
 #[cfg(test)]
 #[derive(Clone, Copy)]
 pub enum OutputCapturePoint {
     BeforeLock,
     BeforeRead,
+    AfterSseRegistration,
 }
 
 #[cfg(test)]
@@ -110,7 +115,7 @@ pub struct DevServerState {
     // IDs are monotonic so client removal stays stable even when vector indices shift.
     pub next_client_id: AtomicU64,
     #[cfg(test)]
-    pub before_output_read: Mutex<Option<OutputCaptureHook>>,
+    pub capture_hook: Mutex<Option<OutputCaptureHook>>,
 }
 
 impl DevServerState {
@@ -121,7 +126,7 @@ impl DevServerState {
             clients: Mutex::new(Vec::new()),
             next_client_id: AtomicU64::new(1),
             #[cfg(test)]
-            before_output_read: Mutex::new(None),
+            capture_hook: Mutex::new(None),
         }
     }
 }

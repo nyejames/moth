@@ -42,13 +42,24 @@ use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 
+/// Whether lane installation rewrote the HIR it was given.
+///
+/// WHY: borrow analysis and validation of unchanged HIR would only reproduce the convergence
+///      results, so the caller re-runs them only after a rewrite. Most generated sidecars and
+///      fully proven bodies have no escaping private failure and stay unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrivateFailureLaneInstallation {
+    Unchanged,
+    Rewritten,
+}
+
 /// Give escaping private functions one internal builtin-`Error` lane and make
 /// every call to such a function branch before its success value is used.
 pub(crate) fn install_private_failure_lanes(
     hir: &mut HirModule,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
-) -> Result<(), CompilerError> {
+) -> Result<PrivateFailureLaneInstallation, CompilerError> {
     let lane_functions = private_lane_functions(hir, report)?;
     let builtin_error = type_environment.type_id_for_canonical_identity(
         &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
@@ -60,6 +71,9 @@ pub(crate) fn install_private_failure_lanes(
         .iter()
         .map(|record| (record.statement, record.handler))
         .collect::<FxHashMap<_, _>>();
+    // Draining records, installing return lanes and pruning handlers all change the HIR, so
+    // only a module with none of them can stay unchanged.
+    let mut rewritten = !records.is_empty() || !lane_functions.is_empty();
     {
         let mut installer = LaneInstaller {
             hir,
@@ -76,15 +90,19 @@ pub(crate) fn install_private_failure_lanes(
         installer.assert_records_reference_live_calls(&records)?;
         installer.prepare_ids()?;
         installer.install_return_lanes(&records)?;
-        installer.rewrite_bodies()?;
+        rewritten |= installer.rewrite_bodies()?;
         installer.retarget_store_conversions()?;
-        installer.narrow_entry_return()?;
+        rewritten |= installer.narrow_entry_return()?;
         installer.prune_unrouted_catch_handlers(&records);
         installer.hir.compact_block_ids();
     }
+    if !rewritten {
+        return Ok(PrivateFailureLaneInstallation::Unchanged);
+    }
 
     // Rewrites finish before analysis can consume the final base or generated body.
-    validate_hir_module(hir, type_environment)
+    validate_hir_module(hir, type_environment)?;
+    Ok(PrivateFailureLaneInstallation::Rewritten)
 }
 
 struct LaneInstaller<'a> {
@@ -178,13 +196,15 @@ impl LaneInstaller<'_> {
         Ok(())
     }
 
-    fn rewrite_bodies(&mut self) -> Result<(), CompilerError> {
+    /// Returns whether any producer was split.
+    fn rewrite_bodies(&mut self) -> Result<bool, CompilerError> {
         let function_ids = self
             .hir
             .functions
             .iter()
             .map(|function| function.id)
             .collect::<Vec<_>>();
+        let mut split_any = false;
         for function_id in function_ids {
             let entry = self.function_entry(function_id)?;
             let mut pending = VecDeque::from([entry]);
@@ -195,30 +215,32 @@ impl LaneInstaller<'_> {
                 }
                 // A split replaces the terminator with its error and success edges. Following
                 // both reaches the suffix and any catch handler first routed by this split.
-                self.rewrite_block(function_id, block_id)?;
+                split_any |= self.rewrite_block(function_id, block_id)?;
                 for target in terminator_targets(&self.hir.blocks[block_id.0 as usize].terminator) {
                     pending.push_back(target);
                 }
             }
         }
-        Ok(())
+        Ok(split_any)
     }
 
-    /// Split the first internal-lane producer in this block. Its success continuation holds
-    /// the remaining statements and is rewritten when the traversal reaches it.
+    /// Split the first internal-lane producer in this block, returning whether one existed.
+    /// Its success continuation holds the remaining statements and is rewritten when the
+    /// traversal reaches it.
     fn rewrite_block(
         &mut self,
         function_id: FunctionId,
         block_id: BlockId,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<bool, CompilerError> {
         let statement_count = self.hir.blocks[block_id.0 as usize].statements.len();
         for index in 0..statement_count {
             let Some(producer) = self.producer_at(function_id, block_id, index)? else {
                 continue;
             };
-            return self.split_producer(function_id, block_id, index, producer);
+            self.split_producer(function_id, block_id, index, producer)?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn producer_at(
@@ -578,15 +600,17 @@ impl LaneInstaller<'_> {
     /// The AST entry always accepts builtin Error, but a dead error slot must not
     /// introduce a backend ABI or runtime requirement. Narrow only after private
     /// callees and statement-owned checks have installed their escaping edges.
-    fn narrow_entry_return(&mut self) -> Result<(), CompilerError> {
+    ///
+    /// Returns whether the entry return was narrowed.
+    fn narrow_entry_return(&mut self) -> Result<bool, CompilerError> {
         let Some(function_id) = self.hir.start_function else {
-            return Ok(());
+            return Ok(false);
         };
         let function_index = self.function_index(function_id)?;
         let return_type = self.hir.functions[function_index].return_type;
         let Some((success_type, _)) = self.type_environment.fallible_carrier_slots(return_type)
         else {
-            return Ok(());
+            return Ok(false);
         };
         let entry = self.hir.functions[function_index].entry;
         let blocks = reachable_blocks(self.hir, entry);
@@ -596,7 +620,7 @@ impl LaneInstaller<'_> {
                 HirTerminator::ReturnError(_)
             )
         }) {
-            return Ok(());
+            return Ok(false);
         }
 
         self.hir.functions[function_index].return_type = success_type;
@@ -608,7 +632,7 @@ impl LaneInstaller<'_> {
                 other => other,
             };
         }
-        Ok(())
+        Ok(true)
     }
 
     fn function_propagates_builtin_error(

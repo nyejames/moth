@@ -358,8 +358,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Dev entry-error reporting]
             [: Supported]
-            [: Dev-server and generated-bootstrap tests cover returned Errors including code 0, assertion and unexpected startup-fault categories, hostile text, stale, duplicate, malformed, oversized and cross-origin reports, origin prefixes, unavailable transport and isolated pages. A release case proves output has no dev reporting dependency.]
-            [: In [$html:<code>moth dev</code>], a returned [$html:<code>start</code>] Error covers its page with a runtime view that keeps hot reload, logs to the console and reports once to the server terminal. A successful build stays successful for every page. Assertion failures are identified structurally and other faults escaping the generated startup wrapper are reported as unexpected startup faults. Later callbacks and unrelated scripts are not intercepted.]
+            [: Dev-server and generated-bootstrap tests cover returned Errors including code 0, assertion and unexpected startup-fault categories, hostile text, stale, duplicate, malformed, oversized and cross-origin reports, origin prefixes, unavailable transport and isolated pages. Socket and browser-client tests cover a page catching up after a missed publication broadcast, reconnection to the same generation without reloading and registration interleaved with publication. A release case proves output has no dev reporting dependency.]
+            [: In [$html:<code>moth dev</code>], a returned [$html:<code>start</code>] Error covers its page with a runtime view that keeps hot reload, logs to the console and reports once to the server terminal. A successful build stays successful for every page. Assertion failures are identified structurally and other faults escaping the generated startup wrapper are reported as unexpected startup faults. Later callbacks and unrelated scripts are not intercepted. A page that missed a publication reloads when its event stream connects or reconnects.]
         ]
 
         [data:

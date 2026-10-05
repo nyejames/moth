@@ -22,6 +22,8 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages,
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::projects::dev_server::dev_client::tests::run_client_test;
+use crate::projects::dev_server::sse::tests::{close_sse, connect_sse, read_generations};
 use crate::projects::dev_server::state::{DevServerState, OutputCapturePoint};
 use crate::projects::dev_server::watch;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -1101,7 +1103,7 @@ fn recovered_build_generation_clears_lock_poison_for_http_reads_and_reports() {
 
     let page = get_page(&state);
     assert!(page.contains("generation-2"));
-    assert!(page.contains("\"build\":\"2\""));
+    assert!(page.contains("const build = \"2\";"));
     assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
     assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
 }
@@ -1117,7 +1119,7 @@ fn output_reader_capture_blocks_rebuild_until_generation_bytes_are_read() {
 
     let (captured_sender, captured_receiver) = std::sync::mpsc::channel();
     let (release_sender, release_receiver) = std::sync::mpsc::channel();
-    *state.before_output_read.lock().expect("read hook") = Some(Box::new(move |point| {
+    *state.capture_hook.lock().expect("read hook") = Some(Box::new(move |point| {
         if matches!(point, OutputCapturePoint::BeforeLock) {
             return;
         }
@@ -1156,13 +1158,13 @@ fn output_reader_capture_blocks_rebuild_until_generation_bytes_are_read() {
     release_sender.send(()).expect("release reader capture");
     let old_page = reader.join().expect("reader should finish");
     assert!(old_page.contains("generation-1"));
-    assert!(old_page.contains("\"build\":\"1\""));
+    assert!(old_page.contains("const build = \"1\";"));
     assert!(!old_page.contains("generation-2"));
     assert_eq!(rebuild.join().expect("rebuild finishes").version, 2);
-    *state.before_output_read.lock().expect("read hook") = None;
+    *state.capture_hook.lock().expect("read hook") = None;
     let current_page = get_page(&state);
     assert!(current_page.contains("generation-2"));
-    assert!(current_page.contains("\"build\":\"2\""));
+    assert!(current_page.contains("const build = \"2\";"));
 }
 
 #[test]
@@ -1201,7 +1203,7 @@ fn output_write_and_metadata_publication_exclude_concurrent_get() {
     ));
 
     let (get_sender, get_receiver) = std::sync::mpsc::channel();
-    *state.before_output_read.lock().expect("read hook") = Some(Box::new(move |point| {
+    *state.capture_hook.lock().expect("read hook") = Some(Box::new(move |point| {
         if matches!(point, OutputCapturePoint::BeforeLock) {
             get_sender.send(()).expect("signal GET capture attempt");
         }
@@ -1217,9 +1219,9 @@ fn output_write_and_metadata_publication_exclude_concurrent_get() {
     assert_eq!(rebuild.join().expect("rebuild finishes").version, 2);
     let page = reader.join().expect("GET finishes");
     assert!(page.contains("generation-2"));
-    assert!(page.contains("\"build\":\"2\""));
-    assert!(!page.contains("\"build\":\"1\""));
-    *state.before_output_read.lock().expect("read hook") = None;
+    assert!(page.contains("const build = \"2\";"));
+    assert!(!page.contains("const build = \"1\";"));
+    *state.capture_hook.lock().expect("read hook") = None;
 }
 
 #[test]
@@ -1235,7 +1237,7 @@ fn companion_requests_cross_publication_but_reports_keep_page_generation() {
     assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
     let old_page = get_page(&state);
     assert!(old_page.contains("generation-1"));
-    assert!(old_page.contains("\"build\":\"1\""));
+    assert!(old_page.contains("const build = \"1\";"));
     assert_eq!(get_bytes(&state, "/page.js"), b"generation-1");
     assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
 
@@ -1252,7 +1254,7 @@ fn companion_requests_cross_publication_but_reports_keep_page_generation() {
     );
     let current = get_page(&state);
     assert!(current.contains("generation-2"));
-    assert!(current.contains("\"build\":\"2\""));
+    assert!(current.contains("const build = \"2\";"));
     let other_before_report = get_bytes(&state, "/docs/basics/");
     assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
     assert!(post_entry_error(&state, 2).starts_with("HTTP/1.1 204 "));
@@ -1277,6 +1279,60 @@ fn companion_requests_cross_publication_but_reports_keep_page_generation() {
     assert!(build.last_build_ok);
     assert!(build.last_error_html.is_none());
     assert_eq!(build.last_build_version, 2);
+}
+
+#[test]
+fn stale_page_that_missed_the_publication_broadcast_reloads_on_connection() {
+    // WHAT: capture a generation-1 page, publish generation 2 before that page registers SSE,
+    //       straddle its companions across the publication, then run the page's own client
+    //       against the generation a real SSE connection announces.
+    // WHY: the missed broadcast and the rejected stale report produce no further rebuild, so
+    //      only the connection handshake can start the fresh invocation without a source edit.
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("create publication project");
+    let entry = temp.path().join("main.moth");
+    let state = Arc::new(DevServerState::new(temp.path().join("dev")));
+    let mut executor = FakeExecutor::new(vec![
+        Ok(generation_build_result(1)),
+        Ok(generation_build_result(2)),
+    ]);
+    assert!(run_single_build_cycle(&state, &mut executor, &entry, &[]).build_ok);
+    let stale_page = get_page(&state);
+    assert!(stale_page.contains("generation-1"));
+
+    let missed = run_single_build_cycle(&state, &mut executor, &entry, &[]);
+    assert_eq!((missed.version, missed.clients_notified), (2, 0));
+    assert_eq!(get_bytes(&state, "/page.js"), b"generation-2");
+    assert!(post_entry_error(&state, 1).starts_with("HTTP/1.1 409 "));
+
+    let Some(mut connection) = connect_sse(&state) else {
+        return;
+    };
+    let announced = read_generations(&mut connection.client, 1).remove(0);
+    close_sse(&state, connection);
+    assert_eq!(announced, "2");
+
+    let announced = serde_json::Value::String(announced);
+    let assertions = format!(
+        r#"
+const tab = page(clientScript, 'accept');
+tab.context.__moth_record_entry_failure(301, 'Integer overflow', null);
+tab.sources[0].listeners.generation({{data: {announced}}});
+assert.equal(tab.reloads(), 1);
+"#
+    );
+    run_client_test(&stale_page, &assertions);
+
+    // The reloaded page carries the announced generation, so its own connection stays put.
+    let current_page = get_page(&state);
+    let assertions = format!(
+        r#"
+const tab = page(clientScript, 'accept');
+tab.sources[0].listeners.generation({{data: {announced}}});
+assert.equal(tab.reloads(), 0);
+"#
+    );
+    run_client_test(&current_page, &assertions);
 }
 
 #[test]
@@ -1375,7 +1431,7 @@ fn assert_served_entry_outcome(
     };
 
     let page = get_page(state);
-    assert!(page.contains(&format!("\"build\":\"{version}\"")));
+    assert!(page.contains(&format!("const build = \"{version}\";")));
     assert!(page.contains("static-survives"));
 
     // The existing Node harness owns application execution. Remove only the dev-only client,

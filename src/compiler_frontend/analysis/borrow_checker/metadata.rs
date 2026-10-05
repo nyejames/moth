@@ -1134,7 +1134,9 @@ fn combine_successor_facts(
             let mut intersection = RootSet::full(local_count);
             for successor in successors {
                 match live_in.get(successor) {
-                    Some(successor_live_in) => intersection.intersect_with(successor_live_in),
+                    Some(successor_live_in) => {
+                        intersection.intersect_with(successor_live_in);
+                    }
                     // An unreachable successor contributes no guaranteed future use.
                     None => return RootSet::empty(local_count),
                 }

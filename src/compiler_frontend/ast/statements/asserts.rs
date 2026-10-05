@@ -160,7 +160,10 @@ pub(crate) fn parse_assert_statement(
     }
 
     ast.push(AstNode {
-        kind: NodeKind::Assert { condition, message },
+        kind: NodeKind::Assert {
+            condition,
+            message: Box::new(message),
+        },
         span: assert_span,
         scope: context.scope,
     });

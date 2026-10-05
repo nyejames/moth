@@ -77,12 +77,7 @@ fn handle_connection_with_timeouts(
     drop(reader);
 
     #[cfg(test)]
-    if let Some(hook) = state
-        .before_output_read
-        .lock()
-        .expect("read hook lock")
-        .as_ref()
-    {
+    if let Some(hook) = state.capture_hook.lock().expect("read hook lock").as_ref() {
         hook(crate::projects::dev_server::state::OutputCapturePoint::BeforeLock);
     }
 
@@ -108,18 +103,15 @@ fn handle_connection_with_timeouts(
                 )),
                 _ => {
                     #[cfg(test)]
-                    if let Some(hook) = state
-                        .before_output_read
-                        .lock()
-                        .expect("read hook lock")
-                        .as_ref()
+                    if let Some(hook) = state.capture_hook.lock().expect("read hook lock").as_ref()
                     {
                         hook(crate::projects::dev_server::state::OutputCapturePoint::BeforeRead);
                     }
 
                     // WHAT: capture the response bytes while publication is excluded.
                     // WHY: companions fetched after a page's generation may be newer; its report
-                    // still carries the page's version and is stale. SSE reload recovers normally.
+                    // still carries the page's version and is stale. The SSE generation
+                    // handshake reloads that page even when it missed the publication broadcast.
                     GetResponse::Static(prepare_static_response(
                         &site_local_path,
                         request_query,

@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::expressions::failure_classification::{
     pending_function_failure_facts,
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::{
-    ExpressionFailureFacts, FailureDisposition, ImplicitFailureSource,
+    ExpressionFailureFacts, FailureDisposition, FailureWitnessSite, ImplicitFailureSource,
+    WitnessCandidates,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -23,8 +24,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use std::cell::Cell;
 
 fn returned_value(body: &[AstNode]) -> &Expression {
     body.iter()
@@ -550,4 +553,101 @@ fn recursive_back_edge_before_compound_update_keeps_writeback_origin() {
         witness.origin,
         BuiltinFailureOriginKind::CompoundWriteBack { .. }
     ));
+}
+
+#[test]
+fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
+    // WHAT: every body calls every other body before body 0's only numeric producer, so all
+    //       bodies are active and the origin is reachable only after the whole component.
+    // WHY: path-only backtracking re-entered exhausted bodies through every simple path (over
+    //      a hundred thousand expansions at nine bodies). The bounded search enters each body
+    //      once and still reports the same origin with only the entry hop visible.
+    const BODY_COUNT: usize = 12;
+    let mut source = String::new();
+    for body in 0..BODY_COUNT {
+        source.push_str(&format!("body_{body} |value Int, ready Bool| -> Int:\n"));
+        for callee in (0..BODY_COUNT).filter(|callee| *callee != body) {
+            source.push_str(&format!(
+                "    if ready:\n        return body_{callee}(value, ready)\n    ;\n"
+            ));
+        }
+        let result = if body == 0 { "value * 2" } else { "value" };
+        source.push_str(&format!("    return {result}\n;\n"));
+    }
+    source
+        .push_str("boundary |value Int, ready Bool| -> Int:\n    return body_0(value, ready)\n;\n");
+
+    let (ast, path_fork, string_table) = parse_single_file_ast(&source);
+    let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
+        .expect("fixture summaries converge");
+    let boundary = function_body_by_name(&ast, &path_fork, &string_table, "boundary");
+    let boundary_facts = pending_function_failure_facts(boundary, &TemplateIrStore::new()).unwrap();
+    let entry = summaries
+        .first_active(&boundary_facts.body.implicit)
+        .expect("the boundary escapes through the component");
+
+    let (witness, expanded_bodies) = summaries.witness_with_expanded_bodies(entry);
+    assert_eq!(expanded_bodies, BODY_COUNT);
+
+    let origin_body = function_body_by_name(&ast, &path_fork, &string_table, "body_0");
+    let origin_facts =
+        pending_function_failure_facts(origin_body, &TemplateIrStore::new()).unwrap();
+    let numeric_span = origin_facts
+        .body
+        .implicit
+        .iter()
+        .find(|contributor| matches!(contributor.source, ImplicitFailureSource::NumericOperation))
+        .expect("body 0 retains its late numeric producer")
+        .span;
+    assert_eq!(witness.origin, BuiltinFailureOriginKind::Operation);
+    assert_eq!(witness.origin_span, numeric_span);
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans, vec![entry.span]);
+    assert_eq!(witness.elided_call_hops, 0);
+    assert_eq!(summaries.witness(entry), witness);
+}
+
+fn cursor_span(index: u32) -> Option<SourceSpan> {
+    let mut builder = ExtendedSpanBuilder::new();
+    let local = LocalSpan::exact(index * 10, 3, &mut builder).unwrap();
+    Some(SourceSpan::new(SourceId::from_index(1), local))
+}
+
+#[test]
+fn witness_candidates_select_on_demand_without_ordering_unused_contributors() {
+    // WHAT: a long body whose first candidate already ends the search.
+    // WHY: the walkers try one candidate at a time, so selecting the first must not classify or
+    //      order the rest. Arithmetic looks ahead once for its own compound write-back.
+    const CALL_COUNT: usize = 10_000;
+    let mut sites = vec![FailureWitnessSite::Call; CALL_COUNT];
+    let activity_checks = Cell::new(0);
+    let site_reads = Cell::new(0);
+    let is_active = |_: &FailureWitnessSite| {
+        activity_checks.set(activity_checks.get() + 1);
+        Ok::<_, std::convert::Infallible>(true)
+    };
+    let site = |site: &FailureWitnessSite| {
+        site_reads.set(site_reads.get() + 1);
+        *site
+    };
+
+    let mut candidates = WitnessCandidates::new(&sites);
+    let first = candidates.next_candidate(is_active, site).unwrap();
+    assert!(std::ptr::eq(first.unwrap(), &sites[0]));
+    assert_eq!((activity_checks.get(), site_reads.get()), (1, 1));
+
+    // Arithmetic scans its remainder once, linearly, and yields its write-back first.
+    sites[0] = FailureWitnessSite::Arithmetic(cursor_span(0));
+    sites[CALL_COUNT - 1] = FailureWitnessSite::WriteBack(cursor_span(0));
+    activity_checks.set(0);
+    site_reads.set(0);
+    let mut candidates = WitnessCandidates::new(&sites);
+    let first = candidates.next_candidate(is_active, site).unwrap();
+    assert!(std::ptr::eq(first.unwrap(), &sites[CALL_COUNT - 1]));
+    assert_eq!(activity_checks.get(), 2);
+    assert_eq!(site_reads.get(), CALL_COUNT);
+    let second = candidates.next_candidate(is_active, site).unwrap();
+    assert!(std::ptr::eq(second.unwrap(), &sites[0]));
+    let third = candidates.next_candidate(is_active, site).unwrap();
+    assert!(std::ptr::eq(third.unwrap(), &sites[1]));
 }

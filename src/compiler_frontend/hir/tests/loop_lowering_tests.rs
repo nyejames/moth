@@ -52,13 +52,13 @@ fn range_loop_spec(
     end: Expression,
     end_kind: RangeEndKind,
     step: Option<Expression>,
-) -> RangeLoopSpec {
-    RangeLoopSpec {
+) -> Box<RangeLoopSpec> {
+    Box::new(RangeLoopSpec {
         start,
         end,
         end_kind,
         step,
-    }
+    })
 }
 
 use crate::compiler_frontend::hir::hir_builder::{
@@ -120,10 +120,10 @@ fn lowers_range_loop_with_new_syntax() {
 
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(3, location, ValueMode::ImmutableOwned),
@@ -190,10 +190,10 @@ fn lowers_range_loop_without_user_bindings() {
 
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: None,
                 index: None,
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(3, location, ValueMode::ImmutableOwned),
@@ -247,10 +247,10 @@ fn lowers_range_loop_with_index_binding() {
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
                 index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(4, location, ValueMode::ImmutableOwned),
@@ -341,10 +341,10 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
 
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(10, location, ValueMode::ImmutableOwned),
@@ -411,10 +411,10 @@ fn lowers_collection_loop_to_explicit_cfg() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![],
         },
@@ -482,10 +482,10 @@ fn lowers_collection_loop_without_user_bindings() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: None,
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![],
         },
@@ -539,10 +539,10 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![],
         },
@@ -615,10 +615,10 @@ fn lowers_collection_loop_optional_index_binding() {
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
                 index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![],
         },
@@ -697,10 +697,10 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let location = None;
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
                 index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(4, location, ValueMode::ImmutableOwned),
@@ -753,10 +753,10 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
                 index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![],
         },
@@ -811,10 +811,10 @@ fn break_targets_exit_block_in_collection_loop() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![node(
                 NodeKind::If(
@@ -897,10 +897,10 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![node(NodeKind::Break, location)],
         },
@@ -937,10 +937,10 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
 
     let range_loop = node(
         NodeKind::RangeLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             range: range_loop_spec(
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(3, location, ValueMode::ImmutableOwned),
@@ -982,10 +982,10 @@ fn continue_targets_step_block_in_collection_loop() {
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![node(NodeKind::Continue, location)],
         },
@@ -1046,10 +1046,10 @@ fn nested_loop_targets_remain_correct() {
     let inner_item_symbol = super::symbol("inner_item", &mut path_fork, &mut string_table);
     let inner_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(inner_item_symbol, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![node(NodeKind::Continue, location)],
         },
@@ -1059,10 +1059,10 @@ fn nested_loop_targets_remain_correct() {
     let outer_item_symbol = super::symbol("outer_item", &mut path_fork, &mut string_table);
     let outer_loop = node(
         NodeKind::CollectionLoop {
-            bindings: LoopBindings {
+            bindings: Box::new(LoopBindings {
                 item: Some(loop_binding(outer_item_symbol, builtin_type_ids::INT)),
                 index: None,
-            },
+            }),
             iterable: collection_literal(location),
             body: vec![inner_loop, node(NodeKind::Continue, location)],
         },

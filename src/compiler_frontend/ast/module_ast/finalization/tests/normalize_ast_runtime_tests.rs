@@ -1304,7 +1304,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
     let mut node = AstNode {
         kind: NodeKind::Assert {
             condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message,
+            message: Box::new(message),
         },
         span: None,
         scope: PathId::ROOT,

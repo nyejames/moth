@@ -115,58 +115,73 @@ pub(crate) fn select_failure_witness<'a, T: 'a, E>(
     Ok(first)
 }
 
-/// One witness-search step over a call contributor.
+/// Lazily yields one body's active contributors in witness-policy order.
 ///
-/// WHAT: distinguishes the terminal producer or unavailable leaf from a skippable recursive
-///       back-edge. Only `SkippedBackEdge` permits trying the next contributor; a terminal
-///       leaf keeps its recorded path with no codes or origin.
-/// WHY: an unavailable hop is already the visible boundary, so later contributors must not
-///      supply a connected origin across it, while a back-edge carries no origin of its own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WitnessSearchOutcome {
-    FoundOrigin,
-    SkippedBackEdge,
-    TerminalLeaf,
+/// WHAT: each step reapplies `select_failure_witness` to the contributors not yet yielded, so
+///       a write-back yields ahead of the arithmetic of its own compound update wherever the
+///       remaining sequence starts.
+/// WHY: the witness walkers stop at the first origin or terminal leaf, and only calls are ever
+///      skipped. Selecting on demand examines each skipped call once, instead of ordering every
+///      contributor of the body before the first one is tried.
+pub(crate) struct WitnessCandidates<'contributors, T> {
+    contributors: &'contributors [T],
+    next: usize,
+    /// Write-backs already yielded ahead of their arithmetic, skipped when the cursor reaches them.
+    hoisted: Vec<usize>,
 }
 
-/// Deterministic candidate order for one function body's active contributors.
-///
-/// WHAT: repeatedly applies the shared witness policy to the contributors not yet ordered,
-///       so each matching write-back stays ahead of its own arithmetic wherever the
-///       remaining sequence starts.
-/// WHY: after skipping a recursive back-edge the search resumes mid-sequence; reapplying
-///      the selection (instead of appending the rest in raw order) keeps same-compound
-///      write-back precedence after any skipped prefix.
-pub(crate) fn order_failure_witness_candidates<'candidates, T>(
-    active: Vec<&'candidates T>,
-    site: impl Copy + Fn(&T) -> FailureWitnessSite,
-) -> Vec<&'candidates T> {
-    let mut remaining: Vec<&'candidates T> = active;
-    let mut ordered = Vec::with_capacity(remaining.len());
-    while !remaining.is_empty() {
-        let winner = select_failure_witness::<_, std::convert::Infallible>(
-            remaining.iter().copied().map(Ok),
-            site,
-        )
-        .unwrap_or_else(|never| match never {});
-        let Some(winner) = winner else {
-            break;
-        };
-        let position = remaining
-            .iter()
-            .position(|candidate| std::ptr::eq(*candidate, winner))
-            .expect("the policy winner comes from the remaining contributors");
-        ordered.push(remaining.remove(position));
+impl<'contributors, T> WitnessCandidates<'contributors, T> {
+    pub(crate) fn new(contributors: &'contributors [T]) -> Self {
+        Self {
+            contributors,
+            next: 0,
+            hoisted: Vec::new(),
+        }
     }
-    ordered
+
+    pub(crate) fn next_candidate<E>(
+        &mut self,
+        mut is_active: impl FnMut(&T) -> Result<bool, E>,
+        site: impl Fn(&T) -> FailureWitnessSite,
+    ) -> Result<Option<&'contributors T>, E> {
+        while let Some(contributor) = self.contributors.get(self.next) {
+            let index = self.next;
+            if self.hoisted.contains(&index) || !is_active(contributor)? {
+                self.next += 1;
+                continue;
+            }
+
+            // Arithmetic stays the cursor head until no later write-back of the same compound
+            // update remains, matching the shared policy applied to the remaining sequence.
+            if let FailureWitnessSite::Arithmetic(Some(arithmetic_span)) = site(contributor) {
+                for later in index + 1..self.contributors.len() {
+                    if self.hoisted.contains(&later) {
+                        continue;
+                    }
+                    let candidate = &self.contributors[later];
+                    if let FailureWitnessSite::WriteBack(Some(span)) = site(candidate)
+                        && span == arithmetic_span
+                        && is_active(candidate)?
+                    {
+                        self.hoisted.push(later);
+                        return Ok(Some(candidate));
+                    }
+                }
+            }
+
+            self.next += 1;
+            return Ok(Some(contributor));
+        }
+        Ok(None)
+    }
 }
 
 /// Keep at most three private call hops on a failure witness, counting the rest as elided.
 ///
 /// WHAT: stores the first three path hops as labels and records how many further hops the
 ///       bounded rendering omits.
-/// WHY: both witness walkers share one visible-hop bound, so backtracking search renders the
-///      final path in exactly one place instead of adjusting labels while exploring.
+/// WHY: both witness walkers share one visible-hop bound, so the search renders the final path
+///      in exactly one place instead of adjusting labels while exploring.
 pub(crate) fn retain_bounded_witness_hops(
     witness: &mut BuiltinFailureWitness,
     hops: Vec<Option<SourceSpan>>,

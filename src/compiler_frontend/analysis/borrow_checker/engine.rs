@@ -178,20 +178,16 @@ impl<'a> BorrowChecker<'a> {
         while let Some(block_id) = worklist.pop_front() {
             summary.worklist_iterations += 1;
 
-            let Some(mut input_state) = in_states.get(&block_id).cloned() else {
+            // The stored input is narrowed in place, then cloned once as the transfer state.
+            let Some(input_state) = in_states.get_mut(&block_id) else {
                 continue;
             };
-
-            let input_state_changed = visible_locals_by_block
-                .get(&block_id)
-                .is_some_and(|mask| input_state.kill_invisible(mask));
-
-            let block = self.block_by_id_or_error(block_id, function.id)?;
+            if let Some(mask) = visible_locals_by_block.get(&block_id) {
+                input_state.kill_invisible(mask);
+            }
             let mut output_state = input_state.clone();
 
-            if input_state_changed {
-                in_states.insert(block_id, input_state);
-            }
+            let block = self.block_by_id_or_error(block_id, function.id)?;
 
             // Transfer the block once and collect facts while the state is hot.
             let block_stats = transfer_block(&transfer_context, &layout, block, &mut output_state)?;
@@ -261,22 +257,18 @@ impl<'a> BorrowChecker<'a> {
                     successor_input.kill_invisible(mask);
                 }
 
-                let next_state = match in_states.get(&successor) {
+                // Revisit successors only when their input state grows.
+                let changed_in = match in_states.get_mut(&successor) {
                     Some(existing) => {
                         report.stats.state_joins += 1;
-                        existing.join(&successor_input)
+                        existing.join_in_place(&successor_input)
                     }
-                    None => successor_input,
+                    None => {
+                        in_states.insert(successor, successor_input);
+                        true
+                    }
                 };
-
-                let changed_in = match in_states.get(&successor) {
-                    Some(existing) => existing != &next_state,
-                    None => true,
-                };
-
-                // Revisit successors only when their input state grows.
                 if changed_in {
-                    in_states.insert(successor, next_state);
                     worklist.push_back(successor);
                 }
 

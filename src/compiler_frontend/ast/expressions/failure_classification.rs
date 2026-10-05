@@ -17,8 +17,8 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ExpressionFailureFacts, FailureDisposition, FailureSummary, ImplicitFailureContributor,
-    ImplicitFailureContributorSummary, ImplicitFailureSource, WitnessSearchOutcome,
-    order_failure_witness_candidates, retain_bounded_witness_hops, select_failure_witness,
+    ImplicitFailureContributorSummary, ImplicitFailureSource, WitnessCandidates,
+    retain_bounded_witness_hops, select_failure_witness,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -261,20 +261,29 @@ impl AstBuiltinFailureSummaries {
         .unwrap_or_else(|never| match never {})
     }
 
-    fn ordered_witness_candidates<'a>(
+    pub(crate) fn witness(
         &self,
-        contributors: &'a [ImplicitFailureContributor],
-    ) -> Vec<&'a ImplicitFailureContributor> {
-        let active = contributors
-            .iter()
-            .filter(|contributor| self.is_active(contributor))
-            .collect::<Vec<_>>();
-        order_failure_witness_candidates(active, ImplicitFailureContributor::witness_site)
+        contributor: &ImplicitFailureContributor,
+    ) -> BuiltinFailureWitness {
+        self.search_witness(contributor, &mut HashSet::new())
     }
 
-    pub(crate) fn witness<'a>(
-        &'a self,
-        contributor: &'a ImplicitFailureContributor,
+    /// Depth-first witness search with an explicit stack of entered bodies.
+    ///
+    /// WHAT: follows each entered body's candidates in policy order. A numeric or write-back
+    ///       candidate is the origin. A callee without retained facts is an unavailable leaf:
+    ///       its hop stays the visible boundary and the search stops without an origin beyond
+    ///       it. A body that runs out of candidates is popped with its hop.
+    /// WHY: a recursive call can precede the real producer in source order, so a call into an
+    ///      already-entered body is skipped rather than ending the search. An entered body is
+    ///      either on the current path (a back-edge) or already exhausted. An exhausted body has
+    ///      no origin or leaf reachable without passing through bodies still on the path, so
+    ///      re-entering it can never change the witness. Each body is therefore expanded at
+    ///      most once per search, recorded in the caller's empty `entered` set.
+    fn search_witness(
+        &self,
+        root: &ImplicitFailureContributor,
+        entered: &mut HashSet<PathId>,
     ) -> BuiltinFailureWitness {
         let mut witness = BuiltinFailureWitness {
             codes: Vec::new(),
@@ -283,75 +292,65 @@ impl AstBuiltinFailureSummaries {
             origin: BuiltinFailureOriginKind::Operation,
             elided_call_hops: 0,
         };
-        // WHAT: depth-first witness search over active contributors in deterministic policy
-        //       order. WHY: a recursive call can precede the real numeric producer in source
-        //       order; skipping only the back-edge keeps the available origin instead of
-        //       stopping with an origin-free witness. A terminal unavailable leaf already on
-        //       the path stays the visible boundary. Cycles with no other active contributor
-        //       still terminate without inventing an origin.
-        let mut path: Vec<PathId> = Vec::new();
+        let mut stack: Vec<WitnessCandidates<'_, ImplicitFailureContributor>> = Vec::new();
         let mut hops: Vec<Option<SourceSpan>> = Vec::new();
-        Self::witness_search(self, contributor, &mut path, &mut hops, &mut witness);
+        let mut next = Some(root);
+        loop {
+            if let Some(contributor) = next.take() {
+                match contributor.source {
+                    ImplicitFailureSource::NumericOperation => {
+                        witness.codes.extend_from_slice(contributor.codes);
+                        witness.origin_span = contributor.span;
+                        witness.origin = BuiltinFailureOriginKind::Operation;
+                        break;
+                    }
+                    ImplicitFailureSource::CompoundWriteBack { target, .. } => {
+                        witness.codes.extend_from_slice(contributor.codes);
+                        witness.origin_span = contributor.span;
+                        witness.origin = BuiltinFailureOriginKind::CompoundWriteBack { target };
+                        break;
+                    }
+                    ImplicitFailureSource::PrivateCall(callee) => {
+                        let Some(facts) = self.functions.get(&callee) else {
+                            hops.push(contributor.span);
+                            break;
+                        };
+                        if entered.insert(callee) {
+                            hops.push(contributor.span);
+                            stack.push(WitnessCandidates::new(&facts.body.implicit));
+                        }
+                    }
+                }
+            }
+
+            let Some(candidates) = stack.last_mut() else {
+                break;
+            };
+            next = candidates
+                .next_candidate(
+                    |candidate| Ok::<_, std::convert::Infallible>(self.is_active(candidate)),
+                    ImplicitFailureContributor::witness_site,
+                )
+                .unwrap_or_else(|never| match never {});
+            if next.is_none() {
+                stack.pop();
+                hops.pop();
+            }
+        }
+
         retain_bounded_witness_hops(&mut witness, hops);
         witness
     }
 
-    /// Depth-first witness search down one candidate chain.
-    ///
-    /// WHAT: follows the deterministic candidate order of each callee body. Only a skipped
-    ///       recursive back-edge permits trying the next contributor; a terminal producer or
-    ///       unavailable leaf keeps its recorded path and stops the search.
-    /// WHY: an unavailable hop is already the visible boundary, so a later contributor must
-    ///      not supply a connected origin across it, while a back-edge carries no origin of
-    ///      its own. Each recursion extends the call path, whose length is bounded by the
-    ///      finite function set, so the search terminates.
-    fn witness_search<'a>(
-        &'a self,
-        contributor: &'a ImplicitFailureContributor,
-        path: &mut Vec<PathId>,
-        hops: &mut Vec<Option<SourceSpan>>,
-        witness: &mut BuiltinFailureWitness,
-    ) -> WitnessSearchOutcome {
-        let callee = match contributor.source {
-            ImplicitFailureSource::NumericOperation => {
-                witness.codes.extend_from_slice(contributor.codes);
-                witness.origin_span = contributor.span;
-                witness.origin = BuiltinFailureOriginKind::Operation;
-                return WitnessSearchOutcome::FoundOrigin;
-            }
-            ImplicitFailureSource::CompoundWriteBack { target, .. } => {
-                witness.codes.extend_from_slice(contributor.codes);
-                witness.origin_span = contributor.span;
-                witness.origin = BuiltinFailureOriginKind::CompoundWriteBack { target };
-                return WitnessSearchOutcome::FoundOrigin;
-            }
-            ImplicitFailureSource::PrivateCall(callee) => callee,
-        };
-        // A callee without retained facts is an unavailable external summary: keep the hop
-        // as the visible boundary and stop without inventing an origin beyond it.
-        let Some(facts) = self.functions.get(&callee) else {
-            hops.push(contributor.span);
-            return WitnessSearchOutcome::TerminalLeaf;
-        };
-        if path.contains(&callee) {
-            // A direct recursive back-edge carries no new origin: skip it without recording
-            // a visible hop and let the caller try the next candidate.
-            return WitnessSearchOutcome::SkippedBackEdge;
-        }
-        path.push(callee);
-        hops.push(contributor.span);
-        for candidate in self.ordered_witness_candidates(&facts.body.implicit) {
-            match Self::witness_search(self, candidate, path, hops, witness) {
-                WitnessSearchOutcome::FoundOrigin => return WitnessSearchOutcome::FoundOrigin,
-                WitnessSearchOutcome::TerminalLeaf => {
-                    return WitnessSearchOutcome::TerminalLeaf;
-                }
-                WitnessSearchOutcome::SkippedBackEdge => {}
-            }
-        }
-        path.pop();
-        hops.pop();
-        WitnessSearchOutcome::SkippedBackEdge
+    /// Witness search that also reports how many bodies it expanded.
+    #[cfg(test)]
+    pub(crate) fn witness_with_expanded_bodies(
+        &self,
+        contributor: &ImplicitFailureContributor,
+    ) -> (BuiltinFailureWitness, usize) {
+        let mut entered = HashSet::new();
+        let witness = self.search_witness(contributor, &mut entered);
+        (witness, entered.len())
     }
 }
 

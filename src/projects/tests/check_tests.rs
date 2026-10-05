@@ -759,3 +759,100 @@ fn check_command_total_excludes_renderer_work() {
     assert_eq!(command_total.total, scripted_duration);
     assert_eq!(command_total.samples, 1, "exactly one command-total sample");
 }
+
+/// Marks the child copy of this test binary that performs the stack-budgeted check.
+const STACK_BUDGET_CHILD_ENV: &str = "MOTH_CHECK_STACK_BUDGET_CHILD";
+
+/// Windows reserves 1 MiB for a process main thread by default, and the dev-built benchmark
+/// harness compiles in-process on that thread.
+const WINDOWS_MAIN_THREAD_STACK_BYTES: usize = 1024 * 1024;
+
+/// Ordinary statement nesting, matching the depth that overflowed the dev-built Windows
+/// benchmark gate when inline AST payloads inflated every recursive body-parser frame.
+const NESTED_CONDITIONAL_DEPTH: usize = 9;
+
+#[test]
+fn nested_conditionals_check_within_the_default_windows_main_thread_stack() {
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_some() {
+        check_nested_conditionals_on_budgeted_thread();
+        return;
+    }
+
+    // A native stack overflow aborts the whole process, so the budgeted check runs in a child
+    // copy of this test binary and an overflow becomes this test's failure.
+    let test_name = format!(
+        "{}::nested_conditionals_check_within_the_default_windows_main_thread_stack",
+        module_path!()
+            .split_once("::")
+            .expect("test module path should include the crate name")
+            .1
+    );
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("test binary path should be available"),
+    )
+    .args([test_name.as_str(), "--exact", "--test-threads=1"])
+    .env(STACK_BUDGET_CHILD_ENV, "1")
+    .output()
+    .expect("should spawn the stack-budgeted child test");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "checking {NESTED_CONDITIONAL_DEPTH} nested conditionals must fit a \
+         {WINDOWS_MAIN_THREAD_STACK_BYTES}-byte stack ({}):\n{stdout}\n{stderr}",
+        output.status
+    );
+    // A filter that matched nothing would also exit successfully.
+    assert!(
+        stdout.contains("1 passed"),
+        "the child must run exactly the budgeted test:\n{stdout}"
+    );
+}
+
+fn check_nested_conditionals_on_budgeted_thread() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let entry_file = temp.path().join("main.moth");
+    fs::write(
+        &entry_file,
+        nested_conditional_source(NESTED_CONDITIONAL_DEPTH),
+    )
+    .expect("should write source file");
+
+    let worker = std::thread::Builder::new()
+        .name("stack-budgeted-check".to_owned())
+        .stack_size(WINDOWS_MAIN_THREAD_STACK_BYTES)
+        .spawn(move || {
+            let outcome = execute_check(
+                entry_file
+                    .to_str()
+                    .expect("temp file path should be valid UTF-8 for this test"),
+                &BuildConfigInputSet::new(),
+                &test_project_builder(),
+            );
+            (
+                outcome.messages.error_count(),
+                outcome.messages.warning_count(),
+            )
+        })
+        .expect("should spawn the stack-budgeted check thread");
+
+    let (error_count, warning_count) = worker
+        .join()
+        .expect("stack-budgeted check thread should not panic");
+    assert_eq!(error_count, 0, "nested conditionals should check cleanly");
+    assert_eq!(warning_count, 0, "nested conditionals should not warn");
+}
+
+fn nested_conditional_source(depth: usize) -> String {
+    let mut source = String::from("nested |seed Int| -> Int:\n");
+    for level in 1..=depth {
+        source.push_str(&format!("{}if seed > 0:\n", "    ".repeat(level)));
+    }
+    source.push_str(&format!("{}return seed\n", "    ".repeat(depth + 1)));
+    for level in (1..=depth).rev() {
+        source.push_str(&format!("{};\n", "    ".repeat(level)));
+    }
+    source.push_str("    return seed\n;\n\nio.line([: [nested(1)] ])\n");
+    source
+}

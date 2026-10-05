@@ -62,7 +62,7 @@ fn assert_statement(condition: Expression, _line: i32) -> AstNode {
     node(
         NodeKind::Assert {
             condition,
-            message: Expression::bool(true, None, ValueMode::ImmutableOwned),
+            message: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         },
         None,
     )

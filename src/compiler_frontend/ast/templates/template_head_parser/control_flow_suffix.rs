@@ -193,12 +193,11 @@ pub(crate) fn parse_loop_suffix(
             }
         }
 
-        ParsedLoopHeader::Range { bindings, range } => TemplateLoopHeader::Range {
-            bindings: Box::new(bindings),
-            range: Box::new(range),
-        },
+        ParsedLoopHeader::Range { bindings, range } => {
+            TemplateLoopHeader::Range { bindings, range }
+        }
         ParsedLoopHeader::Collection { bindings, iterable } => TemplateLoopHeader::Collection {
-            bindings: Box::new(bindings),
+            bindings,
             iterable: Box::new(iterable),
         },
     };

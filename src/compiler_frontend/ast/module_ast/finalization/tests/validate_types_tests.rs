@@ -227,13 +227,13 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
     let node = AstNode {
         kind: NodeKind::Assert {
             condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Expression::new(
+            message: Box::new(Expression::new(
                 ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
                 None,
                 builtin_type_ids::STRING,
                 DataType::Template,
                 ValueMode::ImmutableOwned,
-            ),
+            )),
         },
         span: None,
         scope: PathId::ROOT,
@@ -265,13 +265,13 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
     let node = AstNode {
         kind: NodeKind::Assert {
             condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Expression::new(
+            message: Box::new(Expression::new(
                 ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(slot_handoff)),
                 None,
                 builtin_type_ids::STRING,
                 DataType::Template,
                 ValueMode::ImmutableOwned,
-            ),
+            )),
         },
         span: None,
         scope: PathId::ROOT,
@@ -404,7 +404,7 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
     let node = AstNode {
         kind: NodeKind::Assert {
             condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message,
+            message: Box::new(message),
         },
         span: None,
         scope: PathId::ROOT,

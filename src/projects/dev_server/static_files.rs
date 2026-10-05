@@ -34,7 +34,7 @@ pub fn inject_dev_client(html: &str, origin: &str, build_version: u64, entry: &s
         return html.to_owned();
     }
 
-    let snippet = dev_client_snippet(origin, Some((build_version, entry)));
+    let snippet = dev_client_snippet(origin, build_version, Some(entry));
     let lowercase_html = html.to_ascii_lowercase();
     // Install at the start of the generated head, before even head-local classic scripts.
     // This also avoids mistaking commented-out script tags in authored head content for code.

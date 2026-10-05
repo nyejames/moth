@@ -745,7 +745,7 @@ fn assertion_failure_uses_message_value_block_tail() {
                     location,
                     ValueMode::ImmutableReference,
                 ),
-                message,
+                message: Box::new(message),
             },
             location,
         )],
@@ -844,7 +844,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         vec![node(
             NodeKind::Assert {
                 condition: Expression::bool(true, location, ValueMode::ImmutableOwned),
-                message: Expression::coerced(message, option_string),
+                message: Box::new(Expression::coerced(message, option_string)),
             },
             location,
         )],
@@ -950,7 +950,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         vec![node(
             NodeKind::Assert {
                 condition: Expression::bool(false, location, ValueMode::ImmutableOwned),
-                message,
+                message: Box::new(message),
             },
             location,
         )],

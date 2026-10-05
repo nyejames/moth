@@ -237,7 +237,7 @@ pub fn run_single_build_cycle(
     }
     drop(build_state);
 
-    let clients_notified = sse::broadcast_reload(state, version);
+    let clients_notified = sse::broadcast_generation(state);
     #[cfg(feature = "detailed_timers")]
     drop(timing_guard_command_dev_cycle);
     #[cfg(feature = "timers")]

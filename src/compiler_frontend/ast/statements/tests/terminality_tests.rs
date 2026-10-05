@@ -35,7 +35,7 @@ fn assert_bool(condition: bool, _line: i32) -> AstNode {
             condition: Expression::bool(condition, None, ValueMode::ImmutableOwned),
             // Terminality only inspects the condition; this fixture keeps a typed expression
             // placeholder because parsed assertions always carry the canonical optional value.
-            message: Expression::bool(true, None, ValueMode::ImmutableOwned),
+            message: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         },
         None,
     )

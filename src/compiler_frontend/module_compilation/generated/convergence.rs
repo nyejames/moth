@@ -15,8 +15,7 @@
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
-    WitnessSearchOutcome, order_failure_witness_candidates, retain_bounded_witness_hops,
-    select_failure_witness,
+    WitnessCandidates, retain_bounded_witness_hops, select_failure_witness,
 };
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -30,8 +29,12 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
+    HirFunctionFailureFacts,
 };
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::private_failure_lane::{
+    PrivateFailureLaneInstallation, install_private_failure_lanes,
+};
 use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
 };
@@ -467,18 +470,23 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
 
         match node {
             ConvergenceNode::BaseModule => {
-                install_convergence_summaries(
+                let summaries_changed = install_convergence_summaries(
                     hir_module,
                     &direct_summaries.generated,
                     &direct_summaries.active_public,
                     &direct_summaries.module_private,
                 );
-                increment_convergence_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
-                let mut report = timed_stage_attributed!(
-                    crate::timing::TimingMetric::FrontendBorrowConverge,
-                    timing_context,
-                    check_borrows(compiler, hir_module, warnings, None)
-                )?;
+                // The current report already analysed this exact HIR and summary set.
+                let mut report = if summaries_changed {
+                    increment_convergence_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
+                    timed_stage_attributed!(
+                        crate::timing::TimingMetric::FrontendBorrowConverge,
+                        timing_context,
+                        check_borrows(compiler, hir_module, warnings, None)
+                    )?
+                } else {
+                    current_borrow_analysis.clone()
+                };
                 infer_builtin_failure_summaries(hir_module, &mut report)?;
                 let summary_changes =
                     base_summary_changes(hir_module, current_borrow_analysis, &report).map_err(
@@ -589,7 +597,8 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         type_environment,
         warnings,
         None,
-    )?;
+    )?
+    .unwrap_or(borrow_analysis);
     for node_id in convergence_model.generated_node_ids() {
         let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
             return Err(CompilerError::compiler_error(
@@ -602,7 +611,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             identity.declaration().module_origin().package().clone(),
         );
         let sidecar = generated_transaction.sidecar_mut(&identity)?;
-        let report = refresh_private_failure_lanes(
+        let refreshed = refresh_private_failure_lanes(
             compiler,
             &mut sidecar.module.executable.hir,
             &sidecar.module.executable.borrow_analysis,
@@ -610,14 +619,20 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             &sidecar.module.metadata.warnings,
             Some(&source_owner),
         )?;
-        sidecar.module.link_facts.functions =
-            collect_module_function_link_facts(&sidecar.module.executable.hir)
-                .map_err(PremergeFailure::Infrastructure)?;
-        sidecar.module.executable.borrow_analysis = report;
+        // Unchanged sidecar HIR keeps the link facts materialisation collected from it.
+        if let Some(report) = refreshed {
+            sidecar.module.link_facts.functions =
+                collect_module_function_link_facts(&sidecar.module.executable.hir)
+                    .map_err(PremergeFailure::Infrastructure)?;
+            sidecar.module.executable.borrow_analysis = report;
+        }
     }
     Ok(borrow_analysis)
 }
 
+/// Install private failure lanes and re-run analysis of the rewritten HIR.
+///
+/// Returns `None` when installation left the HIR unchanged, so the converged report stands.
 fn refresh_private_failure_lanes(
     compiler: &mut CompilerFrontend<'_>,
     hir: &mut HirModule,
@@ -625,17 +640,16 @@ fn refresh_private_failure_lanes(
     type_environment: &mut TypeEnvironment,
     warnings: &[CompilerDiagnostic],
     source_owner: Option<&FrozenIdentityHandle>,
-) -> Result<BorrowCheckReport, PremergeFailure> {
-    crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes(
-        hir,
-        report,
-        type_environment,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
+    let installation = install_private_failure_lanes(hir, report, type_environment)
+        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    if installation == PrivateFailureLaneInstallation::Unchanged {
+        return Ok(None);
+    }
     let mut refreshed = check_borrows(compiler, hir, warnings, source_owner)?;
     infer_builtin_failure_summaries(hir, &mut refreshed)
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-    Ok(refreshed)
+    Ok(Some(refreshed))
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.
@@ -754,32 +768,50 @@ pub(crate) fn direct_convergence_summaries(
     })
 }
 
+/// Install one node's exact direct-call summaries, reporting whether any summary changed.
+///
+/// WHY: borrow analysis is a pure function of the HIR and these summaries, so the queue may
+///      reuse the node's current report when installation changed nothing.
 pub(crate) fn install_convergence_summaries(
     hir: &mut HirModule,
     generated_summaries: &[(GeneratedFunctionIdentity, PublicCallSummary)],
     active_public_summaries: &[(OriginFunctionId, PublicCallSummary)],
     private_summaries: &[(ModulePrivateExecutableIdentity, PublicCallSummary)],
-) {
-    hir.generated_call_summaries.clear();
-    for (identity, summary) in generated_summaries {
-        hir.generated_call_summaries
-            .insert(identity.clone(), summary.clone());
+) -> bool {
+    let generated_unchanged = hir.generated_call_summaries.len() == generated_summaries.len()
+        && generated_summaries
+            .iter()
+            .all(|(identity, summary)| hir.generated_call_summaries.get(identity) == Some(summary));
+    if !generated_unchanged {
+        hir.generated_call_summaries.clear();
+        for (identity, summary) in generated_summaries {
+            hir.generated_call_summaries
+                .insert(identity.clone(), summary.clone());
+        }
     }
+    let mut changed = !generated_unchanged;
 
     // Active-base public calls are represented as CrossModule targets in generated HIR. Update
     // only those stable origins; provider and cross-boundary imports remain fixed bootstrap
     // leaves in the same imported-summary map.
     for (origin, summary) in active_public_summaries {
-        hir.imported_call_summaries
-            .insert(origin.clone(), summary.clone());
+        changed |= hir
+            .imported_call_summaries
+            .insert(origin.clone(), summary.clone())
+            .as_ref()
+            != Some(summary);
     }
 
     // Provider-private summaries remain fixed bootstrap leaves. Active-base private identities
     // receive exact replacements, while no complete private map is rebuilt or retained.
     for (identity, summary) in private_summaries {
-        hir.module_private_call_summaries
-            .insert(identity.clone(), summary.clone());
+        changed |= hir
+            .module_private_call_summaries
+            .insert(identity.clone(), summary.clone())
+            .as_ref()
+            != Some(summary);
     }
+    changed
 }
 
 /// Resolve a semantic pending-call contributor against an exact retained summary.
@@ -820,48 +852,71 @@ fn active_builtin_failure_contributor<'a>(
     report: &BorrowCheckReport,
     function: FunctionId,
 ) -> Result<Option<&'a HirBuiltinFailureContributor>, CompilerError> {
-    let facts = hir.function_failure_facts.get(&function).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "implicit builtin failure analysis is missing semantic facts for {function:?}"
-        ))
-    })?;
+    let facts = function_failure_facts(hir, function)?;
     let contributors = facts.contributors.iter().filter_map(|contributor| {
-        let active = match &contributor.source {
-            HirBuiltinFailureSource::NumericOperation
-            | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
-                if contributor.codes.is_empty()
-                    || contributor
-                        .codes
-                        .iter()
-                        .any(|code| !code.is_implicit_failure())
-                {
-                    return Some(Err(CompilerError::compiler_error(
-                        "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
-                    )));
-                }
-                true
-            }
-            HirBuiltinFailureSource::Call(target) => {
-                match call_escapes_builtin_failure(hir, report, target) {
-                    Ok(active) => active,
-                    Err(error) => return Some(Err(error)),
-                }
-            }
-        };
-        active.then_some(Ok(contributor))
+        match builtin_failure_contributor_is_active(hir, report, contributor) {
+            Ok(active) => active.then_some(Ok(contributor)),
+            Err(error) => Some(Err(error)),
+        }
     });
     select_failure_witness(contributors, HirBuiltinFailureContributor::witness_site)
 }
 
+fn function_failure_facts(
+    hir: &HirModule,
+    function: FunctionId,
+) -> Result<&HirFunctionFailureFacts, CompilerError> {
+    hir.function_failure_facts.get(&function).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "implicit builtin failure analysis is missing semantic facts for {function:?}"
+        ))
+    })
+}
+
+/// Numeric contributors are always active once their code set is validated; calls are active
+/// while their exact summary escapes builtin failure.
+fn builtin_failure_contributor_is_active(
+    hir: &HirModule,
+    report: &BorrowCheckReport,
+    contributor: &HirBuiltinFailureContributor,
+) -> Result<bool, CompilerError> {
+    match &contributor.source {
+        HirBuiltinFailureSource::NumericOperation
+        | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+            if contributor.codes.is_empty()
+                || contributor
+                    .codes
+                    .iter()
+                    .any(|code| !code.is_implicit_failure())
+            {
+                return Err(CompilerError::compiler_error(
+                    "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
+                ));
+            }
+            Ok(true)
+        }
+        HirBuiltinFailureSource::Call(target) => call_escapes_builtin_failure(hir, report, target),
+    }
+}
+
 /// Retain a bounded source witness without changing the converged failure facts or summaries.
 ///
-/// Source order wins at each hop, except for write-back over its own compound arithmetic.
-/// Continue past the three-label bound to retain the origin; cycles have no invented origin.
-fn builtin_failure_witness<'a>(
+/// WHAT: depth-first search with an explicit stack of entered bodies, following each body's
+///       candidates in policy order. A numeric or write-back candidate is the origin. A callee
+///       this HIR does not own is a summary leaf: its hop stays the visible boundary and the
+///       search stops without inventing an origin across it. A body that runs out of
+///       candidates is popped with its hop.
+/// WHY: a recursive call can precede the real producer in source order, so a call into an
+///      already-entered body is skipped rather than ending the search. An entered body is
+///      either on the current path (a back-edge) or already exhausted. An exhausted body has
+///      no origin or leaf reachable without passing through bodies still on the path, so
+///      re-entering it can never change the witness. Each body is therefore expanded at most
+///      once per search, recorded in the caller's `entered` set, which starts with `function`.
+fn builtin_failure_witness_search<'a>(
     hir: &'a HirModule,
-    report: &'a BorrowCheckReport,
-    function: FunctionId,
+    report: &BorrowCheckReport,
     contributor: &'a HirBuiltinFailureContributor,
+    entered: &mut FxHashSet<FunctionId>,
 ) -> Result<BuiltinFailureWitness, CompilerError> {
     let mut witness = BuiltinFailureWitness {
         codes: Vec::new(),
@@ -870,121 +925,75 @@ fn builtin_failure_witness<'a>(
         origin: BuiltinFailureOriginKind::Operation,
         elided_call_hops: 0,
     };
-    // WHAT: depth-first witness search over active contributors in deterministic policy
-    //       order. WHY: a recursive call can precede the real numeric producer in source
-    //       order; skipping only the back-edge keeps the available origin instead of
-    //       stopping with an origin-free witness. Cycles with no other active contributor
-    //       still terminate without inventing an origin.
-    let mut path = vec![function];
+    let mut stack: Vec<WitnessCandidates<'a, HirBuiltinFailureContributor>> = Vec::new();
     let mut hops: Vec<Option<SourceSpan>> = Vec::new();
-    witness_search(hir, report, contributor, &mut path, &mut hops, &mut witness)?;
+    let mut next = Some(contributor);
+    loop {
+        if let Some(contributor) = next.take() {
+            let target = match &contributor.source {
+                HirBuiltinFailureSource::NumericOperation => {
+                    witness.codes = contributor.codes.clone();
+                    witness.origin_span = contributor.span;
+                    witness.origin = BuiltinFailureOriginKind::Operation;
+                    break;
+                }
+                HirBuiltinFailureSource::CompoundWriteBack { target, .. } => {
+                    witness.codes = contributor.codes.clone();
+                    witness.origin_span = contributor.span;
+                    witness.origin =
+                        BuiltinFailureOriginKind::CompoundWriteBack { target: *target };
+                    break;
+                }
+                HirBuiltinFailureSource::Call(target) => target,
+            };
+            // Stable identities resolve only when this HIR owns the callee's semantic facts.
+            // Other generated/provider executables remain summary leaves, not donor-local IDs.
+            let callee = match target {
+                CallTarget::Local(function) => Some(*function),
+                CallTarget::ModulePrivate(identity) => {
+                    hir.function_ids_by_private_origin.get(identity).copied()
+                }
+                CallTarget::Generated(identity) => {
+                    hir.function_ids_by_generated.get(identity).copied()
+                }
+                CallTarget::CrossModule(_) | CallTarget::External(_) => None,
+            };
+            let Some(callee) = callee else {
+                hops.push(contributor.span);
+                break;
+            };
+            if entered.insert(callee) {
+                hops.push(contributor.span);
+                let facts = function_failure_facts(hir, callee)?;
+                stack.push(WitnessCandidates::new(&facts.contributors));
+            }
+        }
+
+        let Some(candidates) = stack.last_mut() else {
+            break;
+        };
+        next = candidates.next_candidate(
+            |candidate| builtin_failure_contributor_is_active(hir, report, candidate),
+            HirBuiltinFailureContributor::witness_site,
+        )?;
+        if next.is_none() {
+            stack.pop();
+            hops.pop();
+        }
+    }
+
     retain_bounded_witness_hops(&mut witness, hops);
     Ok(witness)
 }
 
-/// Ordered active contributors of one callee body: the shared policy reapplied until every
-/// remaining contributor is ordered, so each write-back keeps its precedence.
-fn ordered_witness_candidates<'a>(
-    hir: &'a HirModule,
-    report: &'a BorrowCheckReport,
+fn builtin_failure_witness(
+    hir: &HirModule,
+    report: &BorrowCheckReport,
     function: FunctionId,
-) -> Result<Vec<&'a HirBuiltinFailureContributor>, CompilerError> {
-    let facts = hir.function_failure_facts.get(&function).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "implicit builtin failure analysis is missing semantic facts for {function:?}"
-        ))
-    })?;
-    let mut active = Vec::new();
-    for contributor in &facts.contributors {
-        let is_active = match &contributor.source {
-            HirBuiltinFailureSource::NumericOperation
-            | HirBuiltinFailureSource::CompoundWriteBack { .. } => true,
-            HirBuiltinFailureSource::Call(target) => {
-                call_escapes_builtin_failure(hir, report, target)?
-            }
-        };
-        if is_active {
-            active.push(contributor);
-        }
-    }
-    // The numeric-shape validation lives in `active_builtin_failure_contributor`, which stays
-    // the single caller that enforces contributor codes. This search never classifies
-    // contributor validity on its own: numeric contributors here come only from a body
-    // whose winner already passed that validation.
-    let _ = active_builtin_failure_contributor(hir, report, function)?;
-    Ok(order_failure_witness_candidates(
-        active,
-        HirBuiltinFailureContributor::witness_site,
-    ))
-}
-
-/// Depth-first witness search down one candidate chain.
-///
-/// WHAT: follows the deterministic candidate order of each callee body. Only a skipped
-///       recursive back-edge permits trying the next contributor; a terminal producer or
-///       unavailable leaf keeps its recorded path and stops the search.
-/// WHY: an unavailable hop is already the visible boundary, so a later contributor must
-///      not supply a connected origin across it, while a back-edge carries no origin of
-///      its own. Each recursion extends the call path, whose length is bounded by the
-///      finite function set, so the search terminates.
-fn witness_search<'a>(
-    hir: &'a HirModule,
-    report: &'a BorrowCheckReport,
-    contributor: &'a HirBuiltinFailureContributor,
-    path: &mut Vec<FunctionId>,
-    hops: &mut Vec<Option<SourceSpan>>,
-    witness: &mut BuiltinFailureWitness,
-) -> Result<WitnessSearchOutcome, CompilerError> {
-    let target = match &contributor.source {
-        HirBuiltinFailureSource::NumericOperation => {
-            witness.codes = contributor.codes.clone();
-            witness.origin_span = contributor.span;
-            witness.origin = BuiltinFailureOriginKind::Operation;
-            return Ok(WitnessSearchOutcome::FoundOrigin);
-        }
-        HirBuiltinFailureSource::CompoundWriteBack { target, .. } => {
-            witness.codes = contributor.codes.clone();
-            witness.origin_span = contributor.span;
-            witness.origin = BuiltinFailureOriginKind::CompoundWriteBack { target: *target };
-            return Ok(WitnessSearchOutcome::FoundOrigin);
-        }
-        HirBuiltinFailureSource::Call(target) => target,
-    };
-    // Stable identities resolve only when this HIR owns the callee's semantic facts.
-    // Other generated/provider executables remain summary leaves, not donor-local IDs.
-    // An unresolvable callee keeps its hop as the visible boundary without inventing an
-    // origin across the unavailable summary.
-    let callee = match target {
-        CallTarget::Local(function) => Some(*function),
-        CallTarget::ModulePrivate(identity) => {
-            hir.function_ids_by_private_origin.get(identity).copied()
-        }
-        CallTarget::Generated(identity) => hir.function_ids_by_generated.get(identity).copied(),
-        CallTarget::CrossModule(_) | CallTarget::External(_) => None,
-    };
-    let Some(callee) = callee else {
-        hops.push(contributor.span);
-        return Ok(WitnessSearchOutcome::TerminalLeaf);
-    };
-    if path.contains(&callee) {
-        // A recursive back-edge carries no new origin: skip it without recording a visible
-        // hop and let the caller try the next candidate.
-        return Ok(WitnessSearchOutcome::SkippedBackEdge);
-    }
-    path.push(callee);
-    hops.push(contributor.span);
-    for candidate in ordered_witness_candidates(hir, report, callee)? {
-        match witness_search(hir, report, candidate, path, hops, witness)? {
-            WitnessSearchOutcome::FoundOrigin => return Ok(WitnessSearchOutcome::FoundOrigin),
-            WitnessSearchOutcome::TerminalLeaf => {
-                return Ok(WitnessSearchOutcome::TerminalLeaf);
-            }
-            WitnessSearchOutcome::SkippedBackEdge => {}
-        }
-    }
-    path.pop();
-    hops.pop();
-    Ok(WitnessSearchOutcome::SkippedBackEdge)
+    contributor: &HirBuiltinFailureContributor,
+) -> Result<BuiltinFailureWitness, CompilerError> {
+    let mut entered = FxHashSet::from_iter([function]);
+    builtin_failure_witness_search(hir, report, contributor, &mut entered)
 }
 
 /// Join immutable semantic failure facts into the exact summaries computed for this queue node.

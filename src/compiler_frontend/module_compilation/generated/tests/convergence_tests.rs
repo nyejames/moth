@@ -879,6 +879,111 @@ fn builtin_failure_witness_skips_mutual_recursion_to_reach_later_origin() {
 }
 
 #[test]
+fn builtin_failure_witness_expands_each_recursive_body_once_before_late_origin() {
+    // WHAT: every private body calls every other body before body 1's only numeric producer,
+    //       so the origin is reachable only after the whole mutually recursive component.
+    // WHY: path-only backtracking re-entered exhausted bodies through every simple path. The
+    //      bounded search enters each body once, matching the AST witness for the same shape.
+    const BODY_COUNT: u32 = 12;
+    let private_names = (1..=BODY_COUNT)
+        .map(|body| private_identity(&format!("body_{body}")))
+        .collect::<Vec<_>>();
+    let mut hir = base_hir(&[origin("boundary")], &private_names);
+    let mut boundary = failure_facts(
+        HirBuiltinFailureBoundary::ExportedNoSlot,
+        vec![HirBuiltinFailureSource::Call(CallTarget::Local(
+            FunctionId(1),
+        ))],
+    );
+    boundary.span = failure_witness_span(0);
+    boundary.contributors[0].span = failure_witness_span(1);
+    hir.function_failure_facts.insert(FunctionId(0), boundary);
+    for body in 1..=BODY_COUNT {
+        let mut sources = (1..=BODY_COUNT)
+            .filter(|callee| *callee != body)
+            .map(|callee| HirBuiltinFailureSource::Call(CallTarget::Local(FunctionId(callee))))
+            .collect::<Vec<_>>();
+        if body == 1 {
+            sources.push(HirBuiltinFailureSource::NumericOperation);
+        }
+        let mut facts = failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources);
+        if body == 1 {
+            let origin = facts.contributors.last_mut().expect("body 1 has an origin");
+            origin.span = failure_witness_span(2);
+        }
+        hir.function_failure_facts.insert(FunctionId(body), facts);
+    }
+    let mut report = report((0..=BODY_COUNT).map(|index| {
+        (
+            FunctionId(index),
+            summary(FunctionReturnAliasSummary::Fresh),
+        )
+    }));
+    infer_builtin_failure_summaries(&hir, &mut report).unwrap();
+
+    let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
+    let mut entered = FxHashSet::from_iter([FunctionId(0)]);
+    let witness =
+        builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered).unwrap();
+    assert_eq!(entered.len(), BODY_COUNT as usize + 1);
+    assert_eq!(witness.call_spans, vec![failure_witness_span(1)]);
+    assert_eq!(witness.origin_span, failure_witness_span(2));
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.elided_call_hops, 0);
+    assert_eq!(exported_failure_witness(&hir, &report), witness);
+}
+
+#[test]
+fn builtin_failure_witness_never_classifies_candidates_after_an_early_terminal_leaf() {
+    // WHAT: a helper's first candidate is an escaping cross-module leaf, followed by many calls
+    //       whose summaries are deliberately absent.
+    // WHY: classifying a call without its exact summary is an infrastructure error, so the
+    //      search succeeding proves it stopped at the leaf instead of ordering the whole body.
+    const UNUSED_CALL_COUNT: usize = 10_000;
+    let foreign = origin("foreign");
+    let mut hir = base_hir(&[origin("boundary")], &[private_identity("helper")]);
+    let mut boundary = failure_facts(
+        HirBuiltinFailureBoundary::ExportedNoSlot,
+        vec![HirBuiltinFailureSource::Call(CallTarget::Local(
+            FunctionId(1),
+        ))],
+    );
+    boundary.contributors[0].span = failure_witness_span(1);
+    hir.function_failure_facts.insert(FunctionId(0), boundary);
+    let mut sources = vec![HirBuiltinFailureSource::Call(CallTarget::CrossModule(
+        foreign.clone(),
+    ))];
+    sources.extend((0..UNUSED_CALL_COUNT).map(|index| {
+        HirBuiltinFailureSource::Call(CallTarget::CrossModule(origin(&format!(
+            "unsummarised_{index}"
+        ))))
+    }));
+    let mut helper = failure_facts(HirBuiltinFailureBoundary::InferPrivate, sources);
+    helper.contributors[0].span = failure_witness_span(2);
+    hir.function_failure_facts.insert(FunctionId(1), helper);
+    let mut escaping = summary(FunctionReturnAliasSummary::Fresh);
+    escaping.escapes_builtin_failure = true;
+    hir.imported_call_summaries
+        .insert(foreign, escaping.clone());
+    // Inference would classify every helper contributor, so the escape bit is installed directly.
+    let report = report([
+        (FunctionId(0), summary(FunctionReturnAliasSummary::Fresh)),
+        (FunctionId(1), escaping),
+    ]);
+
+    let boundary_call = &hir.function_failure_facts[&FunctionId(0)].contributors[0];
+    let mut entered = FxHashSet::from_iter([FunctionId(0)]);
+    let witness =
+        builtin_failure_witness_search(&hir, &report, boundary_call, &mut entered).unwrap();
+    assert_eq!(
+        witness.call_spans,
+        vec![failure_witness_span(1), failure_witness_span(2)]
+    );
+    assert_eq!(witness.origin_span, None);
+    assert!(witness.codes.is_empty());
+}
+
+#[test]
 fn builtin_failure_witness_keeps_origin_free_recursion_free_of_numeric_failure() {
     let mut hir = base_hir(&[origin("boundary")], &[private_identity("recursive")]);
     let mut boundary = failure_facts(

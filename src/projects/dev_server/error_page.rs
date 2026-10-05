@@ -241,7 +241,7 @@ fn render_error_page_shell(
 ) -> String {
     let escaped_title = escape_html(title);
     let timestamp = current_timestamp_unix_seconds();
-    let dev_client = dev_client_snippet(origin, None);
+    let dev_client = dev_client_snippet(origin, build_version, None);
 
     format!(
         r#"<!doctype html>

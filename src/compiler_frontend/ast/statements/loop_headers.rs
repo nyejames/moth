@@ -58,17 +58,16 @@ struct ParsedBindingNames {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum ParsedLoopHeader {
     Conditional {
         condition: Expression,
     },
     Range {
-        bindings: LoopBindings,
-        range: RangeLoopSpec,
+        bindings: Box<LoopBindings>,
+        range: Box<RangeLoopSpec>,
     },
     Collection {
-        bindings: LoopBindings,
+        bindings: Box<LoopBindings>,
         iterable: Expression,
     },
 }
@@ -243,7 +242,10 @@ fn parse_range_loop_header_cursor(
         let bindings =
             declare_loop_bindings(Some(pipe_binding_split.bindings), binding_type, parser)?;
 
-        return Ok(ParsedLoopHeader::Range { bindings, range });
+        return Ok(ParsedLoopHeader::Range {
+            bindings: Box::new(bindings),
+            range: Box::new(range),
+        });
     }
 
     let bare_binding_suffix =
@@ -273,7 +275,10 @@ fn parse_range_loop_header_cursor(
     })?;
     let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
     let bindings = declare_loop_bindings(None, binding_type, parser)?;
-    Ok(ParsedLoopHeader::Range { bindings, range })
+    Ok(ParsedLoopHeader::Range {
+        bindings: Box::new(bindings),
+        range: Box::new(range),
+    })
 }
 
 fn parse_non_range_loop_header_cursor(
@@ -300,7 +305,10 @@ fn parse_non_range_loop_header_cursor(
         })?;
         let bindings = declare_loop_bindings(Some(pipe_binding_split.bindings), item_type, parser)?;
 
-        return Ok(ParsedLoopHeader::Collection { bindings, iterable });
+        return Ok(ParsedLoopHeader::Collection {
+            bindings: Box::new(bindings),
+            iterable,
+        });
     }
     let bare_binding_suffix =
         detect_bare_loop_binding_suffix_cursor(token_stream, header_start, header_end)?;
@@ -338,7 +346,7 @@ fn parse_non_range_loop_header_cursor(
     if let Some(item_type_id) = item_type_id {
         let bindings = declare_loop_bindings(None, item_type_id, parser)?;
         return Ok(ParsedLoopHeader::Collection {
-            bindings,
+            bindings: Box::new(bindings),
             iterable: expression,
         });
     }

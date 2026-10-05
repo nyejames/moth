@@ -125,7 +125,11 @@ pub enum MatchExhaustiveness {
     ExhaustiveChoice,
 }
 
-#[allow(clippy::large_enum_variant)]
+/// Statement node payloads.
+///
+/// Every `AstNode` occupies the largest variant, and recursive body parsing keeps several nodes
+/// live per nesting level. Bulky, comparatively rare payloads (loop headers and assertion
+/// messages) are boxed so nested bodies do not pay their inline size on the native stack.
 #[derive(Debug, Clone)]
 pub enum NodeKind {
     // Control Flow
@@ -152,12 +156,12 @@ pub enum NodeKind {
     },
 
     RangeLoop {
-        bindings: LoopBindings,
-        range: RangeLoopSpec,
+        bindings: Box<LoopBindings>,
+        range: Box<RangeLoopSpec>,
         body: Vec<AstNode>,
     },
     CollectionLoop {
-        bindings: LoopBindings,
+        bindings: Box<LoopBindings>,
         iterable: Expression,
         body: Vec<AstNode>,
     },
@@ -173,7 +177,7 @@ pub enum NodeKind {
     ///      shared call parser owns its named/default/access/type argument contract.
     Assert {
         condition: Expression,
-        message: Expression,
+        message: Box<Expression>,
     },
 
     /// Value-production terminator for active value-producing blocks.
