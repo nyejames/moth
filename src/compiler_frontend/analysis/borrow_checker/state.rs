@@ -272,8 +272,10 @@ impl BorrowState {
 
     /// Reset locals outside the lexical visibility mask and drop their roots from visible locals.
     ///
-    /// WHY: runs on every block visit and CFG edge, so it rewrites each local in place rather
-    /// than cloning and comparing every local's root sets.
+    /// WHY: runs on every CFG edge, so it rewrites each local in place rather than cloning and
+    /// comparing every local's root sets. Transfer keeps a local's direct-alias roots within its
+    /// value roots, so joining two states narrowed to one mask stays narrowed. The engine relies
+    /// on that to store narrowed block inputs without narrowing them again before transfer.
     pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
         for (local_index, local) in self.locals.iter_mut().enumerate() {
             if !visible_mask.contains(local_index) {
