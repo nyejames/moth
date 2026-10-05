@@ -6,17 +6,18 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
-    ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
-    DependencyClauseKind, DiagnosticBag, DiagnosticIdentity, DiagnosticKind, DiagnosticLabel,
-    DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
-    DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason, GenericInferenceSubject,
-    ImportDiagnosticKind, ImportPublicSurfaceType, IncompatibleChoiceComparisonReason,
-    InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
-    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
+    BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, ChoiceVariantSeparatorGap,
+    CommonSyntaxMistakeReason, ConfigDiagnosticKind, DeferredFeatureDiagnosticKind,
+    DeferredFeatureReason, DependencyClauseKind, DiagnosticBag, DiagnosticIdentity, DiagnosticKind,
+    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
+    DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
+    GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
+    IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
+    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
+    InvalidFallibleHandlingReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
+    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
     InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
     InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
     InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
@@ -1829,14 +1830,91 @@ impl CompilerDiagnostic {
     }
 
     pub(crate) fn invalid_fallible_handling(
-        reason: crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason,
+        reason: InvalidFallibleHandlingReason,
         span: Option<SourceSpan>,
     ) -> Self {
+        let mut labels = Vec::new();
+        let mut add_label = |producer_span: Option<SourceSpan>, message| {
+            if producer_span.is_some() {
+                labels.push(DiagnosticLabel::secondary(producer_span, Some(message)));
+            }
+        };
+
+        match &reason {
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id,
+                second_error_type_id,
+                first_producer_span,
+                second_producer_span,
+            } => {
+                add_label(
+                    *first_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *first_error_type_id,
+                    },
+                );
+                add_label(
+                    *second_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *second_error_type_id,
+                    },
+                );
+            }
+
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id,
+                typed_producer_span,
+                implicit_producer_span,
+            } => {
+                add_label(
+                    *typed_producer_span,
+                    DiagnosticLabelMessage::TypedFailureProducer {
+                        error_type_id: *error_type_id,
+                    },
+                );
+                add_label(
+                    *implicit_producer_span,
+                    DiagnosticLabelMessage::ImplicitFailureProducer,
+                );
+            }
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                witness,
+                ..
+            }
+            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                witness,
+            } => {
+                for call_span in &witness.call_spans {
+                    add_label(*call_span, DiagnosticLabelMessage::BuiltinFailureCall);
+                }
+                match witness.origin {
+                    BuiltinFailureOriginKind::Operation => {
+                        add_label(
+                            witness.origin_span,
+                            DiagnosticLabelMessage::BuiltinFailureOrigin,
+                        );
+                    }
+                    BuiltinFailureOriginKind::CompoundWriteBack { target } => {
+                        add_label(
+                            witness.origin_span,
+                            DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+                                target_type_id: target,
+                            },
+                        );
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::InvalidFallibleHandling),
             span,
             DiagnosticPayload::InvalidFallibleHandling { reason },
         )
+        .with_labels(labels)
     }
 
     pub(crate) fn invalid_template_slot(

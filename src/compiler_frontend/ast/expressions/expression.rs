@@ -17,6 +17,10 @@ pub use crate::compiler_frontend::ast::expressions::expression_types::FallibleCa
 pub use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind, FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    ExpressionFailureFacts, FailureDisposition, ImplicitFailureContributor, ImplicitFailureSource,
+    TypedErrorProducer,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -29,7 +33,8 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidBuiltinCallReason,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
@@ -62,6 +67,8 @@ pub struct Expression {
     /// WHY: HIR expression lowering consumes these IDs directly from the final module
     ///      `TypeEnvironment`; AST finalization only debug-validates that no orphan IDs remain.
     pub type_id: TypeId,
+    /// Failure delivery is side data: `type_id` remains the success-value identity.
+    pub(crate) failure_facts: ExpressionFailureFacts,
     /// Non-authoritative type spelling kept for diagnostics and parse-era declarations.
     ///
     /// WHAT: preserves the written type spelling for diagnostics and debug output.
@@ -395,8 +402,10 @@ impl Expression {
         diagnostic_type: DataType,
         value_mode: ValueMode,
     ) -> Self {
+        let failure_facts = ExpressionFailureFacts::from_expression_kind(&kind, span);
         Self {
             type_id,
+            failure_facts,
             diagnostic_type,
             function_receiver: None,
             kind,
@@ -408,6 +417,51 @@ impl Expression {
             contains_regular_division: false,
             synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
         }
+    }
+
+    pub(crate) fn with_typed_error_producer(
+        mut self,
+        error_type_id: TypeId,
+        builtin_name: Option<StringId>,
+    ) -> Self {
+        self.failure_facts.record_typed_error(TypedErrorProducer {
+            span: self.span,
+            error_type_id,
+            builtin_name,
+        });
+        self
+    }
+
+    pub(crate) fn with_private_call_failure_candidate(mut self, path: PathId) -> Self {
+        self.failure_facts
+            .record_implicit(ImplicitFailureContributor {
+                span: self.span,
+                codes: &[],
+                source: ImplicitFailureSource::PrivateCall(path),
+            });
+        self
+    }
+
+    /// Closed receiving sites reject typed producers that remain outside explicit handling.
+    pub(crate) fn unhandled_typed_error_diagnostic(&self) -> Option<CompilerDiagnostic> {
+        if self.failure_facts.disposition != FailureDisposition::Pending {
+            return None;
+        }
+        self.failure_facts.summary.first_typed.map(|producer| {
+            let span = producer.span.or(self.span);
+            if let Some(builtin_name) = producer.builtin_name {
+                CompilerDiagnostic::invalid_builtin_call(
+                    InvalidBuiltinCallReason::UnhandledFallibleCall,
+                    Some(builtin_name),
+                    span,
+                )
+            } else {
+                CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::UnhandledErrorReturn,
+                    span,
+                )
+            }
+        })
     }
 
     /// Returns true if this expression represents a const-record value.
@@ -1018,6 +1072,8 @@ impl Expression {
                     "only propagating fallible expressions carry a postfix span"
                 );
                 *propagation_span = span;
+                self.failure_facts.postfix_exit_span =
+                    span.or(self.failure_facts.postfix_exit_span);
             }
             _ => debug_assert!(
                 false,

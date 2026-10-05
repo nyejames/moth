@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " discharged custom u8 add sum=510"

@@ -42,17 +42,30 @@ once. This includes top-level bindings, function calls and other runtime
 statements. Helper files define reusable declarations. They do not own an
 export block, an independent `start` or an entry.
 
+`start` has a built-in `Error!` contract. Checked numeric failure propagates to
+that contract, and compatible top-level postfix `!` is legal. Custom typed
+errors still need explicit recovery. A generated terminal handler closes the
+entry boundary; an unhandled built-in failure does not become an implicit panic.
+See @../progress (Progress) for compiler support.
+
 ### Page fragments
 
 Two forms of direct top-level template in a module root become page fragments:
 
 - A const fragment uses the `#` prefix before the opening bracket. It folds at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. It is evaluated by the module's `start` function when entry assembly activates it and inserted into the page at runtime.
+- A runtime fragment uses the plain bracket form without `#`. The module's `start` evaluates it when entry assembly activates the module, but publication waits until that invocation succeeds.
 
 The builder preserves source order between static and runtime fragments. Static
-fragments are emitted immediately. Runtime fragments use generated slots in the
-HTML document, then the embedded JavaScript calls the module start function and
-fills those slots.
+fragments remain in the document even when startup fails. Runtime fragments use
+generated slots, and the entry boundary fills those slots only after successful
+startup. Failure publishes none of that invocation's runtime fragments. This is
+not rewind: other side effects do not roll back.
+
+The generated terminal handler presents a generic safe release notice, not the
+application's `Error` message as HTML. Development presentation, including the
+three startup categories and invocation-local reporting, is owned by
+`docs/build-system-design.md` > `Development entry-error reports` and summarised at
+@../../developer-docs/compiler-design/html-assembly-and-output/#document-shell-and-fragments (HTML assembly).
 
 ### Metadata-only pages
 

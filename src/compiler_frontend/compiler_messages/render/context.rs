@@ -416,6 +416,23 @@ fn diagnostic_label_message_text(
         DiagnosticLabelMessage::ImmutableBindingDeclaration => {
             "immutable binding declared here".to_owned()
         }
+        DiagnosticLabelMessage::TypedFailureProducer { error_type_id } => {
+            let error_type = diagnostic_type_name(*error_type_id, context);
+            format!("`{error_type}!` failure produced here")
+        }
+        DiagnosticLabelMessage::ImplicitFailureProducer => {
+            "implicit built-in failure may escape here".to_owned()
+        }
+        DiagnosticLabelMessage::BuiltinFailureCall => {
+            "implicit built-in failure propagates through this call".to_owned()
+        }
+        DiagnosticLabelMessage::BuiltinFailureOrigin => {
+            "original failing numeric or range operation here".to_owned()
+        }
+        DiagnosticLabelMessage::BuiltinWriteBackOrigin { target_type_id } => {
+            let target = diagnostic_type_name(*target_type_id, context);
+            format!("write-back into `{target}` here after the compound update")
+        }
     }
 }
 

@@ -3,19 +3,20 @@
 use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext;
 use crate::backends::wasm::lir::linkage::{WasmImport, WasmImportKind};
-use crate::backends::wasm::lir::types::{WasmImportId, WasmLirSignature};
+use crate::backends::wasm::lir::types::{WasmAbiType, WasmImportId, WasmLirSignature};
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use rustc_hash::FxHashSet;
 
 pub(crate) fn register_required_host_imports(
     context: &mut WasmLirLoweringContext<'_>,
     reachable_blocks: Option<&FxHashSet<BlockId>>,
 ) -> Result<(), CompilerError> {
-    // WHAT: scan HIR for host calls and pre-register required imports.
+    // WHAT: scan emitted HIR for host calls and assertion failure terminators.
     // WHY: deterministic import-id assignment for the whole module.
     for block in &context.hir_module.blocks {
         if let Some(reachable_blocks) = reachable_blocks
@@ -33,6 +34,17 @@ pub(crate) fn register_required_host_imports(
                 let host_function = resolve_host_function_id(context, *id)?;
                 ensure_host_import(context, host_function);
             }
+        }
+
+        if matches!(
+            block.terminator,
+            HirTerminator::AssertFailure {
+                message_evaluation: HirAssertionMessageEvaluation::Default
+                    | HirAssertionMessageEvaluation::Folded,
+                ..
+            }
+        ) {
+            ensure_host_import(context, WasmHostFunction::AssertionFailed);
         }
     }
 
@@ -73,7 +85,7 @@ fn resolve_host_function_id(
     )))
 }
 
-fn ensure_host_import(
+pub(crate) fn ensure_host_import(
     context: &mut WasmLirLoweringContext<'_>,
     function: WasmHostFunction,
 ) -> WasmImportId {
@@ -101,5 +113,10 @@ fn ensure_host_import(
 fn host_function_signature(function: WasmHostFunction) -> WasmLirSignature {
     // WHAT: canonical ABI signature for each supported host function.
     // WHY: keeps import registration and signature assignment in one explicit place.
-    match function {}
+    match function {
+        WasmHostFunction::AssertionFailed => WasmLirSignature {
+            params: vec![WasmAbiType::Handle],
+            results: vec![],
+        },
+    }
 }

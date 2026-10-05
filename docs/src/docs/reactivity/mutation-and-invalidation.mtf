@@ -29,7 +29,7 @@ Field, item and path-level invalidation are deferred.
     ~names.push("Rob")
 ]
 
-Mutation still requires explicit `~` for mutable or exclusive receiver access. Reactive syntax does not bypass ordinary borrowing. Fallible mutations must be handled with `catch` or propagated inside a compatible `Error!` function. Top-level `!` propagation is rejected when no error channel exists.
+Mutation still requires explicit `~` for mutable or exclusive receiver access. Reactive syntax does not bypass ordinary borrowing. Typed fallible mutations must be handled with `catch` or propagated through a compatible error slot. Checked numeric failure follows the enclosing handler or function contract; private functions without an error slot propagate it within the module without postfix `!` at each internal call. The generated `start` has built-in `Error!`, so compatible top-level postfix `!` is legal. Custom errors still need explicit recovery. See @../progress (Progress) for current support.
 
 ### Subscriptions are not borrows
 

@@ -307,12 +307,14 @@ pub(super) fn parse_literal_expression(
 
 /// True when the token at `offset` (skipping newlines) needs a typed operand before it.
 ///
-/// WHAT: peeks the unconsumed stream for member access (`.`), fallible handling (`!`,
-///       `catch`, a `name!` suffix) and option propagation (`?`). A literal passes offset 1
+/// WHAT: peeks the unconsumed stream for member access (`.`), typed propagation (`!`,
+///       a `name!` suffix) and option propagation (`?`). A literal passes offset 1
 ///       (the token after itself); a closed group passes offset 0.
 /// WHY: those suffixes resolve through `push_expression_operand`, which needs a typed
 ///      `Expression`, so a literal (or a group of one literal) followed by one keeps the
 ///      eager default path instead of deferring for destination-aware materialisation.
+///      Whole-expression `catch` completes after evaluation, so its literals retain
+///      destination-aware and immediate-peer materialisation.
 pub(super) fn typed_suffix_follows(token_stream: &AstCursor, mut offset: usize) -> bool {
     while token_stream
         .token_ref_at_offset(offset)
@@ -326,7 +328,7 @@ pub(super) fn typed_suffix_follows(token_stream: &AstCursor, mut offset: usize) 
     };
 
     match next.tag() {
-        TokenTag::DOT | TokenTag::BANG | TokenTag::CATCH | TokenTag::QUESTION_MARK => true,
+        TokenTag::DOT | TokenTag::BANG | TokenTag::QUESTION_MARK => true,
 
         TokenTag::SYMBOL => token_stream
             .token_ref_at_offset(offset.saturating_add(1))

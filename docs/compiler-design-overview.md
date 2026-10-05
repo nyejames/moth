@@ -161,7 +161,9 @@ The normal root's implicit `start` is compiler-synthesised, non-exported and una
 
 `start` owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
 
-Its function contract is infallible, with no `Error!` return channel. Unhandled failures follow the language's trap or invariant behaviour, not builder-defined error fragments. Infallible does not mean trap-free.
+Every executable normal-root `start`, including a synthetic single-file root, has built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+
+Builders consume this typed outcome. They add no error-fragment channel and never execute `start` during compilation. Assertions and fatal runtime resource exhaustion remain outside recoverable failure.
 
 ## Diagnostics and deterministic identity
 
@@ -172,6 +174,8 @@ Its function contract is infallible, with no `Error!` return channel. Unhandled 
 - User-caused source, project, configuration, dependency, type, access and target failures use typed diagnostic drafts that compact into deterministic reports. Warnings share the diagnostic machinery. Deferred-feature and outside-design-scope reasons stay distinct.
 - Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the diagnostic store. A failure retaining compact compiler IDs carries their matching frozen identity context. Pre-source or non-source failures may instead carry ordinary filesystem/host context without compact IDs. Each failure has one context shape, never both.
 - A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and carries self-contained bounded report facts before suspect worker state is discarded. Malformed input, capacity limits and unavailable capabilities never justify a bug panic.
+
+Runtime program `Error` values and entry-startup failures belong to the program's execution contract, not these compiler failure lanes. Statically invalid numeric work and undischarged exported failure are source diagnostics.
 
 Diagnostic schemas own stable codes and typed facts. Codes are not repurposed when prose changes. Stages preserve exact source spans, symbols and semantic reasons rather than pre-rendering messages. Type-display snapshots retain only what rendering needs, not complete type environments solely for diagnostics. Renderers resolve facts without mutating the report.
 
@@ -283,6 +287,10 @@ An export cannot expose a private nominal type, private trait/evidence identity,
 
 The compiler records project provenance through folded values, compile-time-derived implementation facts and source/generated call edges. The build system owns external-package eligibility, including rejection when an exported function reaches a private project-dependent helper. Implementation-only dependence is not an escape from that policy.
 
+Exported and custom-error boundary diagnostics carry a bounded failure witness (`BuiltinFailureWitness`). The witness retains at most three private call sites plus the terminal numeric operation or compound write-back, with its typed builtin cause codes and an elided-hop count for any further hops. The bound lives in the single shared `retain_bounded_witness_hops` in `src/compiler_frontend/ast/expressions/failure_facts.rs`, used by both the AST and HIR witness walkers. Source order selects the witness at each hop and canonical diagnostic ordering ignores worker completion order, so parallel and repeated compilation agree. The walk is a deterministic depth-first search over those ordered contributors: it skips recursive back-edges and backtracks from dead ends, so a later real producer behind an earlier recursive call still supplies the origin. The same-compound write-back keeps precedence over its arithmetic wherever the remaining order starts. Cross-module leaves, external leaves and unresolvable callees stop the witness as terminal leaves, all without inventing an origin or cause codes, and only a skipped back-edge permits trying the next contributor. A missing summary is a compiler error, never evidence of no failure. Donor ownership is preserved because only stable identities resolve and donor-local IDs never cross the boundary. The boundary emits one diagnostic, not a cascade at every private hop.
+
+The evidence and corrective guidance each implicit-failure, catch and error-boundary diagnostic must show live in the Diagnostics section of `docs/src/developer-docs/style-guide/style-guide.mtf`.
+
 ### Synthetic compile-time interfaces
 
 Synthetic interfaces enter through ordinary dependency binding. They contain stable member identities, folded backend-neutral values, source locations, member fingerprints and provenance, with no AST, HIR or runtime body.
@@ -304,6 +312,8 @@ Each successful base module has five distinct fingerprint domains:
 Generated requests come from the active specialised AST. They are materialisation dependencies carried with link data, not runtime-dependency fingerprint contents. A changed request set follows implementation invalidation and updates the generated sidecars. Sidecars retain their own implementation, runtime and compatibility fingerprints.
 
 Configuration values and `NumericProfile` participate in whichever existing domains they affect. Configuration may change folded values, executable behaviour and derived public, root or link facts while preserving declaration/export existence and declaration-origin identity. Provenance survives folding. Structural `$feature` selection requires separate selection-compatibility facts, not ordinary configuration folding.
+
+Private implicit-failure changes use the existing implementation, dormant-root activity and runtime-dependency facts they affect. They create no new fingerprint domain.
 
 Resource bytes and rendered URLs are not semantic-origin identity. `docs/build-system-design.md` > `Incremental and persistent artefacts` owns recompilation, relinking and cache policy. Its resource section owns content/output invalidation.
 
@@ -437,6 +447,12 @@ parse and type-check complete authored bodies
 
 This specifies dependencies, not a fixed count of internal passes. `Static Bool control-flow specialisation` defines exactly what remains validated and what selection removes.
 
+The frontend owns one implicit-failure fact on expression and function summaries. Checked numeric failure is implicit built-in failure, delivered by the enclosing handler or function contract without wrapping or an implicit panic. Private functions without an error slot infer and propagate it inside the same module without postfix `!` at each internal call. This inferred failure is an internal lane, not a public effect row or a third error channel.
+
+Built-in `Error!` materialises that failure as an `Error` value. A custom `E!` does not: its body needs local recovery or explicit mapping. Export validation requires callables without an error slot to discharge bare failure before publication and diagnoses those that do not. Handler selection and typed-error compatibility stay frontend-owned.
+
+Statically known invalid numeric work remains a source diagnostic, including inside `Error!` and `catch`. Compound write-back checks conversion to the destination separately and writes only after success.
+
 #### Dependencies and visibility
 
 AST validates uses through bound file visibility. It never rebuilds dependencies or top-level visibility. One collision policy covers declarations, dependency clauses, aliases, prelude symbols and builtins, with no silent shadowing.
@@ -506,7 +522,7 @@ Template-specific slot labels, indices and helper categories retain their own me
 assert |condition Bool, message String? = none|
 ```
 
-These expectations create no importable, shadowable or first-class function. Shared call validation handles argument shape, defaults, types and access. Assertion semantics handle placement, completed-statement suffix rejection and the prohibition on escaping message evaluation through `!`, `?`, `return`, `break` or `continue`.
+These expectations create no importable, shadowable or first-class function. Shared call validation handles argument shape, defaults, types and access. Assertion semantics handle placement, completed-statement suffix rejection and the prohibition on escaping message evaluation through implicit failure, `!`, `?`, `return`, `break` or `continue`.
 
 A handled fallible expression retains its ordinary call/value location separately from the authored propagation-operator location. Call side-table mapping remains call-owned while escape diagnostics identify the operator.
 
@@ -722,9 +738,15 @@ Successful returns carry ordered values. Error returns carry one error value. Ze
 
 Value-producing branches and catch recovery join individual slots through ordinary block/value targets. Propagation transfers the error channel without constructing an aggregate. Result-slot identity survives analysis, generated artefacts and public summaries. Backends may pack physical results only at the ABI boundary while preserving order, references and exactly-once evaluation.
 
+HIR makes implicit-failure edges, handler joins and built-in `Error` materialisation explicit. The private inferred lane preserves the same success/failure exclusion: success slots do not exist on failure edges. Handlers and propagation consume frontend-owned contracts rather than reconstructing expression coverage or error compatibility.
+
+The private same-module failure transport reuses the existing fallible carrier and ABI as an internal lane rather than a public or foreign result contract, with no global last-error variable and no fabricated aggregate extraction.
+
 #### Lazy assertion failure messages
 
 An assertion message is an ordinary HIR value used only on the failure edge. Message preludes stay in that block. The optional message is evaluated once, then `AssertFailure` terminates. A compile-time `true` assertion has no message runtime work. A compile-time `false` assertion remains terminal after its failure-edge work.
+
+Assertions remain unrecoverable and checked in release. Allocation and stack exhaustion are outside `catch`; growable `push` remains infallible in source and fatal on allocation exhaustion.
 
 Validation, remapping, display, borrowing and reachability treat the message as an ordinary value use. It creates no assertion-specific ownership or Wiring category. HIR also carries the compiler-owned distinction between default/fully folded messages and messages requiring runtime construction. Target validation consumes it rather than inferring it from source.
 
@@ -740,16 +762,17 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 
 - `moth-lexical` owns shared numeric leaf facts: spelling grammar and classification, token-free materialisation, precision-aware formatting, fixed scalar identities, width/profile/precision vocabulary and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
 - `moth` owns semantic numeric typing, receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
-- HIR records canonical numeric domain, operator and failure mode, not backend helper names or one statement family per target.
+- HIR records canonical numeric domain, operator and failure mode, not backend helper names or one statement family per target. `NumericFailureMode` selects the disposition required by the enclosing handler or function contract. A backend never infers it from the function name.
 - Compile-time and runtime operations round/fail at the same semantic boundaries. `Dec` rounds at every language-level operation result.
-- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and stamped with one `NumericProfile`. Each base executable and generated sidecar computes its own table from that executable's validated HIR before publication; facts stay paired with that exact immutable executable. Later summary convergence does not alter numeric statements.
+- Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible when the operands' complete canonical ranges keep the mathematical result inside the result domain (for example `U8 + U8 -> U32`). It reads types only, never a `NumericProfile` or build profile. AST failure facts and HIR emission call it with the same pre-promotion operand domains: a discharged operation keeps catch eligibility, records no implicit contributor and lowers as a `NumericOp` with `NumericFailureMode::Infallible`, which backends lower like `Trap` and which never requests the recoverable-numeric Wasm capability or becomes a private-lane producer.
+- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and stamped with one `NumericProfile`. Each base executable and generated sidecar computes its own table from that executable's validated HIR before publication; facts stay paired with that exact immutable executable. Summary convergence itself does not alter numeric statements. After convergence, the private failure lane rewrites escaping private checked operations from trap delivery to `ReturnError`. That changes failure delivery, not which results are valid.
 - An absent or empty table, a missing statement fact or a profile-mismatched query retains runtime checks; statement ids need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
 - The analysis derives closed `i128` intervals from canonical integer bounds, including the complete `U64` range, fixed integer literals and infallible integer casts. It walks each block independently with a single last-written-local cache. Every write invalidates the earlier fact: a direct-local assignment replaces it with its new interval, while projected writes clear the cache; calls and unknown statements also clear it. If checked endpoint arithmetic cannot represent an intermediate in `i128`, the analysis declines proof.
 - `Power`, real division, `Byte`, `Float`, binary floats and the language `Dec` domain never prove. Lowerers elide only a proven predicate they support; source validity, evaluation and failure order, and required recovery or narrowing carriers remain unchanged.
 - Target validation checks reachable numeric capabilities. Lowerers consume the boundary profile, canonical domain and physical plan rather than parallel width tables.
 - Binary-float and Dec formatting use the common value-to-string boundary for templates and runtime lowering.
 
-Target-specific check elision remains a lowerer responsibility; each backend consumes only the proof classes it supports. Scalar size, alignment and computation carriers remain distinct from semantic numeric identity. Broader numeric proof algorithms and ReturnError CFG redesign remain deferred.
+Target-specific check elision remains a lowerer responsibility; each backend consumes only the proof classes it supports. Check elision is independent of failure delivery and preserves explicit failure continuations. Scalar size, alignment and computation carriers remain distinct from semantic numeric identity. Broader numeric proof algorithms remain deferred.
 
 #### Call targets
 

@@ -119,6 +119,12 @@ pub(crate) fn resolve_cast_expression(
         type_environment,
         active_generic_type_context,
     );
+    let operand_only_recovery = matches!(handling, CastHandling::Recover)
+        && selection.fallible.is_none()
+        && selection.infallible.is_some()
+        && (source.failure_facts.checked_numeric_operation
+            || source.failure_facts.summary.first_implicit.is_some()
+            || source.failure_facts.summary.first_typed.is_some());
 
     let evidence = match handling {
         CastHandling::Infallible => match selection.infallible {
@@ -138,6 +144,13 @@ pub(crate) fn resolve_cast_expression(
             }
         },
 
+        CastHandling::Recover if operand_only_recovery => {
+            // Recovery may protect operand evaluation without making the conversion fallible.
+            selection
+                .infallible
+                .expect("the guarded selection contains infallible evidence")
+        }
+
         CastHandling::Propagate | CastHandling::Recover | CastHandling::StoreConversion => {
             match selection.fallible {
                 Some(evidence) => evidence,
@@ -156,6 +169,11 @@ pub(crate) fn resolve_cast_expression(
                 }
             }
         }
+    };
+    let handling = if operand_only_recovery {
+        CastHandling::Infallible
+    } else {
+        handling
     };
 
     let cast = ResolvedCastExpression {

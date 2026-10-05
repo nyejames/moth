@@ -40,6 +40,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
@@ -47,7 +48,6 @@ use crate::compiler_frontend::compiler_messages::{
 use std::sync::Arc;
 
 use crate::compiler_frontend::ast::type_resolution::resolve_diagnostic_type_to_type_id_checked;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
@@ -55,6 +55,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -64,7 +65,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -213,6 +214,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
     generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+    known_infallible_functions: Rc<RefCell<FxHashSet<PathId>>>,
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
@@ -238,6 +240,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             const_templates_by_path: FxHashMap::default(),
             compatibility_cache: TypeCompatibilityCache::new(),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
+            known_infallible_functions: Rc::new(RefCell::new(FxHashSet::default())),
             generic_function_instances_by_key: FxHashMap::default(),
             deferred_generic_requests: Vec::new(),
             validated_generic_template_bodies: Vec::new(),
@@ -314,6 +317,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_generic_function_instantiation_sink(Rc::clone(
             &self.generic_function_instantiation_requests,
         ))
+        .with_known_infallible_functions(Rc::clone(&self.known_infallible_functions))
         .with_receiver_methods(Rc::clone(&self.environment.lookups.receiver_methods))
         .with_lookups(Rc::clone(&self.environment.lookups))
         .with_generated_evidence_pairs(Rc::clone(&self.environment.generated_evidence_pairs))
@@ -1111,10 +1115,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        // --------------------------
-        //  Build context and parse body
-        // --------------------------
-        let context = self.build_base_scope_context(BaseScopeContextInput {
+        // The synthetic signature owns the same propagation context as an authored
+        // function. Keep Module parsing rules for root declarations and fragments.
+        let mut context = self.build_base_scope_context(BaseScopeContextInput {
             kind: ContextKind::Module,
             scope: header.declaration_path,
             top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
@@ -1123,6 +1126,37 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             source_file_scope,
             scope_frame_capacity,
         });
+
+        let error_type = resolve_builtin_error_type_typed(&context, None, string_table)
+            .map_err(|error| self.error_messages(error, string_table))?
+            .type_id;
+        let start_return_type = DataType::collection(DataType::StringSlice);
+        let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
+            &start_return_type,
+            &mut self.environment.type_environment,
+            None,
+        )
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        let start_signature = FunctionSignature {
+            parameters: vec![],
+            returns: vec![
+                ReturnSlot {
+                    value: start_return_type,
+                    type_id: Some(start_return_type_id),
+                    reactive_template: None,
+                    channel: ReturnChannel::Success,
+                },
+                ReturnSlot {
+                    value: diagnostic_type_spelling(error_type, &self.environment.type_environment),
+                    type_id: Some(error_type),
+                    reactive_template: None,
+                    channel: ReturnChannel::Error,
+                },
+            ],
+        };
+        // Root initializers infer their own success types. The fragment collection
+        // is an implicit HIR return, not a receiving expectation for those values.
+        context.expected_error_type = start_signature.error_return_type_id();
 
         let start_source = self
             .canonical_owner_for_header(&header)
@@ -1151,7 +1185,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
 
         // --------------------------
-        //  Synthesize implicit start signature and emit node
+        // Emit the module-owned start without changing root selection or activation.
         let full_name = self
             .path_fork
             .try_intern_child(
@@ -1159,29 +1193,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 string_table.intern(IMPLICIT_START_FUNC_NAME),
             )
             .expect("path table exhausted while creating implicit start function path");
-
-        // WHAT: entry start() returns Collection(StringSlice, MutableOwned),
-        //       which is the Moth frontend type for Vec<String>.
-        // WHY: compiler-design-overview.md describes the return type as Vec<String>;
-        //      DataType::Collection(StringSlice) is the same contract
-        //      expressed in frontend DataType terms. The HIR builder adds the implicit
-        //      return of the accumulated fragment vec at function end.
-        let start_return_type = DataType::collection(DataType::StringSlice);
-        let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
-            &start_return_type,
-            &mut self.environment.type_environment,
-            None,
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
-        let start_signature = FunctionSignature {
-            parameters: vec![],
-            returns: vec![ReturnSlot {
-                value: start_return_type,
-                type_id: Some(start_return_type_id),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            }],
-        };
 
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),

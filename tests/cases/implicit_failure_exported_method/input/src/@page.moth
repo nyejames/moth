@@ -1,0 +1,7 @@
+export:
+    Counter = | value Int |
+;
+
+scaled |this Counter, factor Int| -> Int:
+    return this.value * factor
+;

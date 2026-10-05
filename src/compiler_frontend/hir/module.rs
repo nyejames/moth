@@ -17,11 +17,14 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
+use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::hir_builder::CatchProtectedCall;
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
-use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::HirStruct;
+use crate::compiler_frontend::hir::utils::for_each_terminator_target_mut;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -130,6 +133,19 @@ pub struct HirModule {
     /// deterministic direct provenance. HIR validation rejects missing, extra or out-of-range
     /// coverage as `CompilerError`.
     pub function_provenance: FxHashMap<FunctionId, SyntheticInterfaceProvenance>,
+
+    /// Direct unhandled failure producers and source boundary for every local function.
+    /// Summary convergence consumes this read-only projection rather than AST or CFG rescans.
+    pub(crate) function_failure_facts: FxHashMap<FunctionId, HirFunctionFailureFacts>,
+
+    /// Scalar calls lowered inside catch-protected work.
+    ///
+    /// WHAT: each record binds one `Call` statement id to the catch handler that owned the
+    ///       failure edge at lowering time. Records cover infallible callees optimistically;
+    ///       the private-lane installer skips those whose callee never escapes.
+    /// WHY: the installer runs after summary convergence and cannot re-derive protection from
+    ///      the HIR alone, so lowering records the route once and the installer acts on it.
+    pub(crate) catch_protected_calls: Vec<CatchProtectedCall>,
 }
 
 impl HirModule {
@@ -152,12 +168,56 @@ impl HirModule {
             regions: vec![],
             const_facts: HirConstFacts::default(),
             function_provenance: FxHashMap::default(),
+            function_failure_facts: FxHashMap::default(),
+            catch_protected_calls: vec![],
         }
     }
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.side_table.remap_path_ids(remap);
         self.const_facts.remap_path_ids(remap);
+    }
+
+    /// Renumber blocks so `blocks[index].id == BlockId(index)`.
+    ///
+    /// HIR construction removes unused scaffolding blocks after other blocks already exist,
+    /// which leaves gaps. The builder calls this once construction is done, before validation.
+    pub(crate) fn compact_block_ids(&mut self) {
+        if self
+            .blocks
+            .iter()
+            .enumerate()
+            .all(|(index, block)| block.id == BlockId(index as u32))
+        {
+            return;
+        }
+
+        let remap = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| (block.id, BlockId(index as u32)))
+            .collect::<FxHashMap<_, _>>();
+        for block in &mut self.blocks {
+            block.id = remap[&block.id];
+            // Removed blocks have no incoming edges. Any unknown target is left for validation.
+            for_each_terminator_target_mut(&mut block.terminator, |target| {
+                *target = remap.get(target).copied().unwrap_or(*target);
+            });
+        }
+        for function in &mut self.functions {
+            function.entry = remap
+                .get(&function.entry)
+                .copied()
+                .unwrap_or(function.entry);
+        }
+        for record in &mut self.catch_protected_calls {
+            record.handler.block = remap
+                .get(&record.handler.block)
+                .copied()
+                .unwrap_or(record.handler.block);
+        }
+        self.side_table.remap_block_ids(&remap);
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {

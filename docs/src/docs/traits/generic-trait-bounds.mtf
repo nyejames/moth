@@ -28,6 +28,12 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 - `where` syntax is rejected.
 - File-local evidence-backed dispatch outside reusable conformance is outside scope.
 
+Generic dispatch preserves the requirement's declared error contract. It cannot
+secretly widen an error-free requirement. A concrete private method may still
+propagate inferred failure inside its module through resolved evidence. An
+exposed method must discharge that failure at the declared boundary. See
+@#conformance (Conformance) and @../progress (Progress).
+
 ### Multiple bounds on one parameter
 
 [codeblock, $code("moth"):

@@ -80,6 +80,7 @@ pub enum HirTerminator {
     ///      machinery, not the public `assert` statement surface.
     RuntimeFailure {
         message: String,
+        cause: Option<RuntimeFailureCause>,
     },
 
     /// Assertion failure — unrecoverable runtime stop.
@@ -92,6 +93,15 @@ pub enum HirTerminator {
         message: HirExpression,
         message_evaluation: HirAssertionMessageEvaluation,
     },
+}
+
+/// Semantic origin retained until private failure lanes have been installed.
+///
+/// WHY: compound write-back must preserve its conversion carrier independently of
+/// the backend-facing runtime failure message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeFailureCause {
+    StoreConversion { carrier: LocalId },
 }
 
 /// Evaluation fact retained with an assertion failure message.

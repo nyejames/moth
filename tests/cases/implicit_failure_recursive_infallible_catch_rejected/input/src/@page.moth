@@ -1,0 +1,11 @@
+recursive |value Int, again Bool| -> Int:
+    if again:
+        return recursive(value, false)
+    ;
+    return value
+;
+recover |value Int| -> Int:
+    return recursive(value, true) catch then 0
+;
+
+[: eligibility]

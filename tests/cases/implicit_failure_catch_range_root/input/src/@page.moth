@@ -1,0 +1,30 @@
+double |value Int| -> Int:
+    return value + 2147483647
+;
+
+span_info ~= ""
+span = double(1) to double(5) catch |span_err|:
+    span_info = [: [span_err.code] [span_err.message]]
+    then 1 to 2
+;
+
+span_report = copy span_info
+
+walk |start Int, end Int| -> Int:
+    total ~Int = 0
+    loop start to end |value|:
+        total = total + value
+    ;
+    return total
+;
+
+loop_info ~= ""
+walked = walk(double(0), double(3)) catch |loop_err|:
+    loop_info = [: [loop_err.code] [loop_err.message]]
+    then -1
+;
+
+loop_report = copy loop_info
+exact = walk(0, 3)
+
+[: span=[span_report] walked=[walked] loop=[loop_report] exact=[exact]]

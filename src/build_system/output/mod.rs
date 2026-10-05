@@ -11,10 +11,9 @@ mod output_path;
 mod policy;
 mod writer;
 pub(crate) use writer::OutputRejectionReason;
-// Write outcomes are inspected by name only from the build-output tests; production callers
-// consume the summary returned by `write_project_outputs` without naming its parts.
+pub(crate) use writer::OutputWriteSummary;
 #[cfg(test)]
-pub(crate) use writer::{OutputDestinationOutcome, OutputWriteOutcome, OutputWriteSummary};
+pub(crate) use writer::{OutputDestinationOutcome, OutputWriteOutcome};
 
 #[cfg(test)]
 mod tests;

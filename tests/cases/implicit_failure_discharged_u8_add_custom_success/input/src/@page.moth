@@ -1,0 +1,13 @@
+DomainError ::
+    Missing,
+;
+
+as_domain_value |left U8, right U8| -> U32, DomainError!:
+    return left + right
+;
+
+left U8 = 255
+right U8 = 255
+result = as_domain_value(left, right) catch then 0
+
+[: discharged custom u8 add sum=[result]]

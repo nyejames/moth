@@ -1,0 +1,16 @@
+risky |amount U8| -> U8, Error!:
+    return amount
+;
+bump |wide U32, one U32, amount U8| -> U8:
+    earlier = wide + one
+    total ~U8 = 250
+    total += risky(amount) catch then amount
+    return total
+;
+export:
+    boundary |wide U32, one U32, amount U8| -> U8:
+        return bump(wide, one, amount)
+    ;
+;
+
+[: witness]

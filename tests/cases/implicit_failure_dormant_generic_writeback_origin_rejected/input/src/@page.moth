@@ -1,0 +1,12 @@
+risky |amount U8| -> U8, Error!:
+    return amount
+;
+export:
+    boundary type T |value T, amount U8| -> U8:
+        total ~U8 = 250
+        total += risky(amount) catch then amount
+        return total
+    ;
+;
+
+[: witness]

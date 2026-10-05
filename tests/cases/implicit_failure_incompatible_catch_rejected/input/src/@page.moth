@@ -1,0 +1,14 @@
+Failure = | message String |
+Other = | message String |
+
+first |value Bool| -> Bool, Failure!:
+    return value
+;
+
+second |value Bool| -> Bool, Other!:
+    return value
+;
+
+recover |left Bool, right Bool| -> Bool:
+    return first(left) and second(right) catch then false
+;

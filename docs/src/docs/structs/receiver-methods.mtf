@@ -46,6 +46,8 @@ Use a free function for a type owned elsewhere.
 Compiler-owned collection operations and builder-owned builtin operations are
 not user extension methods.
 
+Implicit failure follows the closed module boundary: an exported receiver method without an error slot must handle it locally, while a private method propagates it within the same module. See @../errors (Errors).
+
 ### Constants and receiver methods
 
 A struct instance folded into a constant becomes a data-only const record.

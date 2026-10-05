@@ -86,6 +86,8 @@ Concrete instantiation with trait bounds requires visible reusable evidence. See
 - Receiver methods on concrete instances are rejected.
 - Generic external package functions and types are deferred.
 
+Implicit failure follows the closed module boundary: an exported generic instance without an error slot must discharge it. See @../errors (Errors) for failure delivery.
+
 ### Related concepts
 
 - For type application see @#type-application (Type application).

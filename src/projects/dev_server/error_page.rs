@@ -10,6 +10,164 @@ use std::fmt::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Shared presentation for server error pages and the isolated browser runtime view.
+pub(super) const ERROR_PAGE_STYLES: &str = r#"
+    :root, :host, .runtime-view {
+      color-scheme: dark;
+      --bg: #0a120b;
+      --bg-glow: rgba(80, 180, 100, 0.20);
+      --card: #061004e0;
+      --panel: #0d160e;
+      --fg: #f2f5f8;
+      --accent: #fd494b;
+      --muted: #9bb09b;
+      --border: #243a25;
+      --link: #7fd97f;
+      --warning: #ff8f57;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+    body, .runtime-view {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top, var(--bg-glow), transparent 36%),
+        var(--bg);
+      color: var(--fg);
+      font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .runtime-view {
+      display: flow-root;
+    }
+    main {
+      max-width: 1040px;
+      margin: 2.5rem auto;
+      padding: 0 1rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px var(--shadow);
+      overflow: hidden;
+    }
+    header {
+      padding: 1rem 1.2rem 0.95rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      color: var(--accent);
+    }
+    .meta {
+      padding: 0.8rem 1.2rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .msg {
+      margin: 0;
+      padding: 1.3rem;
+      line-height: 1.45;
+      font-size: 0.92rem;
+      white-space: pre-wrap;
+    }
+    .diagnostics {
+      padding: 1.1rem;
+      display: grid;
+      gap: 0.9rem;
+    }
+    .diagnostic {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 1rem 1rem 0.95rem;
+    }
+    .diagnostic-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+      margin-bottom: 0.7rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0.22rem 0.55rem;
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      background: rgba(255, 122, 144, 0.16);
+      color: var(--accent);
+    }
+    .badge.warning {
+      background: rgba(255, 212, 121, 0.16);
+      color: var(--warning);
+    }
+    .kind {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .diagnostic-message {
+      margin: 0 0 0.8rem;
+      line-height: 1.5;
+    }
+    .detail-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.45rem;
+    }
+    .detail-list li {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .detail-label {
+      color: var(--fg);
+      margin-right: 0.45rem;
+    }
+    a {
+      color: var(--link);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .empty-state {
+      padding: 1.3rem;
+      color: var(--muted);
+    }
+    .source-frame {
+      margin: 0.8rem 0;
+      padding: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.18);
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .source-location {
+      color: var(--link);
+    }
+    .source-line-number {
+      color: var(--muted);
+    }
+    .source-caret {
+      color: var(--accent);
+    }
+    .guidance {
+      margin-top: 0.7rem;
+      color: var(--muted);
+    }
+    .open-source {
+      display: inline-block;
+      margin-top: 0.8rem;
+    }
+"#;
+
 fn current_timestamp_unix_seconds() -> u64 {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs(),
@@ -83,7 +241,7 @@ fn render_error_page_shell(
 ) -> String {
     let escaped_title = escape_html(title);
     let timestamp = current_timestamp_unix_seconds();
-    let dev_client = dev_client_snippet(origin);
+    let dev_client = dev_client_snippet(origin, None);
 
     format!(
         r#"<!doctype html>
@@ -92,159 +250,7 @@ fn render_error_page_shell(
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Moth Dev Server Error</title>
-  <style>
-    :root {{
-      color-scheme: dark;
-      --bg: #0a120b;
-      --bg-glow: rgba(80, 180, 100, 0.20);
-      --card: #061004e0;
-      --panel: #0d160e;
-      --fg: #f2f5f8;
-      --accent: #fd494b;
-      --muted: #9bb09b;
-      --border: #243a25;
-      --link: #7fd97f;
-      --warning: #ff8f57;
-      --shadow: rgba(0, 0, 0, 0.35);
-    }}
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      background:
-        radial-gradient(circle at top, var(--bg-glow), transparent 36%),
-        var(--bg);
-      color: var(--fg);
-      font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    }}
-    main {{
-      max-width: 1040px;
-      margin: 2.5rem auto;
-      padding: 0 1rem;
-    }}
-    .card {{
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      box-shadow: 0 20px 60px var(--shadow);
-      overflow: hidden;
-    }}
-    header {{
-      padding: 1rem 1.2rem 0.95rem;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.02);
-    }}
-    h1 {{
-      margin: 0;
-      font-size: 1.1rem;
-      color: var(--accent);
-    }}
-    .meta {{
-      padding: 0.8rem 1.2rem;
-      color: var(--muted);
-      font-size: 0.9rem;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.02);
-    }}
-    .msg {{
-      margin: 0;
-      padding: 1.3rem;
-      line-height: 1.45;
-      font-size: 0.92rem;
-      white-space: pre-wrap;
-    }}
-    .diagnostics {{
-      padding: 1.1rem;
-      display: grid;
-      gap: 0.9rem;
-    }}
-    .diagnostic {{
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--panel);
-      padding: 1rem 1rem 0.95rem;
-    }}
-    .diagnostic-head {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.55rem;
-      align-items: center;
-      margin-bottom: 0.7rem;
-    }}
-    .badge {{
-      display: inline-flex;
-      align-items: center;
-      border-radius: 999px;
-      padding: 0.22rem 0.55rem;
-      font-size: 0.74rem;
-      letter-spacing: 0.04em;
-      background: rgba(255, 122, 144, 0.16);
-      color: var(--accent);
-    }}
-    .badge.warning {{
-      background: rgba(255, 212, 121, 0.16);
-      color: var(--warning);
-    }}
-    .kind {{
-      color: var(--muted);
-      font-size: 0.86rem;
-    }}
-    .diagnostic-message {{
-      margin: 0 0 0.8rem;
-      line-height: 1.5;
-    }}
-    .detail-list {{
-      margin: 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 0.45rem;
-    }}
-    .detail-list li {{
-      color: var(--muted);
-      line-height: 1.45;
-    }}
-    .detail-label {{
-      color: var(--fg);
-      margin-right: 0.45rem;
-    }}
-    a {{
-      color: var(--link);
-      text-decoration: none;
-    }}
-    a:hover {{
-      text-decoration: underline;
-    }}
-    .empty-state {{
-      padding: 1.3rem;
-      color: var(--muted);
-    }}
-    .source-frame {{
-      margin: 0.8rem 0;
-      padding: 0.85rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: rgba(0, 0, 0, 0.18);
-      white-space: pre;
-      overflow-x: auto;
-    }}
-    .source-location {{
-      color: var(--link);
-    }}
-    .source-line-number {{
-      color: var(--muted);
-    }}
-    .source-caret {{
-      color: var(--accent);
-    }}
-    .guidance {{
-      margin-top: 0.7rem;
-      color: var(--muted);
-    }}
-    .open-source {{
-      display: inline-block;
-      margin-top: 0.8rem;
-    }}
-  </style>
+  <style>{ERROR_PAGE_STYLES}</style>
 </head>
 <body>
   <main>

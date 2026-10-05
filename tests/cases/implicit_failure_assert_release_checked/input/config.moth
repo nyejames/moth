@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_assert_release_checked",
+    entry_root = "src",
+)
+html #= ()

@@ -29,8 +29,9 @@ HTML-Wasm executes infallible numeric expression casts that do not involve
 `Byte -> U8` and `U8 -> Byte`. F32/F64-to-F16 narrowing and other
 numeric-to-numeric casts from F16 remain target-gated. It supports infallible
 integer-to-`String` expression casts from profile `Int` and fixed
-signed/unsigned integers, and trap-mode `Float`/`F16`/`F32`/`F64`-to-`String`
-expression casts.
+signed/unsigned integers. `Float`/`F16`/`F32`/`F64`-to-`String` formatting is
+a separate integrity guard, not implicit numeric failure: it halts on a
+non-finite input unless a declared builtin `Error!` contract returns it.
 
 HTML-Wasm rejects reachable `Dec` values and signatures, including nested
 types and generated-function uses; unreachable private helpers do not gate
@@ -64,10 +65,14 @@ See @../progress (Progress) for current support.
     ;
 ]
 
-- Plain `cast` requires infallible evidence.
-- `cast!` requires fallible evidence and propagates through the current function's builtin `Error!` slot.
-- `cast ... catch:` requires fallible evidence and recovers locally.
+- Plain `cast` without an enclosing handler requires infallible evidence.
+- `cast!` requires fallible evidence and explicitly propagates through a compatible builtin `Error!` slot, including `start` at the top level.
+- `cast ... catch:` recovers the complete selected expression, including operand evaluation and the conversion. A fallible conversion needs fallible evidence; an infallible conversion can still have a failing operand.
 - Cast syntax does not contain the target in parentheses or after the expression.
+
+Implicit failure and builtin `Error!` can share the cast expression's handler.
+`cast!` and `catch` on the same cast remain invalid. Catch does not legalise
+invalid cast evidence. See @./#fallible-casts (Fallible casts).
 
 ### Removed conversion constructors
 

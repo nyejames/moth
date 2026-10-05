@@ -19,9 +19,11 @@ use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
     ExternalReturnSlot, ExternalSignatureType,
 };
+use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -32,7 +34,9 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, param_with_datatype,
     reference_expr_with_datatype, symbol, test_if_branch_metadata, test_source_location,
 };
-use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
+use crate::compiler_frontend::tests::borrow_fixture_support::{
+    assert_borrow_error_kind, assert_invalid_mutable_access_reason, run_borrow_checker,
+};
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -486,6 +490,247 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             .optional_transfer,
         OptionalTransferStatus::Transfer
     );
+}
+
+#[test]
+fn mutable_alias_final_read_in_same_statement_blocks_source_read() {
+    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+
+    for comparison in ["data is writer", "writer is data"] {
+        let source = format!("data ~= 1\nwriter ~= data\nsame = {comparison}\n");
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let external_package_registry = default_external_package_registry(&mut string_table);
+        let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+            .expect_err("exclusive holder is still active during its final-read statement");
+        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    }
+}
+
+#[test]
+fn mutable_alias_reachable_write_keeps_loan_active() {
+    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+
+    for body in [
+        "snapshot = copy data\nif flag:\nwriter = 2\n;\n",
+        "observed = writer\nsnapshot = copy data\nif flag:\nwriter = 2\n;\n",
+        "loop flag:\nwriter = 2\nsnapshot = copy data\n;\n",
+    ] {
+        let source = format!("probe |flag Bool|:\ndata ~= 1\nwriter ~= data\n{body};\n");
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let external_package_registry = default_external_package_registry(&mut string_table);
+        let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+            .expect_err("a reachable write through the holder keeps its exclusive loan active");
+        assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+    }
+}
+
+#[test]
+fn loop_local_alias_next_declaration_does_not_prolong_previous_loan() {
+    let source = "probe |flag Bool|:\n\
+                  data ~= 1\nloop flag:\nwriter ~= data\n\
+                  observed = copy writer\nsnapshot = copy data\n;\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("the observed loop-local loan ends before the source read each iteration");
+}
+
+#[test]
+fn unequal_path_diamond_expires_alias_after_merge_final_read() {
+    for reverse_numbering in [false, true] {
+        for mutable_alias in [false, true] {
+            check_unequal_path_alias_activity(reverse_numbering, mutable_alias, false);
+        }
+    }
+}
+
+#[test]
+fn unequal_path_diamond_keeps_alias_used_on_one_future_branch_active() {
+    for reverse_numbering in [false, true] {
+        for mutable_alias in [false, true] {
+            check_unequal_path_alias_activity(reverse_numbering, mutable_alias, true);
+        }
+    }
+}
+
+fn check_unequal_path_alias_activity(
+    reverse_numbering: bool,
+    mutable_alias: bool,
+    later_branch_use: bool,
+) {
+    use crate::compiler_frontend::compiler_messages::{
+        BorrowDiagnosticKind, InvalidMutableAccessReason,
+    };
+    use crate::compiler_frontend::tests::hir_fixture_support::{
+        bool_expression, expression, statement,
+    };
+
+    let source = "scores ~{String = Int} = {\"Priya\" = 10}\nresult = scores\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let root = find_local_by_name(&hir, &path_fork, &string_table, "scores")
+        .expect("fixture declares the map root");
+    let result = find_local_by_name(&hir, &path_fork, &string_table, "result")
+        .expect("fixture declares the result alias");
+    let start = hir.start_function.expect("fixture has a start function");
+    let entry_id = hir.functions[start.0 as usize].entry;
+    let entry = &mut hir.blocks[entry_id.0 as usize];
+    let region = entry.region;
+    let result_local = entry
+        .locals
+        .iter_mut()
+        .find(|local| local.id == result)
+        .expect("result is declared in the entry region");
+    result_local.mutable = true;
+    let result_type = result_local.ty;
+    let assignment_index = entry
+        .statements
+        .iter()
+        .position(|statement| {
+            matches!(&statement.kind, HirStatementKind::Assign { target: HirPlace::Local(local), .. }
+                if *local == result)
+        })
+        .expect("fixture binds the result alias");
+    let success_assignment = entry.statements.remove(assignment_index);
+    let mut handler_assignment = success_assignment.clone();
+    handler_assignment.id = HirNodeId(80_000);
+    let HirStatementKind::Assign { value, .. } = &mut handler_assignment.kind else {
+        unreachable!("the selected statement is an assignment");
+    };
+    value.id = HirValueId(80_001);
+    if !mutable_alias {
+        hir.side_table
+            .bind_local_origin(result, HirLocalOriginKind::CompilerTemp, None, None);
+    }
+
+    // Both paths write the same result, but the error path has an adapter before its handler.
+    // BFS therefore visits the merge before the handler, independently of block numbering.
+    let base = hir.blocks.len() as u32;
+    let block_id = |offset| {
+        BlockId(
+            base + if reverse_numbering {
+                5 - offset
+            } else {
+                offset
+            },
+        )
+    };
+    let success = block_id(0);
+    let transfer = block_id(1);
+    let handler = block_id(2);
+    let merge = block_id(3);
+    let later_use = block_id(4);
+    let exit = block_id(5);
+    let load = |id, local| {
+        expression(
+            id,
+            HirExpressionKind::Load(HirPlace::Local(local)),
+            result_type,
+            region,
+            ValueKind::Place,
+        )
+    };
+    let jump = |target| HirTerminator::Jump {
+        target,
+        args: vec![],
+    };
+    let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
+    hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
+        condition: bool_expression(80_002, true, builtin_type_ids::BOOL, region),
+        then_block: success,
+        else_block: transfer,
+    };
+    let access = if mutable_alias {
+        // This exercises the companion active-mutable-loan check for a shared root read.
+        HirStatementKind::Expr(load(80_004, root))
+    } else {
+        HirStatementKind::MapOp {
+            op: HirMapOp::Clear,
+            receiver: load(80_004, root),
+            args: vec![],
+            result: None,
+        }
+    };
+    let mut blocks = vec![
+        HirBlock {
+            id: success,
+            region,
+            locals: vec![],
+            statements: vec![success_assignment],
+            terminator: jump(merge),
+        },
+        HirBlock {
+            id: transfer,
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: jump(handler),
+        },
+        HirBlock {
+            id: handler,
+            region,
+            locals: vec![],
+            statements: vec![handler_assignment],
+            terminator: jump(merge),
+        },
+        HirBlock {
+            id: merge,
+            region,
+            locals: vec![],
+            statements: vec![
+                statement(80_003, HirStatementKind::Expr(load(80_003, result)), 3),
+                statement(80_004, access, 4),
+            ],
+            terminator: if later_branch_use {
+                HirTerminator::If {
+                    condition: bool_expression(80_005, true, builtin_type_ids::BOOL, region),
+                    then_block: later_use,
+                    else_block: exit,
+                }
+            } else {
+                jump(exit)
+            },
+        },
+        HirBlock {
+            id: later_use,
+            region,
+            locals: vec![],
+            statements: vec![statement(
+                80_006,
+                HirStatementKind::Expr(load(80_006, result)),
+                6,
+            )],
+            terminator: jump(exit),
+        },
+        HirBlock {
+            id: exit,
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: exit_terminator,
+        },
+    ];
+    blocks.sort_by_key(|block| block.id.0);
+    hir.blocks.extend(blocks);
+
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table);
+    if later_branch_use {
+        let error = report.expect_err("one later-use branch must keep the alias active");
+        if mutable_alias {
+            assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
+        } else {
+            assert_invalid_mutable_access_reason(
+                &error,
+                InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
+            );
+        }
+    } else {
+        report.expect("the result's last read precedes access and must expire on this CFG");
+    }
 }
 
 // WHAT: hidden map-operation transfer facts that integration output cannot inspect.
@@ -1425,7 +1670,7 @@ fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValue
             collect_expression_values(&end, out);
             collect_expression_values(&ascending, out);
         }
-        HirStatementKind::Drop(_) => {}
+        HirStatementKind::Drop(_) | HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             collect_expression_values(&value, out)
         }
@@ -1528,4 +1773,243 @@ fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<Hir
             collect_expression_values(source, out);
         }
     }
+}
+
+#[test]
+fn catch_failed_argument_releases_earlier_shared_and_mutable_call_borrows() {
+    // The first argument retains an alias in a call-result scratch slot. Only the success
+    // continuation uses it; the handler must be able to rebind its source.
+    for parameter in ["String", "~String"] {
+        let access = if parameter == "~String" { "~" } else { "" };
+        let source = format!(
+            "identity |input {parameter}| -> String:\nreturn input\n;\n\
+             combine |text String, count Int| -> String:\nreturn text\n;\n\
+             probe |trigger Int| -> String:\n\
+             data ~= \"before\"\n\
+             return combine(identity({access}data), trigger + 2147483647) catch:\n\
+                 data = \"handler\"\n\
+                 then data\n\
+             ;\n;\n"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("an abandoned argument alias must not conflict with its handler");
+        let data = find_local_by_name(&hir, &path_fork, &string_table, "data")
+            .expect("the source binding must exist");
+        let handler_write = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .rfind(|statement| {
+                matches!(
+                    statement.kind,
+                    HirStatementKind::Assign { target: HirPlace::Local(local), .. } if local == data
+                )
+            })
+            .expect("the handler must rebind the source");
+        let state = &report.analysis.statement_entry_states[&handler_write.id];
+        let snapshot = state
+            .locals
+            .iter()
+            .find(|local| local.local == data)
+            .expect("the source must be visible in the handler");
+        assert!(snapshot.mode.contains(LocalMode::SLOT));
+        assert!(!snapshot.mode.is_definitely_uninit());
+        let first_call = hir.blocks.iter().flat_map(|block| &block.statements)
+            .find(|statement| matches!(&statement.kind, HirStatementKind::Call { args, .. }
+                if args.len() == 1 && matches!(args[0].kind, HirExpressionKind::Load(HirPlace::Local(local)) if local == data)))
+            .expect("the first argument must access the source before the failing argument");
+        let fact = report
+            .analysis
+            .statement_fact(first_call.id)
+            .expect("the earlier call must have a borrow fact");
+        if parameter == "~String" {
+            assert!(fact.mutable_roots.contains(&data));
+        } else {
+            assert!(fact.shared_roots.contains(&data));
+        }
+    }
+}
+
+#[test]
+fn catch_failed_argument_keeps_optional_transfer_consistent_with_handler_use() {
+    for (handler_value, expected_transfer) in [
+        ("data", OptionalTransferStatus::Borrow),
+        ("\"fallback\"", OptionalTransferStatus::Transfer),
+    ] {
+        let source = format!(
+            "produce |input String| -> String:\nreturn \"fresh\"\n;\n\
+             combine |text String, count Int| -> String:\nreturn text\n;\n\
+             probe |data ~String, trigger Int| -> String:\n\
+             return combine(produce(data), trigger + 2147483647) catch then {handler_value}\n;\n"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("optional transfers must respect the error continuation's future reads");
+        let data = find_local_by_name(&hir, &path_fork, &string_table, "data")
+            .expect("the source parameter must exist");
+        let argument = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match &statement.kind {
+                HirStatementKind::Call { args, .. }
+                    if args.len() == 1
+                        && matches!(args[0].kind,
+                            HirExpressionKind::Load(HirPlace::Local(local)) if local == data) =>
+                {
+                    Some(args[0].id)
+                }
+                _ => None,
+            })
+            .expect("the earlier produce call must receive the source parameter");
+        let fact = report
+            .analysis
+            .value_fact(argument)
+            .expect("the earlier argument must have its own optional-transfer fact");
+        assert!(fact.roots.contains(&data));
+        assert_eq!(fact.optional_transfer, expected_transfer);
+        let branch = hir
+            .blocks
+            .iter()
+            .find(|block| block.locals.iter().any(|local| local.id == data))
+            .expect("the protected region must hold the parameter");
+        let HirTerminator::FallibleBranch { error_block, .. } = branch.terminator else {
+            panic!("the later argument must have a real error edge");
+        };
+        let state = &report.analysis.block_entry_states[&error_block];
+        let snapshot = state
+            .locals
+            .iter()
+            .find(|local| local.local == data)
+            .expect("the error edge must track the original source");
+        assert!(
+            snapshot.mode.contains(LocalMode::SLOT),
+            "advisory transfer cannot invalidate mandatory source state"
+        );
+    }
+}
+
+#[test]
+fn catch_handler_numeric_failure_returns_outward_without_success_local() {
+    let source = "identity |input String| -> String:\nreturn input\n;\n\
+                  combine |text String, count Int| -> String:\nreturn text\n;\n\
+                  probe |input String, trigger Int| -> String, Error!:\n\
+                  return combine(identity(input), trigger + 2147483647) catch:\n\
+                      handler_local = \"handler\"\n\
+                      count = trigger + 2147483647\n\
+                      then handler_local\n\
+                  ;\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("a failing handler must use the enclosing function error lane");
+    let handler_local = find_local_by_name(&hir, &path_fork, &string_table, "handler_local")
+        .expect("the handler must declare its local");
+    let handler_block = hir
+        .blocks
+        .iter()
+        .find(|block| block.locals.iter().any(|local| local.id == handler_local))
+        .expect("the handler's block must exist");
+    let HirTerminator::FallibleBranch { error_block, .. } = handler_block.terminator else {
+        panic!("the handler's checked addition must branch");
+    };
+    let outward = &hir.blocks[error_block.0 as usize];
+    assert!(matches!(outward.terminator, HirTerminator::ReturnError(_)));
+    assert!(
+        outward.statements.is_empty(),
+        "a failing handler cannot commit its then value"
+    );
+    let result_local = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Assign {
+                target: HirPlace::Local(local),
+                value:
+                    HirExpression {
+                        kind: HirExpressionKind::Load(_),
+                        ..
+                    },
+            } if *local != handler_local => Some(*local),
+            _ => None,
+        })
+        .expect("the success path must have a result slot");
+    let outward_state = &report.analysis.block_entry_states[&outward.id];
+    let success_slot = outward_state
+        .locals
+        .iter()
+        .find(|local| local.local == result_local)
+        .expect("the result slot must be tracked on the outward edge");
+    assert!(success_slot.mode.is_definitely_uninit());
+}
+
+#[test]
+fn catch_handler_cannot_load_never_initialised_success_call_result() {
+    use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
+
+    let source = "identity |input String| -> String:\nreturn input\n;\n\
+                  combine |text String, count Int| -> String:\nreturn text\n;\n\
+                  probe |input String, trigger Int| -> String:\n\
+                  return combine(identity(input), trigger + 2147483647) catch then \"fallback\"\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let registry = default_external_package_registry(&mut string_table);
+    let record = hir
+        .catch_protected_calls
+        .iter()
+        .find(|record| {
+            hir.blocks.iter().flat_map(|block| &block.statements).any(|statement| {
+            statement.id == record.statement
+                && matches!(&statement.kind, HirStatementKind::Call { args, .. } if args.len() == 2)
+        })
+        })
+        .copied()
+        .expect("the complete protected call must record its handler");
+    let success_result = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match statement.kind {
+            HirStatementKind::Call {
+                result: Some(local),
+                ..
+            } if statement.id == record.statement => Some(local),
+            _ => None,
+        })
+        .expect("the protected call must have a success local");
+    let success_type = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.locals)
+        .find(|local| local.id == success_result)
+        .expect("the result local must be declared")
+        .ty;
+    let handler = &mut hir.blocks[record.handler.block.0 as usize];
+    // Source scoping prevents naming this scratch slot. Inject its read, as the scope suite
+    // does for dead locals, to protect the borrow consumer's mandatory initialisation rule.
+    handler.statements.insert(
+        0,
+        HirStatement {
+            id: HirNodeId(90_000),
+            kind: HirStatementKind::Expr(HirExpression {
+                id: HirValueId(90_000),
+                kind: HirExpressionKind::Load(HirPlace::Local(success_result)),
+                ty: success_type,
+                value_kind: ValueKind::Place,
+                region: handler.region,
+                span: None,
+            }),
+            span: None,
+        },
+    );
+    let error = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect_err("the handler must not read the skipped outer call's result");
+    assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
 }

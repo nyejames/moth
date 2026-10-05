@@ -88,6 +88,21 @@ pub(crate) enum DiagnosticLabelMessage {
     GenericInferencePreviousEvidence,
     /// Marks the original immutable binding declaration for assignment-target diagnostics.
     ImmutableBindingDeclaration,
+    TypedFailureProducer {
+        error_type_id: TypeId,
+    },
+    ImplicitFailureProducer,
+    BuiltinFailureCall,
+    BuiltinFailureOrigin,
+    /// Marks a compound-assignment write-back into the target type.
+    ///
+    /// WHAT: identifies the later conversion into the compound target that still
+    ///       escapes after the RHS work was handled, naming the canonical target.
+    /// WHY: the plain numeric-origin label would blame the already-handled
+    ///      arithmetic; this label keeps the write-back distinct at the renderer.
+    BuiltinWriteBackOrigin {
+        target_type_id: TypeId,
+    },
 }
 
 impl DiagnosticLabelMessage {
@@ -111,7 +126,12 @@ impl DiagnosticLabelMessage {
             | DiagnosticLabelMessage::GenericInstantiationBodySite
             | DiagnosticLabelMessage::GenericInstantiationDeclarationSite
             | DiagnosticLabelMessage::GenericInferencePreviousEvidence
-            | DiagnosticLabelMessage::ImmutableBindingDeclaration => {}
+            | DiagnosticLabelMessage::ImmutableBindingDeclaration
+            | DiagnosticLabelMessage::TypedFailureProducer { .. }
+            | DiagnosticLabelMessage::ImplicitFailureProducer
+            | DiagnosticLabelMessage::BuiltinFailureCall
+            | DiagnosticLabelMessage::BuiltinFailureOrigin
+            | DiagnosticLabelMessage::BuiltinWriteBackOrigin { .. } => {}
         }
     }
 }

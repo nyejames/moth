@@ -1,0 +1,23 @@
+Bucket = |
+    level U8,
+|
+
+nudge |box ~Bucket, step U8| -> U8:
+    box.level += step
+    return box.level
+;
+safe_nudge |box ~Bucket, step U8| -> U8, Error!:
+    return nudge(~box, step)
+;
+failed ~= Bucket(level = 200)
+failed_step U8 = 100
+failed_code ~U32 = 0
+failed_result = safe_nudge(~failed, failed_step) catch |field_err|:
+    failed_code = field_err.code
+    then copy failed.level
+;
+failed_level U8 = copy failed.level
+ok_box ~= Bucket(level = 200)
+ok_result = safe_nudge(~ok_box, 50) catch then 0
+ok_level U8 = copy ok_box.level
+[: field writeback level=[failed_level] code=[failed_code] recovered=[failed_result] exact=[ok_result] exact-level=[ok_level]]

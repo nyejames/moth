@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::const_values::body_local::insert_body_local_c
 use crate::compiler_frontend::ast::const_values::store::{
     ConstTemplateValue, ConstValueStore, ConstValueStoreError,
 };
+use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::generic_functions::{
     ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
 };
@@ -32,8 +33,13 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidFallibleHandlingReason,
+};
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -273,7 +279,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // The authored assertion message must remain available to the authoritative AST
         // type/TIR boundary validation above. Only after that validation succeeds may AST
         // finalization discard compile-time-inactive executable message state.
-        discard_inactive_assertion_messages(&mut emitted.ast);
+        discard_inactive_assertion_messages(&mut emitted.ast)
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.path_fork
@@ -309,6 +316,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         self.validate_specialized_function_terminality(
             &emitted.validated_generic_template_bodies,
             None,
+            &emitted.warnings,
+            string_table,
+        )?;
+        self.validate_generic_builtin_failure_boundaries(
+            &emitted.validated_generic_template_bodies,
+            &emitted.ast,
             &emitted.warnings,
             string_table,
         )?;
@@ -562,6 +575,129 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 self.error_messages(*error, warnings, string_table)
             }
         }
+    }
+
+    /// Validate dormant contracts against the closed facts of every retained local typed body.
+    /// Template verdicts remain AST-local; concrete instances still undergo HIR convergence.
+    fn validate_generic_builtin_failure_boundaries(
+        &self,
+        nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        warnings: &[CompilerDiagnostic],
+        string_table: &StringTable,
+    ) -> Result<(), CompilerMessages> {
+        if nodes.is_empty() {
+            return Ok(());
+        }
+
+        let builtin_error_type = self
+            .environment
+            .type_environment
+            .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::Error,
+            ));
+        let template_ir_store = self.context.template_ir_store.borrow();
+        let summaries =
+            AstBuiltinFailureSummaries::compute(&[nodes, concrete_nodes], &template_ir_store)
+                .map_err(|error| self.error_messages(error, warnings, string_table))?;
+        for node in nodes {
+            let NodeKind::Function(path, signature, _) = &node.kind else {
+                continue;
+            };
+            let Some(pending) = summaries.function_facts(*path) else {
+                continue;
+            };
+            for check in &pending.body.deferred_custom_catches {
+                let candidate = check
+                    .candidates
+                    .iter()
+                    .find(|candidate| summaries.is_active(candidate));
+                if check.eligibility_only {
+                    if candidate.is_some() {
+                        continue;
+                    }
+                    return Err(CompilerMessages::from_diagnostic_with_warnings(
+                        CompilerDiagnostic::invalid_fallible_handling(
+                            InvalidFallibleHandlingReason::CatchOnNonFallible,
+                            check.catch_span,
+                        ),
+                        warnings.to_owned(),
+                        string_table,
+                    ));
+                }
+                if let Some(candidate) = candidate {
+                    return Err(CompilerMessages::from_diagnostic_with_warnings(
+                        CompilerDiagnostic::invalid_fallible_handling(
+                            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                                error_type_id: check.error_type_id,
+                                typed_producer_span: check.typed_producer_span,
+                                implicit_producer_span: candidate.span,
+                            },
+                            check.catch_span,
+                        ),
+                        warnings.to_owned(),
+                        string_table,
+                    )
+                    .with_type_context_for_all_diagnostics(
+                        self.environment.type_environment.clone(),
+                    ));
+                }
+            }
+            if let Some(contributor) = pending
+                .assertion_message_calls
+                .iter()
+                .find(|contributor| summaries.is_active(contributor))
+            {
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    CompilerDiagnostic::invalid_fallible_handling(
+                        InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+                        contributor.span.or(node.span),
+                    ),
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+            }
+            let custom_error = match signature.error_return_type_id() {
+                Some(error_type) if Some(error_type) == builtin_error_type => continue,
+                Some(error_type) => Some(error_type),
+                None if self
+                    .environment
+                    .lookups
+                    .exported_callable_paths
+                    .contains(path) =>
+                {
+                    None
+                }
+                None => continue,
+            };
+            let contributor = summaries.first_active(&pending.body.implicit);
+            let Some(contributor) = contributor else {
+                continue;
+            };
+            let witness = summaries.witness(contributor);
+            let reason = match custom_error {
+                Some(error_type_id) => {
+                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                        error_type_id,
+                        witness: Box::new(witness),
+                    }
+                }
+                None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                    witness: Box::new(witness),
+                },
+            };
+            return Err(CompilerMessages::from_diagnostic_with_warnings(
+                CompilerDiagnostic::invalid_fallible_handling(
+                    reason,
+                    node.span.or(contributor.span),
+                ),
+                warnings.to_owned(),
+                string_table,
+            )
+            .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+        }
+        Ok(())
     }
 
     fn validate_specialized_function_terminality(

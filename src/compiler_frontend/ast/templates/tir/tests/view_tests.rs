@@ -47,6 +47,7 @@ fn bool_expression() -> Expression {
     Expression {
         kind: ExpressionKind::Bool(true),
         type_id: builtin_type_ids::BOOL,
+        failure_facts: Default::default(),
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
@@ -1208,6 +1209,7 @@ fn bool_expression_with_span(span: SourceSpan) -> Expression {
     Expression {
         kind: ExpressionKind::Bool(true),
         type_id: builtin_type_ids::BOOL,
+        failure_facts: Default::default(),
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,

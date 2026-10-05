@@ -90,6 +90,14 @@ cast targets, generic cast traits, broad return-type-directed conversion and
 implicit conversion chosen from distant context remain outside scope. Cast
 evidence stays compiler-owned and explicit.
 
+### Failure conversion and extra failure channels
+
+User-defined failure-conversion traits, error-conversion hooks and generic
+adapter searches stay outside the language. Only canonical `Error` receives
+implicit failure automatically; a custom error needs explicit mapping. Public
+bare-failure signatures such as a `fails` marker, a third escaping error
+channel and unchecked modes that bypass numeric checks are also outside scope.
+
 ### Exceptions and catchable panic systems
 
 Expected failures use `Error!`. Invariants use `assert`. Moth has no public

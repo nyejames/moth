@@ -4,7 +4,7 @@ use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
 use crate::backends::wasm::lir::instructions::{
     WasmCalleeRef, WasmLirStmt, WasmLirTerminator, WasmScalarComparisonOp, WasmScalarComparisonType,
 };
-use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage};
+use crate::backends::wasm::lir::linkage::{WasmExportKind, WasmFunctionLinkage, WasmImportKind};
 use crate::backends::wasm::lir::types::{
     WasmAbiType, WasmLirFunctionId, WasmLirLocalId, WasmLocalRole,
 };
@@ -140,7 +140,7 @@ fn assertion_failure_module(
 }
 
 #[test]
-fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() {
+fn wasm_assertion_lowering_calls_host_before_trap_and_rejects_runtime_messages() {
     for message_evaluation in [
         HirAssertionMessageEvaluation::Default,
         HirAssertionMessageEvaluation::Folded,
@@ -163,7 +163,7 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .expect("static assertion messages should lower to Wasm traps");
+        .expect("static assertion messages should lower to a host call and trap");
         let function = result
             .lir_module
             .functions
@@ -173,6 +173,22 @@ fn wasm_assertion_lowering_traps_static_messages_and_rejects_runtime_messages() 
         assert!(matches!(
             function.blocks[0].terminator,
             WasmLirTerminator::Trap
+        ));
+        let [import] = result.lir_module.imports.as_slice() else {
+            panic!("assertions should demand exactly one host import");
+        };
+        assert_eq!(import.module_name, "host");
+        assert_eq!(import.item_name, "assertion_failed");
+        let WasmImportKind::Function(signature) = &import.kind;
+        assert_eq!(signature.params, [WasmAbiType::Handle]);
+        assert!(signature.results.is_empty());
+        assert!(matches!(
+            function.blocks[0].statements.last(),
+            Some(WasmLirStmt::Call {
+                dst: None,
+                callee: WasmCalleeRef::Import(id),
+                args,
+            }) if *id == import.id && args.len() == 1
         ));
     }
 
@@ -2008,10 +2024,11 @@ fn rejects_unsupported_host_call_with_diagnostic() {
 }
 
 #[test]
-fn selected_function_policy_ignores_unselected_host_calls() {
+fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
+    let (mut type_environment, types) = build_type_environment();
+    let option_string = type_environment.intern_option(types.string);
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -2042,7 +2059,20 @@ fn selected_function_policy_ignores_unselected_host_calls() {
             },
             1,
         )],
-        terminator: HirTerminator::Return(unit_expression(901, types.unit, RegionId(0))),
+        terminator: HirTerminator::AssertFailure {
+            message: expression(
+                901,
+                HirExpressionKind::VariantConstruct {
+                    carrier: HirVariantCarrier::Option,
+                    variant_index: 0,
+                    fields: vec![],
+                },
+                option_string,
+                RegionId(0),
+                ValueKind::Const,
+            ),
+            message_evaluation: HirAssertionMessageEvaluation::Default,
+        },
     };
 
     let start_function = HirFunction {
@@ -2101,7 +2131,7 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         &type_environment,
         &path_fork.snapshot_table(),
     )
-    .expect("unreachable unsupported host call should not be lowered");
+    .expect("unreachable host calls and assertions should not be lowered");
 
     assert_eq!(result.lir_module.imports.len(), 0);
     assert_eq!(

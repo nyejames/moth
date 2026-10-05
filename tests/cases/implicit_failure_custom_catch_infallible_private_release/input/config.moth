@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_custom_catch_infallible_private_release",
+    entry_root = "src",
+)
+html #= ()

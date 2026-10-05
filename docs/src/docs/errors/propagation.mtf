@@ -1,4 +1,5 @@
-Postfix `!` propagates a fallible value's error through the enclosing function.
+Postfix `!` propagates a typed error through the enclosing function's compatible
+error slot.
 
 [codeblock, $code("moth"):
     wrapper |text String| -> Int, Error!:
@@ -40,5 +41,36 @@ Old inline fallback and bang-handler spellings are invalid.
 
 Use `catch then ...` or a block `catch:` handler for recovery.
 
-Checked numeric recovery is compiler-owned control flow. Numeric operators do
-not become first-class source-visible `Error!` expressions.
+### Implicit private propagation
+
+Checked numeric failure is compiler-owned control flow, not a first-class
+source-visible `Error!` expression. Under the accepted contract, private
+functions without an error slot infer and propagate it within the same semantic
+module. Their internal callers do not add postfix `!`.
+
+[codeblock, $code("moth"):
+    product |left Int, right Int| -> Int:
+        return left * right
+    ;
+
+    export:
+        checked_product |left Int, right Int| -> Int, Error!:
+            return product(left, right)
+        ;
+
+        product_or_zero |left Int, right Int| -> Int:
+            return product(left, right) catch then 0
+        ;
+    ;
+]
+
+`checked_product` materialises escaping implicit failure as a built-in `Error`.
+`product_or_zero` discharges it locally. An otherwise identical exported product
+without an error slot or recovery is rejected when multiplication may fail.
+Calling it with small values in one consumer does not repair its public contract.
+
+A custom `E!` function must recover locally or map implicit failure explicitly
+with `catch` and `return!`. It receives no automatic conversion or hidden extra
+channel. Explicit typed errors still require `!` or an applicable catch.
+See @./#error-returns (Error returns) for the boundary rules and @../progress
+(Progress) for current compiler support.

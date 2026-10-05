@@ -1,0 +1,111 @@
+trace_a ~U32 = 0
+trace_b ~U32 = 0
+trace_c ~U32 = 0
+trace_d ~U32 = 0
+trace_e ~U32 = 0
+trace_f ~U32 = 0
+trace_g ~U32 = 0
+trace_h ~U32 = 0
+trace_i ~U32 = 0
+trace_j ~U32 = 0
+trace_k ~U32 = 0
+
+note_private |seen ~U32, value Int| -> Int:
+    seen = seen + 1
+    return value + 2147483647
+;
+
+note_typed |seen ~U32, value Int| -> Int, Error!:
+    seen = seen + 10
+    if value is 2:
+        return! Error("typed failed")
+    ;
+    return value
+;
+
+fetch |seen ~U32, value Int| -> {Int}:
+    seen = seen + 1
+    probe = value + 2147483647
+    return {10, probe, 30}
+;
+
+combine |left_arg Int, right_arg Int| -> Int:
+    return left_arg + right_arg
+;
+
+big Int = 2147483647
+ok Int = 0 - 2147483646
+
+-- A: private call fails first; the typed call never runs.
+code_a ~U32 = 0
+first_a = combine(note_private(~trace_a, 2), note_typed(~trace_a, 2)) catch |err_a|:
+    code_a = err_a.code
+    then 0 - 1
+;
+spent_a U32 = trace_a
+
+-- B: typed call fails first; the private call never runs.
+code_b ~U32 = 0
+first_b = combine(note_typed(~trace_b, 2), note_private(~trace_b, 2)) catch |err_b|:
+    code_b = err_b.code
+    then 0 - 2
+;
+spent_b U32 = trace_b
+
+-- C: private call runs, then the numeric operand fails.
+code_c ~U32 = 0
+first_c = combine(note_private(~trace_c, ok), big + 1) catch |err_c|:
+    code_c = err_c.code
+    then 0 - 3
+;
+spent_c U32 = trace_c
+
+-- D: numeric operand fails first; the private call never runs.
+code_d ~U32 = 0
+first_d = combine(big + 1, note_private(~trace_d, ok)) catch |err_d|:
+    code_d = err_d.code
+    then 0 - 4
+;
+spent_d U32 = trace_d
+
+-- E: typed call fails first; the numeric operand never evaluates.
+code_e ~U32 = 0
+first_e = combine(note_typed(~trace_e, 2), big + 1) catch |err_e|:
+    code_e = err_e.code
+    then 0 - 5
+;
+spent_e U32 = trace_e
+-- F: numeric operand fails first; the typed call never runs.
+code_f ~U32 = 0
+first_f = combine(big + 1, note_typed(~trace_f, 2)) catch |err_f|:
+    code_f = err_f.code
+    then 0 - 6
+;
+spent_f U32 = trace_f
+
+-- G: receiver fails first; the argument never runs.
+code_g ~U32 = 0
+first_g = fetch(~trace_g, 2).get(note_typed(~trace_g, 2)) catch |err_g|:
+    code_g = err_g.code
+    then 0 - 7
+;
+spent_g U32 = trace_g
+
+-- H: receiver runs, then the argument fails.
+code_h ~U32 = 0
+first_h = fetch(~trace_h, ok).get(note_typed(~trace_h, 2)) catch |err_h|:
+    code_h = err_h.code
+    then 0 - 8
+;
+spent_h U32 = trace_h
+
+-- I: both calls succeed; values flow left to right.
+first_i = combine(note_private(~trace_i, ok), note_typed(~trace_j, 1)) catch then 0 - 9
+spent_i U32 = trace_i
+spent_j U32 = trace_j
+
+-- K: receiver call succeeds; item flows through get.
+first_k = fetch(~trace_k, ok).get(1) catch then 0 - 10
+spent_k U32 = trace_k
+
+[: order a=[first_a] ac=[code_a] as=[spent_a] b=[first_b] bc=[code_b] bs=[spent_b] c=[first_c] cc=[code_c] cs=[spent_c] d=[first_d] dc=[code_d] ds=[spent_d] e=[first_e] ec=[code_e] es=[spent_e] f=[first_f] fc=[code_f] fs=[spent_f] g=[first_g] gc=[code_g] gs=[spent_g] h=[first_h] hc=[code_h] hs=[spent_h] i=[first_i] is=[spent_i] js=[spent_j] k=[first_k] ks=[spent_k]]

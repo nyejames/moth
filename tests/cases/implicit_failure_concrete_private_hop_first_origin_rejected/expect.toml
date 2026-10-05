@@ -1,0 +1,21 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
+path = "input/@page.moth"
+line = 11
+count = 1
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 12
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 2
+line = 5
+column = 20

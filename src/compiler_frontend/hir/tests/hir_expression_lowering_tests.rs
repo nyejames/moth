@@ -15,9 +15,11 @@ use crate::compiler_frontend::ast::expressions::expression::{
     FallibleHandling, Operator, ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::MapLiteralEntry;
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotKey, TemplateType,
 };
@@ -1020,7 +1022,7 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
     builder.test_register_function_with_return_type(function_name, FunctionId(35), carrier_type);
     let test_scope = function_name;
 
-    let handled_call_expr = Expression::handled_fallible_function_call_with_typed_arguments(
+    let mut handled_call_expr = Expression::handled_fallible_function_call_with_typed_arguments(
         function_name,
         vec![],
         vec![builtin_type_ids::INT],
@@ -1028,6 +1030,11 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
         &mut builder.type_environment,
         span,
     );
+    // Parser-produced catches carry a resolved HandledByCatch disposition on the protected
+    // node; synthetic fixtures set it explicitly to match.
+    handled_call_expr.failure_facts.disposition = FailureDisposition::HandledByCatch {
+        error_type_id: builtin_type_ids::STRING,
+    };
     assert!(
         matches!(
             &handled_call_expr.kind,
@@ -1085,7 +1092,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
     assert_eq!(result_expr.type_id, carrier_type);
     let test_scope = crate::compiler_frontend::symbols::path_interner::PathId::ROOT;
 
-    let handled_expr = handled_result_expr(
+    let mut handled_expr = handled_result_expr(
         result_expr,
         FallibleHandling::Handler {
             error: None,
@@ -1105,6 +1112,17 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
         vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
         span,
     );
+    // Parser-produced catches carry a resolved HandledByCatch disposition on the protected
+    // node; synthetic fixtures set it explicitly to match.
+    let ExpressionKind::ValueBlock { block } = &mut handled_expr.kind else {
+        panic!("handled result fixture should wrap a value block");
+    };
+    let ValueBlock::Catch(catch_block) = &mut **block else {
+        panic!("handled result fixture should wrap a catch block");
+    };
+    catch_block.handled_value.failure_facts.disposition = FailureDisposition::HandledByCatch {
+        error_type_id: builtin_type_ids::STRING,
+    };
 
     let lowered = builder
         .lower_expression(&handled_expr)
@@ -3725,7 +3743,7 @@ fn external_fallible_float_call_catch_validates_success() {
 
     builder.test_register_function_with_return_type(function_name, FunctionId(100), carrier_type);
 
-    let handled_call_expr =
+    let mut handled_call_expr =
     Expression::handled_fallible_host_function_call_with_typed_arguments(
         crate::compiler_frontend::ast::expressions::expression::HandledFallibleHostFunctionCallInput {
             id: ExternalFunctionId::Synthetic(2),
@@ -3737,6 +3755,11 @@ fn external_fallible_float_call_catch_validates_success() {
         },
         &mut builder.type_environment,
     );
+    // Parser-produced catches carry a resolved HandledByCatch disposition on the protected
+    // node; synthetic fixtures set it explicitly to match.
+    handled_call_expr.failure_facts.disposition = FailureDisposition::HandledByCatch {
+        error_type_id: error_type,
+    };
 
     let catch_expr = wrap_catch_expression(
         handled_call_expr,

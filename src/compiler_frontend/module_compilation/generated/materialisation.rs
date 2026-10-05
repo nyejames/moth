@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
+use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
@@ -37,7 +38,9 @@ use crate::compiler_frontend::module_compilation::generated::transaction::{
 };
 use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
-use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -405,6 +408,21 @@ fn materialise_generated_request_inner<'build>(
         hir_module
             .function_ids_by_generated
             .insert(request.identity.clone(), function_id);
+        let root_failure_facts = hir_module
+            .function_failure_facts
+            .get_mut(&function_id)
+            .ok_or_else(|| {
+                PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    "Generated HIR omitted its requested root failure facts",
+                ))
+            })?;
+        if matches!(
+            request.identity.declaration(),
+            GeneratedDeclarationIdentity::Public(_)
+        ) && root_failure_facts.boundary == HirBuiltinFailureBoundary::InferPrivate
+        {
+            root_failure_facts.boundary = HirBuiltinFailureBoundary::ExportedNoSlot;
+        }
         increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
         let borrow_analysis = check_borrows(
             &mut generated_compiler,

@@ -1,6 +1,7 @@
 //! Host-function and start-invocation JavaScript emission tests.
 
 use super::support::*;
+use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -166,3 +167,97 @@ fn auto_invokes_start_function_when_enabled() {
 }
 
 // ---------------------------------------------------------------------------
+
+#[test]
+fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
+    for succeeds in [false, true] {
+        let mut path_fork = PathInternerFork::empty();
+        let mut string_table = StringTable::new();
+        let (type_environment, types) = build_type_environment();
+        let region = RegionId(0);
+        let terminator = if succeeds {
+            HirTerminator::ReturnSuccess(int_expression(2, 42, types.int, region))
+        } else {
+            HirTerminator::ReturnError(string_expression(
+                2,
+                "application-secret",
+                types.string,
+                region,
+            ))
+        };
+        let block = HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![],
+            statements: vec![statement(
+                1,
+                HirStatementKind::Call {
+                    target: CallTarget::External(ExternalFunctionId::IoLine),
+                    args: vec![string_expression(1, "start", types.string, region)],
+                    result: None,
+                },
+            )],
+            terminator,
+        };
+        let function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![],
+            return_type: types.fallible_int_string,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            "start_main",
+            vec![block],
+            function,
+            &[],
+        );
+        let mut config = default_config();
+        config.auto_invoke_start = true;
+        let output = lower_hir_to_js(
+            &module,
+            &BorrowCheckReport::default(),
+            &NumericProofs::default(),
+            &string_table,
+            config,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("fallible start should lower");
+        assert!(output.start_is_fallible);
+        let caller = output
+            .source
+            .split("(function () {")
+            .last()
+            .expect("generated entry caller");
+        assert!(caller.contains("typeof globalThis.__moth_record_entry_failure === \"function\""));
+        assert!(caller.contains(
+            "globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);"
+        ));
+        assert!(!caller.contains(".message"));
+        assert!(!caller.contains(".code"));
+
+        let script = format!(
+            "globalThis.__moth_record_entry_failure = (...details) => console.log(JSON.stringify(details));\n{}",
+            output.source
+        );
+        let runtime = std::process::Command::new("node")
+            .args(["--eval", &script])
+            .output()
+            .expect("Node.js is required for automatic start runtime tests");
+        assert_eq!(runtime.status.code(), Some(if succeeds { 0 } else { 1 }));
+        assert_eq!(
+            String::from_utf8(runtime.stdout).expect("UTF-8 output"),
+            if succeeds {
+                "start\n"
+            } else {
+                "start\n[0,\"Unknown error\",null]\n"
+            }
+        );
+        let stderr = String::from_utf8(runtime.stderr).expect("UTF-8 error output");
+        assert_eq!(stderr, if succeeds { "" } else { ENTRY_FAILURE_NOTICE });
+        assert!(!stderr.contains("application-secret"));
+        assert!(!output.source.contains("document"));
+    }
+}

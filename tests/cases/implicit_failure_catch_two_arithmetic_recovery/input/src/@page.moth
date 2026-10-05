@@ -1,0 +1,17 @@
+recover |seen ~String, left Int, right Int, offset Int| -> Int:
+    value = left * right + offset catch |err|:
+        seen = [: [err.code] [err.message]]
+        then 0
+    ;
+    return value
+;
+
+first_info ~= ""
+first = recover(~first_info, 50000, 50000, 1)
+first_report = copy first_info
+second_info ~= ""
+second = recover(~second_info, 2, 3, 2147483647)
+second_report = copy second_info
+exact = recover(~second_info, 2, 3, 4)
+
+[: first=[first] freport=[first_report] second=[second] sreport=[second_report] exact=[exact]]

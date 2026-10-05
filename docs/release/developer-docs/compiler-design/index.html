@@ -1548,7 +1548,20 @@ return __moth_read(b_l0);
 </script>
 <script>
 (function () {
-  if (typeof b_fn0 === "function") b_fn0();
+  try {
+    if (typeof b_fn0 === "function") b_fn0();
+  } catch (error) {
+    try {
+      if (typeof globalThis.__moth_record_startup_fault === "function") {
+        let category = "startup_fault";
+        try {
+          if (error !== null && typeof error === "object" && error.__moth_assertion === true) category = "assertion";
+        } catch (_) {}
+        globalThis.__moth_record_startup_fault(category, error);
+      }
+    } catch (_) {}
+    throw error;
+  }
 })();
 </script>
   </body>

@@ -1,0 +1,19 @@
+@bad_float.js unsafe_float
+
+load_code || -> Int, Error!:
+    value = unsafe_float()
+
+    if value > 0.0:
+        return 1
+    ;
+
+    return 0
+;
+
+code ~U32 = 0
+ignored = load_code() catch |err|:
+    code = err.code
+    then 0
+;
+
+io.line([: external_native_float64_nonfinite code=[code]])

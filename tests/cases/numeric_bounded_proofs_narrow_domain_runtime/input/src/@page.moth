@@ -1,10 +1,10 @@
--- Bounded-integer proof coverage for the paired backends. Every operation
--- below is provably safe from its operand types, a narrow promotion domain, a
--- literal divisor interval excluding zero, or an infallible cast whose single
--- cached local feeds the proven operation that follows it immediately, so both
--- backends may elide the checks while still computing and rendering the same
--- exact values. Operands arrive through parameters so no operation folds, and
--- the final retained-but-valid controls keep their checks.
+-- Narrow fixed operand ranges let the compiler discharge selected additions,
+-- subtractions, multiplications and negation when their promoted results fit.
+-- HTML renders all exact values from parameter operands without constant folding.
+-- Other operations retain checked failure, including wide_minus_zero's
+-- subtraction after an infallible cast, division, power and the final pair-add.
+-- HTML-Wasm rejects the recoverable numeric capability at wide_minus_zero,
+-- before runtime, rather than computing and rendering the values.
 
 u8_sum |left U8, right U8| -> U32:
     return left + right

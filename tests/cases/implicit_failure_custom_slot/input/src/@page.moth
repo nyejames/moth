@@ -1,0 +1,5 @@
+Failure = | message String |
+
+area |left Int, right Int| -> Int, Failure!:
+    return left * right
+;

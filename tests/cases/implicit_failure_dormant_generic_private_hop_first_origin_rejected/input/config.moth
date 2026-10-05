@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_dormant_generic_private_hop_first_origin_rejected",
+    entry_root = "src",
+)
+html #= ()

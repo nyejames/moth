@@ -1,0 +1,24 @@
+double |value Int| -> Int:
+    return value + 2147483647
+;
+
+recover_direct |value Int| -> Int:
+    return double(value) catch then -1
+;
+
+recover_bound |value Int| -> Int:
+    recovered = double(value) catch |err|:
+        then 0 - 1
+    ;
+    return recovered
+;
+bound_code ~U32 = 0
+direct = recover_direct(2)
+direct_ok = recover_direct(0 - 2147483646)
+via_helper = recover_bound(2)
+bound = double(2) catch |bound_err|:
+    bound_code = bound_err.code
+    then 0 - 1
+;
+
+[: direct private catch direct=[direct] ok=[direct_ok] helper=[via_helper] bound=[bound] code=[bound_code]]

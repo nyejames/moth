@@ -1,0 +1,9 @@
+load_name |missing Bool| -> String, Error!:
+    if missing:
+        return! Error(message = "<private startup message>", code = 0)
+    ;
+    return "Priya"
+;
+
+name = load_name(true)!
+[: This must not be published: [name]]

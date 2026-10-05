@@ -49,10 +49,9 @@ impl<'a> HirBuilder<'a> {
 
     /// Emits the implicit return of the fragment accumulator for entry `start()`.
     ///
-    /// WHAT: loads the fragment vec local and emits `HirTerminator::Return`.
-    /// WHY: the entry start body contains only `PushStartRuntimeFragment` nodes
-    ///      with no explicit return; the return type is `Vec<String>` consumed
-    ///      by the builder as the ordered fragment list.
+    /// WHAT: loads the fragment vec local and returns through the signature's success channel.
+    /// WHY: the provisional builtin `Error!` start uses the existing fallible carrier.
+    ///      Failure-lane installation narrows it only after escaping failure is known.
     ///
     /// Returns `true` only when the return was actually emitted.
     pub(super) fn maybe_emit_entry_fragment_return(
@@ -72,7 +71,17 @@ impl<'a> HirBuilder<'a> {
         let vec_type = self.local_type_id_or_error(vec_local, span)?;
         let region = self.current_region_or_error(span)?;
         let load_expr = self.make_local_load_expression(vec_local, vec_type, span, region);
-        self.emit_terminator(current_block, HirTerminator::Return(load_expr), span)?;
+        let function = self.function_by_id_or_error(function_id, span)?;
+        let terminator = if self
+            .type_environment
+            .fallible_carrier_slots(function.return_type)
+            .is_some()
+        {
+            HirTerminator::ReturnSuccess(load_expr)
+        } else {
+            HirTerminator::Return(load_expr)
+        };
+        self.emit_terminator(current_block, terminator, span)?;
 
         Ok(true)
     }

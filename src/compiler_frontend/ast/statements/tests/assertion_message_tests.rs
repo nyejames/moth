@@ -7,9 +7,10 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
-    EnclosingExitEffect, assert_message_escape_diagnostic, classify_assertion_message_effect,
+    assert_message_escape_diagnostic, classify_assertion_message_effect,
 };
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::failure_classification::EnclosingExitEffect;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,

@@ -27,5 +27,12 @@ Files in the same module can see each other's declarations. Other modules can
 only see what the root's `export:` block makes public. The `#` marker means
 compile-time constant, not public visibility.
 
+Private functions without an error slot can propagate implicit numeric failure
+within their module without postfix `!` at each internal call. Exported
+callables without an error slot must handle that failure, not silently add an
+error channel. Built-in `Error!` can deliver it; custom errors need recovery or
+explicit mapping. Traits and generic conformance cannot widen the public
+signature. See @../progress (Progress) for current support.
+
 Re-export direct selections inside the same current block. Don't use `$export`
 until its migration and syntax land.

@@ -478,8 +478,8 @@ Holder     -&gt; Blob</code></pre><p>Inserting a <code>Holder</code> adds one di
              <td style=""><p> map destruction</p></td> <td style=""><p> removes all stored key and value obligations and destroys the backing-storage domain</p></td>
         </tr>
             
-</table><p>Consider a map whose key and value point to the same allocation family:</p><pre style=""><code class='codeblock'>text <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> large value<span class='moth-code-delimiter'>]</span>
-values <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-delimiter'>}</span>
+</table><p>Consider a map whose key and value point to the same allocation family:</p><p>Source <code>{=}</code> is accepted empty-map syntax but is not implemented yet; see <a href="../../../docs/progress">Progress matrix</a> for current support.</p><pre style=""><code class='codeblock'>text <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> large value<span class='moth-code-delimiter'>]</span>
+values <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>}</span>
 
 <span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span>text, text<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span> <span class='moth-code-comment'>-- final use of text</span>
 removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>remove</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;large value&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span></code></pre><p>The new-key insertion creates two direct persistent obligations to the same allocation family, one from the stored key and one from the stored value. Because this was the final use of <code>text</code>, its affine root can be reclassified into exactly one of those two edges. The second edge is a genuinely new obligation.</p><pre style=""><code class='codeblock'>fresh text root:
@@ -975,7 +975,20 @@ return __moth_read(b_l0);
 </script>
 <script>
 (function () {
-  if (typeof b_fn0 === "function") b_fn0();
+  try {
+    if (typeof b_fn0 === "function") b_fn0();
+  } catch (error) {
+    try {
+      if (typeof globalThis.__moth_record_startup_fault === "function") {
+        let category = "startup_fault";
+        try {
+          if (error !== null && typeof error === "object" && error.__moth_assertion === true) category = "assertion";
+        } catch (_) {}
+        globalThis.__moth_record_startup_fault(category, error);
+      }
+    } catch (_) {}
+    throw error;
+  }
 })();
 </script>
   </body>

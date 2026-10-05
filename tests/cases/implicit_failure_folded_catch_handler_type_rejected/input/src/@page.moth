@@ -1,0 +1,3 @@
+value Int = 1 + 2 catch:
+    then "wrong"
+;

@@ -1,9 +1,9 @@
-//! Fallible suffix parsing helpers.
+//! Explicit fallible propagation and complete-expression recovery.
 //!
-//! WHAT: parses postfix propagation plus `catch` recovery handler suffixes for fallible
-//! expressions and calls.
-//! WHY: fallible handling has its own control-flow rules and statement-body parsing, which would
-//! otherwise make the general expression parser too large and too coupled to function bodies.
+//! Expression completion selects one receiving-boundary catch after ordinary reduction.
+//! This owner resolves producer compatibility, types the optional binding and validates handler
+//! success slots or termination. Call finishers consume only postfix propagation; neither
+//! implicit failure facts nor handlers create a source-level carrier type.
 
 mod catch_handler;
 mod parser;
@@ -22,8 +22,9 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 pub(crate) use parser::{
     CastCatchSite, FallibleCallSite, FallibleHostCallSite, HandledFallibleCall,
-    HandledFallibleHostCall, fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
-    parse_fallible_handling_suffix_for_call_expression,
+    HandledFallibleHostCall, compatible_expression_error_type, complete_catch_failure_fact,
+    fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
+    parse_completed_expression_catch, parse_fallible_handling_suffix_for_call_expression,
     parse_fallible_handling_suffix_for_expression,
     parse_fallible_handling_suffix_for_host_call_expression, wrap_catch_expression,
 };
@@ -31,16 +32,11 @@ pub(crate) use parser::{
 const FUNCTION_CALL_STAGE: &str = "Function Call Parsing";
 const EXPRESSION_STAGE: &str = "Expression Parsing";
 
-/// Returns true when the current token starts a fallible-handling suffix (`!`, `catch`,
-/// or a symbol followed by `!`).
+/// Returns whether the current token starts explicit typed propagation.
 ///
-/// WHAT: keeps suffix detection shared by free calls, receiver calls, collection builtins,
-///       and generic expression result handling.
-/// WHY: these entrypoints construct fallible carriers in different parser modules, but the
-///      syntax that consumes those carriers must stay identical.
-pub(crate) fn token_stream_starts_fallible_handling_suffix(token_stream: &AstCursor) -> bool {
+/// Recovery is selected only by expression completion; call finishers consume postfix `!`.
+pub(crate) fn token_stream_starts_typed_propagation_suffix(token_stream: &AstCursor) -> bool {
     token_stream.current_tag() == TokenTag::BANG
-        || token_stream.current_tag() == TokenTag::CATCH
         || (token_stream.current_tag() == TokenTag::SYMBOL
             && token_stream.peek_next_tag() == Some(TokenTag::BANG))
 }

@@ -1,0 +1,22 @@
+update |target ~U8, amount U8| -> U8:
+    target = 240
+    target += amount
+    return target
+;
+
+failed ~U8 = 200
+old ~U8 = 0
+code ~U32 = 0
+recovered = update(~failed, 20) catch |err|:
+    code = err.code
+    old = copy failed
+    failed = 7
+    then copy failed
+;
+
+succeeded ~U8 = 200
+exact = update(~succeeded, 10) catch then 0
+committed U8 = copy succeeded
+succeeded = 9
+
+[: writeback commit old=[old] code=[code] recovered=[recovered] failed=[failed] exact=[exact] committed=[committed] reborrowed=[succeeded]]

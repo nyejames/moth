@@ -1,0 +1,20 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+entry_error_code = 301
+rendered_output_exact = ""
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@page.moth"
+line = 2
+column = 18

@@ -9,6 +9,19 @@ use crate::backends::js::{
 };
 
 impl<'hir> JsEmitter<'hir> {
+    /// Assertion identity is structural so hosts never infer it from application text.
+    pub(crate) fn emit_runtime_assertion_helper(&mut self) {
+        self.emit_line("function __moth_assertion_error(message) {");
+        self.with_indent(|emitter| {
+            emitter.emit_line("const error = new Error(message);");
+            emitter
+                .emit_line("Object.defineProperty(error, \"__moth_assertion\", { value: true });");
+            emitter.emit_line("return error;");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
     /// Emits canonical builtin error helpers used by collection and cast lowering.
     ///
     /// WHAT: normalises location paths, constructs canonical error records, and provides hidden

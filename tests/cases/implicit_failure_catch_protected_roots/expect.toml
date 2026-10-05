@@ -1,0 +1,17 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " protected roots method=-1 mcode=301 field=-2 fcode=301 coll=-3 ccode=301"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0058"
+path = "input/@page.moth"
+line = 28

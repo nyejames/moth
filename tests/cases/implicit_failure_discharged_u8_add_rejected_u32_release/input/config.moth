@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_discharged_u8_add_rejected_u32_release",
+    entry_root = "src",
+)
+html #= ()

@@ -104,7 +104,7 @@ The JS backend speaks host values and functions. It leans on the host GC for rea
 
 `greet` in JavaScript form is ordinary host code that preserves Moth contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.
 
-`NumericProofs` lets JS replace a proven-safe checked integer operation with native carrier arithmetic and omit only the impossible checks; for a proven narrowing it omits only the range predicate. Operands still lower once, in source order. Trap operations assign the raw scalar result; `ReturnError` operations preserve the existing success branch and `{tag, value}` carrier. Narrowings retain their Number/BigInt carrier conversion and success branch/carrier. JavaScript's exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt operations remain exact. The Moth `Dec` domain, `Float`, binary floats, `Byte` and `Power` stay on checked paths.
+`NumericProofs` lets JS replace a proven-safe checked integer operation with native carrier arithmetic and omit only the impossible checks; for a proven narrowing it omits only the range predicate. Operands still lower once, in source order. Check elision is independent of failure delivery. Recoverable operations preserve their success branch and `{tag, value}` carrier. Narrowings retain their Number/BigInt carrier conversion and success branch/carrier. JavaScript's exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt operations remain exact. The Moth `Dec` domain, `Float`, binary floats, `Byte` and `Power` stay on checked paths.
 
 Emitted F16 values call native `Math.f16round`, so a JavaScript host executing F16 code must
 provide it built in. The compiler's integration test harness uses Node, which requires Node 24 or
@@ -146,7 +146,9 @@ Borrow facts, last-use facts and validated lifetime topology stay upstream input
 
 What the lowerer emits follows the plan exactly. Where the plan chose a GC-native representation, planned ownership-specific operations may be absent from the target encoding. Where it chose affine, inferred-region, declared-region or REC handling, the lowerer emits what the plan says and nothing more.
 
-Wasm consumes integer-operation proofs only in trap mode. It marks a proven statement with explicit `ProvenSafe`; it does not infer safety from missing scratch. The emitter uses native integer opcodes and omits the checked predicates. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`. Wasm's existing `CastOp`, `ReturnError` and `Dec` gates remain; fallible casts and narrowing have no Wasm proof-elision path.
+Numeric proof elision is independent of failure delivery. Wasm marks a proven statement with explicit `ProvenSafe`; it does not infer safety from missing scratch. The emitter uses native integer opcodes and omits only the proven-impossible predicates while preserving the operation's required success and failure continuations. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`.
+
+Current Wasm proof elision covers `Trap` and semantically discharged `Infallible` integer operations only. Its `CastOp`, `ReturnError` and `Dec` capability gates remain; fallible casts and narrowing have no Wasm proof-elision path. These are backend coverage limits, not the language's failure-delivery rule. See the @../../../docs/progress (Progress matrix).
 
 Every backend answers to the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 

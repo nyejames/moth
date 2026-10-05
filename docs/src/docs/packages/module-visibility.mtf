@@ -53,6 +53,14 @@ The parent module sees only the `components` child module's `export:` surface. I
 
 Without the root export block, the cross-module dependency clause is rejected with `MOTH-IMPORT-0011`.
 
+Implicit numeric failure stays module-local unless a declared error contract
+delivers it. Private functions without an error slot may infer and propagate
+it to same-module callers without postfix `!` at each internal call. An
+exported callable without an error slot must discharge it. Public receiver
+methods and generic functions obey the same closed contract, even when their
+implementation later shares a backend with the caller. See
+@../project-structure/#public-api (Public API) and @../progress (Progress).
+
 ### Normal modules are not source packages
 
 An `@*.moth` normal module is not a source package. Use `+package.moth` when the example intends to teach a scoped package. See @#project-local-packages (Project-local packages) for the support-package contract.

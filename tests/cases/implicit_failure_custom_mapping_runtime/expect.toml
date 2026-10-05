@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " mapped big=-1 report= area overflow 301 small=42 clean="

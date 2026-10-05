@@ -1,7 +1,7 @@
 //! Static file and HTML injection helpers for the dev server.
 //!
-//! This module resolves safe output-relative paths, maps content types, and injects the tiny
-//! EventSource client into HTML responses.
+//! This module resolves safe output-relative paths, maps content types and installs the
+//! development client before application bootstrap scripts can call its outcome hooks.
 
 use crate::projects::dev_server::dev_client::{DEV_CLIENT_MARKER, dev_client_snippet};
 use crate::projects::routing::{HtmlSiteConfig, PageUrlStyle, prefix_origin};
@@ -29,24 +29,58 @@ pub enum ResolvedRequest {
     InvalidPath,
 }
 
-pub fn inject_dev_client(html: &str, origin: &str) -> String {
+pub fn inject_dev_client(html: &str, origin: &str, build_version: u64, entry: &str) -> String {
     if html.contains(DEV_CLIENT_MARKER) {
         return html.to_owned();
     }
 
-    let snippet = dev_client_snippet(origin);
-    if let Some(body_index) = html.rfind("</body>") {
-        let mut injected = String::with_capacity(html.len() + snippet.len());
-        injected.push_str(&html[..body_index]);
-        injected.push_str(&snippet);
-        injected.push_str(&html[body_index..]);
-        injected
-    } else {
-        let mut injected = String::with_capacity(html.len() + snippet.len());
-        injected.push_str(html);
-        injected.push_str(&snippet);
-        injected
+    let snippet = dev_client_snippet(origin, Some((build_version, entry)));
+    let lowercase_html = html.to_ascii_lowercase();
+    // Install at the start of the generated head, before even head-local classic scripts.
+    // This also avoids mistaking commented-out script tags in authored head content for code.
+    let insertion_index = lowercase_html
+        .find("<head>")
+        .map(|index| index + "<head>".len())
+        .unwrap_or_else(|| {
+            [
+                lowercase_html.find("<script"),
+                lowercase_html.find("</head>"),
+                lowercase_html.rfind("</body>"),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(html.len())
+        });
+
+    let mut injected = String::with_capacity(html.len() + snippet.len());
+    injected.push_str(&html[..insertion_index]);
+    injected.push_str(&snippet);
+    injected.push_str(&html[insertion_index..]);
+    injected
+}
+
+/// Reports name exact output pages, not URL aliases or files outside the output root.
+pub fn is_known_entry(entry: &str, output_dir: &Path) -> bool {
+    if entry.is_empty()
+        || entry.contains(['\\', '\0'])
+        || entry.split('/').any(|part| matches!(part, "" | "." | ".."))
+        || Path::new(entry)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("html")
+    {
+        return false;
     }
+
+    let Ok(path) = resolve_relative_path(Path::new(entry), output_dir) else {
+        return false;
+    };
+    let (Ok(output_root), Ok(page)) = (output_dir.canonicalize(), path.canonicalize()) else {
+        return false;
+    };
+
+    page.starts_with(output_root) && page.is_file()
 }
 
 pub fn content_type_for_path(path: &Path) -> &'static str {

@@ -1,0 +1,225 @@
+i32_edges |add_left I32, add_right I32, sub_left I32, sub_right I32, mul_left I32, mul_right I32| -> String:
+    sum = add_left + add_right
+    difference = sub_left - sub_right
+    product = mul_left * mul_right
+    assert(sum is 2147483647)
+    assert(difference is -2147483648)
+    assert(product is 2147395600)
+    return "i32-edges-ok"
+;
+
+u32_edges |add_left U32, add_right U32, sub_left U32, sub_right U32, mul_left U32, mul_right U32| -> String:
+    sum = add_left + add_right
+    difference = sub_left - sub_right
+    product = mul_left * mul_right
+    assert(sum is 4294967295)
+    assert(difference is 0)
+    assert(product is 4294967295)
+    return "u32-edges-ok"
+;
+
+i64_edges |add_left I64, add_right I64, sub_left I64, sub_right I64, mul_left I64, mul_right I64| -> String:
+    sum = add_left + add_right
+    difference = sub_left - sub_right
+    product = mul_left * mul_right
+    assert(sum is 9223372036854775807)
+    assert(difference is -9223372036854775808)
+    assert(product is 9223372030926249001)
+    return "i64-edges-ok"
+;
+
+signed_product_i64 |left I64, right I64, expected I64| -> String:
+    product = left * right
+    assert(product is expected)
+    return "i64-product-ok"
+;
+
+u64_edges |add_left U64, add_right U64, sub_left U64, sub_right U64, mul_left U64, mul_right U64| -> String:
+    sum = add_left + add_right
+    difference = sub_left - sub_right
+    product = mul_left * mul_right
+    assert(sum is 18446744073709551615)
+    assert(difference is 0)
+    assert(product is 18446744065119617025)
+    return "u64-edges-ok"
+;
+
+u64_high_half |value U64, one U64| -> String:
+    result = value + one
+    assert(result is 9223372036854775809)
+    return "u64-high-half-ok"
+;
+
+u32_wide_product |left U32, right U32| -> String:
+    wide_left U64 = cast left
+    wide_right U64 = cast right
+    product = wide_left * wide_right
+    assert(product is 18446744065119617025)
+    return "u32-wide-product-ok"
+;
+
+u32_to_i64 |value U32| -> String:
+    widened I64 = cast value
+    assert(widened is 4294967295)
+    return "u32-to-i64-ok"
+;
+
+u8_promotion |left U8, right U8| -> String:
+    result = left + right
+    assert(result is 300)
+    return "u8-promotes-u32-ok"
+;
+
+i32_u32_promotion |signed I32, unsigned U32| -> String:
+    result = signed + unsigned
+    assert(result is 6442450942)
+    return "i32-u32-promotes-i64-ok"
+;
+
+u32_u64_promotion |small U32, large U64| -> String:
+    result = small + large
+    assert(result is 9223372041149743103)
+    return "u32-u64-promotes-u64-ok"
+;
+
+signed_division |dividend I32, divisor I32, expected_quotient I32, expected_remainder I32| -> String:
+    quotient = dividend // divisor
+    remainder = dividend % divisor
+    assert(quotient is expected_quotient)
+    assert(remainder is expected_remainder)
+    return "signed-div-rem-ok"
+;
+
+unsigned_division_u32 |dividend U32, divisor U32, expected_quotient U32, expected_remainder U32| -> String:
+    quotient = dividend // divisor
+    remainder = dividend % divisor
+    assert(quotient is expected_quotient)
+    assert(remainder is expected_remainder)
+    return "u32-div-rem-ok"
+;
+
+unsigned_division_u64 |dividend U64, divisor U64, expected_quotient U64, expected_remainder U64| -> String:
+    quotient = dividend // divisor
+    remainder = dividend % divisor
+    assert(quotient is expected_quotient)
+    assert(remainder is expected_remainder)
+    return "u64-div-rem-ok"
+;
+
+minimum_remainder_i32 |dividend I32, divisor I32| -> String:
+    result = dividend % divisor
+    assert(result is 0)
+    return "i32-minimum-remainder-ok"
+;
+
+minimum_remainder_i64 |dividend I64, divisor I64| -> String:
+    result = dividend % divisor
+    assert(result is 0)
+    return "i64-minimum-remainder-ok"
+;
+
+integer_power |base I32, exponent I32, expected I32| -> String:
+    result = base ^ exponent
+    assert(result is expected)
+    return "integer-power-ok"
+;
+
+integer_power_u32 |base U32, exponent U32, expected U32| -> String:
+    result = base ^ exponent
+    assert(result is expected)
+    return "u32-power-ok"
+;
+
+integer_power_u64 |base U64, exponent U64, expected U64| -> String:
+    result = base ^ exponent
+    assert(result is expected)
+    return "u64-power-ok"
+;
+
+integer_power_i64 |base I64, exponent I64, expected I64| -> String:
+    result = base ^ exponent
+    assert(result is expected)
+    return "i64-power-ok"
+;
+
+negate_i8 |value I8| -> String:
+    result = -value
+    assert(result is 128)
+    return "i8-negation-promotes-i32-ok"
+;
+
+negate_i16 |value I16| -> String:
+    result = -value
+    assert(result is 32768)
+    return "i16-negation-promotes-i32-ok"
+;
+
+negate_i32 |value I32| -> String:
+    result = -value
+    assert(result is 2147483647)
+    return "i32-negation-ok"
+;
+
+negate_i64 |value I64| -> String:
+    result = -value
+    assert(result is 9223372036854775807)
+    return "i64-negation-ok"
+;
+
+profile_int_edges |add_value Int, subtract_value Int, multiply_left Int, multiply_right Int| -> String:
+    incremented = add_value + 1
+    decremented = subtract_value - 1
+    product = multiply_left * multiply_right
+    assert(incremented is 2147483647)
+    assert(decremented is -2147483648)
+    assert(product is 2147395600)
+    return "int32-edges-ok"
+;
+
+profile_int_to_i64 |value Int, expected I64| -> String:
+    widened I64 = cast value
+    assert(widened is expected)
+    return "int32-to-i64-ok"
+;
+
+checks_i32 = i32_edges(2147483646, 1, -2147483647, 1, 46340, 46340)
+checks_u32 = u32_edges(4294967294, 1, 1, 1, 65535, 65537)
+checks_i64 = i64_edges(9223372036854775806, 1, -9223372036854775807, 1, 3037000499, 3037000499)
+checks_u64 = u64_edges(18446744073709551614, 1, 1, 1, 4294967295, 4294967295)
+checks_u64_high = u64_high_half(9223372036854775808, 1)
+checks_u32_wide_product = u32_wide_product(4294967295, 4294967295)
+checks_u32_to_i64 = u32_to_i64(4294967295)
+checks_u8_promotion = u8_promotion(200, 100)
+checks_i32_u32_promotion = i32_u32_promotion(2147483647, 4294967295)
+checks_u32_u64_promotion = u32_u64_promotion(4294967295, 9223372036854775808)
+checks_negative_dividend = signed_division(-7, 3, -2, -1)
+checks_negative_divisor = signed_division(7, -3, -2, 1)
+checks_i32_minimum_remainder = minimum_remainder_i32(-2147483648, -1)
+checks_i64_minimum_remainder = minimum_remainder_i64(-9223372036854775808, -1)
+checks_valid_power = integer_power(3, 4, 81)
+checks_zero_exponent = integer_power(7, 0, 1)
+checks_zero_to_zero = integer_power(0, 0, 1)
+checks_u32_power = integer_power_u32(65535, 2, 4294836225)
+checks_u64_high_bit_exponent = integer_power_u64(1, 9223372036854775808, 1)
+checks_u64_power_two_63 = integer_power_u64(2, 63, 9223372036854775808)
+checks_i64_max_odd_exponent = integer_power_i64(-1, 9223372036854775807, -1)
+checks_i64_negative_two_power_sixty_three = integer_power_i64(-2, 63, -9223372036854775808)
+checks_large_base_zero_exponent = integer_power_u64(18446744073709551615, 0, 1)
+
+checks_i8_negation = negate_i8(-128)
+checks_i16_negation = negate_i16(-32768)
+checks_i32_negation = negate_i32(-2147483647)
+checks_i64_negation = negate_i64(-9223372036854775807)
+checks_profile_int_edges = profile_int_edges(2147483646, -2147483647, 46340, 46340)
+checks_profile_int_to_i64_max = profile_int_to_i64(2147483647, 2147483647)
+checks_profile_int_to_i64_min = profile_int_to_i64(-2147483648, -2147483648)
+
+checks_u32_high_division = unsigned_division_u32(2147483648, 3, 715827882, 2)
+checks_u64_high_division = unsigned_division_u64(18446744073709551614, 3, 6148914691236517204, 2)
+checks_i64_negative_positive_product = signed_product_i64(-3, 2, -6)
+checks_i64_negative_negative_product = signed_product_i64(-3, -2, 6)
+checks_i64_minimum_times_one = signed_product_i64(-9223372036854775808, 1, -9223372036854775808)
+checks_i64_one_times_minimum = signed_product_i64(1, -9223372036854775808, -9223372036854775808)
+checks_u64_max_base_one_exponent = integer_power_u64(18446744073709551615, 1, 18446744073709551615)
+
+[:integer checked arithmetic i32=[checks_i32] u32=[checks_u32] i64=[checks_i64] i64-multiply=[checks_i64_negative_positive_product]/[checks_i64_negative_negative_product]/[checks_i64_minimum_times_one]/[checks_i64_one_times_minimum] u64=[checks_u64]/[checks_u64_high] u32-wide-product=[checks_u32_wide_product] casts=[checks_u32_to_i64]/[checks_profile_int_to_i64_max]/[checks_profile_int_to_i64_min] promotion=[checks_u8_promotion]/[checks_i32_u32_promotion]/[checks_u32_u64_promotion] division=[checks_negative_dividend]/[checks_negative_divisor]/[checks_i32_minimum_remainder]/[checks_i64_minimum_remainder] unsigned-div=[checks_u32_high_division]/[checks_u64_high_division] power=[checks_valid_power]/[checks_zero_exponent]/[checks_zero_to_zero]/[checks_u32_power]/[checks_u64_high_bit_exponent]/[checks_u64_power_two_63]/[checks_i64_max_odd_exponent]/[checks_i64_negative_two_power_sixty_three]/[checks_large_base_zero_exponent]/[checks_u64_max_base_one_exponent] negate=[checks_i8_negation]/[checks_i16_negation]/[checks_i32_negation]/[checks_i64_negation] profile=[checks_profile_int_edges]]

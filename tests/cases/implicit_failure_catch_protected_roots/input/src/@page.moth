@@ -1,0 +1,33 @@
+Box = |
+    value Int,
+|
+
+scaled |this Box, factor Int| -> Int:
+    return this.value + factor + 2147483647
+;
+
+double |value Int| -> Int:
+    return value + 2147483647
+;
+
+box Box = Box(6)
+method_code ~U32 = 0
+method_value = box.scaled(double(2)) catch |method_err|:
+    method_code = method_err.code
+    then 0 - 1
+;
+
+field_code ~U32 = 0
+field_value = Box(double(2)).value catch |field_err|:
+    field_code = field_err.code
+    then 0 - 2
+;
+
+collection_code ~U32 = 0
+fresh = {10, 20}
+collection_value = fresh.get(double(2) - double(2) + 1) catch |collection_err|:
+    collection_code = collection_err.code
+    then 0 - 3
+;
+
+[: protected roots method=[method_value] mcode=[method_code] field=[field_value] fcode=[field_code] coll=[collection_value] ccode=[collection_code]]

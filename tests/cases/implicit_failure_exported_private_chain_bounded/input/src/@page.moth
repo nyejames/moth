@@ -1,0 +1,25 @@
+multiply |left Int, right Int| -> Int:
+    return left * right
+;
+
+first |left Int, right Int| -> Int:
+    return multiply(left, right)
+;
+
+second |left Int, right Int| -> Int:
+    return first(left, right)
+;
+
+third |left Int, right Int| -> Int:
+    return second(left, right)
+;
+
+fourth |left Int, right Int| -> Int:
+    return third(left, right)
+;
+
+export:
+    product |left Int, right Int| -> Int:
+        return fourth(left, right)
+    ;
+;

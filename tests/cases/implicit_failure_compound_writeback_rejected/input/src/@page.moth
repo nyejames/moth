@@ -1,0 +1,11 @@
+risky |amount U8| -> U8, Error!:
+    wide U32 = amount + 200
+    return cast! wide
+;
+export:
+    bump |extra U8| -> U8:
+        total ~U8 = 250
+        total += risky(extra) catch then extra
+        return total
+    ;
+;

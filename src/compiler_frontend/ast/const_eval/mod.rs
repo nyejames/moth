@@ -545,31 +545,47 @@ pub fn fold_compile_time_expression(
                 numeric_profile,
             )?;
 
-            match &folded_value.kind {
+            let mut folded_expression = match &folded_value.kind {
                 #[cfg(test)]
                 ExpressionKind::FallibleCarrierConstruct {
                     variant: FallibleCarrierVariant::Success,
                     value,
-                } => Ok(value.as_ref().to_owned()),
+                } => value.as_ref().to_owned(),
                 #[cfg(test)]
                 ExpressionKind::FallibleCarrierConstruct {
                     variant: FallibleCarrierVariant::Error,
                     ..
-                } => Ok(Expression::handled_result_with_type_id(
+                } => Expression::handled_result_with_type_id(
                     folded_value,
                     handling.to_owned(),
                     expression.type_id,
                     expression.diagnostic_type.to_owned(),
                     expression.span,
-                )),
-                _ => Ok(Expression::handled_result_with_type_id(
+                ),
+                _ => Expression::handled_result_with_type_id(
                     folded_value,
                     handling.to_owned(),
                     expression.type_id,
                     expression.diagnostic_type.to_owned(),
                     expression.span,
-                )),
+                ),
+            };
+            if matches!(
+                folded_expression.kind,
+                ExpressionKind::HandledFallibleExpression { .. }
+            ) {
+                // Pending receiver calls own their producers on this wrapper, not its carrier
+                // operand. Rebuilding the folded value must preserve that selected identity,
+                // catch disposition and authored propagation span.
+                folded_expression.failure_facts = expression.failure_facts.clone();
+                if let ExpressionKind::HandledFallibleExpression {
+                    propagation_span, ..
+                } = &mut folded_expression.kind
+                {
+                    *propagation_span = expression.propagation_span();
+                }
             }
+            Ok(folded_expression)
         }
         ExpressionKind::ValueBlock { block } => match block.as_ref() {
             ValueBlock::Catch(value_catch) => {

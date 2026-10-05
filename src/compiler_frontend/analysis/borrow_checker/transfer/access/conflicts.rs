@@ -7,7 +7,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::state::{
     BorrowState, FunctionLayout, FutureUseKind, RootSet,
 };
-use crate::compiler_frontend::analysis::borrow_checker::types::AccessKind;
+use crate::compiler_frontend::analysis::borrow_checker::types::{AccessKind, LocalMode};
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, DiagnosticPlace, InvalidMutableAccessReason,
 };
@@ -25,6 +25,7 @@ pub(super) fn check_shared_access(
     let preserve_cfg_future_use_activity =
         preserves_cfg_future_use_activity(check.context, check.layout, check.actor_index_hint);
     let alias_activity = AliasActivityContext {
+        context: check.context,
         layout: check.layout,
         state: check.state,
         block_id: check.block_id,
@@ -51,12 +52,9 @@ pub(super) fn check_shared_access(
             ));
         }
 
-        if let Some(conflicting_index) = active_mutable_alias_for_root(
-            check.context,
-            &alias_activity,
-            root_index,
-            check.actor_index_hint,
-        ) {
+        if let Some(conflicting_index) =
+            active_mutable_alias_for_root(&alias_activity, root_index, check.actor_index_hint)
+        {
             let place = check
                 .context
                 .diagnostics
@@ -93,6 +91,7 @@ pub(super) fn check_mutable_access(
     let preserve_cfg_future_use_activity =
         preserves_cfg_future_use_activity(check.context, check.layout, check.actor_index_hint);
     let alias_activity = AliasActivityContext {
+        context: check.context,
         layout: check.layout,
         state: check.state,
         block_id: check.block_id,
@@ -264,6 +263,7 @@ fn borrow_access_kind(access: AccessKind) -> BorrowAccessKind {
 }
 
 struct AliasActivityContext<'a> {
+    context: &'a BorrowTransferContext<'a>,
     layout: &'a FunctionLayout,
     state: &'a BorrowState,
     block_id: BlockId,
@@ -314,7 +314,6 @@ fn active_alias_count_for_root(
 }
 
 fn active_mutable_alias_for_root(
-    context: &BorrowTransferContext<'_>,
     activity: &AliasActivityContext<'_>,
     root_index: usize,
     actor_index_hint: Option<usize>,
@@ -329,7 +328,7 @@ fn active_mutable_alias_for_root(
         }
 
         if matches!(
-            context
+            activity.context
                 .diagnostics
                 .local_origin_kind(activity.layout.local_ids[candidate_index]),
             Some(kind) if kind != HirLocalOriginKind::User
@@ -405,16 +404,52 @@ fn is_local_active_for_alias_conflict(
 ) -> bool {
     let last_use = activity.layout.local_last_use_order[local_index];
     if last_use >= 0 {
+        let local_state = activity.state.local_state(local_index);
+
+        // Traversal ordinals are ordered within a block, not across CFG paths. A handler
+        // visited after its merge cannot prolong a dead alias. Include the current statement:
+        // a holder read there still excludes a simultaneous shared read through its source.
         if !activity
             .layout
             .local_is_expired(local_index, activity.current_order)
         {
-            return true;
+            if !local_state.has_value_aliases() || !activity.preserve_cfg_future_use_activity {
+                return true;
+            }
+
+            if activity.layout.future_use_kind(
+                activity.block_id,
+                local_index,
+                activity.current_order - 1,
+            ) != FutureUseKind::None
+            {
+                return true;
+            }
         }
 
-        let local_state = activity.state.local_state(local_index);
         if !local_state.has_value_aliases() {
             return false;
+        }
+
+        // A source alias-view assignment writes through its existing referent. Read
+        // liveness treats a local assignment as a slot kill, so consult reachable
+        // assignments separately without weakening slot rebinding or optional transfers.
+        let source_mutable_alias = activity.layout.local_mutable[local_index]
+            && local_state.mode.contains(LocalMode::ALIAS)
+            && !matches!(
+                activity
+                    .context
+                    .diagnostics
+                    .local_origin_kind(activity.layout.local_ids[local_index]),
+                Some(kind) if kind != HirLocalOriginKind::User
+            );
+        if activity.preserve_cfg_future_use_activity
+            && source_mutable_alias
+            && activity
+                .layout
+                .local_has_future_assignment(activity.block_id, local_index)
+        {
+            return true;
         }
 
         if activity.preserve_cfg_future_use_activity

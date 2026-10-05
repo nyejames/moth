@@ -1,0 +1,13 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " order a=-1 ac=301 as=1 b=-2 bc=0 bs=10 c=-3 cc=301 cs=1 d=-4 dc=301 ds=0 e=-5 ec=0 es=10 f=-6 fc=301 fs=0 g=-7 gc=301 gs=1 h=-8 hc=0 hs=11 i=2 is=1 js=10 k=1 ks=1"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]
+message_contains = ["'__moth_collection_get'", "'@core/collections'", "Wasm"]

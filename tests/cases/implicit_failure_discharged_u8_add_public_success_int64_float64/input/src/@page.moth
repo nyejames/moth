@@ -1,0 +1,9 @@
+export:
+    wide_add |left U8, right U8| -> U32:
+        return left + right
+    ;
+;
+
+result = wide_add(255, 255)
+
+[: discharged u8 add sum=[result]]

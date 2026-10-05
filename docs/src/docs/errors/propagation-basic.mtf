@@ -1,5 +1,5 @@
-Add `!` after a fallible call when the current function should pass the error
-to its caller.
+Add `!` after a call with a typed error return when the current function should
+pass that error to its caller.
 
 [codeblock, $code("moth"):
     wrapper |text String| -> Int, Error!:
@@ -13,3 +13,9 @@ On success, `value` receives the parsed number.
 On failure, `wrapper` returns the error immediately.
 
 The surrounding function needs a compatible error return slot.
+
+Implicit numeric failure follows a different accepted rule. A private function
+without an error slot propagates it to callers within the same module without
+postfix `!`. An `Error!` function turns escaping implicit failure into `Error`;
+an exported function without an error slot must recover locally.
+See @../progress (Progress) for current compiler support.

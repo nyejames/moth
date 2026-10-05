@@ -1,0 +1,45 @@
+DomainFailure = |
+    detail String,
+    marker Int,
+|
+
+left_producer |hit Bool| -> Int, DomainFailure!:
+    if hit:
+        return! DomainFailure("left-detail", 11)
+    ;
+    return 101
+;
+right_producer |hit Bool| -> Int, DomainFailure!:
+    if hit:
+        return! DomainFailure("right-detail", 22)
+    ;
+    return 202
+;
+pick |first Int, second Int| -> Int:
+    if first is 101:
+        return second
+    ;
+    return first
+;
+observe_left |hit Bool, seen ~String| -> Int:
+    value = pick(left_producer(hit), right_producer(false)) catch |left_err|:
+        seen = [: [left_err.marker] [left_err.detail]]
+        then 0 - 1
+    ;
+    return value
+;
+observe_right |hit Bool, seen ~String| -> Int:
+    value = pick(left_producer(false), right_producer(hit)) catch |right_err|:
+        seen = [: [right_err.marker] [right_err.detail]]
+        then 0 - 2
+    ;
+    return value
+;
+left_seen ~= ""
+left_value = observe_left(true, ~left_seen)
+left_report = copy left_seen
+right_seen ~= ""
+right_value = observe_right(true, ~right_seen)
+right_report = copy right_seen
+ok = pick(left_producer(false), right_producer(false)) catch then 0 - 3
+[: custom shared left=[left_value] lreport=[left_report] right=[right_value] rreport=[right_report] ok=[ok]]

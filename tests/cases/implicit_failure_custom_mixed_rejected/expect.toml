@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
+path = "input/@page.moth"
+line = 11
+column = 47

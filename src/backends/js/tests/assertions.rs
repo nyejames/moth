@@ -6,6 +6,7 @@
 //!      once at the failure terminator without eagerly evaluating successful assertions.
 
 use super::support::*;
+use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -137,7 +138,9 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
 
     assert_eq!(source.matches("let __assert_message_").count(), 1);
     assert_eq!(
-        source.matches("throw new Error((__assert_message_").count(),
+        source
+            .matches("throw __moth_assertion_error((__assert_message_")
+            .count(),
         1
     );
     assert_eq!(
@@ -228,7 +231,9 @@ fn dispatcher_assertion_message_is_lowered_once() {
     assert!(source.contains("switch (__bb"));
     assert_eq!(source.matches("let __assert_message_").count(), 1);
     assert_eq!(
-        source.matches("throw new Error((__assert_message_").count(),
+        source
+            .matches("throw __moth_assertion_error((__assert_message_")
+            .count(),
         1
     );
     assert_eq!(
@@ -277,9 +282,27 @@ fn default_assertion_message_skips_optional_lowering() {
         &[],
     );
 
-    assert!(source.contains("throw new Error(\"assertion failed\");"));
+    assert!(source.contains("throw __moth_assertion_error(\"assertion failed\");"));
     assert!(!source.contains("__assert_message_"));
     assert!(!source.contains("unused message"));
+    let function_name = expected_dev_function_name("default_assertion", 0);
+    let script = format!(
+        "{source}\ntry {{ {function_name}(); }} catch (error) {{ console.log(JSON.stringify([error instanceof Error, error.message, Object.hasOwn(error, '__moth_assertion'), error.__moth_assertion, Object.getOwnPropertyDescriptor(error, '__moth_assertion').enumerable])); }}"
+    );
+    let output = std::process::Command::new("node")
+        .args(["--eval", &script])
+        .output()
+        .expect("Node.js is required for assertion identity tests");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        r#"[true,"assertion failed",true,true,false]"#
+    );
+    assert!(!lower_minimal_module("no_assertions").contains("__moth_assertion"));
 }
 
 #[test]

@@ -13,6 +13,7 @@ use super::super::{ArtifactKind, FailureKind};
 use super::artifacts::BuiltArtifactIndex;
 use super::html_scripts::extract_executable_scripts;
 use super::node_harness::{RenderHarnessError, run_node_script, with_harness_workspace};
+use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::build::OutputFile;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::compiler_tests::integration_test_runner::types::RenderedOutputExpectation;
@@ -164,6 +165,35 @@ fn validate_rendered_output_result(
     rendered: &RenderedOutput,
     expectation: &RenderedOutputExpectation,
 ) -> Option<(String, FailureKind)> {
+    if let Some(RuntimeEvent::EntryFailure { code }) = rendered.events.last() {
+        let Some(expected_code) = expectation.entry_error_code else {
+            return Some((
+                format!("rendered_output: {}", ENTRY_FAILURE_NOTICE.trim_end()),
+                FailureKind::EntryFailed,
+            ));
+        };
+        if *code != expected_code {
+            return Some((
+                format!(
+                    "rendered_output: expected returned entry Error code {expected_code}, but received code {code}."
+                ),
+                FailureKind::EntryFailed,
+            ));
+        }
+
+        // The terminal event carries no application text; assertions still protect its prefix.
+        return validate_rendered_output_fragments(&rendered.combined_output(), expectation);
+    }
+
+    if let Some(expected_code) = expectation.entry_error_code {
+        return Some((
+            format!(
+                "rendered_output: expected returned entry Error code {expected_code}, but no entry failure occurred."
+            ),
+            FailureKind::RenderedOutputMismatch,
+        ));
+    }
+
     let actual_error = rendered.runtime_error_message();
     let actual_trap = rendered.runtime_trap_message();
     let expects_error = !expectation.runtime_error_contains.is_empty();
@@ -369,6 +399,7 @@ pub(crate) enum RuntimeEvent {
     FragmentInsert { id: String, html: String },
     WasmTrap { message: String },
     RuntimeError { message: String },
+    EntryFailure { code: u32 },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -384,7 +415,8 @@ impl RenderedOutput {
             RuntimeEvent::RuntimeError { message } => Some(message),
             RuntimeEvent::Console { .. }
             | RuntimeEvent::FragmentInsert { .. }
-            | RuntimeEvent::WasmTrap { .. } => None,
+            | RuntimeEvent::WasmTrap { .. }
+            | RuntimeEvent::EntryFailure { .. } => None,
         }
     }
 
@@ -393,7 +425,8 @@ impl RenderedOutput {
             RuntimeEvent::WasmTrap { message } => Some(message),
             RuntimeEvent::Console { .. }
             | RuntimeEvent::FragmentInsert { .. }
-            | RuntimeEvent::RuntimeError { .. } => None,
+            | RuntimeEvent::RuntimeError { .. }
+            | RuntimeEvent::EntryFailure { .. } => None,
         }
     }
 
@@ -433,7 +466,9 @@ impl RenderedOutput {
             match event {
                 RuntimeEvent::Console { text } => parts.push(text.to_owned()),
                 RuntimeEvent::FragmentInsert { html, .. } => parts.push(html.to_owned()),
-                RuntimeEvent::RuntimeError { .. } | RuntimeEvent::WasmTrap { .. } => {}
+                RuntimeEvent::RuntimeError { .. }
+                | RuntimeEvent::WasmTrap { .. }
+                | RuntimeEvent::EntryFailure { .. } => {}
             }
         }
 
@@ -509,13 +544,43 @@ fn execute_html_in_node(
     })
 }
 
+/// Executes real HTML artifacts without applying a success expectation.
+///
+/// Failure tests inspect the captured prefix independently of the terminal classification.
+#[cfg(test)]
+pub(crate) fn execute_html_harness_for_test(
+    build_result: &mut crate::build_system::build::BuildResult,
+) -> Result<RenderedOutput, RenderHarnessError> {
+    let index = BuiltArtifactIndex::build(
+        &build_result.project.output_files,
+        &build_result.project.deferred_resources,
+    )
+    .expect("the HTML execution seam needs an unambiguous artifact set");
+
+    execute_html_in_node(&index, &mut build_result.project.resource_inputs, None)
+}
+
 const NODE_TERMINAL_PROTOCOL: &str = r#"// A Moth runtime Error is a value thrown as `new Error(message)`; subclasses and
 // non-Wasm engine errors such as TypeError remain harness faults. Only the HTML-Wasm adapter
-// recognizes WebAssembly.RuntimeError as a Wasm trap. The first terminal event ends the run;
-// summary serialization is synchronous so queued host work cannot extend its event prefix.
+// recognizes WebAssembly.RuntimeError as a Wasm trap. Generated callers record returned entry
+// failure directly, independently of terminal notice text and host process status. Recording
+// serializes the summary at once, so later host output, faults or status changes cannot follow
+// or erase the terminal entry_failure event.
+// Summary serialization is synchronous so queued host work cannot extend a terminal event prefix.
 let __moth_summary_error_hook = null;
 let __moth_runtime_trap_message_hook = null;
 let __moth_finished = false;
+let __moth_entry_failure_recorded = false;
+globalThis.__moth_record_entry_failure = (code) => {
+    if (__moth_entry_failure_recorded || __moth_finished) return;
+    if (!Number.isInteger(code) || code < 0 || code > 4294967295) {
+        __moth_report_harness_failure(new Error("entry failure code must be a U32"));
+        return;
+    }
+    __moth_entry_failure_recorded = true;
+    __moth_events.push({ type: 'entry_failure', code });
+    __moth_write_summary();
+};
 function __moth_write_summary() {
     if (__moth_finished) return;
     if (__moth_summary_error_hook !== null) {
@@ -524,6 +589,12 @@ function __moth_write_summary() {
             __moth_report_harness_failure(error);
             return;
         }
+    }
+    const terminal_event = __moth_events.at(-1);
+    if (!__moth_entry_failure_recorded && typeof process.exitCode === "number" && process.exitCode !== 0
+        && terminal_event?.type !== 'runtime_error' && terminal_event?.type !== 'wasm_trap') {
+        __moth_report_harness_failure(new Error("host process status " + process.exitCode));
+        return;
     }
     __moth_finished = true;
     process.stdout.write(JSON.stringify({ events: __moth_events }) + '\n', () => process.exit(0));
@@ -640,7 +711,7 @@ globalThis.document = {
 
     format!(
         "{prefix}{NODE_TERMINAL_PROTOCOL}{random_setup}import({module_specifier})\n\
-         .then(() => setImmediate(__moth_write_summary), __moth_handle_runtime_error);\n"
+         .then(() => setImmediate(__moth_write_summary), __moth_handle_runtime_error);\n",
     )
 }
 
@@ -785,13 +856,16 @@ pub(crate) fn parse_harness_output(json: &str) -> Result<RenderedOutput, RenderH
     for (index, event_value) in events_array.iter().enumerate() {
         if terminal_event_seen {
             return Err(invalid_harness_output(
-                "a runtime_error or wasm_trap event must be the final event".to_owned(),
+                "a runtime_error, wasm_trap or entry_failure event must be the final event"
+                    .to_owned(),
             ));
         }
         let event = decode_runtime_event(index, event_value).map_err(invalid_harness_output)?;
         terminal_event_seen = matches!(
             &event,
-            RuntimeEvent::RuntimeError { .. } | RuntimeEvent::WasmTrap { .. }
+            RuntimeEvent::RuntimeError { .. }
+                | RuntimeEvent::WasmTrap { .. }
+                | RuntimeEvent::EntryFailure { .. }
         );
         events.push(event);
     }
@@ -828,6 +902,16 @@ fn decode_runtime_event(index: usize, value: &serde_json::Value) -> Result<Runti
             reject_unknown_fields(object, &["type", "message"], &format!("event {index}"))?;
             let message = required_string_field(object, "message", &format!("event {index}"))?;
             Ok(RuntimeEvent::WasmTrap { message })
+        }
+
+        "entry_failure" => {
+            reject_unknown_fields(object, &["type", "code"], &format!("event {index}"))?;
+            let code = object
+                .get("code")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|code| u32::try_from(code).ok())
+                .ok_or_else(|| format!("event {index} field 'code' must be a U32"))?;
+            Ok(RuntimeEvent::EntryFailure { code })
         }
 
         other => Err(format!("event {index} has unknown type '{other}'")),

@@ -1,7 +1,6 @@
--- Loop CFG lowering inside builtin `Error!` functions. No loop body below contains an authored
--- fallible operation, so the compiler-generated iteration-index and range-value updates are the
--- only recoverable arithmetic. Their success paths must continue from the live block emitted by
--- checked lowering, while the final endpoint update is skipped when no next iteration exists.
+-- Loop CFG lowering inside fallible functions. Authored arithmetic and compiler-generated
+-- iteration-index and range-value updates must continue from the live success block emitted
+-- by checked lowering. The final endpoint update is skipped when no next iteration exists.
 
 LoopFault = |
     reason String,
@@ -43,12 +42,14 @@ walk_to_int_max || -> Int, Error!:
     return visited
 ;
 
--- A custom error slot cannot carry a numeric failure, so the same generated updates keep the
--- trapping path and the step block stays unsplit.
+-- A custom error slot requires explicit mapping of the authored numeric failure.
+-- The collection loop still exercises its generated iteration update and success continuation.
 count_with_custom_error |items {Int}| -> Int, LoopFault!:
     seen ~= 0
     loop items |item|:
-        seen = seen + 1
+        seen = seen + 1 catch:
+            return! LoopFault("count overflow")
+        ;
     ;
     return seen
 ;

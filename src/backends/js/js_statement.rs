@@ -103,6 +103,19 @@ impl<'hir> JsEmitter<'hir> {
                 )?;
             }
 
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result,
+            } => {
+                let error_code = cause.builtin_error_code();
+                let helper_call = format!(
+                    "__moth_error_result({:?}, {})",
+                    error_code.default_message(),
+                    error_code.as_u32(),
+                );
+                self.emit_numeric_carrier_assignment(helper_call, *failure_mode, *result)?;
+            }
             HirStatementKind::FloatRangeCandidate {
                 current,
                 step,
@@ -288,7 +301,7 @@ impl<'hir> JsEmitter<'hir> {
                 self.proven_integer_operation_expression(op, &carrier, &lowered_args)
         {
             let assigned_value = match failure_mode {
-                NumericFailureMode::Trap => proven_expression,
+                NumericFailureMode::Trap | NumericFailureMode::Infallible => proven_expression,
                 NumericFailureMode::ReturnError => {
                     format!("{{ tag: \"ok\", value: {proven_expression} }}")
                 }
@@ -579,7 +592,9 @@ impl<'hir> JsEmitter<'hir> {
         result: LocalId,
     ) -> Result<(), CompilerError> {
         let assigned_value = match failure_mode {
-            NumericFailureMode::Trap => format!("__moth_numeric_trap({helper_call})"),
+            NumericFailureMode::Trap | NumericFailureMode::Infallible => {
+                format!("__moth_numeric_trap({helper_call})")
+            }
             NumericFailureMode::ReturnError => helper_call,
         };
 
@@ -816,8 +831,9 @@ impl<'hir> JsEmitter<'hir> {
         message: &HirExpression,
         message_evaluation: HirAssertionMessageEvaluation,
     ) -> Result<(), CompilerError> {
+        self.used_assertions = true;
         if matches!(message_evaluation, HirAssertionMessageEvaluation::Default) {
-            self.emit_line("throw new Error(\"assertion failed\");");
+            self.emit_line("throw __moth_assertion_error(\"assertion failed\");");
             return Ok(());
         }
 
@@ -825,7 +841,7 @@ impl<'hir> JsEmitter<'hir> {
         let message_value = self.lower_expr(message)?;
         self.emit_line(&format!("let {message_identifier} = {message_value};"));
         self.emit_line(&format!(
-            "throw new Error(({message_identifier}.tag === \"some\" ? {message_identifier}.value : \"assertion failed\"));"
+            "throw __moth_assertion_error(({message_identifier}.tag === \"some\" ? {message_identifier}.value : \"assertion failed\"));"
         ));
 
         Ok(())
@@ -1030,7 +1046,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             }
 
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)?;
             }
 

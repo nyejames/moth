@@ -643,6 +643,14 @@ td {
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Fallible HTML entry and runtime fragment publication</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted synthetic-start, propagated/implicit failure, code-zero failure, local recovery, once-only execution, fragment suppression and safe release-notice coverage. The execution harness records failure at the generated start call.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
+ <td style="padding: 0.1em 0.5em; "> Applicable synthetic <code>start</code> has builtin <code>Error!</code>. The generated caller publishes invocation-owned runtime fragments only after success. Failure preserves static HTML and earlier explicit IO, reports a fixed terminal notice independently of <code>Error.code</code> and appends fixed safe release text, not application Error HTML. Wasm capability diagnostics appear in @../ (Compiler Progress). <code>moth dev</code> shows entry errors, assertions and unexpected startup faults in a page-local view and reports each invocation once to the terminal.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Moth template <code>.mtf</code> content assets</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
  <td style="padding: 0.1em 0.5em; "> Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.</td>
@@ -763,6 +771,13 @@ td {
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
  <td style="padding: 0.1em 0.5em; "> Accepted queued HTML entry declaration. One normal-root <code>$page</code> per directory, metadata cutover from reserved <code>page_*</code> names, and command-specific no-page rules. Current HTML entries still come from implemented root activity and reserved page metadata.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Dev entry-error reporting</td>
+ <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Dev-server and generated-bootstrap tests cover returned Errors including code 0, assertion and unexpected startup-fault categories, hostile text, stale, duplicate, malformed, oversized and cross-origin reports, origin prefixes, unavailable transport and isolated pages. A release case proves output has no dev reporting dependency.</td>
+ <td style="padding: 0.1em 0.5em; "> In <code>moth dev</code>, a returned <code>start</code> Error covers its page with a runtime view that keeps hot reload, logs to the console and reports once to the server terminal. A successful build stays successful for every page. Assertion failures are identified structurally and other faults escaping the generated startup wrapper are reported as unexpected startup faults. Later callbacks and unrelated scripts are not intercepted.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -1107,7 +1122,20 @@ return __moth_read(b_l0);
 </script>
 <script>
 (function () {
-  if (typeof b_fn0 === "function") b_fn0();
+  try {
+    if (typeof b_fn0 === "function") b_fn0();
+  } catch (error) {
+    try {
+      if (typeof globalThis.__moth_record_startup_fault === "function") {
+        let category = "startup_fault";
+        try {
+          if (error !== null && typeof error === "object" && error.__moth_assertion === true) category = "assertion";
+        } catch (_) {}
+        globalThis.__moth_record_startup_fault(category, error);
+      }
+    } catch (_) {}
+    throw error;
+  }
 })();
 </script>
   </body>

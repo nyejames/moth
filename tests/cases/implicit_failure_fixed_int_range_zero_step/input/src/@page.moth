@@ -1,0 +1,22 @@
+walk_fixed |step I32, flag ~Int| -> Int:
+    lower I32 = 0
+    upper I32 = 10
+    loop lower to upper by step:
+        flag = flag + 1
+    ;
+    return flag
+;
+safe_walk |step I32, flag ~Int| -> Int, Error!:
+    return walk_fixed(step, ~flag)
+;
+flag ~= 0
+info ~= ""
+recovered = safe_walk(0, ~flag) catch |err|:
+    info = [: [err.code] [err.message]]
+    then 0 - 1
+;
+report = copy info
+exact_flag ~= 0
+exact = safe_walk(1, ~exact_flag) catch then 0 - 2
+
+[: fixed zero step report=[report] recovered=[recovered] iterations=[flag] exact=[exact] exact-iters=[exact_flag]]

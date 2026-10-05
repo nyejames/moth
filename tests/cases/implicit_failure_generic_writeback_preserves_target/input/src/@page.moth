@@ -1,0 +1,16 @@
+bump type T |marker T, target ~U8, amount U8| -> U8:
+    target += amount
+    return target
+;
+safe_bump |target ~U8, amount U8| -> U8, Error!:
+    return bump(0, ~target, amount)
+;
+kept ~U8 = 200
+code ~U32 = 0
+recovered = safe_bump(~kept, 100) catch |err|:
+    code = err.code
+    then copy kept
+;
+exact_target ~U8 = 200
+exact = safe_bump(~exact_target, 50) catch then 0
+[: generic writeback target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target]]

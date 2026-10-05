@@ -17,7 +17,7 @@
 //! method lookup) so body parsing is self-contained without referencing the mutable environment
 //! builder directly.
 //! Semantic lookups are immutable after environment construction. Interior-mutable shared state is
-//! limited to emission side channels plus the AST-local TIR cache tied to the shared module store.
+//! limited to emission side channels, completed callable proofs and the AST-local TIR cache.
 //!
 //! ## External symbol visibility
 //!
@@ -418,6 +418,9 @@ pub struct ScopeShared {
 
     pub(crate) generic_function_instantiation_requests:
         Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+    /// Emission-owned proof that a completed no-slot body has no pending failure contributors.
+    /// Missing entries, including bodies still being parsed, remain conservative candidates.
+    pub(crate) known_infallible_functions: Option<Rc<RefCell<FxHashSet<PathId>>>>,
     pub(crate) source_file_scope: Option<PathId>,
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
     /// Names of source `#Config` contracts declared by this module.
@@ -453,6 +456,10 @@ pub struct ScopeContext {
     /// Preserves an enclosing match arm's line boundary in child expression contexts.
     pub(crate) match_arm_boundary: bool,
 
+    /// Defers typed producer rejection until the complete root expression is known.
+    /// This is parser control state, not an expression failure fact.
+    pub(crate) defer_typed_error_validation: bool,
+
     // Immutable shared services are cheap to clone into child scopes.
     pub(crate) shared: Rc<ScopeShared>,
 
@@ -487,6 +494,12 @@ pub struct ScopeContext {
     /// must validate against the function return contract rather than the
     /// immediate expression receiver.
     pub current_function_return_type_ids: Vec<TypeId>,
+    /// Whether this scope is inside an authored function body.
+    ///
+    /// WHAT: set for source functions and copied into their child scopes.
+    /// WHY: synthetic start exposes builtin Error! for postfix propagation, but
+    ///      that slot must not make a root `return` look like an authored return.
+    pub(crate) inside_authored_function: bool,
 
     /// Active value-production target for `then` statements in the current scope.
     ///
@@ -521,6 +534,7 @@ impl Clone for ScopeContext {
             kind: self.kind.clone(),
             scope: self.scope,
             match_arm_boundary: self.match_arm_boundary,
+            defer_typed_error_validation: self.defer_typed_error_validation,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
             template_ir_store: Rc::clone(&self.template_ir_store),
@@ -531,6 +545,7 @@ impl Clone for ScopeContext {
             expected_result_type_ids: self.expected_result_type_ids.clone(),
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: self.active_value_target.clone(),
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -723,6 +738,7 @@ impl ScopeContext {
             resolved_module_constants_override: None,
             emitted_warnings: Rc::new(RefCell::new(Vec::new())),
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
+            known_infallible_functions: None,
             source_file_scope: None,
             file_value_resolution: None,
             source_build_config_values: None,
@@ -744,10 +760,12 @@ impl ScopeContext {
         )));
         let root_frame_id = arena.borrow_mut().alloc_root_frame_with_capacity(0);
         record_scope_frame_depth(0);
+        let inside_authored_function = matches!(kind, ContextKind::Function);
 
         ScopeContext {
             kind,
             match_arm_boundary: false,
+            defer_typed_error_validation: false,
             scope,
             shared,
             arena,
@@ -759,6 +777,7 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: None,
             current_function_return_type_ids: Vec::new(),
+            inside_authored_function,
             active_value_target: None,
             active_generic_type_context: None,
             generic_template_validation: false,
@@ -807,6 +826,7 @@ impl ScopeContext {
         ScopeContext {
             kind,
             match_arm_boundary,
+            defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -818,6 +838,7 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             // Branch-like child scopes inherit value production so ordinary nested
             // `if`/match paths can produce for the nearest active value block.
             // Barriers such as loops, functions, conditions, and templates keep
@@ -855,6 +876,7 @@ impl ScopeContext {
         let mut new_context = ScopeContext {
             kind: ContextKind::Function,
             match_arm_boundary: false,
+            defer_typed_error_validation: false,
             scope: function_scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -866,6 +888,7 @@ impl ScopeContext {
             expected_result_type_ids: expected_result_type_ids.clone(),
             expected_error_type,
             current_function_return_type_ids: expected_result_type_ids,
+            inside_authored_function: true,
             active_value_target: None,
             active_generic_type_context: None,
             generic_template_validation: false,
@@ -891,6 +914,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Expression,
             match_arm_boundary: self.match_arm_boundary,
+            defer_typed_error_validation: self.defer_typed_error_validation,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -902,12 +926,20 @@ impl ScopeContext {
             expected_result_type_ids,
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
             loop_depth: self.loop_depth,
         }
+    }
+
+    /// Keeps the receiving scope's policy while nested operands retain typed producers.
+    pub(crate) fn new_pending_typed_error_expression_context(&self) -> ScopeContext {
+        let mut context = self.clone();
+        context.defer_typed_error_validation = true;
+        context
     }
 
     /// Build the context used while parsing template expressions.
@@ -932,6 +964,7 @@ impl ScopeContext {
         ScopeContext {
             kind: template_kind,
             match_arm_boundary: self.match_arm_boundary,
+            defer_typed_error_validation: false,
             scope: self.scope,
             shared: Rc::clone(&self.shared),
             arena: Rc::clone(&self.arena),
@@ -943,6 +976,7 @@ impl ScopeContext {
             expected_result_type_ids: vec![],
             expected_error_type: self.expected_error_type,
             current_function_return_type_ids: self.current_function_return_type_ids.clone(),
+            inside_authored_function: self.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -970,6 +1004,7 @@ impl ScopeContext {
         ScopeContext {
             kind: ContextKind::Constant,
             match_arm_boundary: parent.match_arm_boundary,
+            defer_typed_error_validation: false,
             scope,
             shared: Rc::clone(&parent.shared),
             arena: Rc::clone(&parent.arena),
@@ -981,6 +1016,7 @@ impl ScopeContext {
             expected_result_type_ids: Vec::new(),
             expected_error_type: parent.expected_error_type,
             current_function_return_type_ids: parent.current_function_return_type_ids.clone(),
+            inside_authored_function: parent.inside_authored_function,
             active_value_target: None,
             active_generic_type_context: parent.active_generic_type_context.clone(),
             generic_template_validation: parent.generic_template_validation,

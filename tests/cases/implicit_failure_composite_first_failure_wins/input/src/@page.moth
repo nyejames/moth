@@ -1,0 +1,34 @@
+double |value Int| -> Int:
+    return value + 2147483647
+;
+
+combine |left Int, right Int| -> Int:
+    return left + right
+;
+
+trace ~U32 = 0
+left |seen ~U32, value Int| -> Int:
+    seen = seen + 1
+    return value + 2147483647
+;
+
+right |seen ~U32, value Int| -> Int:
+    seen = seen + 10
+    return value + 2147483647
+;
+
+first_code ~U32 = 0
+first = combine(left(~trace, 1), right(~trace, 2)) catch |first_err|:
+    first_code = first_err.code
+    then 0 - 1
+;
+
+second_code ~U32 = 0
+after_first U32 = trace + 0
+second = combine(right(~trace, 2), left(~trace, 1)) catch |second_err|:
+    second_code = second_err.code
+    then 0 - 2
+;
+after_second = trace
+
+[: composite first-failure first=[first] code=[first_code] spent=[after_first] second=[second] code2=[second_code] spent2=[after_second]]

@@ -133,6 +133,9 @@ pub(crate) fn lower_statement(
                 )
             }
         }
+        HirStatementKind::RangeStepFailure { .. } => Err(lir_transformation_error(
+            "Range-step failure must be lowered as a block terminator",
+        )),
         HirStatementKind::FloatRangeCandidate {
             current,
             step,
@@ -199,7 +202,11 @@ fn lower_checked_integer_operation(
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), CompilerError> {
-    if failure_mode != NumericFailureMode::Trap || !op.domain.is_integer() {
+    if !matches!(
+        failure_mode,
+        NumericFailureMode::Trap | NumericFailureMode::Infallible
+    ) || !op.domain.is_integer()
+    {
         return Err(lir_transformation_error(format!(
             "Wasm lowering does not support checked numeric operation {op} in {failure_mode:?} mode"
         )));

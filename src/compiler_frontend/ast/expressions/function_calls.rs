@@ -1,11 +1,8 @@
-//! Function-call parsing and result-handling suffix integration.
+//! Function-call parsing and typed producer completion.
 //!
-//! WHAT: resolves user/host call signatures and applies the postfix `!` propagation and `catch`
-//!       recovery forms that can follow a call expression.
-//! WHY: function-call completion owns result handling after the shared `call_arguments` parser
-//!      has produced retained, source-span argument metadata.
-//! WHY: call validation belongs here, while callers should consume the same
-//!      expression contract in statement and expression positions.
+//! Calls finish explicit propagation immediately. Unhandled typed producers keep ordinary success
+//! types and expression-owned failure facts until whole-expression catch completion decides their
+//! delivery. Arguments retain their own pending contributors independently of the outer call.
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -18,21 +15,21 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     expectations_from_user_parameters, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::{
+    Expression, FallibleExpressionHandling, HandledFallibleHostFunctionCallInput,
+};
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     FallibleCallSite, FallibleHostCallSite, HandledFallibleCall, HandledFallibleHostCall,
     call_success_is_optional, non_fallible_handler_reason,
     parse_fallible_handling_suffix_for_call_expression,
     parse_fallible_handling_suffix_for_host_call_expression,
-    token_stream_starts_fallible_handling_suffix,
+    token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidFallibleHandlingReason,
-};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{
@@ -82,15 +79,15 @@ struct ParsedExternalFunctionCall {
     span: Option<SourceSpan>,
 }
 
-struct CallFinishContext<'a, 'b, 'tokens> {
-    token_stream: &'a mut AstCursor<'tokens>,
-    context: &'a ScopeContext,
-    value_required: bool,
-    allow_boundary_catch: bool,
-    warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
-    type_interner: &'a mut AstTypeInterner<'b>,
-    string_table: &'a mut StringTable,
-    path_fork: &'a mut PathInternerFork,
+pub(crate) struct CallFinishContext<'a, 'b, 'tokens> {
+    pub(crate) token_stream: &'a mut AstCursor<'tokens>,
+    pub(crate) context: &'a ScopeContext,
+    pub(crate) value_required: bool,
+    pub(crate) allow_boundary_catch: bool,
+    pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
+    pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
 /// Parses a source-function call for expression position.
@@ -190,7 +187,7 @@ pub(crate) fn parse_function_call_expression(
     )
 }
 
-fn finish_function_call_expression(
+pub(crate) fn finish_function_call_expression(
     call: HandledFallibleCall,
     error_return_type_id: Option<TypeId>,
     finish: CallFinishContext<'_, '_, '_>,
@@ -207,7 +204,7 @@ fn finish_function_call_expression(
     } = finish;
 
     let Some(error_return_type_id) = error_return_type_id else {
-        if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
+        if token_stream.current_tag() == TokenTag::BANG {
             let operand_is_optional = call_success_is_optional(
                 call.result_type_ids.as_slice(),
                 type_interner.environment(),
@@ -219,9 +216,16 @@ fn finish_function_call_expression(
             .into());
         }
 
-        return Ok(call.into_plain_expression(type_interner.environment_mut_for_derived_types()));
+        let call_path = call.name;
+        let expression =
+            call.into_plain_expression(type_interner.environment_mut_for_derived_types());
+        return Ok(if context.source_call_has_private_failure_lane(call_path) {
+            expression.with_private_call_failure_candidate(call_path)
+        } else {
+            expression
+        });
     };
-    if token_stream_starts_fallible_handling_suffix(token_stream) {
+    if token_stream_starts_typed_propagation_suffix(token_stream) {
         return parse_fallible_handling_suffix_for_call_expression(
             token_stream,
             context,
@@ -238,11 +242,17 @@ fn finish_function_call_expression(
         );
     }
 
-    Err(CompilerDiagnostic::invalid_fallible_handling(
-        InvalidFallibleHandlingReason::UnhandledErrorReturn,
-        Some(token_stream.current_span()),
+    Ok(
+        Expression::handled_fallible_function_call_with_typed_arguments(
+            call.name,
+            call.args,
+            call.result_type_ids,
+            FallibleExpressionHandling::Recover,
+            type_interner.environment_mut_for_derived_types(),
+            call.call_span,
+        )
+        .with_typed_error_producer(error_return_type_id, None),
     )
-    .into())
 }
 
 #[allow(
@@ -463,7 +473,7 @@ fn finish_external_function_call_expression(
             call_span: span,
         };
 
-        if token_stream_starts_fallible_handling_suffix(token_stream) {
+        if token_stream_starts_typed_propagation_suffix(token_stream) {
             return parse_fallible_handling_suffix_for_host_call_expression(
                 token_stream,
                 context,
@@ -479,14 +489,23 @@ fn finish_external_function_call_expression(
             );
         }
 
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::UnhandledErrorReturn,
-            Some(token_stream.current_span()),
-        )
-        .into());
+        return Ok(
+            Expression::handled_fallible_host_function_call_with_typed_arguments(
+                HandledFallibleHostFunctionCallInput {
+                    id: call.name,
+                    args: call.args,
+                    result_type_ids: call.result_type_ids,
+                    error_type_id: call.error_type_id,
+                    handling: FallibleExpressionHandling::Recover,
+                    span: call.call_span,
+                },
+                type_interner.environment_mut_for_derived_types(),
+            )
+            .with_typed_error_producer(error_type_id, None),
+        );
     }
 
-    if matches!(token_stream.current_tag(), TokenTag::BANG | TokenTag::CATCH) {
+    if token_stream.current_tag() == TokenTag::BANG {
         let operand_is_optional =
             call_success_is_optional(result_type_ids.as_slice(), type_interner.environment());
         return Err(CompilerDiagnostic::invalid_fallible_handling(

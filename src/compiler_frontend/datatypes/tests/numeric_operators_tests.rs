@@ -2,7 +2,7 @@
 
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, common_fixed_integer, comparison_supported,
-    negation_domain,
+    negation_domain, numeric_failure_codes, numeric_operation_cannot_fail,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -376,4 +376,155 @@ fn every_fixed_integer_pair_compares_including_i64_with_u64() {
         NumericScalar::Int,
         NumericScalar::Float
     ));
+}
+
+#[test]
+fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
+    use NumericOperator as Op;
+    // (operator, left, right, domain, expected): domains mirror `binary_operation_domain` /
+    // `negation_domain` outputs so the table pins the predicate's contract inputs.
+    let cases = [
+        // Contract true table.
+        (Op::Add, fixed(U8), Some(fixed(U8)), fixed(U32), true),
+        (Op::Multiply, fixed(U8), Some(fixed(U8)), fixed(U32), true),
+        (Op::Multiply, fixed(U16), Some(fixed(U16)), fixed(U32), true),
+        (Op::Add, fixed(I8), Some(fixed(I8)), fixed(I32), true),
+        (Op::Subtract, fixed(I8), Some(fixed(I8)), fixed(I32), true),
+        (Op::Negate, fixed(I8), None, fixed(I32), true),
+        // Mixed signedness promotes to the computed common domain.
+        (Op::Add, fixed(U8), Some(fixed(I8)), fixed(I32), true),
+        // Contract false table.
+        (Op::Subtract, fixed(U8), Some(fixed(U8)), fixed(U32), false),
+        (Op::Add, fixed(U32), Some(fixed(U32)), fixed(U32), false),
+        (Op::Add, fixed(U64), Some(fixed(U64)), fixed(U64), false),
+        (
+            Op::Multiply,
+            fixed(I64),
+            Some(fixed(I64)),
+            fixed(I64),
+            false,
+        ),
+        (Op::Negate, fixed(I32), None, fixed(I32), false),
+        (Op::Negate, fixed(I64), None, fixed(I64), false),
+        (
+            Op::Add,
+            NumericScalar::Int,
+            Some(NumericScalar::Int),
+            NumericScalar::Int,
+            false,
+        ),
+        (
+            Op::Add,
+            fixed(I32),
+            Some(NumericScalar::Int),
+            NumericScalar::Float,
+            false,
+        ),
+        (Op::Divide, fixed(U8), Some(fixed(U8)), fixed(F64), false),
+        (
+            Op::Divide,
+            NumericScalar::Int,
+            Some(NumericScalar::Int),
+            NumericScalar::Float,
+            false,
+        ),
+        (
+            Op::IntegerDivide,
+            fixed(I32),
+            Some(fixed(I32)),
+            fixed(I32),
+            false,
+        ),
+        (
+            Op::Remainder,
+            fixed(U32),
+            Some(fixed(U32)),
+            fixed(U32),
+            false,
+        ),
+        (Op::Power, fixed(U8), Some(fixed(U8)), fixed(U32), false),
+        (
+            Op::Add,
+            NumericScalar::Float,
+            Some(NumericScalar::Float),
+            NumericScalar::Float,
+            false,
+        ),
+        (Op::Add, fixed(F32), Some(fixed(F32)), fixed(F32), false),
+        (Op::Add, number(2), Some(number(2)), number(2), false),
+    ];
+
+    for (operator, left, right, domain, expected) in cases {
+        assert_eq!(
+            numeric_operation_cannot_fail(operator, left, right, domain),
+            expected,
+            "{operator:?} {left:?} {right:?} -> {domain:?}"
+        );
+    }
+
+    // The mixed-signedness and negation rows above use the domains the promotion table
+    // actually computes, pinned here so a promotion change fails loudly.
+    assert_eq!(
+        binary_operation_domain(Op::Add, fixed(U8), fixed(I8)),
+        Some(fixed(I32))
+    );
+    assert_eq!(negation_domain(fixed(I32)), Some(fixed(I32)));
+    assert_eq!(negation_domain(fixed(I64)), Some(fixed(I64)));
+
+    // Byte never participates: it has no `NumericScalar` domain, so model it as rejected by
+    // asserting the predicate refuses a non-integer fixed domain (F32 here stands in for any
+    // non-integer domain, including Byte's absence from the scalar vocabulary).
+    assert!(!numeric_operation_cannot_fail(
+        Op::Add,
+        fixed(F32),
+        Some(fixed(F32)),
+        fixed(F32)
+    ));
+}
+
+#[test]
+fn failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure_edge() {
+    use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+    use NumericOperator as Op;
+
+    // `Float` negation is exact, so it carries no codes while every other `Float`
+    // operation keeps its non-finite guard.
+    assert!(numeric_failure_codes(Op::Negate, NumericScalar::Float).is_empty());
+    assert_eq!(
+        numeric_failure_codes(Op::Add, NumericScalar::Float),
+        &[BuiltinErrorCode::FloatNonFinite]
+    );
+    assert_eq!(
+        numeric_failure_codes(Op::Divide, NumericScalar::Float),
+        &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::FloatNonFinite
+        ]
+    );
+
+    // Exact `Dec` arithmetic is exact at its scale; only dividing operations and power
+    // retain codes.
+    for operator in [Op::Add, Op::Subtract, Op::Multiply, Op::Negate] {
+        assert!(
+            numeric_failure_codes(operator, number(0)).is_empty(),
+            "{operator:?} on Dec must carry no failure codes"
+        );
+    }
+    assert_eq!(
+        numeric_failure_codes(Op::Remainder, number(0)),
+        &[BuiltinErrorCode::DivideByZero]
+    );
+    assert_eq!(
+        numeric_failure_codes(Op::Power, number(1)),
+        &[BuiltinErrorCode::InvalidExponent]
+    );
+
+    // Integer operations always retain at least one code; the discharge predicate may
+    // still prove fixed-width cases unable to fail.
+    for operator in BINARY_OPERATORS {
+        assert!(
+            !numeric_failure_codes(operator, NumericScalar::Int).is_empty(),
+            "{operator:?} on Int must retain failure codes"
+        );
+    }
 }

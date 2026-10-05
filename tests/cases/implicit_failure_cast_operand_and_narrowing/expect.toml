@@ -1,0 +1,18 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " overflowed=0 oreport= 301 Int operation overflowed narrowed=0 nreport= 242 U32 -> U8 source 300 is out of U8 range exact=30"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.runtime_casts"
+path = "input/@page.moth"
+line = 2

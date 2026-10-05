@@ -36,6 +36,7 @@ fn summary(
     PublicCallSummary {
         parameters,
         return_alias,
+        escapes_builtin_failure: false,
     }
 }
 
@@ -54,6 +55,23 @@ fn identical_summary_is_an_unchanged_transition() {
         validate_public_call_summary_transition(&current, &current).unwrap(),
         PublicCallSummaryTransition::Unchanged
     );
+}
+
+#[test]
+fn builtin_failure_bit_widens_but_never_narrows() {
+    let initial = summary(vec![], FunctionReturnAliasSummary::Fresh);
+    let mut escaping = initial.clone();
+    escaping.escapes_builtin_failure = true;
+
+    assert_eq!(
+        validate_public_call_summary_transition(&initial, &escaping).unwrap(),
+        PublicCallSummaryTransition::Widened
+    );
+    assert_eq!(
+        validate_public_call_summary_transition(&escaping, &escaping).unwrap(),
+        PublicCallSummaryTransition::Unchanged
+    );
+    assert!(validate_public_call_summary_transition(&escaping, &initial).is_err());
 }
 
 #[test]

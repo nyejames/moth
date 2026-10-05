@@ -1,0 +1,19 @@
+Failure = | message String |
+
+check |value Bool| -> Bool, Failure!:
+    if value:
+        return true
+    ;
+    return! Failure("not ready")
+;
+
+saved_message ~= ""
+recovered = check(false) catch |err|:
+    saved Failure = err
+    saved_message = saved.message
+    then true
+;
+
+exact = check(true) catch then false
+
+[: custom error catch recovered=[recovered] message=[saved_message] exact=[exact]]

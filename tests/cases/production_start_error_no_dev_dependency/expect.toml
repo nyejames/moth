@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+entry_error_code = 0
+rendered_output_exact = ""
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ['typeof globalThis.__moth_record_entry_failure === "function"', 'typeof globalThis.__moth_record_startup_fault === "function"']
+must_not_contain = ["/__moth/", "EventSource", "runtime-report", "onerror", "unhandledrejection"]

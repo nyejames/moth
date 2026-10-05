@@ -795,7 +795,7 @@ fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
         assert_unsupported_feature(
             &diagnostic,
             &mut string_table,
-            UnsupportedBackendFeatureReason::CheckedNumericOperations,
+            UnsupportedBackendFeatureReason::RecoverableNumericFailure,
         );
     }
 }
@@ -892,6 +892,35 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     );
     assert_unsupported_feature(
         &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+    );
+
+    let recoverable = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![numeric_op_statement_with_failure(
+                10,
+                HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Fixed(FixedScalar::F16),
+                },
+                None,
+                NumericFailureMode::ReturnError,
+            )],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let recoverable_diagnostic = wasm_feature_validation_diagnostic(
+        &recoverable,
+        &type_environment,
+        &mut string_table,
+        "Wasm should keep an unimplemented F16 domain ahead of recoverable failure delivery",
+    );
+    assert_unsupported_feature(
+        &recoverable_diagnostic,
         &mut string_table,
         UnsupportedBackendFeatureReason::CheckedNumericOperations,
     );
@@ -1401,12 +1430,12 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
         &numeric_module,
         &type_environment,
         &mut string_table,
-        "checked numeric failures should retain precedence over Error values and fallible terminators",
+        "recoverable numeric failure should retain precedence over Error values and fallible terminators",
     );
     assert_unsupported_feature(
         &numeric_diagnostic,
         &mut string_table,
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        UnsupportedBackendFeatureReason::RecoverableNumericFailure,
     );
 
     let cast_result_type =
@@ -1466,6 +1495,49 @@ fn backend_feature_validation_allows_direct_fixed_scalar_values() {
             "direct {scalar:?} values should pass the Wasm shape gate"
         );
     }
+}
+
+#[test]
+fn backend_feature_validation_keeps_fixed_scalar_failure_carriers_out_of_aggregate_gate() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let error_type = register_test_builtin_error_type(&mut type_environment);
+    let span = Some(test_source_span(17));
+
+    for scalar in FixedScalar::ALL {
+        let success_type = builtin_type_ids::fixed_scalar(scalar);
+        let carrier = type_environment.intern_fallible_carrier(success_type, error_type);
+        let module = module_returning_expression(carrier, span);
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "an internal scalar-success carrier must reach the Error representation gate",
+        );
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::ErrorValues,
+        );
+        assert_eq!(diagnostic.primary_span, span);
+    }
+
+    let aggregate =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::U32), None);
+    let carrier = type_environment.intern_fallible_carrier(aggregate, error_type);
+    let module = module_returning_expression(carrier, span);
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "an internal carrier must not hide unsupported user-aggregate success values",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::FixedWidthScalarValues,
+    );
+    assert_eq!(diagnostic.primary_span, span);
 }
 
 #[test]

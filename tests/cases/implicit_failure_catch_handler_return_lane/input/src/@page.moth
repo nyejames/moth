@@ -1,0 +1,28 @@
+bump |value Int| -> Int:
+    return value + 2147483647
+;
+
+-- The handler returns instead of producing `then`; the uncaught addition below
+-- keeps this helper on the inferred-failure lane.
+guarded |value Int| -> Int:
+    recovered = bump(value) catch:
+        return 0
+    ;
+    return recovered + 2147483647
+;
+
+safe_bump |value Int| -> Int, Error!:
+    return bump(value)
+;
+
+ok Int = 0 - 2147483647 - 1
+recovered = guarded(2)
+exact = guarded(ok)
+
+fail_code ~U32 = 0
+failed = safe_bump(2) catch |fail_err|:
+    fail_code = fail_err.code
+    then 0 - 1
+;
+
+[: handler return recovered=[recovered] exact=[exact] failed=[failed] code=[fail_code]]

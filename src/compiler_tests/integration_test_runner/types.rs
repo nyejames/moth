@@ -106,6 +106,7 @@ pub(crate) struct RenderedOutputExpectation {
     pub contains_exactly_once: Vec<String>,
     pub runtime_error_contains: Vec<String>,
     pub runtime_trap_contains: Vec<String>,
+    pub entry_error_code: Option<u32>,
     pub math_random_samples: Option<Vec<f64>>,
 }
 
@@ -119,6 +120,7 @@ impl RenderedOutputExpectation {
             || !self.contains_exactly_once.is_empty()
             || !self.runtime_error_contains.is_empty()
             || !self.runtime_trap_contains.is_empty()
+            || self.entry_error_code.is_some()
     }
 
     pub(crate) fn assertion_count(&self) -> usize {
@@ -129,6 +131,7 @@ impl RenderedOutputExpectation {
             + self.contains_exactly_once.len()
             + self.runtime_error_contains.len()
             + self.runtime_trap_contains.len()
+            + usize::from(self.entry_error_code.is_some())
     }
 }
 
@@ -264,6 +267,7 @@ pub(crate) enum FailureKind {
     RenderedOutputExactMismatch,
     RenderedOutputOrderMismatch,
     RenderedOutputMultiplicityMismatch,
+    EntryFailed,
     HarnessFailed,
     ExpectationViolation,
 }

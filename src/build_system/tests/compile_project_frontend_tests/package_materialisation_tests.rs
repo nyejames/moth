@@ -1,4 +1,18 @@
 use super::*;
+use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::failure_facts::{
+    HirBuiltinFailureBoundary, HirBuiltinFailureSource,
+};
+use crate::compiler_frontend::public_interface::{
+    PublicDeclarationSemantics, PublicFunctionCategory,
+};
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use moth_lexical::numeric::profile::NumericProfile;
 #[test]
@@ -374,7 +388,7 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
 ;
 
 seed_helper type T |value ~Int, marker T| -> Int:
-    value = value + 1
+    value = 2
     return value
 ;
 
@@ -1335,6 +1349,609 @@ wrapped Wrapper = identity(make())
         .expect("facade-hidden provider nominal should retain its fields");
     assert_eq!(hidden_fields.len(), 1);
     assert_eq!(hidden_fields[0].type_id, builtin_type_ids::INT);
+}
+
+#[test]
+fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_convergence() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let dir = temp_dir.path().to_path_buf();
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("should create project entry root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    ).expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
+         product type T |marker T, left Int, right Int| -> Int:\n\
+             return multiply(left, right)\n;\n\
+         safe_product type T |marker T, left Int, right Int| -> Int, Error!:\n\
+             return multiply(left, right)\n;\n\
+         use_product |left Int, right Int| -> Int:\n    return product(0, left, right)\n;\n\
+         use_safe_product |left Int, right Int| -> Int, Error!:\n\
+             return safe_product(0, left, right)!\n;\n\
+         result = use_product(2, 3)\n",
+    )
+    .expect("should write private generic helper source");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("real private generic helper contracts should compile");
+
+    let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+    assert_eq!(
+        sidecars.len(),
+        2,
+        "both authored concrete requests must materialise"
+    );
+    let mut inferred_roots = 0;
+    let mut error_slot_roots = 0;
+    for sidecar in sidecars {
+        let executable = &sidecar.module.executable;
+        let hir = &executable.hir;
+        let root = *hir
+            .function_ids_by_generated
+            .get(&sidecar.identity)
+            .expect("sidecar identity must resolve to its exact generated root");
+        let facts = &hir.function_failure_facts[&root];
+        assert_eq!(facts.contributors.len(), 1);
+        let contributor = &facts.contributors[0];
+        let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source
+        else {
+            panic!(
+                "materialised donor-private call must retain its failure contributor: {contributor:?}"
+            );
+        };
+        assert!(contributor.span.is_some());
+        assert!(
+            hir.module_private_call_summaries[helper].escapes_builtin_failure,
+            "the real multiply body, not an injected summary, must establish helper failure",
+        );
+        let summary = &executable.borrow_analysis.analysis.public_call_summaries[&root];
+        match facts.boundary {
+            HirBuiltinFailureBoundary::InferPrivate => {
+                inferred_roots += 1;
+                assert!(summary.escapes_builtin_failure);
+            }
+            HirBuiltinFailureBoundary::BuiltinErrorSlot => {
+                error_slot_roots += 1;
+                assert!(!summary.escapes_builtin_failure);
+            }
+            boundary => panic!("unexpected generated failure contract: {boundary:?}"),
+        }
+    }
+    assert_eq!((inferred_roots, error_slot_roots), (1, 1));
+}
+
+#[test]
+fn implicit_failure_later_generated_request_reuses_converged_private_helper_summary() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let dir = temp_dir.path().to_path_buf();
+    let src = dir.join("src");
+    let helper = src.join("helper");
+    fs::create_dir_all(&helper).expect("should create declaring module");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        helper.join("@mod.moth"),
+        r#"multiply |left Int, right Int| -> Int:
+    return left * right
+;
+
+export:
+    product type T |marker T, left Int, right Int| -> Int, Error!:
+        return multiply(left, right)
+    ;
+;
+"#,
+    )
+    .expect("should write uninstantiated public generic and private helper");
+    fs::write(
+        src.join("@page.moth"),
+        "@helper product\n\
+         use_product || -> Int, Error!:\n    return product(0, 2, 3)!\n;\n\
+         result = use_product() catch then 0\n",
+    )
+    .expect("should write later generated requester");
+
+    let mut config = Config::new(dir);
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("later public generic request should compile with the private failure contract");
+    assert!(
+        !frontend.has_diagnosed_or_blocked(),
+        "both declaring module and later requester must compile without source diagnoses",
+    );
+
+    let declaring_artefact = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact.interface.declarations.iter().any(|declaration| {
+                matches!(
+                    &declaration.origin,
+                    OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
+                )
+            })
+        })
+        .expect("declaring module should publish product");
+    assert_eq!(
+        declaring_artefact.interface.declarations.len(),
+        1,
+        "multiply must remain private to the declaring module",
+    );
+    let declaration = &declaring_artefact.interface.declarations[0];
+    let PublicDeclarationSemantics::Function(product) = &declaration.semantics else {
+        panic!("product must retain its public function contract");
+    };
+    assert!(matches!(
+        product.category,
+        PublicFunctionCategory::GenericTemplate(_),
+    ));
+    assert_eq!(
+        product.error_return,
+        Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)),
+        "product must keep its public Error! slot",
+    );
+
+    let context = declaring_artefact
+        .module
+        .metadata
+        .materialisation_context
+        .as_ref()
+        .expect("uninstantiated product must publish its declaring materialisation context");
+    let declaring_hir = &declaring_artefact.module.executable.hir;
+    assert!(
+        declaring_hir.function_ids_by_generated.is_empty(),
+        "the declaring module must not instantiate product",
+    );
+    let multiply = declaring_hir
+        .function_ids_by_private_origin
+        .keys()
+        .find(|identity| identity.defining_name() == "multiply")
+        .expect("declaring module must retain multiply's private identity");
+    assert!(
+        context
+            .private_callable_summary(multiply)
+            .expect("declaring context must retain multiply's exact summary")
+            .escapes_builtin_failure,
+        "the published declaring context must replace multiply's signature-only bootstrap false",
+    );
+    let mut sidecars = frontend.project.generated.sidecars();
+    let sidecar = sidecars
+        .next()
+        .expect("the page request should materialise product");
+    assert!(
+        sidecars.next().is_none(),
+        "only product should be generated"
+    );
+    let executable = &sidecar.module.executable;
+    let hir = &executable.hir;
+    let root = *hir
+        .function_ids_by_generated
+        .get(&sidecar.identity)
+        .expect("product sidecar must resolve to its exact generated root");
+    let facts = &hir.function_failure_facts[&root];
+    assert_eq!(facts.contributors.len(), 1);
+    let contributor = &facts.contributors[0];
+    let HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(helper)) = &contributor.source
+    else {
+        panic!("later product request must retain its private-call contributor: {contributor:?}");
+    };
+    assert_eq!(
+        helper, multiply,
+        "the sidecar must call the declaring private multiply"
+    );
+    assert!(
+        hir.module_private_call_summaries[multiply].escapes_builtin_failure,
+        "the later page request must consume the converged private summary, not bootstrap false",
+    );
+    assert_eq!(facts.boundary, HirBuiltinFailureBoundary::BuiltinErrorSlot);
+    assert!(
+        !executable.borrow_analysis.analysis.public_call_summaries[&root].escapes_builtin_failure,
+        "product must consume private failure through Error! without widening its public effect",
+    );
+}
+
+// A later generated request cannot leak escaping implicit failure through a missing or custom
+// error slot. Dormant validation of the declaring template rejects it before publication, so the
+// requesting transaction never materialises the instantiation.
+fn compile_later_request_rejection(project_dir: &std::path::Path) -> ProjectFrontendCompilation {
+    let mut config = Config::new(project_dir.to_path_buf());
+    config.entry_root = PathBuf::from("src");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("a diagnosed declaring module stays a retained frontend outcome")
+}
+
+fn assert_later_request_rejected(declaring_source: &str, requester_source: &str, reason_key: &str) {
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let src = temp_dir.path().join("src");
+    fs::create_dir_all(src.join("helper")).expect("should create declaring module");
+    fs::write(
+        temp_dir.path().join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("helper").join("@mod.moth"), declaring_source)
+        .expect("should write declaring module");
+    fs::write(src.join("@page.moth"), requester_source).expect("should write requester");
+
+    let frontend = compile_later_request_rejection(temp_dir.path());
+    assert!(
+        frontend.project.generated.sidecars().next().is_none(),
+        "no escaping later request may materialise",
+    );
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        1,
+        "the declaring module owns the rejection"
+    );
+    assert_eq!(
+        frontend.project.blocked.len(),
+        1,
+        "the requester stays blocked on its provider"
+    );
+
+    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "one escaping failure is reported once"
+    );
+    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostic.identity().reason_key, Some(reason_key));
+    let DiagnosticPayload::InvalidFallibleHandling {
+        reason:
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness }
+            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                witness, ..
+            },
+    } = &diagnostic.payload
+    else {
+        panic!("later request rejection must carry a failure witness: {diagnostic:?}");
+    };
+    // The witness names the declaring private hop, then the originating multiplication.
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans.len(), 1);
+    assert_eq!(witness.elided_call_hops, 0);
+    assert!(witness.call_spans[0].is_some() && witness.origin_span.is_some());
+    let labels = diagnostic
+        .labels
+        .iter()
+        .map(|label| (label.span, label.message.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        vec![
+            (
+                witness.call_spans[0],
+                Some(DiagnosticLabelMessage::BuiltinFailureCall)
+            ),
+            (
+                witness.origin_span,
+                Some(DiagnosticLabelMessage::BuiltinFailureOrigin)
+            ),
+        ],
+    );
+
+    // Recompiling the same project reports the identical structured rejection.
+    let repeat = compile_later_request_rejection(temp_dir.path());
+    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
+    assert_eq!(repeated.identity(), diagnostic.identity());
+    assert_eq!(repeated.payload, diagnostic.payload);
+}
+
+#[test]
+fn implicit_failure_later_generated_request_rejects_exported_function_without_error_slot() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    assert_later_request_rejected(
+        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
+         export:\n    product type T |marker T, left Int, right Int| -> Int:\n        \
+         return multiply(left, right)\n    ;\n;\n",
+        "@helper product\nresult = product(0, 2, 3)\n",
+        "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+    );
+}
+
+#[test]
+fn implicit_failure_later_generated_request_rejects_custom_error_function() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    assert_later_request_rejected(
+        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
+         export:\n    Failure = |\n        message String,\n    |\n\n    \
+         product type T |marker T, left Int, right Int| -> Int, Failure!:\n        \
+         return multiply(left, right)\n    ;\n;\n",
+        "@helper product\nresult = product(0, 2, 3) catch then 0\n",
+        "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
+    );
+}
+
+// M02: a private helper that changes from infallible to fallible changes the
+// exported caller's verdict even though every public signature text stays
+// identical. The first compilation publishes a success-only export whose helper
+// cannot fail; rewriting the helper body to a possibly overflowing op rejects
+// the same exported caller. Each compilation here is fresh (no cross-build
+// artefact reuse exists yet), so this proves the verdict follows the helper's
+// current semantic failure summary rather than the unchanged public text — not
+// cache invalidation.
+#[test]
+fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_caller_verdict() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let src = temp_dir.path().join("src");
+    fs::create_dir_all(src.join("helper")).expect("should create declaring module");
+    fs::write(
+        temp_dir.path().join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // The export block is byte-identical in both versions: only the private helper
+    // body changes. Every public signature text stays the same; only the private
+    // helper's semantic failure summary widens from infallible to fallible.
+    const EXPORT_BLOCK: &str = "export:\n    product type T |marker T, left Int, right Int| -> Int:\n        return double(left)\n    ;\n;\n";
+    let infallible_source =
+        format!("double |value Int| -> Int:\n    return value\n;\n\n{EXPORT_BLOCK}");
+    let fallible_source =
+        format!("double |value Int| -> Int:\n    return value * value\n;\n\n{EXPORT_BLOCK}");
+    assert_ne!(infallible_source, fallible_source);
+    assert_eq!(
+        infallible_source.len() + " * value".len(),
+        fallible_source.len(),
+        "only the helper body gains the overflowing op"
+    );
+    fs::write(src.join("helper").join("@mod.moth"), &infallible_source)
+        .expect("should write infallible declaring module");
+    fs::write(
+        src.join("@page.moth"),
+        "@helper product\n\
+         use_product || -> Int:\n    return product(0, 2, 3)\n;\n\
+         result = use_product()\n",
+    )
+    .expect("should write requester");
+
+    let first = compile_later_request_rejection(temp_dir.path());
+    assert!(
+        first.project.generated.sidecars().next().is_some(),
+        "the infallible helper version must materialise the later request"
+    );
+    assert!(
+        first.project.diagnosed.is_empty(),
+        "the infallible helper version must publish without rejection"
+    );
+    let declaring_artefact = first
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact.interface.declarations.iter().any(|declaration| {
+                matches!(
+                    &declaration.origin,
+                    OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
+                )
+            })
+        })
+        .expect("declaring module should publish product");
+    let context = declaring_artefact
+        .module
+        .metadata
+        .materialisation_context
+        .as_ref()
+        .expect("uninstantiated product must publish its declaring materialisation context");
+    let helper_identity = declaring_artefact
+        .module
+        .executable
+        .hir
+        .function_ids_by_private_origin
+        .keys()
+        .find(|identity| identity.defining_name() == "double")
+        .expect("declaring module must retain the helper private identity")
+        .clone();
+    assert!(
+        !context
+            .private_callable_summary(&helper_identity)
+            .expect("declaring context must retain the helper summary")
+            .escapes_builtin_failure,
+        "the published caller contract must record the helper as infallible"
+    );
+
+    // Version two: identical public signature text, but the private helper now
+    // multiplies, gaining a possibly overflowing op.
+    fs::write(src.join("helper").join("@mod.moth"), &fallible_source)
+        .expect("should write fallible declaring module");
+
+    let second = compile_later_request_rejection(temp_dir.path());
+    assert!(
+        second.project.generated.sidecars().next().is_none(),
+        "no escaping later request may materialise once the helper can fail"
+    );
+    assert_eq!(
+        second.project.diagnosed.len(),
+        1,
+        "the declaring module owns the rejection after the helper widened"
+    );
+    assert_eq!(
+        second.project.blocked.len(),
+        1,
+        "the requester stays blocked on its provider"
+    );
+    let diagnostics = second.project.diagnosed[0].diagnostics.diagnostics();
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "one escaping failure is reported once"
+    );
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
+    );
+    let DiagnosticPayload::InvalidFallibleHandling {
+        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
+    } = &diagnostic.payload
+    else {
+        panic!("widened helper rejection must carry an export witness: {diagnostic:?}");
+    };
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert!(witness.origin_span.is_some());
+    // Recompiling the widened project reports the identical structured rejection,
+    // so the verdict is repeatable and not a one-off ordering artefact.
+    let repeat = compile_later_request_rejection(temp_dir.path());
+    let repeated = &repeat.project.diagnosed[0].diagnostics.diagnostics()[0];
+    assert_eq!(repeated.identity(), diagnostic.identity());
+    assert_eq!(repeated.payload, diagnostic.payload);
+}
+
+// D02: the bounded-witness export source must render the identical terse diagnostic
+// across repeated real-pipeline compilations, even when independent declarations
+// sharing the helper module are textually permuted. The chain hops and the numeric
+// origin stay byte-identical in place (their spans participate in the witness), so
+// only the unrelated declarations move; their spans never enter the witness.
+// There is no worker-count knob to vary: semantic module jobs stay serial (only
+// file preparation parallelises inside a job), so repetition plus textual
+// permutation is the available determinism probe.
+#[test]
+fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilation() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp_dir = tempfile::tempdir().expect("should create temporary project");
+    let src = temp_dir.path().join("src");
+    fs::create_dir_all(&src).expect("should create entry root");
+    fs::write(
+        temp_dir.path().join("config.moth"),
+        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    const CHAIN_TAIL: &str = "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
+         first |left Int, right Int| -> Int:\n    return multiply(left, right)\n;\n\
+         second |left Int, right Int| -> Int:\n    return first(left, right)\n;\n\
+         third |left Int, right Int| -> Int:\n    return second(left, right)\n;\n\
+         fourth |left Int, right Int| -> Int:\n    return third(left, right)\n;\n";
+    const UNRELATED_A: &str = "unrelated_a || -> Int:\n    return 1\n;\n";
+    const UNRELATED_B: &str = "unrelated_b || -> Int:\n    return 2\n;\n";
+    fn write_chain(src: &std::path::Path, unrelated_first: &str, unrelated_second: &str) {
+        fs::write(
+            src.join("chain.moth"),
+            format!("{unrelated_first}\n{unrelated_second}\n{CHAIN_TAIL}"),
+        )
+        .expect("should write chain helpers");
+    }
+    write_chain(&src, UNRELATED_A, UNRELATED_B);
+    fs::write(
+        src.join("@page.moth"),
+        "@chain fourth\n\
+         export:\n    product |left Int, right Int| -> Int:\n        return fourth(left, right)\n    ;\n;\n\
+         result = product(2, 3)\n",
+    )
+    .expect("should write entry");
+    fn terse_error_lines(project_dir: &std::path::Path) -> Vec<String> {
+        let frontend = compile_later_request_rejection(project_dir);
+        assert!(
+            frontend.project.generated.sidecars().next().is_none(),
+            "the escaping export must not materialise"
+        );
+        let project_source = frontend.project_source_database.clone();
+        let mut string_table = StringTable::new();
+        let messages = frontend
+            .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
+            .expect("the diagnosed project must produce render messages");
+        messages
+            .diagnostics()
+            .enumerate()
+            .map(|(index, diagnostic)| {
+                terse::format_terse_diagnostic_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(index),
+                )
+            })
+            .collect()
+    }
+    let first = terse_error_lines(temp_dir.path());
+    assert_eq!(
+        first.len(),
+        1,
+        "the bounded chain must report exactly one error"
+    );
+    assert!(
+        first[0].starts_with("E|MOTH-RULE-0051|@page.moth|"),
+        "the witness rejection must render its code and signature position: {}",
+        first[0]
+    );
+    assert!(
+        first[0].ends_with("Witness omits 2 additional private call hop(s)."),
+        "the bounded witness must render its elided-hop count: {}",
+        first[0]
+    );
+    assert_eq!(
+        terse_error_lines(temp_dir.path()),
+        first,
+        "recompiling the same source must render byte-identical diagnostics"
+    );
+    write_chain(&src, UNRELATED_B, UNRELATED_A);
+    let permuted = terse_error_lines(temp_dir.path());
+    assert_eq!(
+        permuted, first,
+        "permuting unrelated declarations must not move the rendered witness"
+    );
+    assert_eq!(
+        terse_error_lines(temp_dir.path()),
+        first,
+        "the permuted source must itself render deterministically"
+    );
+    // The structured witness behind the rendering carries the exact bounded
+    // content: one IntOverflow code, three kept call spans plus the origin, and
+    // two elided middle hops.
+    let frontend = compile_later_request_rejection(temp_dir.path());
+    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_exported_function")
+    );
+    let DiagnosticPayload::InvalidFallibleHandling {
+        reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
+    } = &diagnostic.payload
+    else {
+        panic!("the bounded chain rejection must carry an export witness: {diagnostic:?}");
+    };
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    assert_eq!(witness.call_spans.len(), 3);
+    assert_eq!(witness.elided_call_hops, 2);
+    assert!(witness.origin_span.is_some());
 }
 
 #[test]

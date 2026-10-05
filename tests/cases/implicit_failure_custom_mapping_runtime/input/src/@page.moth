@@ -1,0 +1,25 @@
+GeometryError = |
+    detail String,
+    cause U32,
+|
+
+area |width Int, height Int| -> Int, GeometryError!:
+    result = width * height catch |err|:
+        return! GeometryError("area overflow", err.code)
+    ;
+    return result
+;
+measure |width Int, height Int, seen ~String| -> Int:
+    value = area(width, height) catch |geo|:
+        seen = [: [geo.detail] [geo.cause]]
+        then 0 - 1
+    ;
+    return value
+;
+big_seen ~= ""
+big = measure(70000, 70000, ~big_seen)
+big_report = copy big_seen
+small_seen ~= ""
+small = measure(6, 7, ~small_seen)
+small_report = copy small_seen
+[: mapped big=[big] report=[big_report] small=[small] clean=[small_report]]

@@ -9,9 +9,6 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::function_calls::{
-    ExternalFunctionCallParseInput, parse_external_function_call_expression,
-};
 use crate::compiler_frontend::ast::expressions::mutation::{
     handle_mutation, handle_mutation_target,
 };
@@ -360,8 +357,9 @@ pub(crate) fn parse_symbol_statement(
     }
 
     // External (host) function calls have no local declaration; resolve by name.
-    if let Some((external_function_id, external_function_def)) =
-        context.lookup_visible_external_function(symbol_id)
+    if context
+        .lookup_visible_external_function(symbol_id)
+        .is_some()
     {
         if token_stream.peek_next_tag() == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
             // Explicit external imports retain the authored dependency span; prelude-injected
@@ -380,24 +378,16 @@ pub(crate) fn parse_symbol_statement(
             .into());
         }
 
-        let call_span = Some(token_stream.current_span());
-        // Shared host-call parsing starts at `(` while this statement dispatcher still points at
-        // the external function name.
-        token_stream.advance();
-        let external_call_expression =
-            parse_external_function_call_expression(ExternalFunctionCallParseInput {
-                token_stream,
-                external_function_id,
-                external_function: external_function_def,
-                call_span,
-                context,
-                value_required: false,
-                allow_boundary_catch: true,
-                warnings: Some(warnings),
-                type_interner,
-                string_table,
-                path_fork,
-            })?;
+        // Host calls share the receiving expression owner with source calls, so a catch protects
+        // the whole call and its operands rather than completing at this statement dispatcher.
+        let external_call_expression = parse_symbol_expression_statement_candidate(
+            token_stream,
+            context,
+            symbol_id,
+            type_interner,
+            string_table,
+            path_fork,
+        )?;
         let external_call_span = external_call_expression.span;
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(external_call_expression),

@@ -1,0 +1,14 @@
+first |value Int, ready Bool| -> Int:
+    if ready:
+        return second(value, ready)
+    ;
+    return value * 2
+;
+second |value Int, ready Bool| -> Int:
+    return first(value, ready)
+;
+export:
+    boundary |value Int, ready Bool| -> Int:
+        return first(value, ready)
+    ;
+;

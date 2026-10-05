@@ -1321,7 +1321,8 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
         .expect("static-true assertion messages should normalize before discard");
     // The production finalizer calls this cleanup immediately after its authoritative type/TIR
     // validation pass. This unit test exercises the same post-validation boundary directly.
-    discard_inactive_assertion_messages(std::slice::from_mut(&mut node));
+    discard_inactive_assertion_messages(std::slice::from_mut(&mut node))
+        .expect("normalized inactive assertion messages should discard successfully");
 
     let NodeKind::Assert { message, .. } = node.kind else {
         panic!("expected the test node to remain an assertion");

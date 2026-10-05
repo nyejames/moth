@@ -1,0 +1,11 @@
+helper |value Int, ready Bool| -> Int:
+    if ready:
+        return helper(value, ready)
+    ;
+    return value * 2
+;
+export:
+    boundary |value Int, ready Bool| -> Int:
+        return helper(value, ready)
+    ;
+;

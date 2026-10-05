@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " custom shared left=-1 lreport= 11 left-detail right=-2 rreport= 22 right-detail ok=202"

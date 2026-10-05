@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_catch_handler_return_lane",
+    entry_root = "src",
+)
+html #= ()

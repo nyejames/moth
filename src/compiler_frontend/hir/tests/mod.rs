@@ -31,6 +31,7 @@ mod hir_reactivity_tests;
 mod hir_result_lowering_tests;
 mod hir_validation_tests;
 mod loop_lowering_tests;
+mod private_failure_lane_tests;
 mod reachability_tests;
 mod value_block_lowering_tests;
 

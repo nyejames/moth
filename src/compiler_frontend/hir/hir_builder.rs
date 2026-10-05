@@ -208,6 +208,15 @@ pub struct HirBuilder<'a> {
     ///      results; HIR lowering needs to intercept those statements and wire them to the
     ///      shared merge locals.
     pub(super) active_value_block_target: Option<ValueBlockTarget>,
+
+    /// Expression-local continuation, installed only while protected work is lowered.
+    pub(super) active_catch_handler: Option<CatchHandlerTarget>,
+
+    /// Calls emitted while a catch handler protected the surrounding work.
+    ///
+    /// WHAT: pending records transferred into the module before compaction.
+    /// WHY: the lane installer needs the routing captured at lowering time.
+    catch_protected_calls: Vec<CatchProtectedCall>,
 }
 
 /// Target state for value-block lowering inside `HirBuilder`.
@@ -219,6 +228,29 @@ pub struct HirBuilder<'a> {
 pub(super) struct ValueBlockTarget {
     pub result_locals: Vec<LocalId>,
     pub merge_block: BlockId,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CatchHandlerTarget {
+    pub block: BlockId,
+    pub error_local: LocalId,
+    pub error_type: TypeId,
+}
+
+/// One scalar `Call` statement whose failure edge an active catch owns.
+///
+/// WHAT: binds the emitted statement id to the handler that protected it and the function
+///       under lowering that owns both.
+/// WHY: the private-lane installer runs after summary convergence, so lowering can only record
+///      where an eligible call's failure edge must go. The installer decides whether the callee
+///      actually escapes, so infallible callees record optimistically and stay invisible.
+///      Validation treats the recorded handler block as a root of the recorded owner until the
+///      installer drains the record.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CatchProtectedCall {
+    pub statement: HirNodeId,
+    pub handler: CatchHandlerTarget,
+    pub owner: FunctionId,
 }
 
 // WHAT: generates a typed `allocate_*_id` method for each HIR entity kind.
@@ -298,6 +330,8 @@ impl<'a> HirBuilder<'a> {
             loop_targets: vec![],
             entry_fragment_vec_local: None,
             active_value_block_target: None,
+            active_catch_handler: None,
+            catch_protected_calls: Vec::new(),
         }
     }
 
@@ -361,6 +395,17 @@ impl<'a> HirBuilder<'a> {
 
         self.active_value_block_target = previous_target;
 
+        result
+    }
+
+    pub(super) fn with_active_catch_handler<T>(
+        &mut self,
+        target: CatchHandlerTarget,
+        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, CompilerError>,
+    ) -> Result<T, CompilerError> {
+        let previous_handler = self.active_catch_handler.replace(target);
+        let result = emit(self);
+        self.active_catch_handler = previous_handler;
         result
     }
 
@@ -477,7 +522,11 @@ impl<'a> HirBuilder<'a> {
             }
         }
 
-        // 5. Assign semantic origins to functions
+        // 5. Project semantic failure facts and join exact function origins.
+        if let Err(error) = self.project_function_failure_facts(&ast) {
+            return Err(self.lower_error_messages(error));
+        }
+
         if let Err(error) = self.assign_function_origins() {
             return Err(self.lower_error_messages(error));
         }
@@ -485,6 +534,11 @@ impl<'a> HirBuilder<'a> {
         let warnings = self.ast_warnings.clone();
         let string_table = &*self.string_table;
         self.module.side_table = self.side_table;
+        // Scalar calls recorded under catch handlers keep their handler routes for the lane
+        // installer; block ids are remapped like every other terminator target.
+        self.module.catch_protected_calls = std::mem::take(&mut self.catch_protected_calls);
+        // Construction may remove unused scaffolding blocks. Later passes index blocks by id.
+        self.module.compact_block_ids();
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
         //    compiler metadata (documentation fragments) is validated separately at the module
@@ -545,6 +599,24 @@ impl<'a> HirBuilder<'a> {
         let index = self.module.functions.len();
         self.function_index_by_id.insert(function.id, index);
         self.module.functions.push(function);
+    }
+
+    /// Records one scalar call emitted while a catch handler protected the work.
+    ///
+    /// WHAT: binds the statement to the active handler and the function under lowering.
+    ///       Infallible callees record optimistically; the lane installer skips records whose
+    ///       callee never escapes and prunes handlers no error edge reaches.
+    /// WHY: the installer runs after summary convergence and cannot re-derive protection from
+    ///      the HIR alone. Validation treats recorded handler blocks as roots of the recorded
+    ///      owner until the installer drains the records.
+    pub(super) fn record_catch_protected_call(&mut self, statement: HirNodeId) {
+        if let (Some(handler), Some(owner)) = (self.active_catch_handler, self.current_function) {
+            self.catch_protected_calls.push(CatchProtectedCall {
+                statement,
+                handler,
+                owner,
+            });
+        }
     }
 
     pub(super) fn push_struct(

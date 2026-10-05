@@ -1,0 +1,19 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "integer checked arithmetic i32=i32-edges-ok u32=u32-edges-ok i64=i64-edges-ok i64-multiply=i64-product-ok/i64-product-ok/i64-product-ok/i64-product-ok u64=u64-edges-ok/u64-high-half-ok u32-wide-product=u32-wide-product-ok casts=u32-to-i64-ok/int32-to-i64-ok/int32-to-i64-ok promotion=u8-promotes-u32-ok/i32-u32-promotes-i64-ok/u32-u64-promotes-u64-ok division=signed-div-rem-ok/signed-div-rem-ok/i32-minimum-remainder-ok/i64-minimum-remainder-ok unsigned-div=u32-div-rem-ok/u64-div-rem-ok power=integer-power-ok/integer-power-ok/integer-power-ok/u32-power-ok/u64-power-ok/u64-power-ok/i64-power-ok/i64-power-ok/u64-power-ok/u64-power-ok negate=i8-negation-promotes-i32-ok/i16-negation-promotes-i32-ok/i32-negation-ok/i64-negation-ok profile=int32-edges-ok"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@page.moth"
+line = 2
+column = 20

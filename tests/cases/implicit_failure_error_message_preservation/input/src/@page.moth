@@ -1,0 +1,50 @@
+first_error |hit Bool| -> Int, Error!:
+    if hit:
+        return! Error("first-msg")
+    ;
+    return 11
+;
+second_error |hit Bool| -> Int, Error!:
+    if hit:
+        return! Error("second-msg", 7)
+    ;
+    return 22
+;
+overflow_term |flag Bool, amount Int| -> Int:
+    if flag:
+        return amount + 2147483647
+    ;
+    return amount
+;
+observe_first |hit Bool, seen ~String| -> Int:
+    value = first_error(hit) + second_error(false) + overflow_term(false, 1) catch |first_err|:
+        seen = [: [first_err.code] [first_err.message]]
+        then 0 - 1
+    ;
+    return value
+;
+observe_second |hit Bool, seen ~String| -> Int:
+    value = first_error(false) + second_error(hit) + overflow_term(false, 1) catch |second_err|:
+        seen = [: [second_err.code] [second_err.message]]
+        then 0 - 2
+    ;
+    return value
+;
+observe_overflow |flag Bool, amount Int, seen ~String| -> Int:
+    value = first_error(false) + second_error(false) + overflow_term(flag, amount) catch |overflow_err|:
+        seen = [: [overflow_err.code] [overflow_err.message]]
+        then 0 - 3
+    ;
+    return value
+;
+first_seen ~= ""
+first_value = observe_first(true, ~first_seen)
+first_report = copy first_seen
+second_seen ~= ""
+second_value = observe_second(true, ~second_seen)
+second_report = copy second_seen
+overflow_seen ~= ""
+overflow_value = observe_overflow(true, 2147483647, ~overflow_seen)
+overflow_report = copy overflow_seen
+ok = first_error(false) + second_error(false) + overflow_term(false, 1) catch then 0 - 4
+[: preservation first=[first_value] freport=[first_report] second=[second_value] sreport=[second_report] overflow=[overflow_value] oreport=[overflow_report] ok=[ok]]

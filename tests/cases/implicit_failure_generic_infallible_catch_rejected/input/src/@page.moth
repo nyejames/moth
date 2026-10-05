@@ -1,0 +1,8 @@
+identity type T |value T| -> T:
+    return value
+;
+recover |value Int| -> Int:
+    return identity(value) catch then 0
+;
+
+[: eligibility]

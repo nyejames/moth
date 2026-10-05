@@ -10,10 +10,12 @@
 //!   3. The compiled JS bundle is embedded in an inline `<script>` block.
 //!      The bundle content is escaped so it cannot contain a raw `</script>` sequence
 //!      that would prematurely close the script tag.
-//!   4. A second inline `<script>` calls entry `start()` once. start() returns the
-//!      runtime fragment array and each element is hydrated into its slot in source order.
+//!   4. The generated caller invokes entry `start()` once and publishes runtime fragments
+//!      only after success, hydrating each slot in source order. Optional host hooks receive
+//!      returned Error details or structurally classified startup faults. Release pages append
+//!      fixed failure text without publishing application error data or replacing static HTML.
 
-use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
+use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsLoweringConfig, lower_hir_to_js};
 use crate::build_system::build::{FileKind, OutputFile, ProjectLinkedModule};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -37,6 +39,25 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Fixed release fallback, inserted as text rather than application HTML.
+pub(crate) const RELEASE_ENTRY_FAILURE_NOTICE: &str = "This page could not start.";
+
+/// Reporting is best-effort: hostile thrown values and host hooks must not replace the fault.
+/// Both startup wrappers rethrow `error` after this snippet and their own host logging.
+pub(crate) fn append_startup_fault_report(output: &mut String, indent: &str) {
+    output.push_str(&format!(
+        "{indent}try {{\n\
+         {indent}  if (typeof globalThis.__moth_record_startup_fault === \"function\") {{\n\
+         {indent}    let category = \"startup_fault\";\n\
+         {indent}    try {{\n\
+         {indent}      if (error !== null && typeof error === \"object\" && error.__moth_assertion === true) category = \"assertion\";\n\
+         {indent}    }} catch (_) {{}}\n\
+         {indent}    globalThis.__moth_record_startup_fault(category, error);\n\
+         {indent}  }}\n\
+         {indent}}} catch (_) {{}}\n"
+    ));
+}
+
 /// Inputs for rendering a JS-backed HTML document.
 ///
 /// WHAT: groups all data needed to produce the final HTML document from a lowered JS module.
@@ -53,6 +74,9 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub project_name: &'a str,
     pub js_bundle: &'a str,
     pub function_names: &'a HashMap<FunctionId, String>,
+    /// Lowering-owned fact from the emitted start's HIR return type.
+    pub start_is_fallible: bool,
+    pub release_build: bool,
     pub entry_runtime_fragment_count: usize,
     /// Whether the emitted JS bundle contains reactive runtime fragments that need the DOM mount
     /// helper instead of plain-string slot insertion.
@@ -230,6 +254,11 @@ pub(crate) fn compile_html_module_js(
         {
             entry_exported_names.push(start_name);
         }
+        if js_module.start_is_fallible {
+            // The generated caller lives outside the entry's isolated runtime prelude.
+            entry_exported_names.push("__moth_error_code".to_owned());
+            entry_exported_names.push("__moth_error_message".to_owned());
+        }
         isolated_modules.push((std::mem::take(&mut js_module.source), entry_exported_names));
         js_module.source = assemble_isolated_module_sources(
             isolated_modules,
@@ -275,6 +304,8 @@ pub(crate) fn compile_html_module_js(
         project_name: input.project_name,
         js_bundle: &bundle_with_imports,
         function_names: &js_module.function_name_by_id,
+        start_is_fallible: js_module.start_is_fallible,
+        release_build: input.build_profile.is_release(),
         entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
         uses_reactive_runtime_fragments,
         import_map_html: glue_result.import_map_html,
@@ -471,6 +502,8 @@ pub(crate) fn render_html_document(
         &slot_ids,
         input.use_module_script,
         input.uses_reactive_runtime_fragments,
+        input.start_is_fallible,
+        input.release_build,
     );
 
     render_html_document_shell(HtmlDocumentShellInput {
@@ -491,6 +524,8 @@ fn render_runtime_bootstrap_script_html(
     slot_ids: &[String],
     is_module_script: bool,
     uses_reactive_runtime_fragments: bool,
+    start_is_fallible: bool,
+    release_build: bool,
 ) -> String {
     // Escape the bundle so any `</script>` sequence inside string literals or comments cannot
     // prematurely terminate the HTML script tag and corrupt the page.
@@ -503,13 +538,17 @@ fn render_runtime_bootstrap_script_html(
         html.push_str("<script type=\"module\">\n");
         html.push_str(&safe_bundle);
         html.push('\n');
+        html.push_str("(function () {\n");
         append_runtime_bootstrap(
             &mut html,
             start_function_name,
             slot_ids,
-            "",
+            "  ",
             uses_reactive_runtime_fragments,
+            start_is_fallible,
+            release_build,
         );
+        html.push_str("})();\n");
         html.push_str("</script>\n");
         html
     } else {
@@ -526,6 +565,8 @@ fn render_runtime_bootstrap_script_html(
             slot_ids,
             "  ",
             uses_reactive_runtime_fragments,
+            start_is_fallible,
+            release_build,
         );
         html.push_str("})();\n");
         html.push_str("</script>\n");
@@ -539,20 +580,77 @@ fn append_runtime_bootstrap(
     slot_ids: &[String],
     indent: &str,
     uses_reactive_runtime_fragments: bool,
+    start_is_fallible: bool,
+    release_build: bool,
 ) {
-    if slot_ids.is_empty() {
+    html.push_str(&format!("{indent}try {{\n"));
+    append_startup_lifecycle(
+        html,
+        start_function_name,
+        slot_ids,
+        &format!("{indent}  "),
+        uses_reactive_runtime_fragments,
+        start_is_fallible,
+        release_build,
+    );
+    html.push_str(&format!("{indent}}} catch (error) {{\n"));
+    append_startup_fault_report(html, &format!("{indent}  "));
+    html.push_str(&format!("{indent}  throw error;\n{indent}}}\n"));
+}
+
+fn append_startup_lifecycle(
+    html: &mut String,
+    start_function_name: &str,
+    slot_ids: &[String],
+    indent: &str,
+    uses_reactive_runtime_fragments: bool,
+    start_is_fallible: bool,
+    release_build: bool,
+) {
+    if start_is_fallible {
+        // Failure has no success slot: branch before reading or publishing any fragments.
+        html.push_str(&format!(
+            "{indent}var moth_result = {start_function_name}();\n"
+        ));
+        html.push_str(&format!("{indent}if (moth_result.tag !== \"ok\") {{\n"));
+        html.push_str(&format!(
+            "{indent}  if (typeof globalThis.__moth_record_entry_failure === \"function\") {{\n\
+             {indent}    var moth_error = moth_result.value;\n\
+             {indent}    globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);\n\
+             {indent}  }}\n"
+        ));
+        html.push_str(&format!(
+            "{indent}  if (typeof process !== \"undefined\" && process.stderr) {{\n\
+             {indent}    process.stderr.write({ENTRY_FAILURE_NOTICE:?});\n\
+             {indent}    process.exitCode = 1;\n\
+             {indent}  }}\n"
+        ));
+        if release_build {
+            html.push_str(&format!(
+                "{indent}  if (typeof document !== \"undefined\" && document.body && document.createTextNode) {{\n\
+                 {indent}    document.body.appendChild(document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?}));\n\
+                 {indent}  }}\n"
+            ));
+        }
+        html.push_str(&format!("{indent}  return;\n{indent}}}\n"));
+        if slot_ids.is_empty() {
+            return;
+        }
+    } else if slot_ids.is_empty() {
         html.push_str(&format!(
             "{indent}if (typeof {start_function_name} === \"function\") {start_function_name}();\n"
         ));
         return;
     }
 
-    // WHAT: call entry start() once; it returns the runtime fragment array in source order.
-    // WHY: start() accumulates fragments via PushRuntimeFragment and returns them as a JS array.
-    //      Calling start() here both produces the fragments and runs the lifecycle.
-    html.push_str(&format!(
-        "{indent}var moth_frags = {start_function_name}();\n"
-    ));
+    // Fragments remain staged until the single start invocation succeeds.
+    if start_is_fallible {
+        html.push_str(&format!("{indent}var moth_frags = moth_result.value;\n"));
+    } else {
+        html.push_str(&format!(
+            "{indent}var moth_frags = {start_function_name}();\n"
+        ));
+    }
     html.push_str(&format!("{indent}var moth_slots = [\n"));
     for slot_id in slot_ids {
         html.push_str(&format!("{indent}  \"{slot_id}\",\n"));

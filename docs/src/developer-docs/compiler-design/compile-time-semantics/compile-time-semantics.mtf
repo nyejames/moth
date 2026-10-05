@@ -142,18 +142,16 @@ Accepted ownership splits cleanly:
 The frontend/HIR implements fixed-width and `Byte` literal typing, fixed-width
 operator semantics, casts and numeric constant folding. HTML-JS executes
 fixed-width, `Byte` and `Dec` values and recovers checked numeric failures
-through builtin `Error!`. Experimental HTML-Wasm executes fixed integers,
-`Byte`, `F16`, `F32` and `F64` with checked trap-mode arithmetic, infallible
-numeric expression casts that do not involve `F16`, integer-to-`F16` and
-widening `F16` casts, `Byte -> U8` and `U8 -> Byte`, and infallible
-integer-to-`String` expression casts from profile `Int` and fixed signed/unsigned
-integer types. HTML-Wasm rejects reachable `Dec` values and recoverable
-numeric failure. Its remaining builtin runtime casts stay gated, including
-fallible casts, conversions involving `Bool`, `Char` or `Error` (including
-`Char -> Int`), parsing from `String` and statement-form casts. Keep
-implementation coverage separate from this accepted ownership split; the
-canonical numeric and cast references and the progress matrix record current
-support.
+through builtin `Error!`. HTML-Wasm executes supported fixed integers,
+`Byte`, `F16`, `F32` and `F64` values, comparisons and supported infallible
+numeric expression casts; it rejects recoverable numeric failure with a
+capability diagnostic, and proven-unable-to-fail operations compile. HTML-Wasm
+rejects reachable `Dec` values and recoverable numeric failure. Its remaining
+builtin runtime casts stay gated, including fallible casts, conversions involving
+`Bool`, `Char` or `Error` (including `Char -> Int`), parsing from `String` and
+statement-form casts. Keep implementation coverage separate from this accepted
+ownership split; the canonical numeric and cast references and the progress matrix
+record current support.
 
 ## What can fail here
 

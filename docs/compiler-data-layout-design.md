@@ -1671,6 +1671,12 @@ when decoding, and field or element path where available.
 Moth compiler failures have exactly three lanes. They are not converted into one another merely
 for rendering convenience.
 
+Runtime program `Error` values, implicit checked failures and entry-startup failures sit outside
+these three compiler lanes. They use the language's execution contract, not `DiagnosticRecord`,
+`InfrastructureFailure` or `compiler_bug!`. Statically invalid numeric work and undischarged
+exported failure are source diagnostics. A runtime failure does not turn a completed compilation
+into a diagnosed module.
+
 ### Lane 1: user-caused diagnostics
 
 User source, project structure, configuration, dependency clauses, type errors, rule violations, borrow errors,
@@ -1860,6 +1866,8 @@ build.
 Each build or analysis request runs in a worker that uniquely owns its mutable compilation context.
 The host owns only immutable inputs and receives a completed success, diagnosis or infrastructure
 failure after the worker finishes.
+
+A compiled program returning `Error` from `start` is not a compiler diagnosis, infrastructure failure or compiler bug. The dev host may present that invocation-local outcome without changing global build success, poisoning shared compiler state or giving other entries a compile-error page. The report protocol lives in `docs/build-system-design.md` > `Development entry-error reports`.
 
 At the worker boundary:
 

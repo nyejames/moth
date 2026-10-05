@@ -8,11 +8,8 @@ message:
 ]
 
 This is compiler-owned metadata, not an importable or shadowable Moth
-function. The current Alpha compiler carries the message as a typed optional
-value through AST and HIR. JavaScript and HTML evaluate reachable runtime
-message construction lazily on the failure edge; HTML-Wasm currently rejects
-reachable runtime construction while accepting default and fully folded forms.
-The rules below describe the accepted end state and the explicit target gap.
+function. The rules below describe the accepted contract. See @../progress
+(Progress) for current compiler and backend support.
 
 [codeblock, $code("moth"):
     assert(index < items.length())
@@ -55,8 +52,9 @@ generated-function request or downstream executable fact. An active message is
 evaluated only on the failure edge. A template-backed message is read as one
 snapshot at failure and does not create an assertion sink or live subscription.
 Message construction cannot escape its evaluation through `!`, `?`, `return`,
-`break` or `continue`. Handle fallible work before the assertion and pass its
-infallible value instead.
+`break` or `continue`, or through escaping implicit or typed failure. This
+includes inferred failure from a private call without an error slot. Handle
+fallible message work before the assertion and pass its infallible value instead.
 
 ### Failure behaviour
 
@@ -65,7 +63,12 @@ infallible value instead.
 - Failure does not produce `Error!`.
 - Postfix `!` is invalid.
 - `catch` is invalid.
-- Expected runtime failures should use a typed error path instead.
+- Expected runtime failures should use an implicit failure or typed error path instead.
+
+The condition is evaluated normally. Implicit failure or a typed error while
+computing it is not a false `Bool` result and does not trigger assertion failure
+or message evaluation. That failure follows the enclosing handler or function
+contract. A typed error still requires its ordinary explicit handling.
 
 ### Statement-only contract
 

@@ -1,0 +1,22 @@
+-- Plan section 2: foreign value-contract violations keep existing validation.
+-- No automatic recoverable adapter: the outer catch does not observe code 304.
+@external_float.js overflow_float
+
+read_raw || -> Float:
+    return overflow_float()
+;
+
+checked_float || -> Int, Error!:
+    value = read_raw()
+    if value > 0.0:
+        return 1
+    ;
+    return 0
+;
+
+code ~U32 = 0
+ignored = checked_float() catch |err|:
+    code = err.code
+    then 0
+;
+io.line([: external_native_float32_no_slot overflow-code=[code]])

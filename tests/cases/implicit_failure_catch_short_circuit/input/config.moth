@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_catch_short_circuit",
+    entry_root = "src",
+)
+html #= ()

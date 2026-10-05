@@ -6,7 +6,7 @@
 
 #[allow(dead_code)] // Some codes are reserved for planned surfaces and must keep stable values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum BuiltinErrorCode {
+pub enum BuiltinErrorCode {
     UnknownOrUnassigned = 0,
     Unsupported = 1,
     CollectionExpectedOrderedCollection = 100,
@@ -41,6 +41,10 @@ pub(crate) enum BuiltinErrorCode {
     FloatBoundaryNonFinite = 304,
     /// Defensive Float formatting checks use this when an internal finite-Float invariant fails.
     FloatFormatInvariant = 305,
+    /// A dynamic range step must be non-zero before the first iteration.
+    InvalidRangeStep = 306,
+    /// An in-range floating-point candidate must advance after rounding.
+    RangeStepNoProgress = 307,
     /// Time ISO parsing uses this when text does not match the accepted timestamp format.
     TimeInvalidTimestampText = 310,
     /// Time rendering uses this when an instant lies outside the renderable range.
@@ -48,6 +52,22 @@ pub(crate) enum BuiltinErrorCode {
 }
 
 impl BuiltinErrorCode {
+    /// The single closed classification of failures inferred for checked arithmetic and ranges.
+    ///
+    /// Boundary validation and defensive formatting invariants are not implicit failures.
+    /// Their delivery remains governed by separately declared API contracts.
+    pub(crate) fn is_implicit_failure(self) -> bool {
+        matches!(
+            self,
+            Self::DivideByZero
+                | Self::IntOverflow
+                | Self::InvalidExponent
+                | Self::FloatNonFinite
+                | Self::InvalidRangeStep
+                | Self::RangeStepNoProgress
+        )
+    }
+
     /// The canonical unsigned runtime value this code carries in `Error.code`.
     pub(crate) fn as_u32(self) -> u32 {
         self as u32
@@ -97,6 +117,8 @@ impl BuiltinErrorCode {
                 "External Float boundary produced a non-finite value"
             }
             BuiltinErrorCode::FloatFormatInvariant => "Float formatting invariant failed",
+            BuiltinErrorCode::InvalidRangeStep => "Loop step cannot be zero",
+            BuiltinErrorCode::RangeStepNoProgress => "Floating-point range step made no progress",
             BuiltinErrorCode::TimeInvalidTimestampText => "Cannot parse Timestamp from text",
             BuiltinErrorCode::TimeTimestampOutOfRange => {
                 "Timestamp instant is outside the renderable range"

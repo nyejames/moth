@@ -8,14 +8,13 @@ rendered_output_contains = [
 ]
 
 [backends.html_wasm]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_contains = [
-    "fixed_numeric_range_runtime verified",
-]
+diagnostic_codes = ["MOTH-RULE-0064"]
 
-[[backends.html_wasm.artifact_assertions]]
-path = "page.wasm"
-kind = "wasm"
-validate_wasm = true
-must_export = ["moth_start"]
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.recoverable_numeric_failure"
+path = "input/@page.moth"
+line = 7
+column = 1

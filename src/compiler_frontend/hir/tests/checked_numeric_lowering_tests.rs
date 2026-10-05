@@ -26,7 +26,7 @@ use crate::compiler_frontend::hir::numeric::{
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -360,23 +360,25 @@ fn compound_u8_store_conversion_traps_before_writing_target() {
             domain: NumericScalar::Fixed(FixedScalar::U32),
         }
     );
-    assert_eq!(failure_mode, NumericFailureMode::Trap);
+    // The U8 + U8 arithmetic is discharged to U32 (F06): it carries no failure edge. The
+    // narrowing store conversion back to U8 remains the failing check under test.
+    assert_eq!(failure_mode, NumericFailureMode::Infallible);
 
     let (success_block, error_block) = store_conversion_branch(&builder);
     let error_block = &builder.module.blocks[error_block.0 as usize];
-    assert!(
-        matches!(
-            &error_block.terminator,
-            HirTerminator::RuntimeFailure { message }
-                if message == "Compound assignment conversion failed"
-        ),
-        "non-fallible conversion failure must trap"
-    );
+    let carrier = match error_block.terminator {
+        HirTerminator::RuntimeFailure {
+            cause: Some(RuntimeFailureCause::StoreConversion { carrier }),
+            ..
+        } => carrier,
+        _ => panic!("non-fallible conversion failure must retain its store-conversion cause"),
+    };
     let stored_value = compound_assignment_store_value(&builder, LocalId(10), success_block);
     assert!(
         matches!(
             &stored_value.kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
+            HirExpressionKind::FallibleUnwrapSuccess { result }
+                if matches!(result.kind, HirExpressionKind::Load(HirPlace::Local(local)) if local == carrier)
         ),
         "the store must consume the successful conversion payload"
     );
@@ -414,7 +416,9 @@ fn compound_u8_store_conversion_returns_error_before_writing_target() {
             domain: NumericScalar::Fixed(FixedScalar::U32),
         }
     );
-    assert_eq!(failure_mode, NumericFailureMode::ReturnError);
+    // Discharged arithmetic stays Infallible even inside Error! functions: only the store
+    // conversion takes the recoverable path asserted below.
+    assert_eq!(failure_mode, NumericFailureMode::Infallible);
 
     let (success_block, error_block) = store_conversion_branch(&builder);
     let error_block = &builder.module.blocks[error_block.0 as usize];

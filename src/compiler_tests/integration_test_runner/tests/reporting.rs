@@ -256,6 +256,40 @@ fn inventory_reports_acceptance_only_without_baseline_only_state() {
 }
 
 #[test]
+fn inventory_counts_entry_error_code_zero_as_runtime_assertion_intent() {
+    let cases = vec![case(
+        "entry_error",
+        BackendId::Html,
+        &["integration"],
+        None,
+        None,
+        ExpectedOutcome::Success(SuccessExpectation {
+            warnings: WarningExpectation::Forbid,
+            success_contract: None,
+            artifact_assertions: Vec::new(),
+            golden: GoldenExpectation::default(),
+            rendered_output: RenderedOutputExpectation {
+                entry_error_code: Some(0),
+                ..Default::default()
+            },
+            artifacts_must_not_exist: Vec::new(),
+        }),
+    )];
+    let json = serde_json::to_value(report_for_cases(&cases, RepositoryRevision::NotARepository))
+        .expect("report should serialize");
+
+    assert_eq!(json["summary"]["rendered_output_backend_blocks"], 1);
+    assert_eq!(
+        json["cases"][0]["backends"][0]["rendered_output_assertion_count"],
+        1
+    );
+    assert_eq!(
+        json["cases"][0]["backends"][0]["assertion_kinds"],
+        serde_json::json!(["backend_baseline", "rendered_output", "entry_error_code"])
+    );
+}
+
+#[test]
 fn inventory_reports_each_rendered_output_form_and_schema_ten_summary_counts() {
     let cases = vec![
         case(

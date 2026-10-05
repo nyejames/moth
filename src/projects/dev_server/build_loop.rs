@@ -5,7 +5,8 @@
 
 use crate::build_system::build::{self, BuildResult, ProjectBuilder};
 use crate::build_system::output::{
-    OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
+    OutputPlan, OutputWriteSummary, SingleFileOutputPlan, WriteMode, WriteOptions,
+    write_project_outputs,
 };
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
@@ -72,11 +73,14 @@ enum BuildFailure {
 /// Keeping this contract small makes the watch/build coordination testable while still delegating
 /// real work to the core build APIs.
 pub trait DevBuildExecutor: Send {
-    fn build_and_write(
+    fn build(&mut self, entry_file: &Path, flags: &[Flag])
+    -> Result<BuildResult, CompilerMessages>;
+
+    fn write_outputs(
         &mut self,
+        build_result: &mut BuildResult,
         entry_file: &Path,
-        flags: &[Flag],
-    ) -> Result<BuildResult, CompilerMessages>;
+    ) -> Result<OutputWriteSummary, CompilerMessages>;
 }
 pub struct ProjectBuildExecutor {
     builder: ProjectBuilder,
@@ -93,7 +97,7 @@ impl ProjectBuildExecutor {
     }
 }
 impl DevBuildExecutor for ProjectBuildExecutor {
-    fn build_and_write(
+    fn build(
         &mut self,
         entry_file: &Path,
         flags: &[Flag],
@@ -105,8 +109,14 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             )
         })?;
 
-        let mut build_result =
-            build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)?;
+        build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
+    }
+
+    fn write_outputs(
+        &mut self,
+        build_result: &mut BuildResult,
+        entry_file: &Path,
+    ) -> Result<OutputWriteSummary, CompilerMessages> {
         let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
@@ -132,17 +142,15 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 &mut build_result.string_table,
             )
         });
-        if let Err(messages) = output_result {
-            let messages = match build_result.take_output_failure_messages(messages) {
+        output_result.map_err(|messages| {
+            match build_result.take_output_failure_messages(messages) {
                 Ok(messages) => messages,
                 Err(error) => CompilerMessages::from_error(
                     error,
                     crate::compiler_frontend::symbols::string_interning::StringTable::new(),
                 ),
-            };
-            return Err(messages);
-        }
-        Ok(build_result)
+            }
+        })
     }
 }
 
@@ -158,8 +166,24 @@ pub fn run_single_build_cycle(
         timing_guard_command_dev_cycle,
         crate::timing::TimingMetric::CommandDevCycle
     );
-    let build_outcome = build_once(executor, entry_file, flags);
+    let start = std::time::Instant::now();
+    let compiled = executor.build(entry_file, flags);
     let project_root = dev_server_project_root(entry_file);
+
+    // WHAT: output mutation and metadata publication share the HTTP read-capture boundary.
+    // WHY: compilation is independent, but no request may label new bytes with the old version.
+    let mut recovered_poison = false;
+    let mut build_state = match state.build_state.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            say!(
+                Yellow "Dev server state warning: recovering from a poisoned build-state lock after a previous panic."
+            );
+            recovered_poison = true;
+            poisoned.into_inner()
+        }
+    };
+    let build_outcome = build_once(executor, entry_file, compiled, start);
     let BuildOutcome {
         build_succeeded,
         build_duration,
@@ -172,52 +196,46 @@ pub fn run_single_build_cycle(
         output_dir,
     } = build_outcome;
 
-    let version = {
-        // If a previous dev-server task panicked while holding the lock, keep the latest state and
-        // continue serving rebuild results instead of crashing the entire watcher loop.
-        let mut build_state = match state.build_state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                say!(
-                    Yellow "Dev server state warning: recovering from a poisoned build-state lock after a previous panic."
-                );
-                poisoned.into_inner()
-            }
-        };
-        build_state.last_build_version = build_state.last_build_version.saturating_add(1);
-        build_state.last_build_ok = build_succeeded;
-        build_state.last_build_messages_summary = diagnostics_summary;
+    build_state.last_build_version = build_state.last_build_version.saturating_add(1);
+    build_state.last_build_ok = build_succeeded;
+    build_state.last_build_messages_summary = diagnostics_summary;
 
-        if build_succeeded {
-            build_state.last_error_html = None;
-            build_state.entry_page_rel = entry_page_rel;
-            if let Some(output_dir) = output_dir {
-                build_state.output_dir = output_dir;
-            }
-            if let Some(html_site_config) = html_site_config {
-                build_state.html_site_config = html_site_config;
-            }
-        } else {
-            // Render compiler diagnostics only after the version increments so the error page and
-            // the SSE reload event always point at the same build number.
-            build_state.last_error_html = Some(match failed_build {
-                Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
-                    &messages,
-                    &project_root,
-                    &build_state.html_site_config.origin,
-                    build_state.last_build_version,
-                ),
-                None => render_runtime_error_page(
-                    "Build Failed",
-                    "The latest build failed, but no diagnostics were stored.",
-                    &build_state.html_site_config.origin,
-                    build_state.last_build_version,
-                ),
-            });
+    if build_succeeded {
+        build_state.last_error_html = None;
+        build_state.entry_page_rel = entry_page_rel;
+        if let Some(output_dir) = output_dir {
+            build_state.output_dir = output_dir;
         }
+        if let Some(html_site_config) = html_site_config {
+            build_state.html_site_config = html_site_config;
+        }
+    } else {
+        // Failed publication may leave partially emitted assets, never a successful page generation.
+        // Keep assets reachable, but replace page HTML with diagnostics for this failed attempt.
+        build_state.last_error_html = Some(match failed_build {
+            Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
+                &messages,
+                &project_root,
+                &build_state.html_site_config.origin,
+                build_state.last_build_version,
+            ),
+            None => render_runtime_error_page(
+                "Build Failed",
+                "The latest build failed, but no diagnostics were stored.",
+                &build_state.html_site_config.origin,
+                build_state.last_build_version,
+            ),
+        });
+    }
 
-        build_state.last_build_version
-    };
+    let version = build_state.last_build_version;
+    // WHAT: clear the poison flag while still holding the guard that published coherent state.
+    // WHY: HTTP readers reject a poisoned lock, so recovery must end the poisoned era before any
+    // reader can acquire it; a panic during a later cycle re-poisons normally.
+    if recovered_poison {
+        state.build_state.clear_poison();
+    }
+    drop(build_state);
 
     let clients_notified = sse::broadcast_reload(state, version);
     #[cfg(feature = "detailed_timers")]
@@ -365,10 +383,13 @@ pub fn run_watch_build_loop(
 fn build_once(
     executor: &mut dyn DevBuildExecutor,
     entry_file: &Path,
-    flags: &[Flag],
+    compiled: Result<BuildResult, CompilerMessages>,
+    start: std::time::Instant,
 ) -> BuildOutcome {
-    let start = std::time::Instant::now();
-    let build_result_outcome = executor.build_and_write(entry_file, flags);
+    let build_result_outcome = compiled.and_then(|mut build_result| {
+        executor.write_outputs(&mut build_result, entry_file)?;
+        Ok(build_result)
+    });
     let build_duration =
         crate::capture_command_duration!(crate::timing::TimingMetric::CommandDevBuildWrite, start,);
 

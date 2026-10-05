@@ -768,7 +768,7 @@ td {
 <span class='moth-code-nominal'>Maybe</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>::</span>
     <span class='moth-code-nominal'>Some</span> <span class='moth-code-delimiter'>|</span> value <span class='moth-code-nominal'>A</span> <span class='moth-code-delimiter'>|</span>,
     <span class='moth-code-nominal'>Empty</span>,
-<span class='moth-code-delimiter'>;</span></code></pre><p>Generic parameters follow the declaration name after <code>type</code>. Multiple parameters are separated by commas.</p><h3>Exact contract</h3><ul><li>Generic parameters are introduced with <code>type</code> after the declaration name.</li><li>Supported declaration owners are top-level structs, choices and free functions.</li><li>Parameter names use type-name casing.</li><li>Parameters are scoped to the declaration.</li><li>Parameters are compile-time placeholders, not runtime values.</li><li>Each parameter name must be unique within the declaration.</li><li>Parameters cannot collide with visible concrete types, type aliases, external package types, builtins or other type-position names.</li><li>A generic body may use active parameters in local type annotations.</li><li>Inline parameter sugar such as <code>|value type A|</code> is rejected.</li><li>Generic parameters do not create type values.</li><li>Generic declarations are resolved before HIR.</li></ul><h3>Multiple parameters</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Pair</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span>, <span class='moth-code-nominal'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>Generic parameters follow the declaration name after <code>type</code>. Multiple parameters are separated by commas.</p><h3>Exact contract</h3><ul><li>Generic parameters are introduced with <code>type</code> after the declaration name.</li><li>Supported declaration owners are top-level structs, choices and free functions.</li><li>Parameter names use type-name casing.</li><li>Parameters are scoped to the declaration.</li><li>Parameters are compile-time placeholders, not runtime values.</li><li>Each parameter name must be unique within the declaration.</li><li>Parameters cannot collide with visible concrete types, type aliases, external package types, builtins or other type-position names.</li><li>A generic body may use active parameters in local type annotations.</li><li>Inline parameter sugar such as <code>|value type A|</code> is rejected.</li><li>Generic parameters do not create type values.</li><li>Generic declarations are resolved before HIR.</li><li>Implicit failure follows the closed module boundary: an exported generic without an error slot must handle it locally, while a private generic propagates it within the same module. See <a href="../errors">Errors</a>.</li></ul><h3>Multiple parameters</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Pair</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span>, <span class='moth-code-nominal'>B</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     first <span class='moth-code-nominal'>A</span>,
     second <span class='moth-code-nominal'>B</span>,
 <span class='moth-code-delimiter'>|</span></code></pre><h3>Unused parameters</h3><p>A generic parameter must be used in the public type shape of the declaration. An unused parameter is rejected.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Error: parameter &#39;A&#39; is declared but never used</span>
@@ -1059,7 +1059,7 @@ text_box <span class='moth-code-nominal'>Box</span> <span class='moth-code-keywo
 <span class='moth-code-delimiter'>;</span>
 
 box <span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Box</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>42</span><span class='moth-code-delimiter'>)</span>
-value <span class='moth-code-operator'>=</span> box.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>Receiver methods on one concrete generic instance remain rejected.</p><h3>Generic bounds and evidence</h3><p>Concrete instantiation with trait bounds requires visible reusable evidence. See <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</p><h3>Deferred and rejected surfaces</h3><ul><li>Recursive generic nominal types are rejected.</li><li>Receiver methods on concrete instances are rejected.</li><li>Generic external package functions and types are deferred.</li></ul><h3>Related concepts</h3><ul><li>For type application see <a href="#type-application">Type application</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
+value <span class='moth-code-operator'>=</span> box.<span class='moth-code-function'>get</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>Receiver methods on one concrete generic instance remain rejected.</p><h3>Generic bounds and evidence</h3><p>Concrete instantiation with trait bounds requires visible reusable evidence. See <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</p><h3>Deferred and rejected surfaces</h3><ul><li>Recursive generic nominal types are rejected.</li><li>Receiver methods on concrete instances are rejected.</li><li>Generic external package functions and types are deferred.</li></ul><p>Implicit failure follows the closed module boundary: an exported generic instance without an error slot must discharge it. See <a href="../errors">Errors</a> for failure delivery.</p><h3>Related concepts</h3><ul><li>For type application see <a href="#type-application">Type application</a>.</li><li>For trait bounds see <a href="../traits/#generic-trait-bounds">Generic trait bounds</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1481,7 +1481,20 @@ return __moth_read(b_l0);
 </script>
 <script>
 (function () {
-  if (typeof b_fn0 === "function") b_fn0();
+  try {
+    if (typeof b_fn0 === "function") b_fn0();
+  } catch (error) {
+    try {
+      if (typeof globalThis.__moth_record_startup_fault === "function") {
+        let category = "startup_fault";
+        try {
+          if (error !== null && typeof error === "object" && error.__moth_assertion === true) category = "assertion";
+        } catch (_) {}
+        globalThis.__moth_record_startup_fault(category, error);
+      }
+    } catch (_) {}
+    throw error;
+  }
 })();
 </script>
   </body>

@@ -10,6 +10,7 @@
 //! operation runs, except `Dec ^ Int` keeps its exponent in the profile `Int` domain.
 //! `Byte` is outside `NumericScalar` and never reaches this policy.
 
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
@@ -247,6 +248,117 @@ fn fixed_float_domain(scalar: FixedScalar) -> FixedScalar {
     }
 }
 
+/// Whether a checked numeric operation provably cannot fail from its operand types alone.
+/// WHAT: the single backend-independent, `NumericProfile`-independent semantic discharge
+///       predicate. True only when every operand and the result domain are fixed-width integer
+///       scalars and the complete canonical result range of `Add` / `Subtract` / `Multiply` /
+///       `Negate` lies inside the result domain's range, computed with `i128` endpoint
+///       arithmetic. `Divide`, `IntegerDivide`, `Remainder` and `Power` always return false,
+///       as does any operation involving profile `Int`, `Float`/binary floats, `Dec`/`Number`
+///       or `Byte`.
+/// WHY: AST failure facts and HIR emission share one proof of infallibility so debug and
+///      release (and every `NumericProfile`) accept the same source. Optional backend check
+///      elision stays in `analysis/numeric_proofs` and never feeds this predicate.
+pub(crate) fn numeric_operation_cannot_fail(
+    operator: NumericOperator,
+    left: NumericScalar,
+    right: Option<NumericScalar>,
+    domain: NumericScalar,
+) -> bool {
+    let result_range = match fixed_integer_range(domain) {
+        Some(range) => range,
+        None => return false,
+    };
+    match operator {
+        NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {
+            let Some(right) = right else {
+                return false;
+            };
+            let (Some(left_range), Some(right_range)) =
+                (fixed_integer_range(left), fixed_integer_range(right))
+            else {
+                return false;
+            };
+            let Some(result) = checked_result_range(operator, left_range, right_range) else {
+                return false;
+            };
+            result.0 >= result_range.0 && result.1 <= result_range.1
+        }
+        NumericOperator::Negate => {
+            if right.is_some() {
+                return false;
+            }
+            let Some(operand_range) = fixed_integer_range(left) else {
+                return false;
+            };
+            let Some(result) = operand_range
+                .1
+                .checked_neg()
+                .and_then(|high| operand_range.0.checked_neg().map(|low| (high, low)))
+            else {
+                return false;
+            };
+            // Negation consumes its promoted domain: the operand already carries the result
+            // type, so the mathematical range must fit the same domain.
+            result.0 >= result_range.0 && result.1 <= result_range.1
+        }
+        NumericOperator::Divide
+        | NumericOperator::IntegerDivide
+        | NumericOperator::Remainder
+        | NumericOperator::Power => false,
+    }
+}
+
+/// Complete canonical range of a fixed-width integer scalar, or `None` for every other domain.
+///
+/// WHAT: profile-free `(min, max)` widened to `i128`, mirroring `NumericScalar::integer_range`
+///       without its `NumericProfile` parameter.
+/// WHY: the discharge predicate must give the same answer under every profile, so it reads
+///      fixed widths only and rejects profile `Int` outright.
+fn fixed_integer_range(scalar: NumericScalar) -> Option<(i128, i128)> {
+    let NumericScalar::Fixed(fixed) = scalar else {
+        return None;
+    };
+    match fixed.class() {
+        FixedScalarClass::SignedInteger => {
+            let (min, max) = fixed.signed_range()?;
+            Some((i128::from(min), i128::from(max)))
+        }
+        FixedScalarClass::UnsignedInteger => Some((0, i128::from(fixed.unsigned_max()?))),
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
+    }
+}
+
+/// Mathematical result range of one dischargeable binary operator over closed `i128` intervals.
+///
+/// WHAT: `None` when a checked `i128` intermediate cannot represent the result; callers treat
+///       that as unproved, never wrapping.
+fn checked_result_range(
+    operator: NumericOperator,
+    left: (i128, i128),
+    right: (i128, i128),
+) -> Option<(i128, i128)> {
+    match operator {
+        NumericOperator::Add => Some((left.0.checked_add(right.0)?, left.1.checked_add(right.1)?)),
+        NumericOperator::Subtract => {
+            Some((left.0.checked_sub(right.1)?, left.1.checked_sub(right.0)?))
+        }
+        NumericOperator::Multiply => {
+            let mut low = i128::MAX;
+            let mut high = i128::MIN;
+            for left_endpoint in [left.0, left.1] {
+                for right_endpoint in [right.0, right.1] {
+                    let product = left_endpoint.checked_mul(right_endpoint)?;
+                    low = low.min(product);
+                    high = high.max(product);
+                }
+            }
+            Some((low, high))
+        }
+        _ => None,
+    }
+}
+
 fn is_fixed_integer(scalar: FixedScalar) -> bool {
     matches!(
         scalar.class(),
@@ -256,4 +368,58 @@ fn is_fixed_integer(scalar: FixedScalar) -> bool {
 
 fn is_fixed_float(scalar: FixedScalar) -> bool {
     scalar.class() == FixedScalarClass::BinaryFloat
+}
+
+/// The recoverable builtin failure codes of one checked numeric operation.
+///
+/// WHAT: the single owner of the operator/domain code set. Empty means the operation has no
+///       runtime failure edge: `Float` negation is exact, and non-dividing, non-power `Dec`
+///       arithmetic is exact at its scale.
+/// WHY: AST failure facts, the AST active-contributor verdict, HIR lane installation and
+///      convergence must agree on which operations can fail. A second table would let one
+///      stage split or reject what another stage calls infallible.
+pub(crate) fn numeric_failure_codes(
+    operator: NumericOperator,
+    domain: NumericScalar,
+) -> &'static [BuiltinErrorCode] {
+    let divides = matches!(
+        operator,
+        NumericOperator::Divide | NumericOperator::IntegerDivide | NumericOperator::Remainder
+    );
+    if domain.is_binary_float() {
+        if divides {
+            return &[
+                BuiltinErrorCode::DivideByZero,
+                BuiltinErrorCode::FloatNonFinite,
+            ];
+        }
+        return if operator == NumericOperator::Negate {
+            &[]
+        } else {
+            &[BuiltinErrorCode::FloatNonFinite]
+        };
+    }
+    if domain.is_integer() {
+        return match operator {
+            NumericOperator::Divide | NumericOperator::Remainder => {
+                &[BuiltinErrorCode::DivideByZero]
+            }
+            NumericOperator::IntegerDivide => &[
+                BuiltinErrorCode::DivideByZero,
+                BuiltinErrorCode::IntOverflow,
+            ],
+            NumericOperator::Power => &[
+                BuiltinErrorCode::IntOverflow,
+                BuiltinErrorCode::InvalidExponent,
+            ],
+            _ => &[BuiltinErrorCode::IntOverflow],
+        };
+    }
+    if divides {
+        &[BuiltinErrorCode::DivideByZero]
+    } else if operator == NumericOperator::Power {
+        &[BuiltinErrorCode::InvalidExponent]
+    } else {
+        &[]
+    }
 }

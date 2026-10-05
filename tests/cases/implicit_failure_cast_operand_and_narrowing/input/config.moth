@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_cast_operand_and_narrowing",
+    entry_root = "src",
+)
+html #= ()

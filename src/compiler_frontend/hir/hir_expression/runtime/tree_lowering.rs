@@ -81,7 +81,7 @@ impl<'a> HirBuilder<'a> {
                 let hir_op = self.lower_unary_op(op, span)?;
 
                 if *op == Operator::Negate {
-                    let Some((numeric_op, numeric_result_ty)) =
+                    let Some((numeric_op, numeric_result_ty, discharged)) =
                         self.classify_checked_numeric_negation(&lowered_operand)
                     else {
                         return_hir_transformation_error!(
@@ -103,6 +103,7 @@ impl<'a> HirBuilder<'a> {
                         HirNumericOperands::Unary { operand },
                         numeric_result_ty,
                         span,
+                        discharged,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],
@@ -157,7 +158,7 @@ impl<'a> HirBuilder<'a> {
                 // Arithmetic always uses checked NumericOp effects. Mixed Int/Float comparisons
                 // preserve their profile-precision promotion; Dec comparisons explicitly
                 // convert a mixed integer operand to the Dec scale before plain BinOp lowering.
-                if let Some((numeric_op, numeric_result_ty)) =
+                if let Some((numeric_op, numeric_result_ty, discharged)) =
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
                     for prelude_statement in prelude.drain(..) {
@@ -174,6 +175,7 @@ impl<'a> HirBuilder<'a> {
                         HirNumericOperands::Binary { left, right },
                         numeric_result_ty,
                         span,
+                        discharged,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],

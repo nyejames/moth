@@ -161,14 +161,24 @@ values through ordinary copies, collections, options and generic instances.
 Same-scale comparisons stay exact, and templates and `String` share the exact
 Dec formatter.
 
-HTML-Wasm executes fixed integers, `Byte` and fixed binary floats through values,
-comparisons, checked trap-mode arithmetic and supported infallible numeric
-expression casts, including integer-to-`F16` and widening `F16`-to-`F32`/`F64`.
-It also converts profile `Int` and fixed integers to decimal `String` values.
-HTML-Wasm validates finite `Float` values after carrier conversion in trap mode.
-It formats runtime `Float` templates and `Float`/`F16`/`F32`/`F64`-to-`String`
-expression casts at their own precision in trap mode. Non-finite formatting and
-validation trap only in trap mode, while negative zero formats as `0`.
+HTML-Wasm executes supported scalar arithmetic (fixed integers, `Byte`, fixed
+binary floats, profile-selected `Int`/`Float`) through values, comparisons and
+supported infallible numeric expression casts, including integer-to-`F16` and
+widening `F16`-to-`F32`/`F64`. Any operation that can actually fail and needs
+recoverable delivery is rejected with a structured backend capability
+diagnostic; there is no trap fallback. Conservative semantic proof discharges
+`Add`, `Subtract`, `Multiply` and `Negate` over fixed-width integer operand
+and result domains with full-range containment (for example, `U8 + U8 -> U32`
+cannot fail). Other domains are excluded from that discharge; see
+@./#checked-arithmetic (Checked arithmetic) for which operations can fail.
+The proof is type-domain based and profile-free, identical in debug and release
+and across numeric profiles. It also converts profile `Int` and fixed integers
+to decimal `String` values.
+`Float` formatting and finite-boundary validation are integrity guards, not
+implicit numeric failure: they halt unless a declared builtin `Error!` contract
+returns them. HTML-Wasm formats runtime `Float` templates and
+`Float`/`F16`/`F32`/`F64`-to-`String` expression casts at their own precision,
+while negative zero formats as `0`. See @../progress (Progress).
 
 Source-level external `Float` calls still need Wasm import/metadata support.
 Reachable `ReturnError` `FormatFloat` and `ValidateFloat`, plus `String`-to-numeric

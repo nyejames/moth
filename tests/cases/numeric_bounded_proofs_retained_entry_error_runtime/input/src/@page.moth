@@ -1,0 +1,25 @@
+-- HTML executes the safe operations before the retained U32 overflow check.
+-- Its built-in Error propagates to the entry, preventing runtime fragment publication.
+-- HTML-Wasm rejects recoverable numeric failure at i64_identity before runtime.
+
+u8_sum |left U8, right U8| -> U32:
+    return left + right
+;
+
+i64_identity |value I64| -> I64:
+    return value + 0
+;
+
+power_u8 |base U8, exponent U8| -> U32:
+    return base ^ exponent
+;
+
+increment_u32 |value U32| -> U32:
+    return value + 1
+;
+
+exact_sum = u8_sum(200, 100)
+exact_identity = i64_identity(-9223372036854775808)
+exact_power = power_u8(2, 31)
+[:proven [exact_sum]/[exact_identity]/[exact_power]]
+overflowed = increment_u32(4294967295)

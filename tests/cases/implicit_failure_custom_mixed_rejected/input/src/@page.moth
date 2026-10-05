@@ -1,0 +1,11 @@
+Failure = | message String |
+
+check |value Bool| -> Bool, Failure!:
+    return value
+;
+
+risky |value Int| -> Int:
+    return value + 2147483647
+;
+
+value = check((risky(2) - risky(2) + 1) is 2) catch then false

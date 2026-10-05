@@ -9,6 +9,8 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind, Operator};
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -47,15 +49,23 @@ impl ExpressionRpn {
         })
     }
 
-    /// Validate that this RPN does not carry statement-shaped expression variants.
+    /// Validate that RPN contains only ordinary operands or completed receiving-site recovery.
     ///
-    /// WHAT: expression contexts other than `ValueBlock` must not carry statement bodies.
-    /// WHY: this is a frontend invariant check; violation indicates a parser/evaluator bug.
+    /// A compound update evaluates its already-handled RHS before the separate arithmetic and
+    /// write-back checks. That completed catch is a value operand, not a new receiving boundary.
     pub fn validate_no_statement_bodies(&self) -> bool {
         self.items.iter().all(|item| match item {
-            ExpressionRpnItem::Operand(expression) => {
-                !matches!(expression.kind, ExpressionKind::ValueBlock { .. })
-            }
+            ExpressionRpnItem::Operand(expression) => match &expression.kind {
+                ExpressionKind::ValueBlock { block } => matches!(
+                    block.as_ref(),
+                    ValueBlock::Catch(catch)
+                        if matches!(
+                            catch.handled_value.failure_facts.disposition,
+                            FailureDisposition::HandledByCatch { .. }
+                        )
+                ),
+                _ => true,
+            },
             // A deferred literal is not a statement body; resolution removes it before lowering.
             ExpressionRpnItem::PendingNumericLiteral { .. } => true,
             ExpressionRpnItem::Operator { .. } => true,

@@ -33,9 +33,13 @@ use crate::compiler_frontend::external_packages::{
     ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
     ExternalFunctionLowerings, ExternalReturnSlot, ExternalSignatureType,
 };
+use crate::compiler_frontend::hir::hir_builder::lower_ast;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -2840,4 +2844,68 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("rhs-only mutable short-circuit call with later merge use should stay borrowed");
+}
+
+#[test]
+fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler() {
+    let source = "load |value String, trigger Int| -> String:\n\
+                  numeric_result = trigger + 2147483647\n\
+                  return value\n;\n\
+                  recover |fallback String, success String, trigger Int| -> String:\n\
+                  return load(success, trigger) catch:\n\
+                      return fallback\n\
+                  ;\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let entry_path = ast.entry_path;
+    let (mut hir, mut type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
+        .expect("a direct private catch must lower");
+    let registry = default_external_package_registry(&mut string_table);
+    let mut initial = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("the pre-installation HIR must be legal");
+    infer_builtin_failure_summaries(&hir, &mut initial)
+        .expect("the private producer must infer its escaping failure");
+    install_private_failure_lanes(&mut hir, &initial, &mut type_environment)
+        .expect("the inferred call must install a real handler edge");
+    assert!(hir.catch_protected_calls.is_empty());
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("return provenance must remain legal after error edges are installed");
+    let recover_name = path_fork
+        .try_intern_child(entry_path, string_table.intern("recover"))
+        .expect("the test path fits");
+    let recover = hir
+        .functions
+        .iter()
+        .find(|function| hir.side_table.function_name_path(function.id) == Some(recover_name))
+        .expect("the recovering function must exist");
+    let summary = &report.analysis.public_call_summaries[&recover.id];
+    // Unknown is the compact classifier's permitted conservative join. Either summary
+    // must retain the parameter-derived result instead of incorrectly advertising Fresh.
+    assert_ne!(summary.return_alias, FunctionReturnAliasSummary::Fresh);
+    if let FunctionReturnAliasSummary::AliasParams(indices) = &summary.return_alias {
+        assert_eq!(indices, &[0, 1]);
+    }
+
+    let return_facts = hir
+        .blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.terminator,
+                HirTerminator::Return(_) | HirTerminator::ReturnSuccess(_)
+            )
+        })
+        .map(|block| &report.analysis.terminator_facts[&block.id])
+        .collect::<Vec<_>>();
+    assert!(
+        return_facts
+            .iter()
+            .any(|fact| fact.shared_roots.contains(&recover.params[0])),
+        "the handler return must retain the fallback parameter"
+    );
+    assert!(
+        return_facts
+            .iter()
+            .any(|fact| fact.shared_roots.contains(&recover.params[1])),
+        "the success return must retain the successful call's parameter provenance"
+    );
 }

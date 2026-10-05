@@ -1,0 +1,11 @@
+recover_product |left Int, right Int| -> Int:
+    product = left * right catch:
+        then -7
+    ;
+    return product
+;
+
+recovered = recover_product(50000, 50000)
+exact = recover_product(6, 7)
+
+[: implicit expression catch recovered=[recovered] exact=[exact]]

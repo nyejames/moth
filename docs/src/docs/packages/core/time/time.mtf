@@ -286,11 +286,11 @@ Every `Float` reaching this package is already finite, because `NaN` and the inf
 
 `Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
 
-Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `Float` result at the shared external boundary, which returns `Error!` in a fallible context and otherwise ends the program the way any unhandled builtin failure does. No function in this package throws a host error of its own.
+Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `Float` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. No function in this package throws a host error of its own. See @../../../progress (Progress) for current support.
 
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function stays infallible.
+All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function declares no typed error slot; a non-finite `Float` at that shared boundary still halts unless a declared builtin `Error!` contract returns it.
 
 ### Backend behaviour
 

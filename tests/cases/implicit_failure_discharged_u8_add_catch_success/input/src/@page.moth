@@ -1,0 +1,5 @@
+left U8 = 255
+right U8 = 255
+result = left + right catch then 0
+
+[: discharged catch u8 add sum=[result]]

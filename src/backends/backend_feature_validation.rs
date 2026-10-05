@@ -35,8 +35,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
-    ReachableNumericOpUse, ReachableReactiveSinkKind, ReachableReactiveSinkUse,
-    ReachableReactiveTemplateUse, ReachableRuntimeCastForm, ReachableRuntimeCastUse,
+    ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableReactiveSinkKind,
+    ReachableReactiveSinkUse, ReachableReactiveTemplateUse, ReachableRuntimeCastForm,
+    ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -115,10 +116,11 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric failures,
-            // statement casts, unsupported formatting, generic values and later Error-value/
-            // fallible-control-flow checks. Trap-mode Float formatting and finite validation run
-            // natively.
+            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric
+            // failure, statement casts, unsupported formatting, generic values and later
+            // Error-value/fallible-control-flow checks. Trap-mode Float formatting and
+            // finite validation run natively. Supported trap-mode arithmetic is not a
+            // stand-in for recoverable failure delivery.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_reactive_features(
                 &reachability.reachable_reactive_templates,
@@ -139,6 +141,11 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_float_statements(
                 &reachability.reachable_float_statements,
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_range_step_failures(
+                &reachability.reachable_range_step_failures,
                 input.target,
                 string_table,
             )?;
@@ -188,9 +195,9 @@ pub fn validate_hir_backend_feature_support(
 
 /// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
 ///
-/// WHAT: direct fixed scalars, including F16, are accepted, but aggregate types containing any
-///       fixed scalar remain unsupported. The canonical builtin Error is exempt: its internal
-///       field shapes are its own runtime representation, reported by the Error-value gate.
+/// WHAT: direct fixed scalars and compiler-internal carriers of those success values are accepted,
+///       but user aggregates containing fixed scalars remain unsupported. Canonical builtin Error
+///       representation belongs to its own Error-value gate.
 /// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
@@ -216,20 +223,14 @@ fn validate_fixed_width_scalar_values(
     // a source-mapped occurrence wins over earlier generated HIR that has no source provenance.
     let module_occurrences =
         first_unsupported_module_occurrence(hir, selection.blocks(), &mut |type_id| {
-            match type_environment.fixed_scalar(type_id) {
-                Some(_) => false,
-                None => backend_type_facts.contains_fixed_scalar(type_id),
-            }
+            backend_type_facts.is_unsupported_fixed_scalar_shape(type_id)
         });
     let occurrence = if let Some(authored) = module_occurrences.authored {
         Some(authored)
     } else {
         let signature_occurrences =
             first_unsupported_function_signature_occurrence(hir, selection, &mut |type_id| {
-                match type_environment.fixed_scalar(type_id) {
-                    Some(_) => false,
-                    None => backend_type_facts.contains_fixed_scalar(type_id),
-                }
+                backend_type_facts.is_unsupported_fixed_scalar_shape(type_id)
             });
         signature_occurrences
             .authored
@@ -551,43 +552,60 @@ fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile
     )
 }
 
-/// Reports the first reachable checked numeric operation outside Wasm's trap-mode integer and
-/// binary32/binary64 paths.
+/// Reports the first reachable checked numeric operation Wasm cannot deliver.
 ///
-/// WHAT: trap-mode integer and supported float operations are admitted. ReturnError and F16-domain
-///       operations remain target-gated independently of direct F16 values.
-/// WHY: lowerers receive only operations whose exact failure mode and semantic precision they
-///      implement, using the operation/domain facts retained by HIR reachability.
+/// WHAT: trap-mode operations outside integer and binary32/binary64 paths stay
+///       `CheckedNumericOperations`. Recoverable failure on an otherwise supported
+///       operation is rejected as its own failure shape.
+/// WHY: Wasm implements those trap-mode operations. Reporting recoverable delivery
+///      as a numeric-operation limit disguises the unsupported failure shape as a trap.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
     numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(numeric_op) = numeric_ops
-        .iter()
-        .find(|numeric_op| !wasm_supports_checked_numeric_op(numeric_op, numeric_profile))
-    else {
+    let Some((numeric_op, reason)) = numeric_ops.iter().find_map(|numeric_op| {
+        wasm_numeric_rejection(numeric_op, numeric_profile).map(|reason| (numeric_op, reason))
+    }) else {
         return Ok(());
     };
 
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
+        reason,
         numeric_op.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-fn wasm_supports_checked_numeric_op(
+/// Classifies one reachable numeric operation for the Wasm target.
+///
+/// WHAT: an unimplemented trap-mode domain or operator keeps the operation limit.
+///       `ReturnError` on a supported operation is a recoverable-failure rejection.
+/// WHY: operation limits retain priority when both apply, such as F16 in `ReturnError`
+///      mode. Supported trap-mode arithmetic is not reported as unsupported.
+fn wasm_numeric_rejection(
+    numeric_op: &ReachableNumericOpUse,
+    numeric_profile: NumericProfile,
+) -> Option<UnsupportedBackendFeatureReason> {
+    if !wasm_supports_trap_numeric_op(numeric_op, numeric_profile) {
+        return Some(UnsupportedBackendFeatureReason::CheckedNumericOperations);
+    }
+    if !matches!(
+        numeric_op.failure_mode,
+        NumericFailureMode::Trap | NumericFailureMode::Infallible
+    ) {
+        return Some(UnsupportedBackendFeatureReason::RecoverableNumericFailure);
+    }
+    None
+}
+
+fn wasm_supports_trap_numeric_op(
     numeric_op: &ReachableNumericOpUse,
     numeric_profile: NumericProfile,
 ) -> bool {
-    if numeric_op.failure_mode != NumericFailureMode::Trap {
-        return false;
-    }
-
     if numeric_op.op.domain.is_integer() {
         return true;
     }
@@ -629,6 +647,28 @@ fn validate_wasm_float_statements(
         string_table.intern(target.as_str()),
         reason,
         float_statement.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Rejects recoverable range guards before generic Error construction is considered.
+fn validate_wasm_range_step_failures(
+    range_step_failures: &[ReachableRangeStepFailureUse],
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let Some(failure) = range_step_failures
+        .iter()
+        .find(|failure| failure.failure_mode == NumericFailureMode::ReturnError)
+    else {
+        return Ok(());
+    };
+
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::RecoverableNumericFailure,
+        failure.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
@@ -1099,6 +1139,9 @@ where
 
             None
         }
+        HirStatementKind::RangeStepFailure { result, .. } => {
+            first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
+        }
         HirStatementKind::FloatRangeCandidate {
             current,
             step,
@@ -1333,6 +1376,24 @@ impl<'environment> BackendTypeFacts<'environment> {
             memo: FxHashMap::default(),
             visiting: FxHashSet::default(),
         }
+    }
+
+    fn is_unsupported_fixed_scalar_shape(&mut self, type_id: TypeId) -> bool {
+        if self.type_environment.fixed_scalar(type_id).is_some() {
+            return false;
+        }
+
+        // A failure lane preserves a scalar success slot; it does not manufacture a user
+        // aggregate. Keep custom error shapes and genuine success aggregates in the walk.
+        if let Some((success_type, error_type)) =
+            self.type_environment.fallible_carrier_slots(type_id)
+            && self.error_type_id == Some(error_type)
+            && self.type_environment.fixed_scalar(success_type).is_some()
+        {
+            return false;
+        }
+
+        self.contains_fixed_scalar(type_id)
     }
 
     fn contains_fixed_scalar(&mut self, type_id: TypeId) -> bool {

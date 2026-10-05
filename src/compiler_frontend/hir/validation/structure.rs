@@ -8,7 +8,7 @@ use super::HirValidator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::FunctionId;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -186,6 +186,35 @@ impl<'a> HirValidator<'a> {
         // WHY: prevents cross-function jumps and ensures clear ownership for analysis.
         self.block_owner_by_id.clear();
 
+        // Pending catch edges: a recorded scalar call still falls through until the
+        // private-lane installer routes its failure edge, so each record counts as a
+        // pending edge from the recorded statement's block to its handler block. The
+        // installer drains every record, so post-install validation sees none of these.
+        let mut statement_block_by_id: FxHashMap<HirNodeId, BlockId> = FxHashMap::default();
+        for block in &self.module.blocks {
+            for statement in &block.statements {
+                statement_block_by_id.insert(statement.id, block.id);
+            }
+        }
+        let mut pending_handlers: FxHashMap<(FunctionId, BlockId), Vec<BlockId>> =
+            FxHashMap::default();
+        for record in &self.module.catch_protected_calls {
+            let Some(statement_block) = statement_block_by_id.get(&record.statement).copied()
+            else {
+                return Err(self.error_with_hir(
+                    format!(
+                        "Catch-protected call record references missing statement {:?}",
+                        record.statement
+                    ),
+                    None,
+                ));
+            };
+            pending_handlers
+                .entry((record.owner, statement_block))
+                .or_default()
+                .push(record.handler.block);
+        }
+
         for function in &self.module.functions {
             let mut queue = VecDeque::new();
             let mut visited = FxHashSet::default();
@@ -216,6 +245,11 @@ impl<'a> HirValidator<'a> {
                 for successor in terminator_targets(&block.terminator) {
                     queue.push_back(successor);
                 }
+                if let Some(handlers) = pending_handlers.get(&(function.id, block_id)) {
+                    for handler in handlers {
+                        queue.push_back(*handler);
+                    }
+                }
             }
         }
 
@@ -231,6 +265,26 @@ impl<'a> HirValidator<'a> {
                 ),
                 Some(HirLocation::Block(block.id)),
             ));
+        }
+
+        // A pending edge never crosses a function boundary: the recorded statement block
+        // and its handler block both belong to the recorded owner.
+        for record in &self.module.catch_protected_calls {
+            let Some(statement_block) = statement_block_by_id.get(&record.statement).copied()
+            else {
+                continue;
+            };
+            let statement_owner = self.block_owner_by_id.get(&statement_block).copied();
+            let handler_owner = self.block_owner_by_id.get(&record.handler.block).copied();
+            if statement_owner != Some(record.owner) || handler_owner != Some(record.owner) {
+                return Err(self.error_with_hir(
+                    format!(
+                        "Catch-protected call record for statement {:?} crosses a function boundary",
+                        record.statement
+                    ),
+                    Some(HirLocation::Block(record.handler.block)),
+                ));
+            }
         }
 
         Ok(())

@@ -463,7 +463,7 @@ A canonical normal module may support multiple entry assemblies under a builder'
 
 An `EntryAssembly` selects an already compiled normal module's dormant `start`, runtime/static fragments, resolved page metadata and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
 
-Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns `start`'s non-exported, infallible contract. Builders add no error-fragment channel.
+Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns `start`'s non-exported contract: built-in `Error!` alongside its fragment-collection success slots, including for a synthetic single-file root. Builders consume the typed outcome and add no error-fragment channel.
 
 ### Package assembly
 
@@ -492,10 +492,46 @@ For each validated `$page` entry, the builder plans:
 1. Activation of that normal module's compiled dormant root.
 2. Compile-time fragments at their recorded runtime insertion indexes and slots for runtime fragments.
 3. Exactly one invocation of active `start` through the selected runtime path.
-4. Runtime fragment insertion in source order.
+4. Runtime fragment publication in source order, only after that invocation succeeds.
 5. Route HTML and companion outputs from folded page metadata and directory routes.
 
 This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share fragment/document assembly. Ordinary strings/templates carry no hidden subscriptions, reactive mount state or automatic rerendering.
+
+The generated caller branches on `start`'s typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
+
+The compiler owns `start`'s signature, checks, failure mapping and explicit result control flow. The builder owns the generated caller and terminal presentation. It consumes the typed result and does not reinterpret HIR or catch ordinary Moth errors as host exceptions.
+
+On error, the generated caller reports one unsuccessful invocation and stops normal startup completion. There is no automatic retry, later-statement continuation or rollback. Propagation does not print at every layer. A terminal host writes to standard error and exits with a nonzero status independently of `Error.code`; code zero remains valid error data. An embedding host delivers the failed outcome to its owner. A test runner records runtime failure unless the expected outcome matches it. These rules apply to existing hosts. They do not require a new CLI runner, server-side renderer or embedding API.
+
+Compile-time diagnostics, compiler operational failures, compiler bugs and a compiled program returning `Error` stay different lanes. Reporting a browser entry failure does not fail the completed compilation.
+
+Runtime fragment results for one invocation stay staged until success. On error, discard unpublished results and never read undefined success slots. Staging is not a transaction over the DOM or application state: earlier explicit IO, title changes and host calls remain done. A wholly static page does not gain mandatory runtime code merely because the conceptual `start` contract permits `Error!`. Wrappers stay reachability-driven. An error handler covers this invocation only, not later callbacks.
+
+Release presentation uses a small generic startup-failure notice, escaped as text and independent of the failed application template. It does not place the raw application `Error` message in public page content. Development presentation is specified under `Development entry-error reports`. See the progress matrix for current support.
+
+### Development entry-error reports
+
+In `moth dev`, a `start` `Error` must be unmistakable even when the static page succeeded. Reuse the existing compiler-error presentation: a prominent view covers the affected page and retains hot reload, with a distinct runtime title and category. A console-only report is not enough.
+
+Report in the affected browser and the server terminal. Reuse dev-client injection, origin-aware routing and error-page rendering. The browser-to-server report is the only added path. It carries entry, build and invocation identity, plus bounded category, message, code and available source information.
+
+The protocol is dev-only and same-origin. Treat browser input as untrusted. Validate kind, shape, `U32` code, current build and known entry. Bound payloads and per-client reporting, escape display text and terminal control characters, and reject malformed or stale reports without panicking the server. Respect the configured origin prefix. Do not accept arbitrary HTML or compiler-ID payloads. A reporting failure must not recursively invoke the reporter.
+
+A runtime report does not change global build success, block other entries or give other tabs a compile-error page. Deduplicate by build, entry and invocation. Ignore old-build reports. Clear the originating view on a fresh page invocation through normal reload. Do not clear a failed invocation merely because a compiler rebuild succeeded elsewhere. If the network drops, keep the local browser view and console report and do not retry application startup.
+
+Development publication couples output bytes with build identity. Compile outside the shared publication lock, then hold that lock through the existing output writer and the build-state update. Capture each HTTP response's state and complete output bytes under the same lock, then release it before network writes or reload broadcasts. A write failure publishes diagnostics rather than a successful generation, even if emission changed some files. Failed builds replace page HTML with diagnostics while keeping supporting assets reachable.
+
+A page from generation N can fetch JavaScript or Wasm companions after generation N+1 publishes. Each response captures one generation, but separate requests do not pin an output batch. Reports retain the page's generation N and the server rejects them as stale after N+1. Normal SSE reload supplies recovery.
+
+Faults that escape the generated startup lifecycle wrapper, including owned Wasm instantiation, use a separate category. This covers only work that wrapper invokes or awaits. It adds no Moth async surface, global `window.onerror` hook or global unhandled-rejection capture. Unrelated scripts, extensions and later callbacks stay outside scope.
+
+Three outcomes stay distinct:
+
+- Entry Error: `start` returned its declared `Error!` outcome.
+- Assertion failure: compiler-owned assertion identity identifies the fault, including through generated calls and glue. Never match message text.
+- Unexpected startup fault: another exception or trap escaped the owned wrapper. It may come from generated code, a host binding or runtime setup. Do not label every runtime exception as a compiler bug.
+
+Unknown faults remain unknown startup faults. Normal typed errors use explicit result branches, not this interception path.
 
 A module without `$page` emits no independent page, but its reachable declarations, resources and runtime requirements may contribute to another entry/package. Unpurposed authored root work is still invalid.
 
@@ -685,6 +721,8 @@ The first development build compiles the full selected graph. Later builds reuse
 Entries relink or regenerate when their implementation, dormant-root, runtime-dependency, generated, entry-settings, project-field or relevant backend-config inputs change. A private body change need not recompile semantic consumers. Dormant root changes affect entries that activate that root. Runtime-dependency changes update capabilities, glue and resource planning.
 
 Configuration and numeric-profile dependence uses existing fingerprint domains, including private implementation and compatibility. Static Bool selection creates no new fingerprint family and never changes declaration identity. Project-field dependencies remain field-granular. Documentation-only changes update documentation/editor indexes without invalidating semantic consumers or executable variants.
+
+The M02 reuse gate requires evidence that a semantic or physical cache reused an artefact before testing invalidation. Cover private effect/body changes, public contracts, entry outcome changes, generated sidecars and backend/profile/ABI compatibility against that demonstrated reuse. A cold recompilation or a writer's skipped-unchanged result alone cannot satisfy this gate. Rebuild/write/serve tests prove current output freshness separately, including exact entry cause codes and diagnosed exports without treating old successful output as the new result.
 
 ### Physical variant invalidation
 

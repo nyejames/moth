@@ -22,10 +22,7 @@ pub enum CollectionBuiltinOp {
     Length,
 }
 
-/// Each collection operation is characterized by static attributes:
-///
-/// - `requires_mutable_receiver`: borrow-checker mutability classification
-/// - `is_fallible`: whether the operation has a recoverable source-visible `Error!` path
+/// Collection access classification is independent of the declared result slots.
 impl CollectionBuiltinOp {
     /// Whether the receiver must be accessed mutably.
     pub fn requires_mutable_receiver(self) -> bool {
@@ -34,18 +31,6 @@ impl CollectionBuiltinOp {
             self,
             CollectionBuiltinOp::Set
                 | CollectionBuiltinOp::PushGrowable
-                | CollectionBuiltinOp::PushFixed
-                | CollectionBuiltinOp::Remove
-        )
-    }
-
-    /// Whether the operation has a recoverable source-visible `Error!` path and therefore requires
-    /// explicit fallible handling.
-    pub fn is_fallible(self) -> bool {
-        matches!(
-            self,
-            CollectionBuiltinOp::Get
-                | CollectionBuiltinOp::Set
                 | CollectionBuiltinOp::PushFixed
                 | CollectionBuiltinOp::Remove
         )

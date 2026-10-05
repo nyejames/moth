@@ -1,0 +1,5 @@
+export:
+    narrow_add |left U32, right U32| -> U32:
+        return left + right
+    ;
+;

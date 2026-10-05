@@ -1,0 +1,16 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["release assert stays checked"]
+
+[backends.html_wasm]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["release assert stays checked"]

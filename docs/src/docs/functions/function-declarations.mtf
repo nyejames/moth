@@ -35,6 +35,13 @@ A source function forms a named top-level declaration.
 Functions with required success values must return or otherwise terminate on
 every reachable path. Terminality is validated before HIR lowering.
 
+The absence of an error slot does not make private numeric work infallible.
+Private functions infer and propagate implicit numeric failure within the same
+module without postfix `!` at each internal call. Exported callables without
+an error slot must discharge it. See @#returns-and-multiple-values (Returns
+and multiple values) and @../progress (Progress) for the contract and current
+support.
+
 ### Generic functions
 
 Declaration-site generic parameters appear after the function name.

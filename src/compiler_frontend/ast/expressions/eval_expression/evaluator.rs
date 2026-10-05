@@ -41,6 +41,7 @@ use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 use moth_lexical::numeric::parse::literal_kind_initialises;
+use rustc_hash::FxHashSet;
 
 use super::ordering;
 use super::result_type::resolve_expression_result_type;
@@ -117,7 +118,7 @@ pub fn evaluate_expression(
     }
 
     // General path: resolve operator types across the full RPN shape, then attempt folding.
-    let resolved_type = resolve_expression_result_type(
+    let resolved = resolve_expression_result_type(
         &mut ordered_nodes,
         span,
         direct_destination,
@@ -126,6 +127,8 @@ pub fn evaluate_expression(
         type_interner.environment(),
         path_fork,
     )?;
+    let resolved_type = resolved.type_id;
+    let mut operation_failure_facts = resolved.failure_facts;
     validate_expression_result_type(
         expected_type,
         resolved_type,
@@ -182,15 +185,38 @@ pub fn evaluate_expression(
         ConstantFoldOutcome::TextUnavailable { items, .. } => items,
     };
 
+    // Folding owns discharge. Only checked operators still present in its reduced stack can
+    // escape at runtime, while authored checked work remains eligible for expression recovery.
+    if !operation_failure_facts.implicit.is_empty() {
+        let remaining_operator_spans: FxHashSet<_> = stack
+            .iter()
+            .filter_map(|item| match item {
+                ExpressionRpnItem::Operator { operator, span }
+                    if operator.numeric_operator().is_some() =>
+                {
+                    Some(*span)
+                }
+                _ => None,
+            })
+            .collect();
+        operation_failure_facts
+            .implicit
+            .retain(|contributor| remaining_operator_spans.contains(&contributor.span));
+        operation_failure_facts.refresh_origin_summary();
+    }
+
     // Fully folded to a single compile-time value: hand the folded operand back by move.
     if stack.len() == 1 {
         let mut stack = stack;
-        let Some(ExpressionRpnItem::Operand(expression)) = stack.pop() else {
+        let Some(ExpressionRpnItem::Operand(mut expression)) = stack.pop() else {
             return Err(CompilerError::compiler_error(
                 "Constant folding produced a non-operand item as the single result.",
             )
             .into());
         };
+        expression
+            .failure_facts
+            .take_origin_work_from(operation_failure_facts);
         return Ok(expression);
     }
 
@@ -209,13 +235,17 @@ pub fn evaluate_expression(
     increment_ast_counter(AstCounter::DiagnosticDataTypeMaterialisations);
     let diagnostic_type = diagnostic_type_spelling(resolved_type, type_interner.environment());
 
-    Ok(runtime_expression_from_items(
+    let mut expression = runtime_expression_from_items(
         stack,
         diagnostic_type,
         resolved_type,
         value_mode,
         stack_span.or(span),
-    )?)
+    )?;
+    expression
+        .failure_facts
+        .take_origin_work_from(operation_failure_facts);
+    Ok(expression)
 }
 
 fn is_matching_materialized_numeric_value(

@@ -19,8 +19,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Implicit failures and entry errors](./plans/implicit-failures-and-entry-errors-plan.md) - Queued immediately after the complete numeric delivery. Add recoverable implicit numeric failure, expression-wide catch, closed exported error boundaries and a built-in Error! entry result with HTML/dev-server reporting. Migrate canonical docs, examples and tests to the accepted model.
-
 - [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
 
 - [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after delivered MON syntax/Rust tooling and the numeric checkpoint, and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.

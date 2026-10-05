@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::parse_expression::complete_pending_expression;
 use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -393,17 +394,35 @@ pub fn parse_field_access(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Expression, ExpressionParseError> {
+    // Operand errors stay pending until the receiving chain has completed. Assignment targets
+    // still leave their operator for the mutation owner instead of entering expression completion.
+    let deferred_context = (!context.defer_typed_error_validation)
+        .then(|| context.new_pending_typed_error_expression_context());
+    let parse_context = deferred_context.as_ref().unwrap_or(context);
+
     let postfix_node = parse_field_access_with_receiver_access(
         token_stream,
         base_arg,
-        context,
+        parse_context,
         PostfixChainAccess::shared(),
         type_interner,
         string_table,
         path_fork,
     )?;
 
-    expression_from_postfix_node(&postfix_node)
+    let expression = expression_from_postfix_node(&postfix_node)?;
+    if token_stream.current_tag().is_assignment_operator() {
+        return Ok(expression);
+    }
+    complete_pending_expression(
+        token_stream,
+        context,
+        type_interner,
+        expression,
+        true,
+        string_table,
+        path_fork,
+    )
 }
 
 fn parse_field_access_with_receiver_access(

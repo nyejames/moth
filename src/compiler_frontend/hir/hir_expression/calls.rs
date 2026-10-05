@@ -266,6 +266,7 @@ impl<'a> HirBuilder<'a> {
         let statement_id = self.allocate_node_id();
         let region = self.current_region_or_error(span)?;
         let no_span = None;
+        let is_external = matches!(target, CallTarget::External(_));
 
         if no_return {
             let statement = HirStatement {
@@ -279,6 +280,10 @@ impl<'a> HirBuilder<'a> {
             };
 
             self.side_table.map_statement(*span, &statement);
+            // Recorded optimistically: only callees with escaping failures will split.
+            if !is_external {
+                self.record_catch_protected_call(statement_id);
+            }
             prelude.push(statement);
 
             let value = self.unit_expression(&no_span, region);
@@ -300,6 +305,11 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.side_table.map_statement(*span, &statement);
+        // Recorded optimistically: only callees with escaping failures will split, and only
+        // while a catch handler protects the surrounding work.
+        if !is_external {
+            self.record_catch_protected_call(statement_id);
+        }
         prelude.push(statement);
 
         let value = self.make_expression(

@@ -273,6 +273,26 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
+        HirStatementKind::RangeStepFailure { result, .. } => {
+            let location = context.diagnostics.statement_error_span(statement);
+            transfer_call_arguments_and_result(
+                &mut CallTransferContext {
+                    context,
+                    layout,
+                    state,
+                    block_id,
+                    current_order: statement_order,
+                    tracker: &mut tracker,
+                    location,
+                    stats,
+                    value_fact_buffer,
+                },
+                &[],
+                Some(*result),
+                FunctionReturnAliasSummary::Fresh,
+            )?;
+        }
+
         HirStatementKind::FloatRangeCandidate {
             current,
             step,

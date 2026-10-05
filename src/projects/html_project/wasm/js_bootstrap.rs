@@ -5,6 +5,7 @@
 //! WHY: HTML assembly/orchestration remains builder policy while Wasm stays backend-generic.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::projects::html_project::js_path::append_startup_fault_report;
 
 /// Emits `page.js` for HTML Wasm mode.
 ///
@@ -59,6 +60,13 @@ pub(crate) fn generate_wasm_bootstrap_js(
     out.push_str("function __moth_build_imports(instance_ref) {\n");
     out.push_str("  return {\n");
     out.push_str("    host: {\n");
+    out.push_str("      assertion_failed(handle) {\n");
+    out.push_str(
+        "        const error = new Error(__moth_take_string(instance_ref.current, handle));\n",
+    );
+    out.push_str("        Object.defineProperty(error, \"__moth_assertion\", { value: true });\n");
+    out.push_str("        throw error;\n");
+    out.push_str("      },\n");
     out.push_str("      dom_create_text(handle) {\n");
     out.push_str(
         "        const text = __moth_take_string(instance_ref.current, handle);\n        return __moth_register_dom_node(document.createTextNode(text));\n",
@@ -149,9 +157,14 @@ pub(crate) fn generate_wasm_bootstrap_js(
     }
 
     out.push_str("})().catch((error) => {\n");
+    append_startup_fault_report(&mut out, "  ");
     out.push_str("  console.error(\"Moth Wasm bootstrap failed\", error);\n");
     out.push_str("  throw error;\n");
     out.push_str("});\n");
 
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "tests/js_bootstrap_tests.rs"]
+mod tests;

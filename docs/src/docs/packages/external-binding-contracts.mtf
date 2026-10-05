@@ -93,13 +93,24 @@ At the HTML-JS boundary:
 - Native `Int` results in a 32-bit Int profile and fixed `I32` values must be JavaScript Numbers, integral and within -2,147,483,648 through 2,147,483,647. Invalid successful payloads fail at the wrapper boundary in both infallible and fallible calls. Integer ingress converts `-0` to `0`, while binary-float ingress preserves signed zero.
 - Opaque external types retain their package-specific identities and representations; numeric carrier adaptation does not reinterpret them.
 
+Moth-owned finite-value checks, including the shared external `Float` boundary
+check with code `304`, are fatal integrity guards, not implicit built-in failure:
+they halt unless a declared builtin `Error!` contract returns them. This changes
+failure delivery, not numeric validity or the foreign signature.
+See @../errors (Errors) and @../progress (Progress) for the contract and current
+support.
+
 Fallible JavaScript bindings project `error.code` onto Moth's `U32` field,
 independently of the `Int` profile. The wrapper reads the foreign code once and
 accepts JavaScript Number integers from `0` through `4294967295`. It normalises
 integer `-0` to `0` and uses code `0` for missing or invalid codes.
-Exceptions thrown by the export become builtin `Error` values with code `0`.
-Their message uses a truthy `message` property or stringifies the thrown value,
-including `null` and `undefined`. Invalid-wrapper handling remains build-mode-specific.
+The existing adapter for declared fallible JavaScript bindings turns exceptions
+thrown by the export into builtin `Error` values with code `0`. Their message
+uses a truthy `message` property or stringifies the thrown value, including
+`null` and `undefined`. Current invalid-wrapper handling remains
+build-mode-specific; see @../progress (Progress). Implicit numeric failure adds
+no automatic recoverable adapter for unexpected foreign throws or other
+violations of a declared value contract.
 
 ### Deferred WIT component support
 

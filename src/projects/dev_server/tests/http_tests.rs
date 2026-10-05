@@ -52,7 +52,7 @@ fn nested_html_request_uses_stored_error_page_during_failed_build() {
     let build_state =
         configure_failed_build_state(&output_dir, error_html, Some(PathBuf::from("index.html")));
 
-    match prepare_static_response("/docs/basics/", None, &build_state) {
+    match prepare_static_response("/docs/basics/", None, &build_state).expect("prepare page") {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -63,7 +63,7 @@ fn nested_html_request_uses_stored_error_page_during_failed_build() {
             assert!(body.contains("compiler exploded"));
             assert!(!body.contains("stale success"));
         }
-        PreparedResponse::File { .. } => {
+        PreparedResponse::Bytes { .. } => {
             panic!("nested html route should render stored error page")
         }
         PreparedResponse::Redirect { .. } => {
@@ -92,37 +92,28 @@ fn failed_build_keeps_css_js_and_image_assets_reachable() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/styles/site.css", None, &build_state) {
-        PreparedResponse::File { path, content_type } => {
+    match prepare_static_response("/styles/site.css", None, &build_state).expect("prepare css") {
+        PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "text/css; charset=utf-8");
-            assert_eq!(
-                fs::read_to_string(path).expect("css file should be readable"),
-                "body { color: red; }"
-            );
+            assert_eq!(body, b"body { color: red; }");
         }
         PreparedResponse::Text { .. } => panic!("css request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("css request should not redirect"),
     }
 
-    match prepare_static_response("/scripts/app.js", None, &build_state) {
-        PreparedResponse::File { path, content_type } => {
+    match prepare_static_response("/scripts/app.js", None, &build_state).expect("prepare js") {
+        PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "application/javascript; charset=utf-8");
-            assert_eq!(
-                fs::read_to_string(path).expect("js file should be readable"),
-                "console.log('hello');"
-            );
+            assert_eq!(body, b"console.log('hello');");
         }
         PreparedResponse::Text { .. } => panic!("js request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("js request should not redirect"),
     }
 
-    match prepare_static_response("/images/icon.png", None, &build_state) {
-        PreparedResponse::File { path, content_type } => {
+    match prepare_static_response("/images/icon.png", None, &build_state).expect("prepare png") {
+        PreparedResponse::Bytes { body, content_type } => {
             assert_eq!(content_type, "image/png");
-            assert_eq!(
-                fs::read(path).expect("png file should be readable"),
-                vec![0x89, b'P', b'N', b'G']
-            );
+            assert_eq!(body, vec![0x89, b'P', b'N', b'G']);
         }
         PreparedResponse::Text { .. } => panic!("image request should keep serving the asset"),
         PreparedResponse::Redirect { .. } => panic!("image request should not redirect"),
@@ -141,7 +132,9 @@ fn failed_build_traversal_request_still_returns_not_found() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/../secret.txt", None, &build_state) {
+    match prepare_static_response("/../secret.txt", None, &build_state)
+        .expect("prepare invalid path")
+    {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -151,7 +144,7 @@ fn failed_build_traversal_request_still_returns_not_found() {
             assert_eq!(content_type, "text/plain; charset=utf-8");
             assert_eq!(body, "Not Found");
         }
-        PreparedResponse::File { .. } => panic!("traversal request should return not found"),
+        PreparedResponse::Bytes { .. } => panic!("traversal request should return not found"),
         PreparedResponse::Redirect { .. } => panic!("traversal request should not redirect"),
     }
 }
@@ -165,7 +158,7 @@ fn root_request_uses_failed_build_error_page_without_entry_page() {
     let build_state =
         configure_failed_build_state(&output_dir, "<html><body>root error</body></html>", None);
 
-    match prepare_static_response("/", None, &build_state) {
+    match prepare_static_response("/", None, &build_state).expect("prepare root") {
         PreparedResponse::Text {
             status_line,
             content_type,
@@ -175,7 +168,9 @@ fn root_request_uses_failed_build_error_page_without_entry_page() {
             assert_eq!(content_type, "text/html; charset=utf-8");
             assert!(body.contains("root error"));
         }
-        PreparedResponse::File { .. } => panic!("root request should render the failed-build page"),
+        PreparedResponse::Bytes { .. } => {
+            panic!("root request should render the failed-build page")
+        }
         PreparedResponse::Redirect { .. } => panic!("root request should not redirect"),
     }
 }
@@ -197,7 +192,7 @@ fn redirects_are_returned_even_during_failed_build() {
         Some(PathBuf::from("index.html")),
     );
 
-    match prepare_static_response("/about", Some("x=1"), &build_state) {
+    match prepare_static_response("/about", Some("x=1"), &build_state).expect("prepare redirect") {
         PreparedResponse::Redirect {
             status_line,
             location,
@@ -205,7 +200,7 @@ fn redirects_are_returned_even_during_failed_build() {
             assert_eq!(status_line, "302 FOUND");
             assert_eq!(location, "/about/?x=1");
         }
-        PreparedResponse::Text { .. } | PreparedResponse::File { .. } => {
+        PreparedResponse::Text { .. } | PreparedResponse::Bytes { .. } => {
             panic!("canonical page redirects should run before failed-build html substitution")
         }
     }

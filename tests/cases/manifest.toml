@@ -4486,10 +4486,10 @@ contract = "language.loops.fixed_numeric_range_runtime"
 role = "boundary"
 
 [[case]]
-id = "fixed_float_range_stall_runtime_trap"
-path = "fixed_float_range_stall_runtime_trap"
+id = "fixed_float_range_stall_recovery"
+path = "fixed_float_range_stall_recovery"
 tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
-contract = "language.loops.fixed_numeric_range_runtime"
+contract = "language.numeric.range_step_uses_builtin_failure"
 role = "boundary"
 
 [[case]]
@@ -5102,11 +5102,11 @@ contract = "language.results.raw_carrier_return_rejected"
 role = "primary"
 
 [[case]]
-id = "result_postfix_in_start_code_rejected"
-path = "result_postfix_in_start_code_rejected"
-tags = ["integration", "results", "diagnostics"]
-contract = "language.results.propagation_without_error_slot_rejected"
-role = "boundary"
+id = "result_postfix_in_start_code_success"
+path = "result_postfix_in_start_code_success"
+tags = ["integration", "results", "entry-start", "runtime"]
+contract = "language.results.builtin_error_propagation_in_start"
+role = "primary"
 
 [[case]]
 id = "result_error_only_fallback_rejected"
@@ -5114,6 +5114,13 @@ path = "result_error_only_fallback_rejected"
 tags = ["integration", "results", "diagnostics"]
 contract = "language.results.error_only_fallback_rejected"
 role = "primary"
+
+[[case]]
+id = "entry_error_top_level_propagation_success"
+path = "entry_error_top_level_propagation_success"
+tags = ["integration", "results", "entry-start", "runtime", "js-backend"]
+contract = "language.results.builtin_error_propagation_in_start"
+role = "boundary"
 
 [[case]]
 id = "result_error_only_catch_handler_fallback_rejected"
@@ -5127,6 +5134,13 @@ id = "result_catch_handler_conflict_rejected"
 path = "result_catch_handler_conflict_rejected"
 tags = ["integration", "results", "diagnostics"]
 contract = "language.results.catch_handler_binding_conflict_rejected"
+role = "primary"
+
+[[case]]
+id = "explicit_propagation_catch_conflict_rejected"
+path = "explicit_propagation_catch_conflict_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.explicit_propagation_catch_conflict_rejected"
 role = "primary"
 
 [[case]]
@@ -7581,10 +7595,10 @@ contract = "language.numbers.compound_assignment_runtime_atomicity"
 role = "primary"
 
 [[case]]
-id = "compound_assignment_store_conversion_trap"
-path = "compound_assignment_store_conversion_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
-contract = "backend.html.compound_store_conversion_runtime_trap"
+id = "compound_assignment_store_conversion_entry_error"
+path = "compound_assignment_store_conversion_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation", "entry-error"]
+contract = "language.numeric.compound_store_conversion_entry_error"
 role = "backend"
 
 [[case]]
@@ -10396,6 +10410,13 @@ contract = "language.dependencies.unsupported_external_js_import_rejected"
 role = "primary"
 
 [[case]]
+id = "unsupported_external_wit_import_rejected"
+path = "unsupported_external_wit_import_rejected"
+tags = ["integration", "dependencies", "external-imports", "diagnostics"]
+contract = "language.dependencies.unsupported_external_wit_import_rejected"
+role = "primary"
+
+[[case]]
 id = "provider_import_selected_symbol_missing_rejected"
 path = "provider_import_selected_symbol_missing_rejected"
 tags = ["integration", "dependencies", "external-imports", "diagnostics"]
@@ -12167,11 +12188,11 @@ contract = "language.numeric.builtin_error_recovery_acceptance"
 role = "primary"
 
 [[case]]
-id = "custom_numeric_failure_trap"
-path = "custom_numeric_failure_trap"
-tags = ["integration", "numeric", "runtime", "js-backend", "error-handling"]
-contract = "backend.html.custom_error_channel_numeric_trap"
-role = "backend"
+id = "custom_numeric_failure_rejected"
+path = "custom_numeric_failure_rejected"
+tags = ["integration", "language", "numeric", "diagnostics", "js-backend", "html-wasm", "error-handling"]
+contract = "language.numeric.caller_catch_does_not_discharge_custom_slot"
+role = "primary"
 
 [[case]]
 id = "checked_numeric_unreachable_helper_ignored"
@@ -12207,6 +12228,224 @@ path = "numeric_failure_runtime_error_fn_recovered"
 tags = ["integration", "language", "numeric", "runtime", "js-backend"]
 contract = "language.numeric.runtime_error_fn_recovered"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_expression_catch"
+path = "implicit_failure_expression_catch"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.expression_local_catch_recovery"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_direct_private_catch"
+path = "implicit_failure_direct_private_catch"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.direct_private_catch_recovery"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_composite_first_failure_wins"
+path = "implicit_failure_composite_first_failure_wins"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.composite_catch_first_failure_wins"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_protected_roots"
+path = "implicit_failure_catch_protected_roots"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_protected_expression_roots"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_short_circuit"
+path = "implicit_failure_catch_short_circuit"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_preserves_boolean_short_circuit"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_error_catch"
+path = "implicit_failure_custom_error_catch"
+tags = ["integration", "language", "results", "runtime", "js-backend"]
+contract = "language.results.single_custom_error_catch_recovery"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_mixed_rejected"
+path = "implicit_failure_custom_mixed_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend"]
+contract = "language.results.custom_catch_rejects_mixed_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_infallible_private"
+path = "implicit_failure_custom_catch_infallible_private"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.results.custom_catch_accepts_infallible_private_helpers"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_infallible_private_release"
+path = "implicit_failure_custom_catch_infallible_private_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "release", "js-backend"]
+contract = "language.results.custom_catch_accepts_infallible_private_helpers"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_catch"
+path = "implicit_failure_folded_catch"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_folded_catch_release"
+path = "implicit_failure_folded_catch_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "release", "js-backend"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_folded_catch_handler_type_rejected"
+path = "implicit_failure_folded_catch_handler_type_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_literal_catch_rejected"
+path = "implicit_failure_literal_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.literal_does_not_make_catch_eligible"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_private_rejected"
+path = "implicit_failure_custom_catch_private_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.custom_catch_rejects_escaping_private_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_catch_forwarded_private_rejected"
+path = "implicit_failure_custom_catch_forwarded_private_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.custom_catch_rejects_escaping_private_failure"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_incompatible_catch_rejected"
+path = "implicit_failure_incompatible_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.incompatible_catch_error_types_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_private_chain"
+path = "implicit_failure_private_chain"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.private_failure_propagates_to_error_slot"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_private_chain"
+path = "implicit_failure_exported_private_chain"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_private_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_private_chain_bounded"
+path = "implicit_failure_exported_private_chain_bounded"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_private_failure_witness_bounded"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_exported_operation"
+path = "implicit_failure_exported_operation"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_operation_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_method"
+path = "implicit_failure_exported_method"
+tags = ["integration", "language", "numeric", "results", "receivers", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_receiver_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_exported_method_private_chain"
+path = "implicit_failure_exported_method_private_chain"
+tags = ["integration", "language", "numeric", "results", "receivers", "diagnostics", "dependencies", "js-backend", "html-wasm"]
+contract = "language.numeric.exported_receiver_failure_witness_preserves_donor"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_custom_slot"
+path = "implicit_failure_custom_slot"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.custom_error_slot_requires_failure_mapping"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_slot_private_chain"
+path = "implicit_failure_custom_slot_private_chain"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.custom_error_slot_private_failure_witness"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_reexport_rejected"
+path = "implicit_failure_reexport_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "dependencies", "facade", "js-backend", "html-wasm"]
+contract = "language.numeric.reexport_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_package_facade_rejected"
+path = "implicit_failure_package_facade_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "dependencies", "facade", "js-backend", "html-wasm"]
+contract = "language.numeric.package_facade_failure_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_compound_writeback"
+path = "implicit_failure_compound_writeback"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.compound_writeback_uses_private_failure_lane"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_compound_writeback_rejected"
+path = "implicit_failure_compound_writeback_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics"]
+contract = "language.numeric.compound_writeback_reports_target_after_rhs_catch"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_compound_writeback_preserves_target"
+path = "implicit_failure_compound_writeback_preserves_target"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.numeric.compound_writeback_preserves_target"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_range_update"
+path = "implicit_failure_range_update"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.range_update_uses_private_failure_lane"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_range_step"
+path = "implicit_failure_range_step"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.range_step_uses_builtin_failure"
+role = "primary"
+
 
 [[case]]
 id = "numeric_failure_known_int32_overflow_rejected"
@@ -13335,108 +13574,108 @@ contract = "language.numbers.fixed_width_integer_checked_boundaries"
 role = "primary"
 
 [[case]]
-id = "fixed_width_integer_overflow_trap"
-path = "fixed_width_integer_overflow_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_u64_add_overflow_trap"
+id = "fixed_width_integer_overflow_entry_error"
+path = "fixed_width_integer_overflow_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_u64_add_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_trap_arithmetic"
-path = "fixed_width_integer_trap_arithmetic"
+id = "fixed_width_integer_checked_arithmetic"
+path = "fixed_width_integer_checked_arithmetic"
 tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_trap_arithmetic"
+contract = "language.numbers.fixed_width_integer_checked_arithmetic"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_profile_int64_trap_arithmetic"
-path = "fixed_width_integer_profile_int64_trap_arithmetic"
+id = "fixed_width_integer_profile_int64_checked_arithmetic"
+path = "fixed_width_integer_profile_int64_checked_arithmetic"
 tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_profile_int64_trap_arithmetic"
+contract = "language.numbers.fixed_width_integer_checked_arithmetic"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_subtraction_trap"
-path = "fixed_width_integer_subtraction_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_u32_subtraction_underflow_trap"
+id = "fixed_width_integer_subtraction_entry_error"
+path = "fixed_width_integer_subtraction_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_u32_subtraction_underflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_u32_multiplication_trap"
-path = "fixed_width_integer_u32_multiplication_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_u32_multiplication_overflow_trap"
+id = "fixed_width_integer_u32_multiplication_entry_error"
+path = "fixed_width_integer_u32_multiplication_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_u32_multiplication_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_i64_multiplication_trap"
-path = "fixed_width_integer_i64_multiplication_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_i64_multiplication_overflow_trap"
+id = "fixed_width_integer_i64_multiplication_entry_error"
+path = "fixed_width_integer_i64_multiplication_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_i64_multiplication_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_minimum_multiplication_trap"
-path = "fixed_width_integer_minimum_multiplication_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_i64_minimum_times_negative_one_trap"
+id = "fixed_width_integer_minimum_multiplication_entry_error"
+path = "fixed_width_integer_minimum_multiplication_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_i64_minimum_times_negative_one_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_minimum_division_trap"
-path = "fixed_width_integer_minimum_division_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_i64_min_division_overflow_trap"
+id = "fixed_width_integer_minimum_division_entry_error"
+path = "fixed_width_integer_minimum_division_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_i64_min_division_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_division_zero_trap"
-path = "fixed_width_integer_division_zero_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_division_by_zero_trap"
+id = "fixed_width_integer_division_zero_entry_error"
+path = "fixed_width_integer_division_zero_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_division_by_zero_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_remainder_zero_trap"
-path = "fixed_width_integer_remainder_zero_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_remainder_by_zero_trap"
+id = "fixed_width_integer_remainder_zero_entry_error"
+path = "fixed_width_integer_remainder_zero_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_remainder_by_zero_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_negative_exponent_trap"
-path = "fixed_width_integer_negative_exponent_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_negative_exponent_trap"
+id = "fixed_width_integer_negative_exponent_entry_error"
+path = "fixed_width_integer_negative_exponent_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_negative_exponent_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_power_overflow_trap"
-path = "fixed_width_integer_power_overflow_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_power_overflow_trap"
+id = "fixed_width_integer_power_overflow_entry_error"
+path = "fixed_width_integer_power_overflow_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_power_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_negation_trap"
-path = "fixed_width_integer_negation_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "trap", "html-wasm"]
-contract = "backend.html_wasm.fixed_width_integer_i64_negation_overflow_trap"
+id = "fixed_width_integer_negation_entry_error"
+path = "fixed_width_integer_negation_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
+contract = "language.numbers.fixed_width_integer_i64_negation_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_int32_overflow_trap"
-path = "fixed_width_integer_int32_overflow_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
-contract = "backend.html_wasm.numeric_profile_int32_overflow_trap"
+id = "fixed_width_integer_int32_overflow_entry_error"
+path = "fixed_width_integer_int32_overflow_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "entry-error", "html-wasm"]
+contract = "language.numbers.numeric_profile_int32_overflow_entry_error"
 role = "backend"
 
 [[case]]
-id = "fixed_width_integer_int64_overflow_trap"
-path = "fixed_width_integer_int64_overflow_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "trap", "html-wasm"]
-contract = "backend.html_wasm.numeric_profile_int64_overflow_trap"
+id = "fixed_width_integer_int64_overflow_entry_error"
+path = "fixed_width_integer_int64_overflow_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "entry-error", "html-wasm"]
+contract = "language.numbers.numeric_profile_int64_overflow_entry_error"
 role = "backend"
 
 [[case]]
@@ -13447,10 +13686,10 @@ contract = "language.numbers.fixed_binary_float_checked_boundaries"
 role = "primary"
 
 [[case]]
-id = "fixed_binary_float_nonfinite_trap"
-path = "fixed_binary_float_nonfinite_trap"
-tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "trap"]
-contract = "backend.html.fixed_binary_float_nonfinite_runtime_trap"
+id = "fixed_binary_float_nonfinite_entry_error"
+path = "fixed_binary_float_nonfinite_entry_error"
+tags = ["integration", "numeric", "runtime", "fixed-width", "binary-float", "entry-error"]
+contract = "language.numbers.fixed_binary_float_nonfinite_entry_error"
 role = "backend"
 
 [[case]]
@@ -13524,31 +13763,31 @@ contract = "backend.html_wasm.checked_float_operations_and_infallible_numeric_ca
 role = "backend"
 
 [[case]]
-id = "wasm_checked_float_zero_division_trap"
-path = "wasm_checked_float_zero_division_trap"
-tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
-contract = "backend.html_wasm.checked_float_zero_division_trap"
+id = "checked_float_zero_division_entry_error"
+path = "checked_float_zero_division_entry_error"
+tags = ["integration", "numeric", "runtime", "entry-error", "binary-float", "html-wasm"]
+contract = "language.numbers.checked_float_zero_division_entry_error"
 role = "backend"
 
 [[case]]
-id = "wasm_checked_float_zero_remainder_trap"
-path = "wasm_checked_float_zero_remainder_trap"
-tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
-contract = "backend.html_wasm.checked_float_zero_remainder_trap"
+id = "checked_float_zero_remainder_entry_error"
+path = "checked_float_zero_remainder_entry_error"
+tags = ["integration", "numeric", "runtime", "entry-error", "binary-float", "html-wasm"]
+contract = "language.numbers.checked_float_zero_remainder_entry_error"
 role = "backend"
 
 [[case]]
-id = "wasm_checked_float_nonfinite_trap"
-path = "wasm_checked_float_nonfinite_trap"
-tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
-contract = "backend.html_wasm.checked_float_nonfinite_arithmetic_trap"
+id = "checked_float_nonfinite_entry_error"
+path = "checked_float_nonfinite_entry_error"
+tags = ["integration", "numeric", "runtime", "entry-error", "binary-float", "html-wasm"]
+contract = "language.numbers.checked_float_nonfinite_arithmetic_entry_error"
 role = "backend"
 
 [[case]]
-id = "wasm_checked_float_power_domain_trap"
-path = "wasm_checked_float_power_domain_trap"
-tags = ["integration", "numeric", "runtime", "trap", "binary-float", "html-wasm"]
-contract = "backend.html_wasm.checked_float_power_domain_trap"
+id = "checked_float_power_domain_entry_error"
+path = "checked_float_power_domain_entry_error"
+tags = ["integration", "numeric", "runtime", "entry-error", "binary-float", "html-wasm"]
+contract = "language.numbers.checked_float_power_domain_entry_error"
 role = "backend"
 
 [[case]]
@@ -13755,6 +13994,20 @@ contract = "backend.html.external_numeric_profile_float32_overflow_error"
 role = "backend"
 
 [[case]]
+id = "external_native_float32_no_slot_overflow"
+path = "external_native_float32_no_slot_overflow"
+tags = ["integration", "numeric", "external", "runtime", "float32", "int64"]
+contract = "backend.html.external_native_float32_no_slot_overflow_error"
+role = "backend"
+
+[[case]]
+id = "external_native_float64_nonfinite"
+path = "external_native_float64_nonfinite"
+tags = ["integration", "numeric", "external", "runtime", "float64"]
+contract = "backend.html.external_native_float64_nonfinite_error"
+role = "backend"
+
+[[case]]
 id = "numeric_float_whole_literal_int32_float32"
 path = "numeric_float_whole_literal_int32_float32"
 tags = ["integration", "numeric", "numeric-profile", "float32"]
@@ -13902,10 +14155,10 @@ contract = "language.numbers.recoverable_checked_failures"
 role = "primary"
 
 [[case]]
-id = "number_numeric_failure_trap_runtime"
-path = "number_numeric_failure_trap_runtime"
-tags = ["integration", "language", "numeric", "number", "runtime", "errors", "traps"]
-contract = "language.numbers.uncaught_checked_failure_traps"
+id = "number_numeric_failure_entry_error_runtime"
+path = "number_numeric_failure_entry_error_runtime"
+tags = ["integration", "language", "numeric", "number", "runtime", "errors", "entry-error"]
+contract = "language.numbers.uncaught_checked_failure_reaches_entry_error"
 role = "primary"
 
 [[case]]
@@ -13993,9 +14246,9 @@ contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "primary"
 
 [[case]]
-id = "numeric_bounded_proofs_retained_trap_runtime"
-path = "numeric_bounded_proofs_retained_trap_runtime"
-tags = ["integration", "numeric", "runtime", "trap", "html-wasm"]
+id = "numeric_bounded_proofs_retained_entry_error_runtime"
+path = "numeric_bounded_proofs_retained_entry_error_runtime"
+tags = ["integration", "numeric", "runtime", "entry-error", "html-wasm"]
 contract = "language.numeric.bounded_integer_proofs_runtime"
 role = "boundary"
 
@@ -14095,4 +14348,249 @@ id = "optional_default_invalid_struct"
 path = "optional_default_invalid_struct"
 tags = ["integration", "language", "optionals", "defaults", "diagnostics"]
 contract = "language.defaults.invalid_struct_optional_default_rejected"
+role = "primary"
+
+[[case]]
+id = "production_start_error_no_dev_dependency"
+path = "production_start_error_no_dev_dependency"
+tags = ["integration", "html", "entry-error", "release", "runtime"]
+contract = "builder.html.production_entry_error_has_no_dev_dependency"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_handler_failure_goes_outward"
+path = "implicit_failure_handler_failure_goes_outward"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.handler_failure_goes_outward"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_writeback_commit"
+path = "implicit_failure_catch_writeback_commit"
+tags = ["integration", "language", "numeric", "results", "borrowing", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_writeback_preserves_individual_commits"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_cast_operand_and_narrowing"
+path = "implicit_failure_cast_operand_and_narrowing"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.cast_catch_recovers_operand_and_narrowing"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_two_arithmetic_recovery"
+path = "implicit_failure_catch_two_arithmetic_recovery"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.expression_catch_recovers_either_arithmetic_operation"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_range_root"
+path = "implicit_failure_catch_range_root"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_protected_range_root"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_coerced_root"
+path = "implicit_failure_catch_coerced_root"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_protected_coerced_root"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_direct_private_multi_success"
+path = "implicit_failure_direct_private_multi_success"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.direct_private_multi_success_catch_preserves_slot_order"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_generic_infallible_catch_rejected"
+path = "implicit_failure_generic_infallible_catch_rejected"
+tags = ["integration", "results", "diagnostics", "generics"]
+contract = "language.results.generic_infallible_catch_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_forward_infallible_catch_rejected"
+path = "implicit_failure_forward_infallible_catch_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.forward_infallible_catch_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_recursive_infallible_catch_rejected"
+path = "implicit_failure_recursive_infallible_catch_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.recursive_infallible_catch_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_evaluation_order"
+path = "implicit_failure_catch_evaluation_order"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_preserves_source_evaluation_order"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_catch_handler_return_lane"
+path = "implicit_failure_catch_handler_return_lane"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.catch_handler_return_in_failure_lane"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_concrete_private_hop_first_origin_rejected"
+path = "implicit_failure_concrete_private_hop_first_origin_rejected"
+tags = ["integration", "results", "numeric", "diagnostics"]
+contract = "language.numeric.concrete_private_hop_first_origin_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dormant_generic_writeback_origin_rejected"
+path = "implicit_failure_dormant_generic_writeback_origin_rejected"
+tags = ["integration", "results", "numeric", "diagnostics", "generics"]
+contract = "language.numeric.dormant_generic_writeback_origin_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dormant_generic_private_hop_writeback_origin_rejected"
+path = "implicit_failure_dormant_generic_private_hop_writeback_origin_rejected"
+tags = ["integration", "results", "numeric", "diagnostics", "generics"]
+contract = "language.numeric.dormant_generic_private_hop_writeback_origin_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_dormant_generic_private_hop_first_origin_rejected"
+path = "implicit_failure_dormant_generic_private_hop_first_origin_rejected"
+tags = ["integration", "results", "numeric", "diagnostics", "generics"]
+contract = "language.numeric.dormant_generic_private_hop_first_origin_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_self_recursive_back_edge_keeps_overflow_origin"
+path = "implicit_failure_self_recursive_back_edge_keeps_overflow_origin"
+tags = ["integration", "results", "numeric", "diagnostics"]
+contract = "language.numeric.self_recursive_back_edge_keeps_overflow_origin"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin"
+path = "implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin"
+tags = ["integration", "results", "numeric", "diagnostics"]
+contract = "language.numeric.mutual_recursive_back_edge_keeps_overflow_origin"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_public_success"
+path = "implicit_failure_discharged_u8_add_public_success"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_public_success"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_public_success_int64_float32"
+path = "implicit_failure_discharged_u8_add_public_success_int64_float32"
+tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_public_success"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_rejected_u32"
+path = "implicit_failure_discharged_u8_add_rejected_u32"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_public_boundary_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_custom_success"
+path = "implicit_failure_discharged_u8_add_custom_success"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend"]
+contract = "language.numeric.discharged_u8_add_custom_success"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_catch_success"
+path = "implicit_failure_discharged_u8_add_catch_success"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_catch_success"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_public_success_release"
+path = "implicit_failure_discharged_u8_add_public_success_release"
+tags = ["integration", "language", "numeric", "results", "runtime", "release", "js-backend"]
+contract = "language.numeric.discharged_u8_add_public_success"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_rejected_u32_release"
+path = "implicit_failure_discharged_u8_add_rejected_u32_release"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "release", "js-backend"]
+contract = "language.numeric.discharged_u8_add_public_boundary_rejected"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_fixed_int_range_zero_step"
+path = "implicit_failure_fixed_int_range_zero_step"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.fixed_int_range_zero_step_recovery"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_public_success_int32_float32"
+path = "implicit_failure_discharged_u8_add_public_success_int32_float32"
+tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_public_success"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_discharged_u8_add_public_success_int64_float64"
+path = "implicit_failure_discharged_u8_add_public_success_int64_float64"
+tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_u8_add_public_success"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_error_message_preservation"
+path = "implicit_failure_error_message_preservation"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.results.typed_error_message_and_code_preserved_with_implicit_failure"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_shared_catch"
+path = "implicit_failure_custom_shared_catch"
+tags = ["integration", "language", "results", "runtime", "js-backend"]
+contract = "language.results.shared_custom_error_catch_recovery"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_custom_mapping_runtime"
+path = "implicit_failure_custom_mapping_runtime"
+tags = ["integration", "language", "results", "runtime", "js-backend"]
+contract = "language.results.custom_error_explicit_implicit_failure_mapping"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_field_writeback_preserves_target"
+path = "implicit_failure_field_writeback_preserves_target"
+tags = ["integration", "language", "numeric", "results", "borrowing", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.field_writeback_preserves_target"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_generic_writeback_preserves_target"
+path = "implicit_failure_generic_writeback_preserves_target"
+tags = ["integration", "language", "numeric", "results", "borrowing", "generics", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.generic_writeback_preserves_target"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_assert_release_checked"
+path = "implicit_failure_assert_release_checked"
+tags = ["integration", "language", "results", "runtime", "release", "js-backend", "html-wasm"]
+contract = "language.results.assert_stays_checked_in_release"
 role = "primary"

@@ -414,6 +414,10 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let target = self.local_place(*result, &source)?;
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
+            HirStatementKind::RangeStepFailure { result, .. } => {
+                let target = self.local_place(*result, &source)?;
+                self.emit_fresh_write(target, &source, event_ids)?;
+            }
             HirStatementKind::FloatRangeCandidate {
                 current,
                 step,

@@ -391,6 +391,7 @@ impl<'a> HirDisplayContext<'a> {
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
+                        NumericFailureMode::Infallible => "safe",
                     }
                 );
 
@@ -410,6 +411,23 @@ impl<'a> HirDisplayContext<'a> {
 
                 out.push(')');
                 out
+            }
+
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result,
+            } => {
+                format!(
+                    "{} = range_step_failure_{:?}_{}()",
+                    self.local_label(*result),
+                    cause,
+                    match failure_mode {
+                        NumericFailureMode::ReturnError => "err",
+                        NumericFailureMode::Trap => "trap",
+                        NumericFailureMode::Infallible => "safe",
+                    }
+                )
             }
 
             HirStatementKind::FloatRangeCandidate {
@@ -445,6 +463,7 @@ impl<'a> HirDisplayContext<'a> {
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
+                        NumericFailureMode::Infallible => "safe",
                     },
                     self.render_expression(source)
                 )
@@ -461,6 +480,7 @@ impl<'a> HirDisplayContext<'a> {
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
+                        NumericFailureMode::Infallible => "safe",
                     },
                     self.render_expression(source)
                 )
@@ -540,7 +560,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!("return! {}", self.render_expression(value))
             }
             HirTerminator::Uninitialized => "uninitialized".to_owned(),
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 format!("runtime_failure \"{}\"", message.escape_debug())
             }
             HirTerminator::AssertFailure {

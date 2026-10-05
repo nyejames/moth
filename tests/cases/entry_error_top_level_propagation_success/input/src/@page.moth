@@ -1,0 +1,9 @@
+load_name |missing Bool| -> String, Error!:
+    if missing:
+        return! Error("Missing name")
+    ;
+    return "Priya"
+;
+
+name = load_name(false)!
+[: Hello [name]]

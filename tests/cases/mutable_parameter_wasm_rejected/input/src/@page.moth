@@ -1,5 +1,5 @@
 rhs_i32 |calls ~Int, increment I32| -> I32:
-    calls += 1
+    calls = 1
     return increment
 ;
 

@@ -35,7 +35,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [routing.rs](src/projects/routing.rs): path/origin rules.
     - [settings.rs](src/projects/settings.rs): Config/defaults/known paths.
     - [repl.rs](src/projects/repl.rs): template-focused REPL placeholder.
-    - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop. kw: serve, hot reload.
+    - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop, injected dev client and bounded runtime entry-error reports kept separate from build state. kw: serve, hot reload, runtime report.
+        - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
 - [builder boundary above frontend](src/build_system/): kw — config, modules, artifacts, cleanup.
     - [build.rs](src/build_system/build.rs): build_project, BuildResult, success-only `ProjectCompilation` over retained graph boundaries, entry/linked-module assembly and compiler/backend orchestration. Compiler module artefact lanes live in [module_compilation](src/compiler_frontend/module_compilation/).
@@ -70,6 +71,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [binding_environment](src/compiler_frontend/headers/binding_environment/): header-owned file visibility, dependency binding, namespace records and provider-interface projection.
     - [dependency_paths.rs](src/compiler_frontend/headers/dependency_paths.rs): authored dependency-path validation before retained-clause registration.
     - [dependency_target.rs](src/compiler_frontend/headers/dependency_target.rs): source-versus-provider classification and checked provider-target decoding.
+    - [start_capture.rs](src/compiler_frontend/headers/start_capture.rs): implicit entry-start body capture; source-owned token ranges for non-header top-level tokens and runtime templates.
 - [declaration_syntax](src/compiler_frontend/declaration_syntax/): shared declaration/type shell parsers. kw: signatures, ParsedTypeRef.
 - [module_dependencies.rs](src/compiler_frontend/module_dependencies.rs): topological header ordering. kw: dependency edges, cycles.
 - [compiler_messages](src/compiler_frontend/compiler_messages/): plain `CompilerDiagnostic` diagnosed values, typed `CompilerError` infrastructure failures and rendering, plus the self-contained [ModuleDiagnostics](src/compiler_frontend/compiler_messages/module_diagnostics.rs) owner. kw: diagnostic codes, labels, module outcomes.
@@ -121,9 +123,11 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [maps.rs](src/compiler_frontend/ast/type_resolution/maps.rs): map key/nesting.
     - [generics.rs](src/compiler_frontend/ast/type_resolution/generics.rs): nominal instances.
     - [signatures.rs](src/compiler_frontend/ast/type_resolution/signatures.rs), [struct_fields.rs](src/compiler_frontend/ast/type_resolution/struct_fields.rs), [choice_variants.rs](src/compiler_frontend/ast/type_resolution/choice_variants.rs), [recursive_types.rs](src/compiler_frontend/ast/type_resolution/recursive_types.rs).
-- [expressions](src/compiler_frontend/ast/expressions/): parsing/type checking/calls/constructors/mutation/options/namespaces. Shared call syntax and retained parameter-slot routing live in [call_arguments.rs](src/compiler_frontend/ast/expressions/call_arguments.rs), call metadata in [call_argument.rs](src/compiler_frontend/ast/expressions/call_argument.rs), final type/access policy in [call_validation.rs](src/compiler_frontend/ast/expressions/call_validation.rs), and assertion-message escape classification in [assertion_message_effects.rs](src/compiler_frontend/ast/expressions/assertion_message_effects.rs).
+- [expressions](src/compiler_frontend/ast/expressions/): parsing/type checking/calls/constructors/mutation/options/namespaces. Shared call syntax and retained parameter-slot routing live in [call_arguments.rs](src/compiler_frontend/ast/expressions/call_arguments.rs), call metadata in [call_argument.rs](src/compiler_frontend/ast/expressions/call_argument.rs) and final type/access policy in [call_validation.rs](src/compiler_frontend/ast/expressions/call_validation.rs). [failure_classification.rs](src/compiler_frontend/ast/expressions/failure_classification.rs) owns general failure classification across AST, TIR and runtime handoffs. [assertion_message_effects.rs](src/compiler_frontend/ast/expressions/assertion_message_effects.rs) owns assertion-message escape policy and diagnostics.
+    - [failure_facts.rs](src/compiler_frontend/ast/expressions/failure_facts.rs): origin-owned failure witnesses and compact expression compatibility summaries.
 - [field_access](src/compiler_frontend/ast/field_access/): fields, receiver calls, collection/map builtins.
 - [statements](src/compiler_frontend/ast/statements/): bodies, declarations, returns, loops, matches, catch, value production.
+    - [fallible_handling/catch_handler.rs](src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs): shared `catch:` and `catch |err|:` handler parsing with `then` value-production bodies.
 - [templates](src/compiler_frontend/ast/templates/): template parse/compose/fold/format/render plans/slots/control flow/reactive metadata.
     - [template_head_parser](src/compiler_frontend/ast/templates/template_head_parser/): directives, subscriptions, suffix control flow.
     - [template_control_flow](src/compiler_frontend/ast/templates/template_control_flow/): const eval/folding/validation/remap.
@@ -157,6 +161,10 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
     - [reactivity.rs](src/compiler_frontend/hir/reactivity.rs): HIR reactive metadata.
+    - [failure_facts.rs](src/compiler_frontend/hir/failure_facts.rs): immutable per-function failure facts projected once from typed AST bodies.
+    - [private_failure_lane.rs](src/compiler_frontend/hir/private_failure_lane.rs): internal failure lane for inferred-failure private functions over the existing fallible carrier.
+    - [hir_expression/fallible/catch.rs](src/compiler_frontend/hir/hir_expression/fallible/catch.rs): expression-local catch CFG lowering into one shared handler.
+    - [hir_statement/entry_start.rs](src/compiler_frontend/hir/hir_statement/entry_start.rs): entry `start()` runtime fragment accumulator lowering.
 - [borrow_checker](src/compiler_frontend/analysis/borrow_checker/): HIR side-table access and advisory optional-transfer facts. kw — exclusivity, optional transfer, aliases.
     - [engine.rs](src/compiler_frontend/analysis/borrow_checker/engine.rs): fixed-point flow.
     - [transfer.rs](src/compiler_frontend/analysis/borrow_checker/transfer.rs), [transfer/](src/compiler_frontend/analysis/borrow_checker/transfer/): access policy.

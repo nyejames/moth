@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin",
+    entry_root = "src",
+)
+html #= ()

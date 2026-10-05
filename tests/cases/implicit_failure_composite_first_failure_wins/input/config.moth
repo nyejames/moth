@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_composite_first_failure_wins",
+    entry_root = "src",
+)
+html #= ()

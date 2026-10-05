@@ -1,7 +1,7 @@
 Some conversions can fail. Text might not contain a number and a `Float` might
 not fit inside `Int`.
 
-Use `cast!` when the current function already returns `Error!`:
+Use `cast!` with a compatible builtin `Error!` return path:
 
 [codeblock, $code("moth"):
     parse_count |text String| -> Int, Error!:
@@ -18,6 +18,25 @@ Use `catch` when this part of the program has a sensible fallback:
 ]
 
 Choose one path. A cast cannot use `!` and `catch` at the same time.
+
+The handler covers both the conversion and evaluation of its operand. Arithmetic
+and builtin `Error!` calls inside that operand can share the handler:
+
+[codeblock, $code("moth"):
+    narrow |left U32, right U32| -> U8:
+        value U8 = cast left + right catch then 0
+        return value
+    ;
+]
+
+This recovers addition overflow as well as a result that does not fit `U8`.
+Parentheses are not required. A bound error name has type `Error`; typed errors
+keep their original message and code. Custom errors cannot mix with these
+built-in failures.
+
+A catch does not make an unsupported conversion valid. Numeric work known to
+be invalid still produces a compile-time diagnostic. See @../progress (Progress)
+for current support.
 
 Converting to a narrower binary float is not automatically a failure. It fails
 only when the rounded result is not finite, so losing precision is not an error

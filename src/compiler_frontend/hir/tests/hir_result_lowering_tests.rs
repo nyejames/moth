@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{
     Expression, FallibleExpressionHandling, FallibleHandling, Operator,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::CatchErrorBinding;
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -1189,10 +1190,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
         vec![node(
             NodeKind::ReturnError(Expression::string_slice(
@@ -1212,20 +1210,28 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement(wrap_catch_expression(
-                Expression::handled_fallible_function_call(
+            NodeKind::ExpressionStatement({
+                let mut caught_call = Expression::handled_fallible_function_call(
                     can_fail_name,
                     vec![],
-                    vec![builtin_type_ids::STRING],
+                    vec![],
                     FallibleExpressionHandling::Recover,
                     location,
-                ),
-                FallibleHandling::Handler {
-                    error: Some(CatchErrorBinding { error_binding }),
-                    body: vec![],
-                },
-                vec![],
-            )),
+                );
+                // Parser-produced catches carry a resolved HandledByCatch disposition on the
+                // protected node; synthetic fixtures set it explicitly to match.
+                caught_call.failure_facts.disposition = FailureDisposition::HandledByCatch {
+                    error_type_id: builtin_type_ids::STRING,
+                };
+                wrap_catch_expression(
+                    caught_call,
+                    FallibleHandling::Handler {
+                        error: Some(CatchErrorBinding { error_binding }),
+                        body: vec![],
+                    },
+                    vec![],
+                )
+            }),
             location,
         )],
         location,

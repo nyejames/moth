@@ -1,0 +1,16 @@
+bump |target ~U8, amount U8| -> U8:
+    target += amount
+    return target
+;
+
+kept ~U8 = 200
+code ~U32 = 0
+recovered = bump(~kept, 100) catch |err|:
+    code = err.code
+    then copy kept
+;
+
+exact_target ~U8 = 200
+exact = bump(~exact_target, 50) catch then 0
+
+[: writeback preserves target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target]]

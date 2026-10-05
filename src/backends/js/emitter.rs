@@ -6,7 +6,7 @@
 use crate::backends::js::JsModule;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
-use crate::backends::js::{JsFunctionEmissionPolicy, JsLoweringConfig};
+use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -75,6 +75,8 @@ pub(crate) struct JsEmitter<'hir> {
         HashSet<crate::compiler_frontend::external_packages::ExternalFunctionId>,
     /// Whether choice equality was lowered, requiring the runtime helper.
     pub(crate) used_choice_equality: bool,
+    /// Whether an emitted assertion terminator needs the structural fault helper.
+    pub(crate) used_assertions: bool,
     /// Builtin cast policies collected pre-emission by `collect_used_cast_policies`.
     /// Used to conditionally emit the matching runtime helpers.
     pub(crate) used_cast_policies: HashSet<BuiltinCastPolicyId>,
@@ -121,6 +123,7 @@ impl<'hir> JsEmitter<'hir> {
             temp_counter: 0,
             referenced_external_functions: HashSet::new(),
             used_choice_equality: false,
+            used_assertions: false,
             used_cast_policies: HashSet::new(),
             used_reactive_sources: false,
             used_reactive_templates: false,
@@ -135,6 +138,9 @@ impl<'hir> JsEmitter<'hir> {
         self.build_symbol_maps()?;
 
         let functions = self.functions_to_emit();
+        let start_is_fallible = functions.iter().any(|function| {
+            Some(function.id) == self.hir.start_function && self.function_is_fallible(function)
+        });
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
         let mut emitted_code_uses_numeric_helpers =
             self.emitted_functions_use_numeric_helpers(&functions)?;
@@ -168,6 +174,10 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_runtime_choice_helpers();
         }
 
+        if self.used_assertions {
+            self.emit_runtime_assertion_helper();
+        }
+
         if self.config.auto_invoke_start {
             let start_function = self
                 .hir
@@ -183,12 +193,43 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line("");
             }
 
-            self.emit_line(&format!("{start_name}();"));
+            if start_is_fallible {
+                // Keep typed entry failure local to this invocation, without host exceptions.
+                self.emit_line("(function () {");
+                self.indent += 1;
+                self.emit_line(&format!("var moth_result = {start_name}();"));
+                self.emit_line("if (moth_result.tag !== \"ok\") {");
+                self.indent += 1;
+                self.emit_line(
+                    "if (typeof globalThis.__moth_record_entry_failure === \"function\") {",
+                );
+                self.indent += 1;
+                self.emit_line("var moth_error = moth_result.value;");
+                self.emit_line(
+                    "globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);",
+                );
+                self.indent -= 1;
+                self.emit_line("}");
+                self.emit_line("if (typeof process !== \"undefined\" && process.stderr) {");
+                self.indent += 1;
+                self.emit_line(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?});"));
+                self.emit_line("process.exitCode = 1;");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.emit_line("return;");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("})();");
+            } else {
+                self.emit_line(&format!("{start_name}();"));
+            }
         }
 
         Ok(JsModule {
             source: self.out,
             function_name_by_id: self.function_name_by_id,
+            start_is_fallible,
             referenced_external_functions: self.referenced_external_functions,
         })
     }
@@ -284,6 +325,9 @@ impl<'hir> JsEmitter<'hir> {
                             self.config.numeric_profile.float_precision.into(),
                         ),
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
+                        HirStatementKind::RangeStepFailure { .. } => {
+                            usage.range_step_failure = true
+                        }
                         _ => {}
                     }
                 }
@@ -367,7 +411,7 @@ impl<'hir> JsEmitter<'hir> {
                     || self.expression_uses_maps(end)
                     || self.expression_uses_maps(ascending)
             }
-            HirStatementKind::Drop(_) => false,
+            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => false,
         }
     }
 
@@ -524,7 +568,7 @@ impl<'hir> JsEmitter<'hir> {
                 self.record_expression_reactivity(end)?;
                 self.record_expression_reactivity(ascending)?;
             }
-            HirStatementKind::Drop(_) => {}
+            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
         }
 
         Ok(())
@@ -891,7 +935,7 @@ fn collect_statement_cast_policies(
             collect_expression_cast_policies(end, policies);
             collect_expression_cast_policies(ascending, policies);
         }
-        HirStatementKind::Drop(_) => {}
+        HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
     }
 }
 

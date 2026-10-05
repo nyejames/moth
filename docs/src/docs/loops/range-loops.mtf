@@ -84,7 +84,9 @@ Bindings use the same one-or-two-name `|...|` rules as collection loops.
 ### Checked updates
 
 Runtime range counter updates use checked numeric operations. Their failures
-follow the numeric failure mode of the enclosing function or entry-selected `start` code.
+are implicit built-in failure, delivered by the enclosing handler or function
+contract. Entry-selected `start` has built-in `Error!`. See @../errors (Errors)
+for propagation and recovery, and @../progress (Progress) for current support.
 
 `by` stays a magnitude in every domain. A descending unsigned range subtracts
 that magnitude with checked arithmetic, because unary minus is invalid on every

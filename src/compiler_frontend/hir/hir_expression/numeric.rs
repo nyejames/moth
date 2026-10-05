@@ -10,18 +10,20 @@ use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, binary_operation_domain, negation_domain,
+    NumericOperator, binary_operation_domain, negation_domain, numeric_operation_cannot_fail,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
@@ -33,7 +35,8 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: allocates a result local, emits `HirStatementKind::NumericOp`, and, in `ReturnError`
     ///       mode, branches on the internal fallible carrier before returning the unwrapped success
     ///       value. In `Trap` mode the result local receives the scalar success value and a local
-    ///       load is returned.
+    ///       load is returned. Semantically discharged (`Infallible`) operations lower exactly
+    ///       like `Trap` with a dead check and no failure edge.
     /// WHY: callers (runtime RPN lowering, loop lowering) should not duplicate the failure-mode
     ///      selection, carrier allocation, and branch-emission logic.
     pub(crate) fn emit_checked_numeric_value(
@@ -42,12 +45,19 @@ impl<'a> HirBuilder<'a> {
         operands: HirNumericOperands,
         success_type: TypeId,
         span: &Option<SourceSpan>,
+        discharged: bool,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = if discharged {
+            NumericFailureMode::Infallible
+        } else if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
 
         match failure_mode {
-            NumericFailureMode::Trap => {
-                self.emit_trapping_numeric_value(op, operands, success_type, span)
+            NumericFailureMode::Trap | NumericFailureMode::Infallible => {
+                self.emit_scalar_numeric_value(op, failure_mode, operands, success_type, span)
             }
             NumericFailureMode::ReturnError => {
                 self.emit_recoverable_numeric_value(op, operands, success_type, span)
@@ -55,20 +65,94 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// Emits a trapping numeric operation and returns the scalar success local load.
-    fn emit_trapping_numeric_value(
+    /// Emits a scalar-result numeric operation and returns the success local load.
+    ///
+    /// WHAT: emits `HirStatementKind::NumericOp` with `Trap` or the semantically discharged
+    ///       `Infallible` mode and returns a load of the scalar result local. Discharged
+    ///       operations keep the trapping operation and evaluation; only the failure edge is
+    ///       gone, so backends share one lowering with a dead check.
+    /// WHY: `Trap` and `Infallible` differ only in the recorded mode, so one helper owns both
+    ///      instead of two identical emitters.
+    fn emit_scalar_numeric_value(
         &mut self,
         op: HirNumericOp,
+        failure_mode: NumericFailureMode,
         operands: HirNumericOperands,
         success_type: TypeId,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
+        debug_assert!(matches!(
+            failure_mode,
+            NumericFailureMode::Trap | NumericFailureMode::Infallible
+        ));
         let result_local = self.allocate_temp_local(success_type, None)?;
-        self.emit_numeric_op_statement(op, NumericFailureMode::Trap, operands, result_local, span)?;
+        self.emit_numeric_op_statement(op, failure_mode, operands, result_local, span)?;
 
         let region = self.current_region_or_error(span)?;
         let no_span = None;
         Ok(self.make_local_load_expression(result_local, success_type, &no_span, region))
+    }
+
+    /// Shares arithmetic's failure owner and carrier shape so private-lane installation can
+    /// retarget the producer without inspecting guard conditions or rendered messages.
+    pub(crate) fn emit_range_step_failure(
+        &mut self,
+        cause: RangeStepFailureCause,
+        span: &Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
+            NumericFailureMode::ReturnError
+        } else {
+            self.select_numeric_failure_mode(span)?
+        };
+        let success_type = self.type_environment.builtins().bool;
+        let error_type = if failure_mode == NumericFailureMode::ReturnError {
+            Some(self.builtin_error_type_id(span)?)
+        } else {
+            None
+        };
+        let result_type = match error_type {
+            Some(error_type) => self
+                .type_environment
+                .intern_fallible_carrier(success_type, error_type),
+            None => success_type,
+        };
+        let result_local = self.allocate_temp_local(result_type, None)?;
+        self.emit_statement_kind_with_span(
+            HirStatementKind::RangeStepFailure {
+                cause,
+                failure_mode,
+                result: result_local,
+            },
+            span,
+            *span,
+        )?;
+        let block = self.current_block_id_or_error(span)?;
+        if let Some(error_type) = error_type {
+            let region = self.current_region_or_error(span)?;
+            let error_result =
+                self.make_local_load_expression(result_local, result_type, &None, region);
+            let error_payload = self.make_expression(
+                span,
+                HirExpressionKind::FallibleUnwrapError {
+                    result: Box::new(error_result),
+                },
+                error_type,
+                ValueKind::RValue,
+                region,
+            );
+            self.emit_terminator(block, HirTerminator::ReturnError(error_payload), span)?;
+        } else {
+            self.emit_terminator(
+                block,
+                HirTerminator::RuntimeFailure {
+                    message: cause.builtin_error_code().default_message().to_owned(),
+                    cause: None,
+                },
+                span,
+            )?;
+        }
+        Ok(())
     }
 
     /// Emits a recoverable numeric operation and returns the unwrapped success value.
@@ -106,7 +190,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
     /// Emits the `NumericOp` statement itself.
@@ -145,7 +229,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
@@ -154,6 +238,12 @@ impl<'a> HirBuilder<'a> {
             }
             NumericFailureMode::ReturnError => {
                 self.emit_recoverable_formatted_float_value(source, string_type, span)
+            }
+            NumericFailureMode::Infallible => {
+                return_hir_transformation_error!(
+                    "Float formatting has no semantically discharged mode",
+                    self.hir_error_location(span)
+                );
             }
         }
     }
@@ -206,7 +296,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
     /// Validates a `Float` value from an external/backend boundary before exposing it as an
@@ -223,7 +313,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {
@@ -232,6 +322,12 @@ impl<'a> HirBuilder<'a> {
             }
             NumericFailureMode::ReturnError => {
                 self.emit_recoverable_validated_float_value(source, float_type, span)
+            }
+            NumericFailureMode::Infallible => {
+                return_hir_transformation_error!(
+                    "Float validation has no semantically discharged mode",
+                    self.hir_error_location(span)
+                );
             }
         }
     }
@@ -284,7 +380,31 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, span)
+        self.lower_numeric_carrier_to_success_value(carrier, span)
+    }
+
+    /// A catch continuation accepts builtin numeric failure only. Custom handlers keep
+    /// injected float boundary checks on the function-boundary continuation.
+    fn active_handler_accepts_builtin_failure(
+        &mut self,
+        span: &Option<SourceSpan>,
+    ) -> Result<bool, CompilerError> {
+        let Some(handler) = self.active_catch_handler else {
+            return Ok(false);
+        };
+        Ok(handler.error_type == self.builtin_error_type_id(span)?)
+    }
+
+    fn lower_numeric_carrier_to_success_value(
+        &mut self,
+        carrier: EmittedFallibleCarrier,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirExpression, CompilerError> {
+        if self.active_handler_accepts_builtin_failure(span)? {
+            self.lower_carrier_to_active_catch_success(carrier, span)
+        } else {
+            self.lower_fallible_carrier_to_success_value(carrier, span)
+        }
     }
 
     /// Emits the `ValidateFloat` statement itself.
@@ -344,18 +464,32 @@ impl<'a> HirBuilder<'a> {
         right: HirExpression,
         span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
+        let discharged =
+            self.pre_conversion_operands_cannot_fail(op.operator, &left, Some(&right), op.domain);
         let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
         let operands = HirNumericOperands::Binary { left, right };
+        if discharged {
+            // Generated loop arithmetic over discharged domains keeps its span but needs no
+            // failure edge, exactly like source-authored proven-safe operations.
+            return self.emit_numeric_op_statement(
+                op,
+                NumericFailureMode::Infallible,
+                operands,
+                target,
+                span,
+            );
+        }
         let failure_mode = self.select_numeric_failure_mode(span)?;
-        let no_span = None;
 
+        // Generated updates still belong to the authored loop/assignment. Preserve that
+        // producer span so a target capability rejection never points at anonymous scaffolding.
         if matches!(failure_mode, NumericFailureMode::Trap) {
-            return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
+            return self.emit_numeric_op_statement(op, failure_mode, operands, target, span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, &no_span)?;
+        let success_type = self.checked_numeric_result_type(op, span)?;
         let success_value =
-            self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
+            self.emit_recoverable_numeric_value(op, operands, success_type, span)?;
         self.emit_assign_local_statement(target, success_value, span)
     }
 
@@ -373,23 +507,40 @@ impl<'a> HirBuilder<'a> {
         self.lower_type_id(domain_type, span)
     }
 
+    /// Formatting and incoming-value guards are integrity checks, not implicit numeric failure.
+    /// Only a source-declared builtin Error! contract makes these guards recoverable. The exact
+    /// start identity is retained from the compiler-generated AST entry, not inferred from a name.
+    fn select_float_integrity_failure_mode(
+        &mut self,
+        span: &Option<SourceSpan>,
+    ) -> Result<NumericFailureMode, CompilerError> {
+        let function_id = self.current_function_id_or_error(span)?;
+        if self.module.start_function == Some(function_id) {
+            return Ok(NumericFailureMode::Trap);
+        }
+
+        self.select_numeric_failure_mode(span)
+    }
+
     /// Selects the numeric failure mode for the current function context.
     ///
-    /// WHAT: returns `ReturnError` only when the enclosing function has an internal fallible carrier
-    ///       whose error slot is exactly builtin `Error`. Top-level `start()`, non-fallible functions,
-    ///       and custom error channels all use `Trap`.
-    /// WHY: only builtin `Error!` can represent numeric failures as user-recoverable values; other
-    ///      contexts have no channel for the failure.
+    /// WHAT: returns `ReturnError` when the signature's fallible carrier has builtin `Error`.
+    ///       Callers check for an enclosing builtin-accepting catch first and bypass this
+    ///       selector; every other context initially uses `Trap`: non-fallible signatures,
+    ///       custom error slots, and private no-slot helpers (until the lane installer
+    ///       retargets their code-carrying producers). The synthetic entry `start()` selects
+    ///       `ReturnError` here through its builtin slot; only its float integrity guards
+    ///       take a separate trap-only path.
+    /// WHY: the private failure lane later installs inferred delivery for private no-slot
+    ///      functions. Custom error slots require frontend-validated local recovery or explicit
+    ///      mapping, never automatic conversion. Code-less operations (`Float` negation,
+    ///      exact `Dec` arithmetic) keep their `Trap` permanently because they never become
+    ///      lane producers.
     pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {
         let current_function_id = self.current_function_id_or_error(span)?;
-        // Entry `start()` is implicitly non-fallible regardless of its carrier shape.
-        if Some(current_function_id) == self.module.start_function {
-            return Ok(NumericFailureMode::Trap);
-        }
-
         let function = self.function_by_id_or_error(current_function_id, span)?;
         let Some((_, error_type)) = self
             .type_environment
@@ -435,15 +586,20 @@ impl<'a> HirBuilder<'a> {
         op: &Operator,
         left: &HirExpression,
         right: &HirExpression,
-    ) -> Option<(HirNumericOp, TypeId)> {
+    ) -> Option<(HirNumericOp, TypeId, bool)> {
         let operator = op.numeric_operator()?;
-        let left = NumericScalar::from_type_id(left.ty, &self.type_environment)?;
-        let right = NumericScalar::from_type_id(right.ty, &self.type_environment)?;
-        let domain = binary_operation_domain(operator, left, right)?;
+        let domain = binary_operation_domain(
+            operator,
+            NumericScalar::from_type_id(left.ty, &self.type_environment)?,
+            NumericScalar::from_type_id(right.ty, &self.type_environment)?,
+        )?;
+        let discharged =
+            self.pre_conversion_operands_cannot_fail(operator, left, Some(right), domain);
 
         Some((
             HirNumericOp { operator, domain },
             domain.type_id(&self.type_environment),
+            discharged,
         ))
     }
 
@@ -487,9 +643,15 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn classify_checked_numeric_negation(
         &self,
         operand: &HirExpression,
-    ) -> Option<(HirNumericOp, TypeId)> {
-        let operand = NumericScalar::from_type_id(operand.ty, &self.type_environment)?;
-        let domain = negation_domain(operand)?;
+    ) -> Option<(HirNumericOp, TypeId, bool)> {
+        let operand_scalar = NumericScalar::from_type_id(operand.ty, &self.type_environment)?;
+        let domain = negation_domain(operand_scalar)?;
+        let discharged = self.pre_conversion_operands_cannot_fail(
+            NumericOperator::Negate,
+            operand,
+            None,
+            domain,
+        );
 
         Some((
             HirNumericOp {
@@ -497,6 +659,7 @@ impl<'a> HirBuilder<'a> {
                 domain,
             },
             domain.type_id(&self.type_environment),
+            discharged,
         ))
     }
 
@@ -539,5 +702,34 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             region,
         ))
+    }
+
+    /// Whether pre-conversion HIR operand types discharge a checked operation.
+    ///
+    /// WHAT: reads the same `NumericScalar` domains from the same pre-conversion operand types
+    ///       as the AST consumer and applies the shared predicate with the same inputs.
+    /// WHY: HIR must emit `Infallible` with exactly the AST's answer; `classify_*` and
+    ///      `emit_checked_numeric_assignment` share this one derivation instead of each
+    ///      re-deriving the predicate inputs.
+    fn pre_conversion_operands_cannot_fail(
+        &self,
+        operator: NumericOperator,
+        left: &HirExpression,
+        right: Option<&HirExpression>,
+        domain: NumericScalar,
+    ) -> bool {
+        let environment: &TypeEnvironment = &self.type_environment;
+        let Some(left) = NumericScalar::from_type_id(left.ty, environment) else {
+            return false;
+        };
+        let right = match right {
+            Some(operand) => match NumericScalar::from_type_id(operand.ty, environment) {
+                Some(scalar) => Some(scalar),
+                None => return false,
+            },
+            None if operator.is_unary() => None,
+            None => return false,
+        };
+        numeric_operation_cannot_fail(operator, left, right, domain)
     }
 }

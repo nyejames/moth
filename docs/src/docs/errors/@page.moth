@@ -45,8 +45,13 @@ page_head #= language_theme_head
     Many languages combine these cases through null values or exceptions, which
     hides part of a function's behaviour.
 
-    Use options for absence, `Error!` returns for expected failure and `assert`
-    only when continuing would violate an invariant.
+    Use options for absence, implicit built-in failure for checked numeric work,
+    typed `Error!` returns for explicit failure and `assert` only when continuing
+    would violate an invariant. An enclosing catch or function contract delivers
+    implicit failure. JS/HTML delivers private propagation, builtin `Error`
+    materialisation and expression-wide catch; HTML-Wasm rejects recoverable
+    numeric failure with a structured capability diagnostic. See @../progress
+    (Progress) for per-target support.
 ]
 
 #[section:

@@ -11,6 +11,7 @@
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpression;
@@ -18,27 +19,59 @@ use crate::compiler_frontend::hir::expressions::HirExpression;
 /// How a checked numeric operation should behave on failure.
 ///
 /// WHAT: selects between returning a recoverable builtin `Error!` carrier and trapping.
-/// WHY: the choice depends on the enclosing function's error return slot. A builtin `Error!`
-///      function can recover numeric failures through the normal fallible-carrier path; any other
-///      fallible channel or non-fallible context must trap because the failure cannot be represented
-///      as a user-visible value.
+/// WHY: the choice depends on the delivery edge available at lowering time. An enclosing
+///      builtin-accepting catch or a builtin `Error!` return slot recovers numeric failures
+///      through the normal fallible-carrier path. Every other context initially lowers to
+///      `Trap`; the private failure lane later retargets the code-carrying trapping producers
+///      of inferred-lane private functions onto the inferred builtin-`Error` edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumericFailureMode {
     /// Produce an internal fallible carrier (success value or builtin `Error`).
     ///
-    /// WHAT: the enclosing function has builtin `Error!` exactly as its error return slot, so
-    ///       numeric failures can be returned through the normal fallible-carrier path.
+    /// WHAT: a builtin-accepting catch or the builtin `Error!` return slot receives the
+    ///       failure through the normal fallible-carrier path.
     /// WHY: this keeps recoverable numeric failures in the same control-flow shape as explicit
     ///      `cast!` propagation and lets later lowering emit `HirTerminator::FallibleBranch`.
     ReturnError,
 
     /// Stop execution on failure.
     ///
-    /// WHAT: the operation has no recoverable channel. The result local receives only the scalar
-    ///       success value; failure is a runtime trap/throw.
-    /// WHY: custom fallible channels, top-level `start()`, and non-fallible functions cannot
-    ///      represent numeric failures as user values, so the backend must halt.
+    /// WHAT: the lowering-time mode for every operation without builtin delivery:
+    ///       non-fallible functions, custom error slots and private no-slot helpers before lane
+    ///       installation. The synthetic entry `start()` owns the builtin slot, so its
+    ///       ordinary arithmetic lowers to `ReturnError`; only its float integrity guards
+    ///       (`FormatFloat`, `ValidateFloat`) use `Trap` because they are not implicit
+    ///       failures. The result local receives only the scalar success value; failure is a
+    ///       runtime trap/throw. Operations with an empty shared code set (`Float` negation,
+    ///       exact `Dec` arithmetic) never become lane producers, so their `Trap` is final.
+    /// WHY: without a builtin delivery edge the failure cannot be represented as a
+    ///      user-visible value, so the backend must halt.
     Trap,
+
+    /// Semantically proven unable to fail; no failure edge.
+    ///
+    /// WHAT: the shared discharge predicate proved the operation cannot fail from its operand
+    ///       types, so the operation lowers through the same operation as `Trap` whose check is
+    ///       dead. The result local receives the scalar success value and no failure edge exists.
+    /// WHY: backend-independent proof removes the semantic failure without changing evaluation
+    ///      or demanding optional check elision; only `NumericOp` statements may carry it.
+    Infallible,
+}
+
+/// Language-defined range guards, distinct from resource and invariant traps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeStepFailureCause {
+    ZeroStep,
+    NoProgress,
+}
+
+impl RangeStepFailureCause {
+    pub(crate) fn builtin_error_code(self) -> BuiltinErrorCode {
+        match self {
+            Self::ZeroStep => BuiltinErrorCode::InvalidRangeStep,
+            Self::NoProgress => BuiltinErrorCode::RangeStepNoProgress,
+        }
+    }
 }
 
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.

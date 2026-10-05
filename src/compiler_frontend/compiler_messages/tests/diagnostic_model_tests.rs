@@ -1,10 +1,11 @@
 use super::{
-    BorrowAccessKind, BorrowDiagnosticKind, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
-    ConfigDiagnosticKind, DeferredFeatureDiagnosticKind, DeferredFeatureReason,
-    DependencyClauseKind, DiagnosticBag, DiagnosticCategory, DiagnosticKind, DiagnosticLabel,
-    DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload, DiagnosticPlace,
-    DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason, ImportDiagnosticKind,
-    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
+    BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
+    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
+    DiagnosticCategory, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
+    GenericApplicationErrorReason, ImportDiagnosticKind, ImportPublicSurfaceType,
+    IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
@@ -18,6 +19,7 @@ use super::{
     UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, ErrorType, RenderFrozenContext, RenderTypeContext,
 };
@@ -2578,6 +2580,169 @@ fn invalid_expression_renderers_keep_structured_reason_prose() {
 }
 
 #[test]
+fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let source = SourceId::from_index(1);
+    let catch_span = Some(exact_span(source, 0, 30, &mut span_builder));
+    let first_span = Some(exact_span(source, 0, 8, &mut span_builder));
+    let second_span = Some(exact_span(source, 11, 9, &mut span_builder));
+    let reasons = [
+        (
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id: builtin_type_ids::INT,
+                second_error_type_id: builtin_type_ids::STRING,
+                first_producer_span: first_span,
+                second_producer_span: second_span,
+            },
+            "invalid_fallible_handling.incompatible_catch_error_types",
+            vec![first_span, second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id: builtin_type_ids::INT,
+                typed_producer_span: first_span,
+                implicit_producer_span: second_span,
+            },
+            "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
+            vec![first_span, second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                error_type_id: builtin_type_ids::INT,
+                witness: Box::new(BuiltinFailureWitness {
+                    codes: vec![BuiltinErrorCode::IntOverflow],
+                    call_spans: vec![first_span, None],
+                    origin_span: second_span,
+                    origin: BuiltinFailureOriginKind::Operation,
+                    elided_call_hops: 2,
+                }),
+            },
+            "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
+            vec![first_span, second_span],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                witness: Box::new(BuiltinFailureWitness {
+                    codes: vec![
+                        BuiltinErrorCode::DivideByZero,
+                        BuiltinErrorCode::IntOverflow,
+                    ],
+                    call_spans: vec![first_span],
+                    origin_span: second_span,
+                    origin: BuiltinFailureOriginKind::Operation,
+                    elided_call_hops: 0,
+                }),
+            },
+            "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+            vec![first_span, second_span],
+        ),
+    ];
+
+    for (reason, reason_key, producer_spans) in reasons {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason.clone(), catch_span);
+        assert_eq!(diagnostic.primary_span, catch_span);
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0051");
+        assert_eq!(diagnostic.identity().reason_key, Some(reason_key));
+        assert_eq!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidFallibleHandling { reason },
+        );
+        assert_eq!(
+            diagnostic
+                .labels
+                .iter()
+                .map(|label| label.span)
+                .collect::<Vec<_>>(),
+            producer_spans,
+        );
+    }
+}
+
+#[test]
+fn builtin_failure_witness_labels_render_calls_before_the_original_operation() {
+    let mut string_table = StringTable::new();
+    let source_path = Path::new("/project/failure.moth");
+    let mut sources = SourceDatabase::build(
+        std::iter::once(source_path),
+        source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("test source identity should build");
+    let source = sources
+        .get_by_canonical_path(source_path)
+        .expect("registered source")
+        .id;
+    sources
+        .retain_text(
+            source,
+            "export\nfirst\nsecond\nthird\nmultiply\n".to_owned(),
+        )
+        .expect("test source text should be retained");
+    let mut builder = ExtendedSpanBuilder::new();
+    let boundary = Some(exact_span(source, 0, 6, &mut builder));
+    let call_spans = vec![
+        Some(exact_span(source, 7, 5, &mut builder)),
+        Some(exact_span(source, 13, 6, &mut builder)),
+        Some(exact_span(source, 20, 5, &mut builder)),
+    ];
+    let origin_span = Some(exact_span(source, 26, 8, &mut builder));
+    let witness = Box::new(BuiltinFailureWitness {
+        codes: vec![BuiltinErrorCode::IntOverflow],
+        call_spans,
+        origin_span,
+        origin: BuiltinFailureOriginKind::Operation,
+        elided_call_hops: 2,
+    });
+    let mut diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { witness },
+        boundary,
+    );
+    assert_eq!(diagnostic.primary_span, boundary);
+    assert_eq!(diagnostic.labels.len(), 4);
+    assert!(
+        diagnostic.labels[..3]
+            .iter()
+            .all(|label| { label.message == Some(DiagnosticLabelMessage::BuiltinFailureCall) })
+    );
+    assert_eq!(
+        diagnostic.labels[3].message,
+        Some(DiagnosticLabelMessage::BuiltinFailureOrigin)
+    );
+    assert_eq!(diagnostic.labels[3].span, origin_span);
+    let context =
+        DiagnosticRenderContext::new(&string_table).with_optional_source_database(Some(&sources));
+    assert_eq!(
+        terminal::format_label_messages_with_context(&diagnostic, context),
+        vec![
+            "info: 2:1 - implicit built-in failure propagates through this call",
+            "info: 3:1 - implicit built-in failure propagates through this call",
+            "info: 4:1 - implicit built-in failure propagates through this call",
+            "info: 5:1 - original failing numeric or range operation here",
+        ],
+    );
+
+    let owner = FrozenIdentityHandle::new();
+    owner
+        .install(Arc::new(FrozenIdentityContext::from_parts(
+            string_table,
+            sources,
+        )))
+        .expect("witness source identity should install once");
+    diagnostic.attach_frozen_identity_handle_if_missing(owner.clone());
+    assert_eq!(
+        diagnostic.primary_frozen_identity_handle,
+        Some(owner.clone())
+    );
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .all(|label| { label.frozen_identity_handle.as_ref() == Some(&owner) })
+    );
+}
+
+#[test]
 fn phase_1_2_renderers_keep_source_language_terminology() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -4021,4 +4186,69 @@ impl DeferredFeatureDiagnosticKind {
     pub(crate) fn all() -> impl Iterator<Item = Self> {
         [Self::DeferredFeature].into_iter()
     }
+}
+
+#[test]
+fn failure_writeback_label_keeps_target_type_through_diagnostic_context_handoff() {
+    let mut string_table = StringTable::new();
+    let source_path = Path::new("/project/writeback.moth");
+    let mut sources = SourceDatabase::build(
+        std::iter::once(source_path),
+        source_path,
+        None,
+        &mut string_table,
+    )
+    .unwrap();
+    let source = sources.get_by_canonical_path(source_path).unwrap().id;
+    sources
+        .retain_text(source, "total += amount\n".to_owned())
+        .unwrap();
+    let mut builder = ExtendedSpanBuilder::new();
+    let origin_span = Some(exact_span(source, 0, 5, &mut builder));
+    let type_environment = TypeEnvironment::new();
+    let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+        InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+            witness: Box::new(BuiltinFailureWitness {
+                codes: vec![BuiltinErrorCode::IntOverflow],
+                call_spans: vec![],
+                origin_span,
+                origin: BuiltinFailureOriginKind::CompoundWriteBack {
+                    target: builtin_type_ids::fixed_scalar(
+                        moth_lexical::numeric::fixed_scalar::FixedScalar::U8,
+                    ),
+                },
+                elided_call_hops: 0,
+            }),
+        },
+        None,
+    );
+    // The label still renders its semantic target after the canonical
+    // premerge/diagnosed/message handoff and a non-identity string-table append.
+    let batch = PremergeDiagnosticBatch::from_parts(
+        vec![diagnostic],
+        string_table,
+        vec![RenderTypeContext {
+            diagnostic_range: 0..1,
+            type_environment,
+        }],
+        vec![],
+    );
+    let mut messages = ModuleDiagnostics::from_batch(batch)
+        .unwrap()
+        .into_batch()
+        .unwrap()
+        .into_messages();
+    messages.set_source_database(Arc::new(sources));
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-padding");
+    let mut aggregate = CompilerMessages::empty(aggregate_table);
+    aggregate.append_messages_preserving_context(messages);
+    let labels = terminal::format_label_messages_with_context(
+        aggregate.diagnostics().next().unwrap(),
+        aggregate.diagnostic_render_context(0),
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("U8")),
+        "{labels:?}"
+    );
 }

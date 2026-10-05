@@ -11,17 +11,21 @@ It is still fully checked and normalized when the condition is the literal
 `true`. The message is normalized through the ordinary AST template path before
 it is discarded after final AST type/TIR validation, so its temporary AST-local
 TIR is removed with the message and no TIR reference, runtime handoff, reactive
-metadata, generated function or other runtime fact survives. JavaScript and
-HTML evaluate active messages only on the failure
-edge. HTML-Wasm accepts an unreachable literal-true runtime message but
-currently rejects reachable runtime message construction.
+metadata, generated function or other runtime fact survives. Active messages
+are evaluated only on the failure edge. See @../progress (Progress) for current
+compiler and backend support.
 
-Message construction must not escape its evaluation through `!`, `?`, `return`,
-`break` or `continue`.
+Message construction must not escape through `!`, `?`, `return`, `break` or
+`continue`, or through escaping implicit or typed failure. Handle fallible work
+before the assertion and pass an infallible message.
 
-A failed assertion stops the current program path.
+A false condition stops the current program path. Failure while computing the
+condition is not a false assertion result. It follows the enclosing failure
+contract instead.
 
-It is not a recoverable error and cannot be caught.
+Assertion failure is not a recoverable error and cannot be caught.
+
+Assertions remain checked in development and release builds.
 
 Use `Error!` for failures callers are expected to handle. Use `assert` for
 broken assumptions and impossible states.

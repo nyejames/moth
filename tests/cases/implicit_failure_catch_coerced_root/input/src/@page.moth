@@ -1,0 +1,18 @@
+double |value Int| -> Int:
+    return value + 2147483647
+;
+
+take_opt |value Int?| -> Int:
+    return if value is |inner| then inner else -99
+;
+
+coerced_info ~= ""
+coerced = take_opt(value = double(2)) catch |coerced_err|:
+    coerced_info = [: [coerced_err.code] [coerced_err.message]]
+    then -1
+;
+
+coerced_report = copy coerced_info
+exact = take_opt(value = 5)
+
+[: coerced=[coerced] report=[coerced_report] exact=[exact]]

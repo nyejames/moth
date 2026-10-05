@@ -25,17 +25,20 @@ use crate::backends::wasm::request::{
 use crate::backends::wasm::runtime::memory::{WasmMemoryPlan, WasmScalarStorageKind};
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::backends::wasm::tests::lowering::test_support::{
-    build_module, build_type_environment, default_borrow_facts, default_numeric_proofs,
-    int_expression,
+    build_module, build_type_environment, default_borrow_facts, default_numeric_proofs, expression,
+    int_expression, string_expression,
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expressions::{
+    HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::binary16::round_f64_to_f16;
@@ -92,6 +95,184 @@ fn lowers_hir_to_wasm_module_bytes() {
     .expect("Wasm lowering should emit module bytes");
     let wasm_bytes = result.wasm_bytes.expect("wasm bytes should be available");
     validate_wasm(&wasm_bytes);
+    let output = run_wasm_node_script(
+        &wasm_bytes,
+        "",
+        r#"
+const module = new WebAssembly.Module(bytes);
+const assertions = WebAssembly.Module.imports(module).filter(
+  item => item.module === "host" && item.name === "assertion_failed"
+);
+process.stdout.write(JSON.stringify(assertions));
+"#,
+    );
+    assert_eq!(
+        String::from_utf8(output).expect("Node import list should be UTF-8"),
+        "[]",
+        "assertion-free output must not demand the assertion host import"
+    );
+}
+
+#[test]
+fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (mut type_environment, types) = build_type_environment();
+    let option_string = type_environment.intern_option(types.string);
+    let cases = [
+        ("default_message", None),
+        ("folded_message", Some("folded 🦋\nmessage")),
+        ("empty_message", Some("")),
+    ];
+    let mut functions = Vec::new();
+    let mut blocks = Vec::new();
+    let mut request = WasmBackendRequest::default();
+    request.export_policy.helper_exports = WasmHelperExportPolicy {
+        export_memory: true,
+        export_str_ptr: true,
+        export_str_len: true,
+        export_release: true,
+        ..Default::default()
+    };
+
+    for (index, (name, text)) in cases.into_iter().enumerate() {
+        let function_id = FunctionId(index as u32);
+        let block_id = BlockId(index as u32);
+        let region = RegionId(0);
+        let path = path_fork
+            .try_intern_portable_path(name, &mut string_table)
+            .expect("test path fits");
+        let (variant_index, fields, message_evaluation) = match text {
+            None => (0, vec![], HirAssertionMessageEvaluation::Default),
+            Some(text) => (
+                1,
+                vec![HirVariantField {
+                    name: None,
+                    value: string_expression(index as u32 * 2 + 1, text, types.string, region),
+                }],
+                HirAssertionMessageEvaluation::Folded,
+            ),
+        };
+        blocks.push(HirBlock {
+            id: block_id,
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::AssertFailure {
+                message: expression(
+                    index as u32 * 2,
+                    HirExpressionKind::VariantConstruct {
+                        carrier: HirVariantCarrier::Option,
+                        variant_index,
+                        fields,
+                    },
+                    option_string,
+                    region,
+                    ValueKind::Const,
+                ),
+                message_evaluation,
+            },
+        });
+        functions.push((
+            HirFunction {
+                id: function_id,
+                entry: block_id,
+                params: vec![],
+                return_type: types.unit,
+            },
+            path,
+            if index == 0 {
+                HirFunctionOrigin::EntryStart
+            } else {
+                HirFunctionOrigin::Normal
+            },
+        ));
+        request.export_policy.exported_functions.push(function_id);
+        request
+            .export_policy
+            .export_names
+            .insert(function_id, name.to_owned());
+    }
+
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        functions,
+        blocks,
+        FunctionId(0),
+    );
+    let result = lower_hir_to_wasm_module(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &request,
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("static assertion HIR should emit valid Wasm");
+    let wasm_bytes = result.wasm_bytes.expect("Wasm bytes should be present");
+    const NODE_SETUP: &str = r#"
+const assert = require("node:assert/strict");
+assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), [
+  { module: "host", name: "assertion_failed", kind: "function" }
+]);
+let assertionInstance;
+let throwFromHost = false;
+let hostError;
+const events = [];
+imports.host = {
+  assertion_failed(handle) {
+    const exports = assertionInstance.exports;
+    const pointer = exports.moth_str_ptr(handle);
+    const length = exports.moth_str_len(handle);
+    const message = new TextDecoder().decode(
+      new Uint8Array(exports.memory.buffer, pointer, length)
+    );
+    exports.moth_release(handle);
+    events.push(message);
+    if (throwFromHost) {
+      hostError = new Error(message);
+      Object.defineProperty(hostError, "__moth_assertion", { value: true });
+      throw hostError;
+    }
+  }
+};
+"#;
+    const NODE_BODY: &str = r#"
+assertionInstance = instance;
+for (const [name, expected] of [
+  ["default_message", "assertion failed"],
+  ["folded_message", "folded 🦋\nmessage"],
+  ["empty_message", ""]
+]) {
+  events.length = 0;
+  throwFromHost = false;
+  assert.throws(() => instance.exports[name](), error => {
+    assert(error instanceof WebAssembly.RuntimeError);
+    assert.match(error.message, /unreachable/);
+    events.push("trap");
+    return true;
+  });
+  assert.deepEqual(events, [expected, "trap"]);
+
+  events.length = 0;
+  throwFromHost = true;
+  assert.throws(() => instance.exports[name](), error => {
+    assert.strictEqual(error, hostError);
+    assert.equal(error.message, expected);
+    const marker = Object.getOwnPropertyDescriptor(error, "__moth_assertion");
+    assert.equal(marker.value, true);
+    assert.equal(marker.enumerable, false);
+    events.push("host-error");
+    return true;
+  });
+  assert.deepEqual(events, [expected, "host-error"]);
+}
+process.stdout.write("assertion-import-ok");
+"#;
+    let output = run_wasm_node_script(&wasm_bytes, NODE_SETUP, NODE_BODY);
+    assert_eq!(output, b"assertion-import-ok");
 }
 
 #[test]
@@ -930,7 +1111,7 @@ process.stdout.write(results.join("\n"));
             &format!("{:?}", include_str!("../../../js/runtime/float_power.js")),
         )
         .replace("__POWER_CASES__", &node_cases);
-    let output = run_wasm_node_script(&emitted.wasm_bytes, &node_body);
+    let output = run_wasm_node_script(&emitted.wasm_bytes, "", &node_body);
     let output = String::from_utf8(output).expect("Node power parity output should be UTF-8");
     let results = output.lines().collect::<Vec<_>>();
     assert_eq!(results.len(), cases.len(), "Node should return every case");
@@ -1189,7 +1370,7 @@ results.push(`f32|${view.getUint32(0, true).toString(16).padStart(8, "0")}`);
 process.stdout.write(results.join("\n"));
 "#
     .replace("__INPUT_BITS__", &input_bits);
-    let output = run_wasm_node_script(&result.wasm_bytes, &node_body);
+    let output = run_wasm_node_script(&result.wasm_bytes, "", &node_body);
     let actual = String::from_utf8(output)
         .expect("Node binary16 results should be UTF-8")
         .lines()
@@ -1316,7 +1497,7 @@ for (const [name, input, expected] of cases) {
 }
 process.stdout.write(results.join("\n"));
 "#;
-    let output = run_wasm_node_script(&result.wasm_bytes, node_body);
+    let output = run_wasm_node_script(&result.wasm_bytes, "", node_body);
     let actual = String::from_utf8(output).expect("Node integer string results should be UTF-8");
     assert_eq!(
         actual,
@@ -1449,7 +1630,7 @@ process.stdout.write(rows.join("\n"));
 "#
     .replace("__F32_BITS__", &f32_js_bits)
     .replace("__F64_BITS__", &f64_js_bits);
-    let output = run_wasm_node_script(&result.wasm_bytes, &node_body);
+    let output = run_wasm_node_script(&result.wasm_bytes, "", &node_body);
     let actual = String::from_utf8(output)
         .expect("Node float string results should be UTF-8")
         .lines()
@@ -1586,7 +1767,7 @@ for (const invalidBits of [0x7c00, 0xfe00]) {
       `F16 load of 0x${invalidBits.toString(16)} must trap with WebAssembly.RuntimeError`);
 }
 "#;
-    run_wasm_node_script(&result.wasm_bytes, node_body);
+    run_wasm_node_script(&result.wasm_bytes, "", node_body);
 }
 
 fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
@@ -3196,7 +3377,7 @@ process.stdout.write(results.join("\n"));
         .collect::<Vec<_>>()
         .join(", ");
     let node_body = NODE_BODY.replace("__EXPORT_SPECS__", &format!("[{export_specs}]"));
-    let output = run_wasm_node_script(wasm_bytes, &node_body);
+    let output = run_wasm_node_script(wasm_bytes, "", &node_body);
     String::from_utf8(output)
         .expect("Node checked Wasm results should be UTF-8")
         .lines()
@@ -3285,7 +3466,7 @@ process.stdout.write(results.join("\n"));
         .collect::<Vec<_>>()
         .join(", ");
     let node_body = NODE_BODY.replace("__EXPORT_SPECS__", &format!("[{export_specs}]"));
-    let output = run_wasm_node_script(wasm_bytes, &node_body);
+    let output = run_wasm_node_script(wasm_bytes, "", &node_body);
     String::from_utf8(output)
         .expect("Node Float validation results should be UTF-8")
         .lines()
@@ -3316,16 +3497,19 @@ fn execute_wasm_in_node(wasm_bytes: &[u8]) -> Vec<u8> {
 instance.exports.run();
 process.stdout.write(Buffer.from(instance.exports.memory.buffer, 0, 152));
 "#;
-    run_wasm_node_script(wasm_bytes, NODE_BODY)
+    run_wasm_node_script(wasm_bytes, "", NODE_BODY)
 }
 
-fn run_wasm_node_script(wasm_bytes: &[u8], node_body: &str) -> Vec<u8> {
+fn run_wasm_node_script(wasm_bytes: &[u8], node_setup: &str, node_body: &str) -> Vec<u8> {
     const NODE_SCRIPT: &str = r#"
 const chunks = [];
 process.stdin.on("data", chunk => chunks.push(chunk));
 process.stdin.on("end", async () => {
   try {
-    const { instance } = await WebAssembly.instantiate(Buffer.concat(chunks));
+    const bytes = Buffer.concat(chunks);
+    const imports = {};
+    __NODE_SETUP__
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
     __NODE_BODY__
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
@@ -3333,7 +3517,9 @@ process.stdin.on("end", async () => {
   }
 });
 "#;
-    let node_script = NODE_SCRIPT.replace("__NODE_BODY__", node_body);
+    let node_script = NODE_SCRIPT
+        .replace("__NODE_SETUP__", node_setup)
+        .replace("__NODE_BODY__", node_body);
     let mut child = Command::new("node")
         .args(["--eval", node_script.as_str()])
         .stdin(Stdio::piped())
@@ -3389,7 +3575,7 @@ process.stdout.write(results.join("\n"));
         .collect::<Vec<_>>()
         .join(", ");
     let node_body = NODE_BODY.replace("__CASES__", &format!("[{cases}]"));
-    let output = run_wasm_node_script(wasm_bytes, &node_body);
+    let output = run_wasm_node_script(wasm_bytes, "", &node_body);
     String::from_utf8(output)
         .expect("Node proof-run results should be UTF-8")
         .lines()

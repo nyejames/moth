@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_generic_infallible_catch_rejected",
+    entry_root = "src",
+)
+html #= ()

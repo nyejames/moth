@@ -1,0 +1,7 @@
+load |value Int| -> Int, Error!:
+    return value
+;
+
+bad |value Int| -> Int, Error!:
+    return load(value)! catch then 0
+;

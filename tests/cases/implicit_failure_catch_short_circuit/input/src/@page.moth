@@ -1,0 +1,18 @@
+trace ~U32 = 0
+check |value Bool| -> Bool:
+    return value
+;
+
+risky |seen ~U32, value Int| -> Int:
+    seen = seen + 100
+    return value + 2147483647
+;
+
+shorted = check(false) and check((risky(~trace, 2) - risky(~trace, 2) + 1) is 0) catch then false
+after_short U32 = trace + 0
+guarded = check(true) or check((risky(~trace, 2) - risky(~trace, 2) + 1) is 0) catch then true
+after_guard U32 = trace + 0
+failing = check(true) and check((risky(~trace, 2) - risky(~trace, 2) + 1) is 0) catch then false
+after_fail U32 = trace + 0
+
+[: short-circuit shorted=[shorted] spent1=[after_short] guarded=[guarded] spent2=[after_guard] failing=[failing] spent3=[after_fail]]

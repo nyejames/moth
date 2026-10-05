@@ -38,6 +38,8 @@ use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn float_expr(
@@ -151,6 +153,88 @@ fn make_float_to_string_cast(
     };
 
     Expression::cast(cast, builtin_type_ids::STRING, &TypeEnvironment::new())
+}
+
+#[test]
+fn float_validation_distinguishes_compiler_entry_from_declared_error_contract() {
+    for compiler_entry in [false, true] {
+        let mut path_fork = super::PathInternerFork::empty();
+        let mut string_table = StringTable::new();
+        let name = symbol("validated_float", &mut path_fork, &mut string_table);
+        let mut builder = setup_builder(&mut string_table, &mut path_fork);
+        let error_type = builder.test_register_builtin_error_type();
+        let return_type = builder
+            .type_environment
+            .intern_fallible_carrier(builtin_type_ids::FLOAT, error_type);
+        let function_id = FunctionId(1);
+        builder.test_register_function_with_return_type(name, function_id, return_type);
+        builder.test_set_current_function(function_id);
+        if compiler_entry {
+            builder.module.start_function = Some(function_id);
+        }
+        let source = builder
+            .lower_expression(&float_expr(1.5, None))
+            .expect("finite Float source must lower")
+            .value;
+        builder
+            .emit_validated_float_value(source, &None)
+            .expect("Float boundary guard must lower");
+        let validation_modes: Vec<_> = builder
+            .module
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .filter_map(|statement| match statement.kind {
+                HirStatementKind::ValidateFloat { failure_mode, .. } => Some(failure_mode),
+                _ => None,
+            })
+            .collect();
+        let expected = if compiler_entry {
+            NumericFailureMode::Trap
+        } else {
+            NumericFailureMode::ReturnError
+        };
+        assert_eq!(validation_modes, vec![expected]);
+    }
+}
+
+#[test]
+fn float_formatting_in_synthetic_error_entry_keeps_integrity_trap() {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(
+        "identity |value Float| -> Float:\n    return value\n;\n\
+         value = identity(1.5)\n[:[value]]\n",
+    );
+    let module = lower_hir(ast, &mut string_table, &mut path_fork);
+    let format_modes: Vec<_> = module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match statement.kind {
+            HirStatementKind::FormatFloat { failure_mode, .. } => Some(failure_mode),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(format_modes, vec![NumericFailureMode::Trap]);
+}
+
+#[test]
+fn float_formatting_source_declared_error_contract_keeps_return_error() {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(
+        "format_value |value Float| -> String, Error!:\n    text String = cast value\n    return text\n;\n",
+    );
+    let module = lower_hir(ast, &mut string_table, &mut path_fork);
+    let format_modes: Vec<_> = module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match statement.kind {
+            HirStatementKind::FormatFloat { failure_mode, .. } => Some(failure_mode),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(format_modes, vec![NumericFailureMode::ReturnError]);
 }
 
 #[test]

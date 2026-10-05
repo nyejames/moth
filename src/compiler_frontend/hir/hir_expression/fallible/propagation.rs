@@ -53,8 +53,8 @@ impl<'a> HirBuilder<'a> {
             .map_or_else(|| vec![expr_type_id], ToOwned::to_owned)
     }
 
-    /// Emits a fallible call carrier for direct propagation and returns its metadata.
-    pub(super) fn emit_result_call_carrier_to_current_block(
+    /// Emits a fallible call carrier after evaluating its operands in source order.
+    pub(in crate::compiler_frontend::hir) fn emit_result_call_carrier_to_current_block(
         &mut self,
         target: CallTarget,
         args: &[CallArgument],

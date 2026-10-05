@@ -245,6 +245,11 @@ pub(super) fn lookup_generic_bound_receiver_method(
                 method_path,
                 signature,
                 receiver_mutable: requirement_receiver_is_mutable(candidate.requirement),
+                origin: if receiver_is_unresolved_generic {
+                    super::shared::TraitSurfaceMethodOrigin::DeclaredRequirement
+                } else {
+                    super::shared::TraitSurfaceMethodOrigin::ConcreteEvidence
+                },
             }))
         }
     }

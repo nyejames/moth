@@ -3,8 +3,11 @@
 //! WHAT: exposes the public `run_dev_server` entry point plus the small CLI option contract.
 //! WHY: the real implementation is split by runtime concern so hot reload behavior stays
 //! inspectable: `server` owns startup, `build_loop` owns rebuild scheduling, `watch` owns
-//! filesystem change detection, `http` owns request routing, `sse` owns reload streams, and
-//! `error_page` owns rendered failure pages.
+//! filesystem change detection, `http` owns request routing and bounded same-origin runtime
+//! reports, `sse` owns reload streams and `error_page` owns shared failure presentation.
+//! `dev_client` installs hot reload and page-local outcome hooks before application scripts.
+//! Runtime report deduplication lives in `state` separately from global build success:
+//! a failed startup never makes other pages receive a build-failure response.
 
 mod build_loop;
 mod dev_client;

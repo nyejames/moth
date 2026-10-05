@@ -1205,6 +1205,7 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
                 reactive_effect: PublicCallReactiveEffect::None,
             }],
             return_alias: FunctionReturnAliasSummary::AliasParams(vec![0]),
+            escapes_builtin_failure: false,
         },
     );
     let problem =

@@ -1,7 +1,0 @@
-entry = "."
-
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["before Dec division trap"]
-runtime_error_contains = ["Division by zero"]

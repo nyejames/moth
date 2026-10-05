@@ -1,0 +1,5 @@
+project #= (
+    name = "implicit_failure_mixed_reject",
+    entry_root = "src",
+)
+html #= ()

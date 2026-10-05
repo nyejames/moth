@@ -87,10 +87,12 @@ HTML-Wasm executes infallible numeric expression casts that do not involve
 `Byte -> U8` and `U8 -> Byte`. F32/F64-to-F16 narrowing and other
 numeric-to-numeric casts from F16 remain target-gated. It supports infallible
 integer-to-`String` expression casts from profile `Int` and fixed
-signed/unsigned integers, and trap-mode `Float`/`F16`/`F32`/`F64`-to-`String`
-expression casts. Non-finite formatting traps in trap mode. Reachable `Dec`
-values and signatures, including nested types and generated-function uses,
-remain Wasm-rejected; unreachable private helpers do not gate the target.
+signed/unsigned integers. `Float`/`F16`/`F32`/`F64`-to-`String` formatting is
+a separate integrity guard, not implicit numeric failure: it halts on a
+non-finite input unless a declared builtin `Error!` contract returns it.
+Reachable `Dec` values and signatures, including nested types and
+generated-function uses, remain Wasm-rejected; unreachable private helpers do
+not gate the target.
 
 On HTML-Wasm, remaining fallible casts, conversions involving `Bool`, `Char`
 or `Error` (including `Char -> Int`), `String` parsing, statement-form casts,

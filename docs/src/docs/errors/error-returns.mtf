@@ -1,4 +1,4 @@
-A fallible function marks one return slot with `!`.
+A function with an explicit typed error path marks one return slot with `!`.
 
 [codeblock, $code("moth"):
     parse_number |text String| -> Int, Error!:
@@ -60,10 +60,45 @@ A function may declare only an error slot:
     ;
 ]
 
-Checked numeric operations use automatic recovery only when the current error
-slot is the builtin `Error!` channel. Custom error slots do not receive an
-implicit conversion.
+### Implicit failure at function boundaries
+
+Checked numeric work produces implicit built-in failure. It neither wraps nor
+implicitly panics. The enclosing handler or function contract delivers that
+failure under the accepted rules:
+
+- A private function with no error slot infers and propagates it within the same module.
+- A built-in `Error!` slot materialises the corresponding `Error` when failure escapes local handling.
+- A custom `E!` slot requires local recovery or explicit mapping to `E`, even in a private function.
+- An exported callable with no error slot must discharge implicit failure. Any remaining possibility is a compiler diagnostic.
+
+These rules apply to zero, one and multiple success returns. The public rule
+also covers receiver methods, generics and re-exports. A transparent alias of
+`Error` keeps its built-in identity; an unrelated wrapper does not. User-defined
+failure-conversion traits, error-conversion hooks and generic adapter searches
+are outside Moth's design scope, so mapping into a custom error stays explicit.
+Current compiler support remains documented by @../progress (Progress).
+
+Map implicit failure into a custom error with `catch` and `return!`:
+
+[codeblock, $code("moth"):
+    GeometryError ::
+        InvalidDimensions,
+    ;
+
+    area |width Int, height Int| -> Int, GeometryError!:
+        result = width * height catch:
+            return! GeometryError::InvalidDimensions
+        ;
+        return result
+    ;
+]
+
+Returning a custom error on one path does not discharge another escaping
+implicit failure. Failure in a handler contributes to the surrounding function's
+contract. Statically known invalid numeric work remains a compile-time diagnostic,
+including inside `Error!` functions.
 
 First-class public `Result` values and result pattern matching are outside the
-current language path. Fallible carriers are consumed by `!` or `catch` at the
-call site.
+language's error-channel path. Explicit typed errors require propagation with
+`!` or recovery with `catch`. Implicit private propagation is documented by
+@./#propagation (Error propagation).

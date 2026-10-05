@@ -109,6 +109,7 @@ pub(crate) fn summary() -> PublicCallSummary {
     PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
+        escapes_builtin_failure: false,
     }
 }
 

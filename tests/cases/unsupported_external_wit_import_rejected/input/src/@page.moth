@@ -1,0 +1,3 @@
+@shapes.wit as shapes
+
+io.line("page")

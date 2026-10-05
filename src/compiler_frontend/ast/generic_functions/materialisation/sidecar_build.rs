@@ -113,6 +113,7 @@ impl ModuleMaterialisationPreparation {
 
         let lookups = AstModuleLookups {
             module_symbols: ModuleSymbols::empty(),
+            exported_callable_paths: FxHashSet::default(),
             binding_environment: Rc::clone(&self.binding_environment),
             warnings: Vec::new(),
             declaration_table: Rc::new(declaration_table),
@@ -814,6 +815,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
     PublicCallSummary {
         parameters,
         return_alias: FunctionReturnAliasSummary::Fresh,
+        escapes_builtin_failure: false,
     }
 }
 

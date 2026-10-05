@@ -1,7 +1,7 @@
 //! Function and CFG emission helpers for the JavaScript backend.
 //!
-//! This module decides whether a HIR function can stay structured in JS or needs the dispatcher
-//! fallback for cyclic control flow.
+//! This module recognises acyclic branch regions and emits their shared continuation once.
+//! Cyclic or unsupported control flow retains the dispatcher fallback.
 
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
@@ -46,7 +46,7 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_parameter_binding_setup(function)?;
         self.validate_jump_argument_contract(&reachable_blocks)?;
 
-        let strategy = self.choose_control_flow_strategy(function, &reachable_blocks)?;
+        let strategy = self.choose_control_flow_strategy(function)?;
         self.current_function = Some(function.id);
         let emit_body_result: Result<(), CompilerError> = if self.function_is_fallible(function) {
             self.emit_line("try {");
@@ -139,7 +139,7 @@ impl<'hir> JsEmitter<'hir> {
         format!("__moth_reactive_binding({}, undefined)", source_id.0)
     }
 
-    fn function_is_fallible(&self, function: &HirFunction) -> bool {
+    pub(crate) fn function_is_fallible(&self, function: &HirFunction) -> bool {
         self.type_environment
             .is_fallible_carrier(function.return_type)
     }
@@ -165,85 +165,34 @@ impl<'hir> JsEmitter<'hir> {
     fn choose_control_flow_strategy(
         &self,
         function: &HirFunction,
-        reachable_blocks: &[BlockId],
     ) -> Result<ControlFlowStrategy, CompilerError> {
         if self.has_cfg_cycle(function.entry)? {
             return Ok(ControlFlowStrategy::Dispatcher);
         }
 
-        for block_id in reachable_blocks {
-            let block = self.block_by_id(*block_id)?;
-
-            match &block.terminator {
-                HirTerminator::Jump { .. } => {}
-
-                HirTerminator::If {
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    if self.inspect_simple_branch_termination(*then_block).is_err()
-                        || self.inspect_simple_branch_termination(*else_block).is_err()
-                    {
-                        return Ok(ControlFlowStrategy::Dispatcher);
-                    }
-                }
-
-                HirTerminator::FallibleBranch {
-                    success_block,
-                    error_block,
-                    ..
-                } => {
-                    if self
-                        .inspect_simple_branch_termination(*success_block)
-                        .is_err()
-                        || self
-                            .inspect_simple_branch_termination(*error_block)
-                            .is_err()
-                    {
-                        return Ok(ControlFlowStrategy::Dispatcher);
-                    }
-                }
-
+        // Follow lexical regions from entry through their joins, not every CFG block independently.
+        // One ownership set catches shared bodies even across separate continuation regions and
+        // visits each nested branch once instead of repeatedly inspecting success-chain suffixes.
+        let mut owned_blocks = HashSet::new();
+        let mut cursor = function.entry;
+        loop {
+            let block = self.block_by_id(cursor)?;
+            let termination = match &block.terminator {
                 HirTerminator::Match { arms, .. } => {
-                    if arms.is_empty() {
+                    if !owned_blocks.insert(cursor) {
                         return Ok(ControlFlowStrategy::Dispatcher);
                     }
-
-                    for arm in arms {
-                        if !matches!(
-                            arm.pattern,
-                            HirPattern::Literal(_)
-                                | HirPattern::OptionNone
-                                | HirPattern::OptionValue { .. }
-                                | HirPattern::OptionRelational { .. }
-                                | HirPattern::OptionPresent
-                                | HirPattern::Wildcard
-                                | HirPattern::ChoiceVariant { .. }
-                        ) {
-                            return Ok(ControlFlowStrategy::Dispatcher);
-                        }
-
-                        if self.inspect_simple_branch_termination(arm.body).is_err() {
-                            return Ok(ControlFlowStrategy::Dispatcher);
-                        }
-                    }
+                    self.inspect_match_termination(arms, &mut owned_blocks)
                 }
 
-                HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {
-                    return Ok(ControlFlowStrategy::Dispatcher);
-                }
-
-                HirTerminator::Return(_)
-                | HirTerminator::ReturnSuccess(_)
-                | HirTerminator::ReturnError(_)
-                | HirTerminator::RuntimeFailure { .. }
-                | HirTerminator::Uninitialized
-                | HirTerminator::AssertFailure { .. } => {}
+                _ => self.inspect_branch_termination(cursor, &mut owned_blocks),
+            };
+            match termination {
+                Ok(BranchTermination::Jump(target)) => cursor = target,
+                Ok(BranchTermination::Terminated) => return Ok(ControlFlowStrategy::Structured),
+                Err(_) => return Ok(ControlFlowStrategy::Dispatcher),
             }
         }
-
-        Ok(ControlFlowStrategy::Structured)
     }
 
     fn validate_jump_argument_contract(
@@ -515,7 +464,7 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::Uninitialized => Err(CompilerError::compiler_error(
                 "JavaScript backend: structured lowering encountered Uninitialized terminator",
             )),
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)
             }
             HirTerminator::AssertFailure {
@@ -538,20 +487,21 @@ impl<'hir> JsEmitter<'hir> {
         else_block: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
     ) -> Result<(), CompilerError> {
-        let then_termination = self.inspect_simple_branch_termination(then_block)?;
-        let else_termination = self.inspect_simple_branch_termination(else_block)?;
+        let mut branch_blocks = HashSet::new();
+        let then_termination = self.inspect_branch_termination(then_block, &mut branch_blocks)?;
+        let else_termination = self.inspect_branch_termination(else_block, &mut branch_blocks)?;
         let merge_target = Self::resolve_branch_merge_target(then_termination, else_termination)?;
 
         let condition = self.lower_expr(condition)?;
 
         self.emit_line(&format!("if ({condition}) {{"));
         self.indent += 1;
-        self.emit_simple_branch_block(then_block, merge_target, emitted_blocks)?;
+        self.emit_branch_block(then_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
 
         self.emit_line("} else {");
         self.indent += 1;
-        self.emit_simple_branch_block(else_block, merge_target, emitted_blocks)?;
+        self.emit_branch_block(else_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
         self.emit_line("}");
 
@@ -569,8 +519,10 @@ impl<'hir> JsEmitter<'hir> {
         error_block: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
     ) -> Result<(), CompilerError> {
-        let success_termination = self.inspect_simple_branch_termination(success_block)?;
-        let error_termination = self.inspect_simple_branch_termination(error_block)?;
+        let mut branch_blocks = HashSet::new();
+        let success_termination =
+            self.inspect_branch_termination(success_block, &mut branch_blocks)?;
+        let error_termination = self.inspect_branch_termination(error_block, &mut branch_blocks)?;
         let merge_target =
             Self::resolve_branch_merge_target(success_termination, error_termination)?;
 
@@ -578,12 +530,12 @@ impl<'hir> JsEmitter<'hir> {
 
         self.emit_line(&format!("if ({condition}) {{"));
         self.indent += 1;
-        self.emit_simple_branch_block(success_block, merge_target, emitted_blocks)?;
+        self.emit_branch_block(success_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
 
         self.emit_line("} else {");
         self.indent += 1;
-        self.emit_simple_branch_block(error_block, merge_target, emitted_blocks)?;
+        self.emit_branch_block(error_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
         self.emit_line("}");
 
@@ -629,7 +581,7 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             self.indent += 1;
-            self.emit_simple_branch_block(arm.body, merge_target, emitted_blocks)?;
+            self.emit_branch_block(arm.body, merge_target, emitted_blocks)?;
             self.indent -= 1;
             self.emit_line("}");
             emitted_arm_count += 1;
@@ -642,12 +594,16 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    fn emit_simple_branch_block(
+    fn emit_branch_block(
         &mut self,
         block_id: BlockId,
         expected_merge_target: Option<BlockId>,
         emitted_blocks: &mut HashSet<BlockId>,
     ) -> Result<BranchTermination, CompilerError> {
+        if expected_merge_target == Some(block_id) {
+            return Ok(BranchTermination::Jump(block_id));
+        }
+
         if emitted_blocks.contains(&block_id) {
             return Err(CompilerError::compiler_error(
                 "JavaScript backend: branch block was emitted more than once during structured lowering",
@@ -669,6 +625,36 @@ impl<'hir> JsEmitter<'hir> {
                         "JavaScript backend: structured branch jumped to unexpected target",
                     ))
                 }
+            }
+
+            HirTerminator::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                let condition = self.lower_expr(condition)?;
+                self.emit_nested_branch(
+                    &condition,
+                    *then_block,
+                    *else_block,
+                    expected_merge_target,
+                    emitted_blocks,
+                )
+            }
+
+            HirTerminator::FallibleBranch {
+                result,
+                success_block,
+                error_block,
+            } => {
+                let condition = self.lower_fallible_success_condition(result)?;
+                self.emit_nested_branch(
+                    &condition,
+                    *success_block,
+                    *error_block,
+                    expected_merge_target,
+                    emitted_blocks,
+                )
             }
 
             HirTerminator::Return(expression) => {
@@ -694,7 +680,7 @@ impl<'hir> JsEmitter<'hir> {
                 Ok(BranchTermination::Terminated)
             }
 
-            HirTerminator::RuntimeFailure { message } => {
+            HirTerminator::RuntimeFailure { message, .. } => {
                 self.emit_runtime_failure_terminator(message)?;
                 Ok(BranchTermination::Terminated)
             }
@@ -705,14 +691,71 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn inspect_simple_branch_termination(
+    /// Keep nested edges inside their selected arm, leaving the shared join to its outer owner.
+    fn emit_nested_branch(
+        &mut self,
+        condition: &str,
+        then_block: BlockId,
+        else_block: BlockId,
+        expected_merge_target: Option<BlockId>,
+        emitted_blocks: &mut HashSet<BlockId>,
+    ) -> Result<BranchTermination, CompilerError> {
+        self.emit_line(&format!("if ({condition}) {{"));
+        self.indent += 1;
+        let then_termination =
+            self.emit_branch_block(then_block, expected_merge_target, emitted_blocks)?;
+        self.indent -= 1;
+
+        self.emit_line("} else {");
+        self.indent += 1;
+        let else_termination =
+            self.emit_branch_block(else_block, expected_merge_target, emitted_blocks)?;
+        self.indent -= 1;
+        self.emit_line("}");
+
+        Ok(
+            Self::resolve_branch_merge_target(then_termination, else_termination)?
+                .map_or(BranchTermination::Terminated, BranchTermination::Jump),
+        )
+    }
+
+    fn inspect_branch_termination(
         &self,
         block_id: BlockId,
+        branch_blocks: &mut HashSet<BlockId>,
     ) -> Result<BranchTermination, CompilerError> {
+        // Branch bodies need one lexical owner. A shared exit is safe only when represented
+        // by a jump target, which the enclosing conditional emits after its arms.
+        if !branch_blocks.insert(block_id) {
+            return Err(CompilerError::compiler_error(
+                "JavaScript backend: structured branches share a non-merge block",
+            ));
+        }
+
         let block = self.block_by_id(block_id)?;
 
         match &block.terminator {
             HirTerminator::Jump { target, .. } => Ok(BranchTermination::Jump(*target)),
+
+            HirTerminator::If {
+                then_block: success_block,
+                else_block: error_block,
+                ..
+            }
+            | HirTerminator::FallibleBranch {
+                success_block,
+                error_block,
+                ..
+            } => {
+                let success_termination =
+                    self.inspect_branch_termination(*success_block, branch_blocks)?;
+                let error_termination =
+                    self.inspect_branch_termination(*error_block, branch_blocks)?;
+                Ok(
+                    Self::resolve_branch_merge_target(success_termination, error_termination)?
+                        .map_or(BranchTermination::Terminated, BranchTermination::Jump),
+                )
+            }
 
             HirTerminator::Return(_)
             | HirTerminator::ReturnSuccess(_)
@@ -725,7 +768,7 @@ impl<'hir> JsEmitter<'hir> {
             )),
 
             _ => Err(CompilerError::compiler_error(
-                "JavaScript backend: branch terminator is not simple enough for structured lowering",
+                "JavaScript backend: branch terminator is unsupported for structured lowering",
             )),
         }
     }
@@ -756,25 +799,64 @@ impl<'hir> JsEmitter<'hir> {
         &self,
         arms: &[HirMatchArm],
     ) -> Result<Option<BlockId>, CompilerError> {
-        let mut jump_targets = Vec::new();
+        Ok(
+            match self.inspect_match_termination(arms, &mut HashSet::new())? {
+                BranchTermination::Jump(target) => Some(target),
+                BranchTermination::Terminated => None,
+            },
+        )
+    }
 
-        for arm in arms {
-            if let BranchTermination::Jump(target) =
-                self.inspect_simple_branch_termination(arm.body)?
-            {
-                jump_targets.push(target);
+    fn inspect_match_termination(
+        &self,
+        arms: &[HirMatchArm],
+        owned_blocks: &mut HashSet<BlockId>,
+    ) -> Result<BranchTermination, CompilerError> {
+        if arms.is_empty() {
+            return Err(CompilerError::compiler_error(
+                "JavaScript backend: structured match has no arms",
+            ));
+        }
+
+        // A synthetic wildcard points directly at the continuation. Inspect the other arms
+        // first so this block remains owned by the post-match region, regardless of arm order.
+        let wildcard = arms
+            .iter()
+            .position(|arm| matches!(arm.pattern, HirPattern::Wildcard) && arm.guard.is_none());
+        let mut termination = BranchTermination::Terminated;
+        for (index, arm) in arms.iter().enumerate() {
+            if !matches!(
+                arm.pattern,
+                HirPattern::Literal(_)
+                    | HirPattern::OptionNone
+                    | HirPattern::OptionValue { .. }
+                    | HirPattern::OptionRelational { .. }
+                    | HirPattern::OptionPresent
+                    | HirPattern::Wildcard
+                    | HirPattern::ChoiceVariant { .. }
+            ) {
+                return Err(CompilerError::compiler_error(
+                    "JavaScript backend: match pattern is unsupported for structured lowering",
+                ));
+            }
+            if Some(index) == wildcard {
+                continue;
+            }
+
+            let arm_termination = self.inspect_branch_termination(arm.body, owned_blocks)?;
+            termination = Self::resolve_branch_merge_target(termination, arm_termination)?
+                .map_or(BranchTermination::Terminated, BranchTermination::Jump);
+        }
+
+        if let Some(index) = wildcard {
+            let arm = &arms[index];
+            if termination != BranchTermination::Jump(arm.body) {
+                let arm_termination = self.inspect_branch_termination(arm.body, owned_blocks)?;
+                termination = Self::resolve_branch_merge_target(termination, arm_termination)?
+                    .map_or(BranchTermination::Terminated, BranchTermination::Jump);
             }
         }
 
-        jump_targets.sort_by_key(|target| target.0);
-        jump_targets.dedup_by_key(|target| target.0);
-
-        match jump_targets.as_slice() {
-            [] => Ok(None),
-            [single] => Ok(Some(*single)),
-            _ => Err(CompilerError::compiler_error(
-                "JavaScript backend: structured match arms jump to different merge targets",
-            )),
-        }
+        Ok(termination)
     }
 }

@@ -4,14 +4,16 @@
 //! WHY: diagnostics carry `TypeId`s, so the renderer is the contract that turns semantic type
 //! identity into source-level names when a module `TypeEnvironment` is available.
 
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::render::terminal::format_payload_guidance;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostics_with_context;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, unsupported_operator_types_message,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticOperator, InvalidAssignmentTargetReason,
-    InvalidFieldAccessReason, TypeMismatchContext,
+    BuiltinFailureOriginKind, BuiltinFailureWitness, CompilerDiagnostic, DiagnosticOperator,
+    InvalidAssignmentTargetReason, InvalidFallibleHandlingReason, InvalidFieldAccessReason,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
@@ -81,6 +83,136 @@ fn rule_diagnostics_render_receiver_type_names() {
             .iter()
             .any(|line| line.contains("A temporary value cannot be assigned through"))
     );
+}
+
+#[test]
+fn failure_handling_renderers_resolve_custom_types_and_recovery_guidance() {
+    let mut type_environment = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut error_types = Vec::new();
+
+    for name in ["ParseFailure", "StoreFailure"] {
+        let path = path_fork
+            .try_intern_portable_path(name, &mut string_table)
+            .expect("test path fits");
+        let (_, type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path,
+            fields: Box::new([]),
+            generic_parameters: None,
+            const_record: false,
+        });
+        error_types.push(type_id);
+    }
+
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+    let cases = [
+        (
+            InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
+                first_error_type_id: error_types[0],
+                second_error_type_id: error_types[1],
+                first_producer_span: None,
+                second_producer_span: None,
+            },
+            vec![
+                "`ParseFailure!`",
+                "`StoreFailure!`",
+                "convert the errors explicitly",
+            ],
+        ),
+        (
+            InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                error_type_id: error_types[0],
+                typed_producer_span: None,
+                implicit_producer_span: None,
+            },
+            vec![
+                "`ParseFailure!`",
+                "implicit built-in failure",
+                "separately handled expressions",
+            ],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
+                error_type_id: error_types[0],
+                witness: Box::new(BuiltinFailureWitness {
+                    codes: vec![BuiltinErrorCode::IntOverflow],
+                    call_spans: vec![None, None, None],
+                    origin_span: None,
+                    origin: BuiltinFailureOriginKind::Operation,
+                    elided_call_hops: 2,
+                }),
+            },
+            vec![
+                "custom `ParseFailure!` slot",
+                "explicitly to `ParseFailure`",
+                "`return!`",
+                "final error slot to `Error!`",
+                "explicit invariant choice",
+                "Witness omits 2 additional private call hop(s).",
+            ],
+        ),
+        (
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                witness: Box::new(BuiltinFailureWitness {
+                    codes: vec![BuiltinErrorCode::DivideByZero],
+                    call_spans: Vec::new(),
+                    origin_span: None,
+                    origin: BuiltinFailureOriginKind::Operation,
+                    elided_call_hops: 0,
+                }),
+            },
+            vec![
+                "exported function",
+                "Recover locally",
+                "final Error! return slot",
+                "explicit invariant choice",
+            ],
+        ),
+        (
+            InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+            vec![
+                "Assertion messages must be ordinary values.",
+                "cannot escape its evaluation",
+            ],
+        ),
+    ];
+
+    for (reason, expected_fragments) in cases {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(reason, None);
+        let guidance = format_payload_guidance(&diagnostic.payload, context).join("\n");
+        if matches!(
+            &diagnostic.payload,
+            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
+                reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+            }
+        ) {
+            assert!(diagnostic.labels.is_empty());
+            assert!(!guidance.contains("explicit invariant choice"));
+            assert!(!guidance.contains("Error!"));
+        }
+        if matches!(
+            &diagnostic.payload,
+            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidFallibleHandling {
+                reason: InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. }
+                    | InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
+            }
+        ) {
+            assert!(!guidance.contains("Witness omits"));
+        }
+        let terse = format_terse_diagnostics_with_context(&[diagnostic], context).join("\n");
+        for fragment in expected_fragments {
+            assert!(
+                guidance.contains(fragment),
+                "missing {fragment:?} in {guidance}"
+            );
+            assert!(terse.contains(fragment), "missing {fragment:?} in {terse}");
+        }
+    }
 }
 
 #[test]

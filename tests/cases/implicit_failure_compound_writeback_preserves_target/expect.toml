@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " writeback preserves target=200 code=242 recovered=200 exact=250 exact-target=250"

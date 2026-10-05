@@ -24,6 +24,16 @@ source-authored receiver methods share this routing policy.
 
 Host functions and compiler-owned builtin member calls are positional-only.
 
+### Implicit failure at calls
+
+A private function without an error slot can infer and propagate checked numeric
+failure within the same module. Its internal callers need no postfix `!` for
+that implicit failure; the enclosing handler or function contract delivers it.
+This does not remove postfix `!` from explicit typed error propagation.
+Exported signatures stay closed and must discharge failure or declare a
+compatible error slot. See @#returns-and-multiple-values (Returns and multiple
+values) and @../progress (Progress) for the contract and current support.
+
 ### Shared MON syntax
 
 @../language-overview/#mon-syntax (MON syntax) names the shared parenthesised

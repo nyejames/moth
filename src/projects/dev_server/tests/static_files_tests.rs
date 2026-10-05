@@ -16,19 +16,63 @@ fn site_config(page_url_style: PageUrlStyle, redirect_index_html: bool) -> HtmlS
 }
 
 #[test]
-fn injection_happens_before_closing_body_once() {
-    let html = "<html><body><h1>Hello</h1></body></html>";
-    let injected = inject_dev_client(html, "/");
-    assert!(injected.contains("EventSource('/__moth/events')"));
-    assert_eq!(injected.matches("EventSource('/__moth/events')").count(), 1);
-    assert!(injected.find("</body>").expect("should contain body close") > 0);
+fn injection_precedes_page_scripts_and_happens_once() {
+    for html in [
+        "<html><head><script>bootstrap()</script></head><body>Hello</body></html>",
+        "<html><head><!-- <script>unused()</script> --><script>bootstrap()</script></head><body>Hello</body></html>",
+        "<html><HEAD><title>Hello</title></HEAD><body><script>bootstrap()</script></body></html>",
+        "<html><body><script>bootstrap()</script></body></html>",
+        "<html><body><h1>Hello</h1></body></html>",
+    ] {
+        let injected = inject_dev_client(html, "/", 7, "docs/index.html");
+        assert_eq!(injected.matches("new EventSource(").count(), 1);
+        let hook = injected
+            .find("globalThis.__moth_record_entry_failure")
+            .expect("hook installed");
+        if let Some(bootstrap) = injected.find("bootstrap()") {
+            assert!(
+                hook < bootstrap,
+                "hooks must exist before classic page bootstrap"
+            );
+        }
+        assert_eq!(
+            inject_dev_client(&injected, "/", 7, "docs/index.html"),
+            injected
+        );
+    }
+}
 
-    let reinjected = inject_dev_client(&injected, "/");
-    assert_eq!(
-        reinjected.matches("EventSource('/__moth/events')").count(),
-        1,
-        "snippet should not be injected twice"
-    );
+#[test]
+fn known_entries_are_exact_html_files_inside_the_output() {
+    let output = tempfile::tempdir().expect("output directory");
+    fs::create_dir(output.path().join("docs")).expect("page directory");
+    fs::write(output.path().join("docs/index.html"), "page").expect("page file");
+    fs::write(output.path().join("app.js"), "script").expect("script file");
+    assert!(super::is_known_entry("docs/index.html", output.path()));
+    for invalid in [
+        "",
+        "/docs/index.html",
+        "../index.html",
+        "docs/./index.html",
+        "docs//index.html",
+        "docs\\index.html",
+        "missing.html",
+        "app.js",
+    ] {
+        assert!(!super::is_known_entry(invalid, output.path()), "{invalid}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn known_entries_reject_symlinks_outside_the_output() {
+    let output = tempfile::tempdir().expect("output directory");
+    let outside = tempfile::tempdir().expect("external directory");
+    let external_page = outside.path().join("index.html");
+    fs::write(&external_page, "external page").expect("external page");
+    std::os::unix::fs::symlink(external_page, output.path().join("index.html"))
+        .expect("page symlink");
+    assert!(!super::is_known_entry("index.html", output.path()));
 }
 
 #[test]

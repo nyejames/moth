@@ -1916,6 +1916,7 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
             summary: PublicCallSummary {
                 parameters: Vec::new(),
                 return_alias: FunctionReturnAliasSummary::Fresh,
+                escapes_builtin_failure: false,
             },
         }],
     }
@@ -2700,10 +2701,12 @@ fn differing_provider_summaries_with_one_origin_fail_as_compiler_error() {
     let first = PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Fresh,
+        escapes_builtin_failure: false,
     };
     let second = PublicCallSummary {
         parameters: Vec::new(),
         return_alias: FunctionReturnAliasSummary::Unknown,
+        escapes_builtin_failure: false,
     };
 
     let mut table = FxHashMap::default();

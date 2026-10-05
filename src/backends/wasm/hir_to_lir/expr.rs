@@ -621,7 +621,7 @@ fn render_structural_string(
     Ok(rendered)
 }
 
-fn lower_concrete_string(
+pub(crate) fn lower_concrete_string(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     statements: &mut Vec<WasmLirStmt>,
     value: &str,

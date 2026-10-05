@@ -303,6 +303,15 @@ impl ScopeContext {
         self
     }
 
+    /// Share proofs from completed bodies with later call parsing in the same module.
+    pub(crate) fn with_known_infallible_functions(
+        mut self,
+        functions: Rc<RefCell<FxHashSet<PathId>>>,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).known_infallible_functions = Some(functions);
+        self
+    }
+
     /// Set the active generic function instantiation stack.
     ///
     /// WHAT: records which generic function instantiations are currently

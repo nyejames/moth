@@ -28,7 +28,7 @@ fn rendered_runtime_page_includes_version_error_text_and_dark_mode() {
     assert!(page.contains("something broke"));
     assert!(page.contains("Timestamp (unix):"));
     assert!(page.contains("color-scheme: dark"));
-    assert!(page.contains("EventSource('/preview/__moth/events')"));
+    assert!(page.contains("EventSource(\"/preview/__moth/events\")"));
 }
 
 #[test]
@@ -104,5 +104,5 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     assert!(page.contains("file://"));
 
     // SSE client is injected.
-    assert!(page.contains("EventSource('/docs/__moth/events')"));
+    assert!(page.contains("EventSource(\"/docs/__moth/events\")"));
 }

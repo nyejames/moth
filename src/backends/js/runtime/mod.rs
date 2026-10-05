@@ -54,6 +54,7 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) format_binary32: bool,
     pub(crate) format_binary64: bool,
     pub(crate) validate_float: bool,
+    pub(crate) range_step_failure: bool,
 }
 
 impl NumericRuntimeHelperUsage {
@@ -83,6 +84,7 @@ impl NumericRuntimeHelperUsage {
             || self.binary_float_power
             || self.uses_float_formatter()
             || self.validate_float
+            || self.range_step_failure
     }
 }
 

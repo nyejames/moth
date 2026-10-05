@@ -12,16 +12,23 @@ use super::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+pub(super) struct ResolvedExpressionType {
+    pub(super) type_id: TypeId,
+    pub(super) failure_facts: ExpressionFailureFacts,
+}
 
 pub(super) fn resolve_expression_result_type(
     output_queue: &mut [ExpressionRpnItem],
@@ -31,12 +38,13 @@ pub(super) fn resolve_expression_result_type(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
-) -> Result<TypeId, ExpressionTypingError> {
+) -> Result<ResolvedExpressionType, ExpressionTypingError> {
     // Resolve pending literals immediately before applying the operator that consumes them, so
     // the type stack carries the same results as the canonical operator policy.
     add_ast_counter(AstCounter::ExpressionTypedStackItems, output_queue.len());
 
     let mut stack = Vec::with_capacity(output_queue.len());
+    let mut failure_facts = ExpressionFailureFacts::default();
 
     // ------------------------
     //  Walk RPN output queue
@@ -68,12 +76,27 @@ pub(super) fn resolve_expression_result_type(
                         context,
                         string_table,
                     )?;
-                    stack.push(ExpressionTypeStackSlot::Typed(resolve_unary_operator_type(
+                    let result_type = resolve_unary_operator_type(
                         operator,
                         operand_type,
                         *span,
                         type_environment,
-                    )?));
+                    )?;
+                    if let Some(numeric_operator) = operator.numeric_operator()
+                        && let Some(operand) =
+                            NumericScalar::from_type_id(operand_type, type_environment)
+                        && let Some(domain) =
+                            NumericScalar::from_type_id(result_type, type_environment)
+                    {
+                        failure_facts.record_numeric_operation(
+                            numeric_operator,
+                            operand,
+                            None,
+                            domain,
+                            *span,
+                        );
+                    }
+                    stack.push(ExpressionTypeStackSlot::Typed(result_type));
                 }
                 2 => {
                     let Some(rhs) = stack.pop() else {
@@ -123,16 +146,29 @@ pub(super) fn resolve_expression_result_type(
                         string_table,
                     )?;
 
-                    stack.push(ExpressionTypeStackSlot::Typed(
-                        resolve_binary_operator_type(
-                            lhs_type,
-                            rhs_type,
-                            operator,
+                    let result_type = resolve_binary_operator_type(
+                        lhs_type,
+                        rhs_type,
+                        operator,
+                        *span,
+                        type_environment,
+                        path_fork,
+                    )?;
+                    if let Some(numeric_operator) = operator.numeric_operator()
+                        && let Some(left) = NumericScalar::from_type_id(lhs_type, type_environment)
+                        && let Some(right) = NumericScalar::from_type_id(rhs_type, type_environment)
+                        && let Some(domain) =
+                            NumericScalar::from_type_id(result_type, type_environment)
+                    {
+                        failure_facts.record_numeric_operation(
+                            numeric_operator,
+                            left,
+                            Some(right),
+                            domain,
                             *span,
-                            type_environment,
-                            path_fork,
-                        )?,
-                    ));
+                        );
+                    }
+                    stack.push(ExpressionTypeStackSlot::Typed(result_type));
                 }
                 _ => {
                     return Err(CompilerError::compiler_error(format!(
@@ -177,7 +213,10 @@ pub(super) fn resolve_expression_result_type(
 
     // stack.len() == 1 guarantees pop() returns Some; the None arm guards a compiler bug.
     match stack.pop() {
-        Some(ExpressionTypeStackSlot::Typed(resolved_type)) => Ok(resolved_type),
+        Some(ExpressionTypeStackSlot::Typed(type_id)) => Ok(ResolvedExpressionType {
+            type_id,
+            failure_facts,
+        }),
         Some(ExpressionTypeStackSlot::Pending(_)) => {
             Err(super::evaluator::pending_numeric_literal_bug("expression result typing").into())
         }

@@ -1,7 +1,0 @@
-f32_start F32 = 16777216.0
-f32_end F32 = 16777218.0
-f32_step F32 = 1.0
-
-loop f32_start to & f32_end by f32_step |value|:
-    ignored = value
-;

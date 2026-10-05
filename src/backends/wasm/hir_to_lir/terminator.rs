@@ -2,10 +2,13 @@
 
 use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lower_type_to_abi};
-use crate::backends::wasm::hir_to_lir::expr::lower_expression;
-use crate::backends::wasm::lir::instructions::{WasmLirStmt, WasmLirTerminator};
+use crate::backends::wasm::hir_to_lir::expr::{lower_concrete_string, lower_expression};
+use crate::backends::wasm::hir_to_lir::imports::ensure_host_import;
+use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
 use crate::backends::wasm::lir::types::WasmAbiType;
+use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier};
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 
@@ -62,12 +65,53 @@ pub(crate) fn lower_terminator(
         )),
         HirTerminator::RuntimeFailure { .. } => Ok(WasmLirTerminator::Trap),
         HirTerminator::AssertFailure {
-            message_evaluation: HirAssertionMessageEvaluation::Runtime,
-            ..
-        } => Err(CompilerError::compiler_error(
-            "Wasm lowering received a runtime assertion message after target validation",
-        )),
-        HirTerminator::AssertFailure { .. } => Ok(WasmLirTerminator::Trap),
+            message,
+            message_evaluation,
+        } => {
+            // The folded option's payload is already evaluated. Lower only its String, not the
+            // unsupported general variant payload representation.
+            let message = match message_evaluation {
+                HirAssertionMessageEvaluation::Default => lower_concrete_string(
+                    context,
+                    statements,
+                    "assertion failed",
+                    "assertion.default_message",
+                ),
+                HirAssertionMessageEvaluation::Folded => {
+                    let HirExpressionKind::VariantConstruct {
+                        carrier: HirVariantCarrier::Option,
+                        variant_index: 1,
+                        fields,
+                    } = &message.kind
+                    else {
+                        return Err(CompilerError::compiler_error(
+                            "Wasm lowering received a non-option folded assertion message",
+                        ));
+                    };
+                    let [field] = fields.as_slice() else {
+                        return Err(CompilerError::compiler_error(
+                            "Wasm lowering received a folded assertion message without one payload",
+                        ));
+                    };
+                    lower_expression(context, &field.value, statements)?
+                }
+                HirAssertionMessageEvaluation::Runtime => {
+                    return Err(CompilerError::compiler_error(
+                        "Wasm lowering received a runtime assertion message after target validation",
+                    ));
+                }
+            };
+            let import =
+                ensure_host_import(context.module_context, WasmHostFunction::AssertionFailed);
+            statements.push(WasmLirStmt::Call {
+                dst: None,
+                callee: WasmCalleeRef::Import(import),
+                args: vec![message.value],
+            });
+
+            // A returning host must still end this unrecoverable invocation.
+            Ok(WasmLirTerminator::Trap)
+        }
         HirTerminator::Match { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support HirTerminator::Match",
         )),

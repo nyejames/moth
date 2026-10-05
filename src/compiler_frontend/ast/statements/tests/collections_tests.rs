@@ -7,6 +7,8 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling,
 };
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
@@ -539,6 +541,45 @@ fn rejects_unhandled_collection_get_result() {
             ..
         }
     ));
+}
+
+#[test]
+fn preserves_nested_builtin_diagnostic_origin_under_whole_expression_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "read |values {Int}, index Int| -> Int:\n    return values.get(index) + 1 catch then 0\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "read");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected return");
+    };
+    let ExpressionKind::ValueBlock { block } = &values[0].kind else {
+        panic!("expected whole-expression catch");
+    };
+    let ValueBlock::Catch(catch) = block.as_ref() else {
+        panic!("expected catch value block");
+    };
+
+    assert!(values[0].unhandled_typed_error_diagnostic().is_none());
+    let mut pending = catch.handled_value.as_ref().clone();
+    pending.failure_facts.disposition = FailureDisposition::Pending;
+    let ExpressionKind::Runtime(rpn) = &pending.kind else {
+        panic!("expected protected addition");
+    };
+    let ExpressionRpnItem::Operand(builtin_call) = &rpn.items[0] else {
+        panic!("expected nested builtin operand");
+    };
+    let diagnostic = pending
+        .unhandled_typed_error_diagnostic()
+        .expect("unhandled nested get needs a builtin diagnostic");
+    let DiagnosticPayload::InvalidBuiltinCall {
+        reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
+        builtin_name: Some(builtin_name),
+    } = diagnostic.payload
+    else {
+        panic!("expected unhandled builtin diagnostic");
+    };
+    assert_eq!(string_table.resolve(builtin_name), "get");
+    assert_eq!(diagnostic.primary_span, builtin_call.span);
 }
 
 #[test]

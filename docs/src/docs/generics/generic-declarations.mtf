@@ -32,6 +32,7 @@ Generic parameters follow the declaration name after `type`. Multiple parameters
 - Inline parameter sugar such as `|value type A|` is rejected.
 - Generic parameters do not create type values.
 - Generic declarations are resolved before HIR.
+- Implicit failure follows the closed module boundary: an exported generic without an error slot must handle it locally, while a private generic propagates it within the same module. See @../errors (Errors).
 
 ### Multiple parameters
 

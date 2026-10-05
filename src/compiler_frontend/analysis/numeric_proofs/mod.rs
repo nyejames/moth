@@ -160,9 +160,13 @@ impl BlockAnalyser<'_> {
                 // Operand facts are derived before any invalidation.
                 if let Some(result_interval) = self.prove_operation(op, operands) {
                     self.facts.safe_operations.insert(statement.id);
-                    if *failure_mode == NumericFailureMode::Trap {
+                    if matches!(
+                        *failure_mode,
+                        NumericFailureMode::Trap | NumericFailureMode::Infallible
+                    ) {
                         // A safe trap operation writes the scalar success value directly, so
-                        // the destination keeps its exact proven interval.
+                        // the destination keeps its exact proven interval. A discharged
+                        // operation is already semantically safe and writes the same scalar.
                         self.cache = Some((*result, result_interval));
                         return;
                     }
@@ -183,6 +187,8 @@ impl BlockAnalyser<'_> {
                 // unwraps it. No value-specific fact survives the statement.
                 self.cache = None;
             }
+            // Range guards always fail and have no numeric success interval to retain.
+            HirStatementKind::RangeStepFailure { .. } => self.cache = None,
             // Calls, side-effect expressions, map operations, drops, float helpers and every
             // other unsupported statement conservatively drop value-specific facts.
             _ => self.cache = None,

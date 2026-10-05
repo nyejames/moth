@@ -1,0 +1,17 @@
+narrow |seen ~String, left U32, right U32| -> U8:
+    value U8 = cast left + right catch |err|:
+        seen = [: [err.code] [err.message]]
+        then 0
+    ;
+    return value
+;
+
+overflow_info ~= ""
+overflowed = narrow(~overflow_info, 4000000000, 4000000000)
+overflow_report = copy overflow_info
+narrow_info ~= ""
+narrowed = narrow(~narrow_info, 200, 100)
+narrow_report = copy narrow_info
+exact = narrow(~narrow_info, 10, 20)
+
+[: overflowed=[overflowed] oreport=[overflow_report] narrowed=[narrowed] nreport=[narrow_report] exact=[exact]]

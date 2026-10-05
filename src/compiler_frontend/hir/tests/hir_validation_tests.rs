@@ -37,7 +37,7 @@ use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
 };
 use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
+    HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
@@ -1520,8 +1520,8 @@ fn validator_accepts_format_float_return_error_with_carrier() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let span = None;
     let string_type = type_environment.builtins().string;
-    let int_type = type_environment.builtins().int;
-    let carrier_type = type_environment.intern_fallible_carrier(string_type, int_type);
+    let error_type = builtin_error_type_id(&mut type_environment);
+    let carrier_type = type_environment.intern_fallible_carrier(string_type, error_type);
 
     inject_float_statement(
         &mut module,
@@ -1616,6 +1616,94 @@ fn validator_rejects_validate_float_return_error_without_carrier() {
     assert!(error.msg.contains(
         "ValidateFloat ReturnError result local must have an internal fallible carrier type"
     ));
+}
+
+#[test]
+fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
+    let _path_fork = super::PathInternerFork::empty();
+    let dummy_source = || HirExpression {
+        id: HirValueId(0),
+        kind: HirExpressionKind::Float(0.0),
+        ty: TypeId(u32::MAX),
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
+        span: None,
+    };
+    // (statement kind under test, expected rejection): the `inject_float_statement`
+    // fixture reads the failure mode off the passed kind, so each case reuses it;
+    // `RangeStepFailure` needs its own injection below.
+    let float_cases = [
+        (
+            HirStatementKind::FormatFloat {
+                source: dummy_source(),
+                failure_mode: NumericFailureMode::Infallible,
+                result: LocalId(0),
+            },
+            "FormatFloat cannot use the discharged numeric mode",
+        ),
+        (
+            HirStatementKind::ValidateFloat {
+                source: dummy_source(),
+                failure_mode: NumericFailureMode::Infallible,
+                result: LocalId(0),
+            },
+            "ValidateFloat cannot use the discharged numeric mode",
+        ),
+    ];
+
+    for (kind, expected_message) in float_cases {
+        let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+        let span = None;
+        let success_type = match &kind {
+            HirStatementKind::FormatFloat { .. } => type_environment.builtins().string,
+            _ => type_environment.builtins().float,
+        };
+        inject_float_statement(&mut module, &type_environment, &span, kind, success_type);
+
+        let error = validate_module_for_tests(&module, &string_table, &type_environment)
+            .expect_err("validator should reject Infallible on float statements");
+        assert_eq!(error.error_type, ErrorType::HirTransformation);
+        assert!(
+            error.msg.contains(expected_message),
+            "unexpected rejection message: {}",
+            error.msg
+        );
+    }
+
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let result_local = LocalId(9000);
+    module.blocks[entry_block_index].locals.push(HirLocal {
+        id: result_local,
+        ty: type_environment.builtins().bool,
+        mutable: false,
+        region: entry_region,
+        span: None,
+    });
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::RangeStepFailure {
+            cause: RangeStepFailureCause::ZeroStep,
+            failure_mode: NumericFailureMode::Infallible,
+            result: result_local,
+        },
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject Infallible on RangeStepFailure");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error
+            .msg
+            .contains("RangeStepFailure cannot use the discharged numeric mode"),
+        "unexpected rejection message: {}",
+        error.msg
+    );
 }
 
 #[test]
@@ -2995,5 +3083,36 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
         .expect_err("validator should reject Dec value/type scale disagreement");
 
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+}
+
+#[test]
+fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_function_records() {
+    use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+
+    let source = "double |value Int| -> Int:\nreturn value + 2147483647\n;\n\
+                  recover |value Int| -> Int:\nreturn double(value) catch then 0\n;\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let (mut module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
+        .expect("the direct inferred-failure catch must lower");
+    assert_eq!(module.catch_protected_calls.len(), 1);
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("the pending handler edge must belong to its caller before installation");
+    let record = module.catch_protected_calls[0];
+
+    module.catch_protected_calls[0].statement = HirNodeId(u32::MAX);
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("a dangling pending edge cannot validate");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    module.catch_protected_calls[0] = record;
+
+    let foreign_function = module
+        .functions
+        .iter()
+        .find(|function| function.id != record.owner)
+        .expect("the fixture must have a distinct callee");
+    module.catch_protected_calls[0].handler.block = foreign_function.entry;
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("a pending handler cannot enter another function's CFG");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }

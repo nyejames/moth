@@ -1,0 +1,6 @@
+check |condition Bool| -> String:
+    assert(condition, "release assert stays checked")
+    return "after assert"
+;
+result = check(false)
+[: [result]]

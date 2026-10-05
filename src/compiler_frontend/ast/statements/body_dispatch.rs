@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::parse_expression_statement_candidate;
 use crate::compiler_frontend::ast::statements::body_return::parse_return_statement;
@@ -438,6 +439,23 @@ pub(crate) fn parse_function_body_statements(
                     string_table,
                 )?));
             }
+        }
+    }
+
+    // Only completed callable bodies prove infallibility. Branch/loop bodies and unresolved
+    // recursive edges cannot close the callee's failure contract on their own.
+    if context.kind == ContextKind::Function
+        && context.expected_error_type.is_none()
+        && context.active_generic_type_context().is_none()
+        && let Some(functions) = &context.known_infallible_functions
+    {
+        let facts =
+            pending_function_failure_facts(&body_nodes, &context.template_ir_store.borrow())?;
+        if !facts.body.summary.has_pending_implicit()
+            && facts.body.summary.summary.first_typed.is_none()
+            && facts.assertion_message_calls.is_empty()
+        {
+            functions.borrow_mut().insert(context.scope);
         }
     }
 
