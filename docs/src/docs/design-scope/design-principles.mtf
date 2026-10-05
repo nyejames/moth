@@ -166,7 +166,7 @@ No legacy patterns to pollute generated output.
 
 See @https://github.com/nyejames/moth/blob/main/HUMANS.md (HUMANS.md) for more general stances and opinions on getting good output out of LLMs.
 
-### Read next
+### Read next on design principles
 
 - @#deferred-and-outside-scope (Deferred, open and outside scope)
 - @#excluded-language-families (Excluded language families)

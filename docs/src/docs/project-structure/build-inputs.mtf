@@ -127,7 +127,7 @@ Both branches remain valid Moth source and complete frontend validation, includi
 
 Moth source cannot inspect or branch on operating system, architecture, backend, target or runtime-platform identity. Builders own physical target decisions and map stable source semantics and capabilities to JavaScript, Wasm or other platform-specific artefacts.
 
-### Related concepts
+### Concepts related to build inputs
 
 - For `$project` and `$html_builder` see @#project-config (Project config).
 - For `$page` metadata see @#entry-config (Entry metadata and page directives).

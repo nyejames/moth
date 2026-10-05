@@ -427,8 +427,8 @@ td {
     </div>
 </nav>
  <h1 style="font-size: 2em;text-align: center;"> PACKAGES AND BUILDERS PROGRESS</h1>
-<section class="container"><p>This page tracks current implementation status for Moth packages and project builders. It also records the important accepted gaps and next extensions for partial package surfaces so later work does not need to rediscover them from implementation details.</p><p>The <a href="../">compiler progress matrix</a> tracks the core language, compiler, memory work and backend implementation. Backend implementation progress belongs there even when a project builder consumes that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or a project builder.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Package acquisition, resolver and package-manager sequencing remains roadmap work rather than something this matrix designs.</p><h2>How to read and edit this page</h2><ul><li>Keep package rows focused on the implemented v1 surface and the most useful accepted next gaps.</li><li>Update a package row while working on that package so deferred extensions do not need to be rediscovered later.</li><li>Keep project-builder rows separate from backend implementation rows.</li><li>Put user-facing package and builder explanations in <code>docs/src/docs/packages/**</code> and the relevant project documentation.</li><li>Put implementation sequencing and unaccepted proposals in <code>docs/roadmap/roadmap.md</code>.</li><li>Use the status labels from this page&#39;s legend. Put backend-specific or deliberately deferred nuance in the notes column instead of inventing new status labels.</li></ul></section>
-<section class="container"><h2>Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><p>This page tracks current implementation status for Moth packages and project builders. It also records the important accepted gaps and next extensions for partial package surfaces so later work does not need to rediscover them from implementation details.</p><p>The <a href="../">compiler progress matrix</a> tracks the core language, compiler, memory work and backend implementation. Backend implementation progress belongs there even when a project builder consumes that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or a project builder.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Package acquisition, resolver and package-manager sequencing remains roadmap work rather than something this matrix designs.</p><h2 id="how-to-read-and-edit-this-page">How to read and edit this page</h2><ul><li>Keep package rows focused on the implemented v1 surface and the most useful accepted next gaps.</li><li>Update a package row while working on that package so deferred extensions do not need to be rediscovered later.</li><li>Keep project-builder rows separate from backend implementation rows.</li><li>Put user-facing package and builder explanations in <code>docs/src/docs/packages/**</code> and the relevant project documentation.</li><li>Put implementation sequencing and unaccepted proposals in <code>docs/roadmap/roadmap.md</code>.</li><li>Use the status labels from this page&#39;s legend. Put backend-specific or deliberately deferred nuance in the notes column instead of inventing new status labels.</li></ul></section>
+<section class="container"><h2 id="status-legend">Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -460,7 +460,7 @@ td {
         </tr>
             
 
-</table><h2>Coverage legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+</table><h2 id="coverage-legend">Coverage legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -493,7 +493,7 @@ td {
             
 
 </table></section>
-<section class="container"><h2>Package model and infrastructure</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><h2 id="package-model-and-infrastructure">Package model and infrastructure</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -562,7 +562,7 @@ td {
             
 
 </table></section>
-<section class="container"><h2>Core packages</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><h2 id="core-packages">Core packages</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -623,7 +623,7 @@ td {
             
 
 </table></section>
-<section class="container"><h2>HTML project builder</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><h2 id="html-project-builder">HTML project builder</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -692,7 +692,7 @@ td {
             
 
 </table></section>
-<section class="container"><h2>Accepted deferred package and builder work</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><h2 id="accepted-deferred-package-and-builder-work">Accepted deferred package and builder work</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -796,7 +796,7 @@ td {
             
 
 </table></section>
-<section class="container"><h2>Maintenance rule</h2><p>Keep this page concise but useful as a handoff between package iterations.</p><ul><li>Record the important common missing operations while a package is being worked on.</li><li>Move implementation sequencing and unaccepted package ideas to <code>docs/roadmap/roadmap.md</code>.</li><li>Keep backend implementation status on <a href="../">the compiler progress matrix</a>.</li><li>Keep package API explanations and examples in <code>docs/src/docs/packages/**</code>.</li><li>Add a new package row only after that package&#39;s scope and semantic contract have been deliberately considered.</li><li>Do not invent package origins or tiers to classify importance. Use only the package model accepted by the canonical package documentation.</li></ul></section>
+<section class="container"><h2 id="maintenance-rule">Maintenance rule</h2><p>Keep this page concise but useful as a handoff between package iterations.</p><ul><li>Record the important common missing operations while a package is being worked on.</li><li>Move implementation sequencing and unaccepted package ideas to <code>docs/roadmap/roadmap.md</code>.</li><li>Keep backend implementation status on <a href="../">the compiler progress matrix</a>.</li><li>Keep package API explanations and examples in <code>docs/src/docs/packages/**</code>.</li><li>Add a new package row only after that package&#39;s scope and semantic contract have been deliberately considered.</li><li>Do not invent package origins or tiers to classify importance. Use only the package model accepted by the canonical package documentation.</li></ul></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

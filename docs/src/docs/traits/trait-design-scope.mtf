@@ -58,7 +58,7 @@ Static traits are backend-independent. Backends do not receive trait objects, er
 
 Do not treat compiler-owned test-only or scaffold traits as public language features.
 
-### Related concepts
+### Concepts related to trait design scope
 
 - For runtime heterogeneity see @../choices (Choices).
 - For generic bounds see @#generic-trait-bounds (Generic trait bounds).

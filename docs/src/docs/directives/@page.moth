@@ -29,7 +29,7 @@ page_head #= language_theme_head
 
 #[section:
     [doc_level:
-        [$insert("key"):directives]
+        [$insert("key"):directive-pages]
         [$insert("title"):Directives]
         [$insert("advanced"):[directives]]
 

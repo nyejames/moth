@@ -95,7 +95,7 @@ To output literal template delimiters, use string insertion:
 
 Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source dependencies are available inside `.mtf`.
 
-### Related concepts
+### Concepts related to template scope
 
 - For the full template directive list see @../templates/#template-directives (Template directives).
 - For `$md` formatting see @../templates/#markdown-formatting (Markdown formatting).

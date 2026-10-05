@@ -337,7 +337,7 @@ fn runtime_templates_format_static_body_strings_only() {
     assert!(
         body_texts
             .iter()
-            .any(|text| text.contains("<h1>Hello</h1>")),
+            .any(|text| text.contains("<h1 id=\"hello\">Hello</h1>")),
         "expected formatted body text to contain markdown-rendered heading"
     );
 }

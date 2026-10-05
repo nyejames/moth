@@ -57,7 +57,7 @@ metadata remains the separate `config.moth` contract.
 
 Scoped `+*.moth` packages are ProjectLocal packages backed by Moth source. `@html` is also source-backed but has Builder origin. `@core/math` and `@web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
 
-### Related concepts
+### Concepts related to project-local packages
 
 - For module root rules see @../project-structure/#module-roots (Module roots).
 - For the export block see @../project-structure/#public-api (Public API).

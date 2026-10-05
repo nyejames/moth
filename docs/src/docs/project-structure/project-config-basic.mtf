@@ -21,7 +21,7 @@
 
 `$html_builder` configures the already selected HTML builder. Bare `$html_builder` uses defaults. Empty parentheses are invalid.
 
-### Current grouped config
+### Current grouped config in brief
 
 [codeblock, $code("moth"):
     version #Config of String = "0.1.0"

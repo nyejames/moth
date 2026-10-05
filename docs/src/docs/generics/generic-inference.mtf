@@ -108,7 +108,7 @@ All of these are rejected:
     identity(42 Int)
 ]
 
-### Related concepts
+### Concepts related to generic inference
 
 - For generic declarations see @#generic-declarations (Generic declarations).
 - For concrete instance behaviour see @#generic-instances (Generic instances).

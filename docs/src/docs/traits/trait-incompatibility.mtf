@@ -1,6 +1,6 @@
 Trait incompatibility records that two traits cannot both be claimed by the same concrete type.
 
-### Syntax
+### Trait incompatibility syntax
 
 [codeblock, $code("moth"):
     TEXT must:
@@ -14,7 +14,7 @@ Trait incompatibility records that two traits cannot both be claimed by the same
     TEXT must not FALLIBLE_TEXT
 ]
 
-### Exact contract
+### Exact trait incompatibility contract
 
 - Incompatibility is trait metadata.
 - It is symmetric.
@@ -32,7 +32,7 @@ Trait incompatibility records that two traits cannot both be claimed by the same
 
 The compiler uses `must not` for incompatible core cast trait pairs. For example, `CASTABLE_TO_STRING` and `TRY_CASTABLE_TO_STRING` cannot both be claimed for the same source type. The conforming type is the cast source type. The trait name identifies the cast target.
 
-### Related concepts
+### Concepts related to trait incompatibility
 
 - For conformance see @#conformance (Conformance).
 - For core cast traits see @#core-cast-traits (Core cast traits).

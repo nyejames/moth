@@ -171,7 +171,7 @@ The progress matrix at @../progress (Progress matrix) reports whether a
 deferred surface is implemented today. This page explains whether the surface
 belongs in the language at all.
 
-### Read next
+### Read next on design scope
 
 - @#design-principles (Design principles)
 - @#checked-proof-budget-blocks-proposal (Future proposal: checked proof-budget blocks)

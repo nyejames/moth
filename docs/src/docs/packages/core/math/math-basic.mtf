@@ -22,7 +22,7 @@ You can also bind the whole namespace and access members through field access.
     result = math.sin(angle)
 ]
 
-### Constants
+### Basic constants
 
 `PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` form compile-time `Float`
 values. Use them directly in expressions.

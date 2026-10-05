@@ -8,7 +8,7 @@ error slot.
     ;
 ]
 
-### Contract
+### Contract for error propagation
 
 - The handled expression must have a fallible error channel.
 - The enclosing function must declare an error slot.

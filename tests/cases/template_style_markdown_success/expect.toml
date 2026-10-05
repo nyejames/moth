@@ -1,7 +1,7 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "<h1>Docs</h1><p>Hello from markdown. Soft line break continues here.</p>"
+rendered_output_exact = "<h1 id=\"docs\">Docs</h1><p>Hello from markdown. Soft line break continues here.</p>"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

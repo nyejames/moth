@@ -15,7 +15,7 @@ A mutable receiver method declares `this ~Type`.
     ~vector.reset()
 ]
 
-### Contract
+### Contract for mutable receivers
 
 - The receiver root must be a mutable place.
 - The call uses `~receiver.method(...)`.

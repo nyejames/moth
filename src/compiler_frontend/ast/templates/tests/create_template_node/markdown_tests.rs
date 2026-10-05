@@ -46,7 +46,7 @@ fn markdown_formats_only_template_body_content() {
     let rendered = string_table.resolve(folded);
 
     assert!(rendered.starts_with("prefix"));
-    assert!(rendered.contains("<h1>Hello</h1>"));
+    assert!(rendered.contains("<h1 id=\"hello\">Hello</h1>"));
     assert!(!rendered.starts_with("<p>prefix"));
 }
 
@@ -54,7 +54,7 @@ fn markdown_formats_only_template_body_content() {
 fn markdown_supports_h2_headings() {
     let rendered = folded_template_output("[$md:\n## Documentation\n]");
 
-    assert!(rendered.contains("<h2>Documentation</h2>"));
+    assert!(rendered.contains("<h2 id=\"documentation\">Documentation</h2>"));
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn markdown_list_breaks_immediately_on_heading_line() {
 
     assert_eq!(
         rendered,
-        "<ul><li>first</li></ul><h2>Heading</h2><p>plain paragraph</p>"
+        "<ul><li>first</li></ul><h2 id=\"heading\">Heading</h2><p>plain paragraph</p>"
     );
 }
 

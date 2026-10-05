@@ -82,7 +82,7 @@ In the experimental `--html-wasm` mode, the builder can emit a route folder
 containing `index.html`, `page.js` and `page.wasm` instead of a single HTML
 file with embedded JavaScript.
 
-### Related concepts
+### Concepts related to HTML routing and artefacts
 
 - For module identity and cosmetic root suffixes see @#module-roots (Module roots).
 - For root purpose, fragments and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).

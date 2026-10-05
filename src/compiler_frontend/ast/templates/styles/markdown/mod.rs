@@ -12,7 +12,8 @@
 //!
 //! Data flow: formatter input splits into lines of atoms here, `blocks` groups them into
 //! headings, lists and paragraphs, and `inline` renders each block's atoms. `parsing` and
-//! `inline_code` own the grammar, `types` the shared records and `output` the piece buffer.
+//! `inline_code` own the grammar, `heading_id` the automatic heading ID normaliser, `types`
+//! the shared records and `output` the piece buffer.
 //! Plain Markdown `.md` content has its own renderer and does not use this module.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
@@ -29,6 +30,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
 
 mod blocks;
+mod heading_id;
 mod inline;
 mod inline_code;
 mod output;
@@ -151,7 +153,7 @@ fn render_markdown_stream(lines: &[MarkdownLine], default_tag: &str) -> Vec<Form
         }
 
         if let Some(heading) = parsing::parse_heading_line(&lines[line_index]) {
-            output.append_pieces(blocks::render_heading_line(&heading));
+            blocks::render_heading_line(&mut output, &heading);
             has_rendered_block = true;
             line_index += 1;
             continue;

@@ -16,7 +16,7 @@ Hash maps form insertion-ordered key/value groups.
 - A bare identifier in key position is a variable reference, not string shorthand.
 - Map values follow the same runtime-storable rules as collection elements.
 
-### MON data boundary
+### Map MON data boundary
 
 Source and MON data share the empty-container forms: `{}` is a collection and `{=}` is a map, regardless of receiving type or schema. Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support. A bare identifier in a source key position is a variable reference, not string shorthand. MON map keys use the same scalar families, including fixed-width integers and `Byte`, follow the schema's declared key type, preserve insertion order, and reject bare names and duplicate keys. The MON literal-data contract is Rust-only; see @../mon/#mon-format (MON format).
 
@@ -139,7 +139,7 @@ Insertion order follows these rules:
 A live shared value returned by `get` prevents mutation of the same map until
 that shared access is no longer used.
 
-### Compiler-known retention effects
+### Retained-edge effects of maps
 
 Builtin maps are part of Moth's trusted dynamic-storage substrate. The compiler
 knows the retained-edge summary contributed by every stored key and value. A
@@ -174,7 +174,7 @@ contributes zero obligations and a direct heap-backed value commonly contributes
 one. The general summary supports aggregates and nested retention without a new
 map vocabulary.
 
-### Successful commits and failed operations
+### Committed and failed map operations
 
 A builtin map mutation commits its retained-edge effects atomically on the
 successful path. A failed operation preserves the original entry structure and

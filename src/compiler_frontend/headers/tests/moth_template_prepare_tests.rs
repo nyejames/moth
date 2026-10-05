@@ -1113,7 +1113,7 @@ fn simple_markdown_body_folds_like_markdown_template() {
 
     assert_eq!(
         folded_content_value(&ast, &string_table, &path_fork),
-        "<h1>Heading</h1>"
+        "<h1 id=\"heading\">Heading</h1>"
     );
 }
 
@@ -1123,7 +1123,7 @@ fn nested_moth_template_defaults_to_markdown_formatting() {
 
     assert_eq!(
         folded_content_value(&ast, &string_table, &path_fork),
-        "<h1>Nested</h1>"
+        "<h1 id=\"nested\">Nested</h1>"
     );
 }
 
@@ -1683,7 +1683,7 @@ fn moth_dependency_binds_template_content_as_folded_string_constant() {
 
     assert_eq!(
         folded_constant_value(&ast, &string_table, &path_fork, "from_intro"),
-        "<h1>Intro</h1>"
+        "<h1 id=\"intro\">Intro</h1>"
     );
 }
 
@@ -1708,7 +1708,7 @@ fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() 
 
     assert_eq!(
         folded_constant_value(&ast, &string_table, &path_fork, "from_intro"),
-        "<h1>Intro</h1>"
+        "<h1 id=\"intro\">Intro</h1>"
     );
 }
 

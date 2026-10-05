@@ -35,7 +35,7 @@ The language contract covers source syntax, metadata and supported sink gating.
 Specific backend helper names and internal render plans remain backend
 artefacts, not user-visible language semantics.
 
-### Related concepts
+### Concepts related to runtime sinks
 
 - For subscriptions see @#subscriptions (Subscriptions).
 - For project structure and HTML output see @../project-structure (Project Structure).

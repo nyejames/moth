@@ -27,7 +27,7 @@ such as `page_title`. The accepted configuration shape is:
     $page(title = "Moth")
 ]
 
-### Arguments
+### Directive argument basics
 
 - Supply arguments with `$name(arguments)`.
 - Supply none with `$name`.

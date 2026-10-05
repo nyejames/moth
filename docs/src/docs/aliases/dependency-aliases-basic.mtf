@@ -12,7 +12,7 @@ Suppose two packages both export a function named `render`. You cannot bind both
     docs_html = render_docs()
 ]
 
-### Namespace aliases
+### Basic namespace aliases
 
 You can also rename a whole namespace.
 

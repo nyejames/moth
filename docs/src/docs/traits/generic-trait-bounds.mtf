@@ -1,6 +1,6 @@
 Generic bounds use traits to promise that a generic parameter provides certain behaviour inside the generic declaration.
 
-### Syntax
+### Generic trait bound syntax
 
 [codeblock, $code("moth"):
     DISPLAY_TEXT must:
@@ -12,7 +12,7 @@ Generic bounds use traits to promise that a generic parameter provides certain b
     ;
 ]
 
-### Exact contract
+### Exact generic trait bound contract
 
 - Generic bounds use `is`, not `must`.
 - `and` adds bounds to one parameter.
@@ -74,7 +74,7 @@ Compiler-owned evidence also exists for the builtin cast table.
     value = render(Label("ok"))
 ]
 
-### Related concepts
+### Concepts related to generic trait bounds
 
 - For conformance see @#conformance (Conformance).
 - For generics see @../generics (Generics).

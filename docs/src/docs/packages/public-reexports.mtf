@@ -81,7 +81,7 @@ alternative pair.
 
 Legacy inline `export` syntax (without the `:` block delimiter) is rejected with `MOTH-SYNTAX-0001`. The strict `export:` block is the only public API marker. See @../project-structure/#public-api (Public API) for the full export-block rules.
 
-### Related concepts
+### Concepts related to public re-exports
 
 - For the export block see @../project-structure/#public-api (Public API).
 - For visibility rules see @#module-visibility (Module visibility).

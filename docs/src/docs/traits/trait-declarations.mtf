@@ -1,6 +1,6 @@
 A trait forms an explicit nominal method contract. A type satisfies a trait only when source declares conformance.
 
-### Syntax
+### Trait declaration syntax
 
 [codeblock, $code("moth"):
     DISPLAY_TEXT must:
@@ -8,7 +8,7 @@ A trait forms an explicit nominal method contract. A type satisfies a trait only
     ;
 ]
 
-### Exact contract
+### Exact trait declaration contract
 
 - A trait is an explicit nominal method contract.
 - Trait names use all-caps identifiers.
@@ -35,7 +35,7 @@ A marker trait carries no requirements but still represents a deliberate contrac
 
 A trait name may appear in trait declarations, conformance declarations and generic bounds. It is invalid as an ordinary variable, parameter, field, return, collection element, choice payload or alias target type.
 
-### Related concepts
+### Concepts related to trait declarations
 
 - For requirement syntax see @#trait-requirements (Trait requirements).
 - For conformance see @#conformance (Conformance).

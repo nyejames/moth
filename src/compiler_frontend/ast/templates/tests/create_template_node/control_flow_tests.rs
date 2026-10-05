@@ -615,14 +615,14 @@ fn template_if_composition_formats_each_branch_independently() {
         first_branch_body_node(branch_chain, &context),
         &context,
         &string_table,
-        "<h1>Visible</h1>",
+        "<h1 id=\"visible\">Visible</h1>",
     );
 
     assert_body_node_static_contains(
         fallback_body_node(branch_chain, &context),
         &context,
         &string_table,
-        "<h1>Hidden</h1>",
+        "<h1 id=\"hidden\">Hidden</h1>",
     );
     assert_body_node_static_excludes(
         first_branch_body_node(branch_chain, &context),
@@ -779,7 +779,7 @@ fn template_loop_composition_formats_body_without_repeating_shared_head_prefix()
         loop_body_node(loop_node, &context),
         &context,
         &string_table,
-        "<h1>Item</h1>",
+        "<h1 id=\"item\">Item</h1>",
     );
     assert_body_node_static_excludes(
         loop_body_node(loop_node, &context),

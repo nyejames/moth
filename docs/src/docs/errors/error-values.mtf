@@ -11,7 +11,7 @@ Its public fields:
     large = Error("Quota exceeded", code = 3_000_000_000)
 ]
 
-### Contract
+### Contract for error values
 
 - `message` carries the human-readable explanation.
 - `code` carries a stable unsigned code and defaults to `0`.

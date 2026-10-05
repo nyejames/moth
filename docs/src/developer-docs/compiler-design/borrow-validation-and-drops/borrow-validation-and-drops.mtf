@@ -86,7 +86,7 @@ Borrow validation reads validated HIR and publishes a solver-independent handoff
 
 These are stable semantic outputs, not a required lattice, root table or solver storage format. Branches and loops remain path-sensitive, but a different solver may derive the same handoff differently. Borrow validation supplies facts without rewriting HIR or choosing lifetime topology or physical representation.
 
-### Current alpha implementation
+### Current data-flow implementation
 
 Today's alpha checker approximates these facts with an abstract-state lattice (`uninitialized`, `slot`, `alias` and `slot + alias`), a `LocalId`-centred root approximation, per-block may/must future-use precomputation and a forward fixed-point transfer implementation. These are current implementation details, not permanent architecture. Advisory drop candidates are scaffolding output only. They are not stable handoff facts, lifetime proof or accepted backend input.
 
@@ -131,7 +131,7 @@ Failure to prove transfer does not reject an otherwise valid source program. The
 
 Borrow validation supplies these candidate and proof facts. Lifetime and retained-edge analysis consumes last-use and capable-source-death facts for retained-edge liveness and cleanup-frontier validation. The compiler-owned memory planner then uses the validated facts for affine transfer, obligation reclassification and REC selection. Borrow validation does not make any of those decisions.
 
-### Current alpha implementation
+### Current future-use implementation
 
 The alpha details listed above are how today's checker approximates this contract. They are replaceable implementation choices, not a permanent handoff. Advisory drop candidates remain current Wasm scaffolding debt, not final lowering input.
 
@@ -217,7 +217,7 @@ Lifetime and retained-edge analysis consumes the last-use classifications and ca
 
 Note the division on transfer, because it is easy to blur. Borrow validation proves that an optional affine transfer is *eligible*. The compiler-owned memory planner decides whether to *realise* it, and owns obligation reclassification, REC selection, concrete obligation transitions and the physical cleanup and destruction plans. Borrow validation supplies facts. It chooses neither target partition nor physical representation.
 
-### Current alpha implementation
+### Current handoff implementation
 
 The alpha checker realises these semantic outputs through the current implementation described above. Its advisory drop candidates remain current Wasm scaffolding debt and never become accepted backend input.
 

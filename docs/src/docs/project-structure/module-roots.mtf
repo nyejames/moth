@@ -79,7 +79,7 @@ Helpers remain declarations inside the surrounding module. They never own an ent
 - Keep current `export:` blocks until the later `$export` migration is implemented.
 - Bind the module directory or package prefix. Do not bind the normal module-root filename directly.
 
-### Related concepts
+### Concepts related to module roots
 
 - For the export block and its current status see @#public-api (Public API).
 - For root purpose, runtime and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).

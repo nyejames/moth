@@ -28,7 +28,7 @@ project-private context. Configuration input contracts stay scoped to one
 project or package boundary; a consumer doesn't satisfy a dependency's
 contracts implicitly.
 
-### Related concepts
+### Concepts related to the facade basics
 
 - For module root rules see @#module-roots (Module roots).
 - For page purpose and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).

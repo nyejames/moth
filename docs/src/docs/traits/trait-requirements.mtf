@@ -13,7 +13,7 @@ Trait requirements describe the method shapes a conforming type must provide. Th
     ;
 ]
 
-### Exact contract
+### Exact trait requirement contract
 
 - Requirement receivers use `This` or `~This`.
 - Lowercase `this` is source-method syntax and invalid in a requirement.
@@ -49,7 +49,7 @@ Multiple method requirements may appear in one trait. The current separator betw
 
 `This` as a non-receiver parameter must carry a name.
 
-### Related concepts
+### Concepts related to trait requirements
 
 - For trait declarations see @#trait-declarations (Trait declarations).
 - For conformance matching see @#conformance (Conformance).

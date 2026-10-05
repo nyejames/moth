@@ -6,7 +6,7 @@ A range loop generates numeric values directly from its loop header.
     ;
 ]
 
-### Forms
+### Forms of range loops
 
 [codeblock, $code("moth"):
     loop start to end:
@@ -59,7 +59,7 @@ promotion follow @../numbers (Numbers).
     ;
 ]
 
-### Evaluation
+### Range loop evaluation order
 
 Start, end and explicit step expressions are evaluated once, from left to
 right, before the first bounds check.

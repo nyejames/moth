@@ -14,3 +14,17 @@ Use `$code("moth")` or another language name for a full highlighted code block.
 
 Moth Markdown stays small. It does not support fenced code
 blocks or pipe tables.
+
+### Automatic heading IDs
+
+Static headings render kebab-case IDs from their visible labels, so a link can jump to a section.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        ## Getting started
+
+        Jump back to @#getting-started (Getting started).
+    ]
+]
+
+Advanced covers the full rules.

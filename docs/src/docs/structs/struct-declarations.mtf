@@ -7,7 +7,7 @@ A struct declares a nominal runtime type with named fields.
     |
 ]
 
-### Contract
+### Contract for struct declarations
 
 - The declaration form is `Name = | fields |`.
 - Struct names use `PascalCase`.

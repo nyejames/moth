@@ -66,11 +66,11 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
     } = folded;
     assert_eq!(
         content,
-        OwnedFoldedString::Text(String::from("<h1>Intro</h1>"))
+        OwnedFoldedString::Text(String::from("<h1 id=\"intro\">Intro</h1>"))
     );
     assert_eq!(
         content.into_text(),
-        Some(String::from("<h1>Intro</h1>")),
+        Some(String::from("<h1 id=\"intro\">Intro</h1>")),
         "plain text extraction should move the owned text"
     );
     assert!(
@@ -310,7 +310,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     assert!(
         pieces.iter().any(|piece| matches!(
             piece,
-            OwnedFoldedStringPiece::Text(text) if text.contains("<h1>Intro</h1>")
+            OwnedFoldedStringPiece::Text(text) if text.contains("<h1 id=\"intro\">Intro</h1>")
         )),
         "the template's own Markdown should fold into a text piece: {pieces:?}"
     );

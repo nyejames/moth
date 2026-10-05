@@ -94,7 +94,7 @@ direction, but block support remains undecided; `export:` and `$export` will not
 permanent alternatives.
 
 
-### Related concepts
+### Concepts related to module visibility
 
 - For the export block see @../project-structure/#public-api (Public API).
 - For dependency path families see @#dependency-paths (Dependency paths).

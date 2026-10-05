@@ -13,7 +13,7 @@ its body while that condition remains `true`.
     ;
 ]
 
-### Contract
+### Conditional loop contract
 
 - The form is `loop condition: ... ;`.
 - The condition must resolve to `Bool`.

@@ -2,7 +2,7 @@ Moth template files use a small Markdown subset, not full CommonMark.
 
 ### What works
 
-- Headings with `#`
+- Headings with `#`, with automatic IDs from `$md`
 - Paragraphs separated by blank lines
 - `*italic*` and `**bold**`
 - Links

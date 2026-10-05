@@ -7,4 +7,4 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["<h1>Docs</h1>", "<code class='codeblock'>", "keep", "<fresh-item/>"]
+must_contain = ["<h1 id=\"docs\">Docs</h1>", "<code class='codeblock'>", "keep", "<fresh-item/>"]

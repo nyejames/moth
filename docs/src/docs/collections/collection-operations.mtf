@@ -104,7 +104,7 @@ Accepted design with implementation deferred. Maps already expose `clear()`; fix
 - removes every element and sets the logical length to zero
 - keeps the collection usable, and does not shrink fixed capacity
 
-## Compiler-known retention effects
+## Retained-edge effects of collection operations
 
 Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. The compiler knows the retained-edge summary contributed by each stored value. An `Int` can contribute zero obligations, a direct heap-backed value can contribute one, and an inline aggregate that physically stores several handles can contribute several direct obligations.
 
@@ -126,7 +126,7 @@ The table describes each operation's successful path.
 
 For the initial direct-handle implementation, an element commonly contributes zero or one direct obligation. The general summary supports aggregate and nested retention without changing the collection contract.
 
-### Successful commits and failed operations
+### Committed and failed collection operations
 
 A builtin collection mutation commits its retained-edge effects atomically on the successful path. A failed operation preserves the original storage topology and all cleanup obligations. Invalid-index `remove` destroys no obligation, a failed fixed-capacity `push` adds none and a failed `set` leaves the previous entry intact. Growable `push` has no recoverable error path, so it has no failed-operation retention case. Count changes happen after the operation reaches its semantic commit point.
 

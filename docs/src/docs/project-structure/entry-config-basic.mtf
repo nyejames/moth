@@ -26,6 +26,6 @@ Bare `$page` uses defaults. `$page()` is invalid. Title, description, language, 
 
 HTML `build` and `dev` need a page somewhere under `entry_root`. `check` can accept a valid project with no page. Future `$test` is a later non-page purpose.
 
-### Related concepts
+### Concepts related to entry basics
 
 - For build configuration values see @#build-inputs (Build configuration values).

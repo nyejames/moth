@@ -17,7 +17,7 @@ page_head #= language_theme_head
 #[section, $md:
     @../ (Documentation) / MON format
 
-    # MON format
+    # The MON format
 
     MON means Moth Object Notation. **MON syntax** names Moth's shared
     parenthesised argument and value-construction notation.

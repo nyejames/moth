@@ -1,0 +1,10 @@
+@docs/section
+
+section_content #String = section.content
+
+[$md:
+# Hello World
+Jump @#hello-world (Hello World).
+]
+
+[:[section_content]]

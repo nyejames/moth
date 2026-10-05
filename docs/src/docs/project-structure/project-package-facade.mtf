@@ -82,7 +82,7 @@ Configuration namespaces are scoped to one project or package compilation
 boundary. A consuming command's unqualified CLI or programmatic inputs don't
 implicitly satisfy a dependency's `$config` contracts.
 
-### Related concepts
+### Concepts related to the project package facade
 
 - For module root rules see @#module-roots (Module roots).
 - For page purpose and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).

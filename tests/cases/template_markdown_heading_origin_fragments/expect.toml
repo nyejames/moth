@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<h1 id=\"hello\">Hello</h1>",
+    "href=\"/moth/docs/message#hello\"",
+    "href=\"./message#hello\"",
+]
+must_not_contain = ["/moth/moth/"]

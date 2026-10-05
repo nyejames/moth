@@ -5978,6 +5978,27 @@ contract = "language.templates.markdown_inline_code_acceptance"
 role = "primary"
 
 [[case]]
+id = "template_markdown_heading_section_links"
+path = "template_markdown_heading_section_links"
+tags = ["integration","templates","markdown"]
+contract = "language.templates.markdown_heading_section_links"
+role = "primary"
+
+[[case]]
+id = "template_markdown_heading_origin_fragments"
+path = "template_markdown_heading_origin_fragments"
+tags = ["integration","templates","markdown"]
+contract = "language.templates.markdown_heading_section_links"
+role = "boundary"
+
+[[case]]
+id = "template_markdown_heading_dynamic_omits_id"
+path = "template_markdown_heading_dynamic_omits_id"
+tags = ["integration","templates","markdown"]
+contract = "language.templates.markdown_heading_section_links"
+role = "boundary"
+
+[[case]]
 id = "template_markdown_path_first_separator"
 path = "template_markdown_path_first_separator"
 tags = ["integration","templates","markdown"]

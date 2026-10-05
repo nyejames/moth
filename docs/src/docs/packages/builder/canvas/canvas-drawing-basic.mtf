@@ -23,7 +23,7 @@ Bind the functions you need with a direct-selection clause.
     fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
 ]
 
-### Opaque types
+### Basic opaque types
 
 The package exposes opaque handle types. You can't construct or inspect them.
 You obtain them through functions.

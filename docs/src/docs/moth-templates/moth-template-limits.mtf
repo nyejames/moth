@@ -32,7 +32,7 @@ Use a `.moth` template when:
 - the content is part of broader program logic
 - dependency clauses or declarations are needed in the same file
 
-### Related concepts
+### Concepts related to Moth template limits
 
 - For choosing between formats see @../markdown/#choosing-a-content-format (Choosing a content format).
 - For template scope see @#template-scope (Template scope).

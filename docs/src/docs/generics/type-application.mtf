@@ -1,6 +1,6 @@
 Concrete generic instances are created with `of` in type position.
 
-### Syntax
+### Type application syntax
 
 [codeblock, $code("moth"):
     number_box Box of Int = Box(42)
@@ -14,7 +14,7 @@ Concrete generic instances are created with `of` in type position.
     item Pair of String, Int = Pair("count", 3)
 ]
 
-### Exact contract
+### Exact type application contract
 
 - `of` applies concrete type arguments in type position.
 - Argument count must match the generic declaration.
@@ -56,7 +56,7 @@ A type alias may name a fully applied generic instance. The alias remains transp
 
 Public `Option of T`, `Result of T, E`, `Option.Some` and `Result.Ok` are not language syntax. Options, fallible carriers and collections are compiler-owned constructed forms with their own source syntax.
 
-### Related concepts
+### Concepts related to type application
 
 - For generic declarations see @#generic-declarations (Generic declarations).
 - For type aliases see @../aliases/#type-aliases (Type aliases).

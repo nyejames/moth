@@ -40,7 +40,7 @@ Plain Markdown is available in HTML project builds. The renderer is registered b
 
 A `.md` file belongs to the module that contains its directory. It follows the same dependency-path resolution as `.moth` and `.mtf` files.
 
-### Related concepts
+### Concepts related to Markdown files
 
 - For dependency syntax see @#markdown-dependencies (Markdown dependencies).
 - For renderer features see @#rendering-contract (Rendering contract).

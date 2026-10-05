@@ -10,7 +10,7 @@ The primary goal is end-to-end language and artifact correctness. Prefer real
 usage patterns and complete Moth snippets over narrow implementation-shaped
 tests.
 
-### Task-reading guide
+### Task-reading guide for testing
 
 Heading paths use `>` to name nested sections. Read the selected heading through
 the next heading of the same or higher level, including nested subsections

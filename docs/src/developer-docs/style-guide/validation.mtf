@@ -5,7 +5,7 @@ work. Choose checks by branch, checkpoint and changed behaviour. Feature-branch
 iteration uses targeted checks, important boundaries use routine validation and
 merge readiness uses the full gate.
 
-### Task-reading guide
+### Task-reading guide for validation
 
 Start every completion decision with `Choose the final gate by scope`. Heading
 paths use `>` to name nested sections. Read the selected heading through the

@@ -47,7 +47,7 @@ will replace it rather than create a permanent dual syntax; its block support is
 undecided. This future spelling does not change module-root-relative path resolution.
 
 
-### Related concepts
+### Concepts related to dependency paths
 
 - For direct-selection and namespace dependency clauses see @#dependency-clauses (Direct-selection and namespace dependency clauses).
 - For visibility rules see @#module-visibility (Module visibility).

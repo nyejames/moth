@@ -173,7 +173,7 @@ Both branches of an ordinary `if` complete normal validation, and a physical-tar
 
 MON carries resource identifiers as ordinary strings. Resolve any compiler structural resource pieces to their final characters before encoding; an unresolved value fails conversion to concrete MON data. There is no public Resource value at the Rust boundary, and the codec performs no path discovery, URL generation, filesystem checks or resource loading. No string scan reconstructs dependencies. That contract is Rust-only serialised-data documentation. See @../mon/#mon-format (MON format).
 
-### Related concepts
+### Concepts related to file values
 
 - For file path syntax and resolution see @#file-paths (File paths).
 - For binding `.mtf` content with a dependency clause see @../moth-templates/#content-dependencies (Content dependencies).

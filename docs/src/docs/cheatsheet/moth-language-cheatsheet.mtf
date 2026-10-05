@@ -931,7 +931,7 @@ Const templates validate every branch and fold the selected work. Const range/co
 
 ### Moth Markdown
 
-`$md` supports headings, paragraphs, lists, emphasis, links and same-line paired single-backtick code. It escapes raw HTML and has no fenced code blocks or pipe tables. Use `$code` for blocks and helpers for tables.
+`$md` supports headings, paragraphs, lists, emphasis, links and same-line paired single-backtick code. It escapes raw HTML and has no fenced code blocks or pipe tables. Use `$code` for blocks and helpers for tables. Static headings render generated kebab-case IDs, so `@#my-section (My section)` and `@/route#my-section (My section)` link to them.
 
 Links use `@./path (label)`, `@/site-route (label)` or `@https://example.com (label)`. A single leading `/` uses `origin`. Other targets render literally. Link targets neither resolve files nor create resource dependencies.
 

@@ -19,6 +19,26 @@ It is intentionally not a full CommonMark implementation.
 - links: `@./relative-path (link text)`, `@/site-route (link text)` or `@https://... (link text)`
 - emphasis: `**bold**` and `*italic*`
 
+### Automatic heading ID rules
+
+A static heading renders an `id` from its complete visible label. Emphasis markers add nothing, inline code contributes its content without backticks and a Moth link contributes its label rather than its target. HTML-sensitive text contributes its visible characters before escaping.
+
+A heading with a dynamic expression or child template anywhere in its label is opaque: it renders no `id` and reports no warning. A label with no letters or numeric characters also renders no `id`.
+
+Normalisation lowercases Unicode text, keeps Unicode letters and numeric characters, folds each run of whitespace, `_` and `-` into one `-` and drops other punctuation. It never leaves a leading or trailing `-`. There is no transliteration and no Unicode normalisation, so NFC and NFD spellings of one text can produce different IDs.
+
+Equal labels produce equal IDs. There are no suffixes, no registry and no diagnostic, so keep linkable labels unique on each page.
+
+[codeblock, $code("moth"):
+    content = [$md:
+        See @#getting-started (Getting started).
+        See @./guide#getting-started (Getting started).
+        See @/docs/guide#getting-started (Getting started).
+    ]
+]
+
+The first target stays on the same page, the second addresses a relative page and the third addresses a site route. A site-route target keeps its fragment after the origin prefix.
+
 ### Link targets
 
 A Moth-aware link target is a URL, never a file value. It is never resolved against the filesystem, copied, watched or tracked. Markdown link parsing is not file discovery. A file value inside `$md` is written as an ordinary nested Moth expression instead, not as a link target. See @../resources/#file-values (File values).

@@ -10,6 +10,8 @@ Moth template files use Moth's `$md` Markdown flavour. This is intentionally sma
 - Ordered lists: `1. item`
 - Inline code: paired isolated single backticks on the same line
 
+Static headings inherit `$md` automatic IDs. See @../templates/#automatic-heading-ids (Automatic heading IDs).
+
 ### HTML escaping
 
 Moth template files escape HTML characters in Markdown text. Raw HTML tags such as `<div>` are escaped as `&lt;div&gt;` in the output. Use `$raw` or `$html` directives when raw HTML output is needed.
@@ -42,7 +44,7 @@ Backslashes in the template body follow formatter behaviour. They are not escape
 
 Use `codeblock` and `$code(...)` where the helper is available through the content environment. See @#template-scope (Template scope) for what is visible inside a `.mtf` file.
 
-### Related concepts
+### Concepts related to implicit Markdown
 
 - For the full `$md` formatting rules see @../templates/#markdown-formatting (Markdown formatting).
 - For what is visible inside `.mtf` see @#template-scope (Template scope).

@@ -90,7 +90,7 @@ Propagation through a compatible `Error!` function uses `cast!`:
 
 `cast!` and `catch` are mutually exclusive. `cast! ... catch` is rejected.
 
-### Related concepts
+### Concepts related to core cast traits
 
 - For cast target selection and fallible handling see @../casts (Casts).
 - For trait incompatibility see @#trait-incompatibility (Trait incompatibility).

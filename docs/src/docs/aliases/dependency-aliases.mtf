@@ -1,6 +1,6 @@
 Dependency aliases rename a bound symbol for local use inside one file. They are distinct from type aliases and from public module re-export names.
 
-### Definition and syntax
+### Dependency alias syntax
 
 A clause-level namespace alias changes the local name of a bound namespace:
 
@@ -14,7 +14,7 @@ An entry alias changes the local name of one bound symbol:
     @core/math sin as sine, PI as CIRCLE_PI
 ]
 
-### Exact contract
+### Exact dependency alias contract
 
 - A clause-level namespace alias changes the namespace name visible in one file.
 - An entry alias changes one bound symbol visible in one file.
@@ -123,7 +123,7 @@ A type alias may target a bound type alias.
 
 This combines a file-local dependency rename with a domain-specific type alias.
 
-### Related concepts
+### Concepts related to dependency aliases
 
 - For type aliases see the previous section.
 - For payload capture aliases see the next section.

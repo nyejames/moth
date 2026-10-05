@@ -2,7 +2,7 @@
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths.
 
-### Accepted config
+### Accepted project config
 
 [codeblock, $code("moth"):
     $config
@@ -21,7 +21,7 @@ A fixed literal version also works. A contract named `version` does not satisfy 
 
 The required generated starter, once implementation lands, keeps the same version contract and explicit `version = version` argument. It may also pass retained scaffold fields such as `author`, `license` and selected HTML defaults. Do not treat `"0.1.0"` as a `$project` default.
 
-### `$project`
+### The `$project` directive
 
 `config.moth` contains exactly one `$project` invocation. The positional order is:
 
@@ -203,7 +203,7 @@ Operational config uses declaration-owned `#Config` inputs and parenthesised gro
 
 Retired flat keys remain rejected. Keep live `docs/config.moth` on this current path.
 
-### Related concepts
+### Concepts related to project config
 
 - For `$config` input contracts see @#build-inputs (Build configuration values).
 - For `$page` see @#entry-config (Entry metadata and page directives).

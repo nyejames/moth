@@ -74,7 +74,7 @@ A fresh rvalue passed to an ordinary mutable parameter is materialised into a co
 - an immutable receiver uses `value.method(...)`
 - mutable receivers require an existing mutable place
 
-### Read next
+### Read next on copies
 
 - @#reference-semantics (Reference semantics)
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)

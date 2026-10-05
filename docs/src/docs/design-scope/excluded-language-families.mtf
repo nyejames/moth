@@ -208,7 +208,7 @@ duplicates export syntax; block support remains undecided.
 details are not yet defined. A separate custom-metadata directive remains open
 design, so strict `$project` metadata remains the interim boundary.
 
-### Read next
+### Read next on excluded language families
 
 - @#design-principles (Design principles)
 - @#deferred-and-outside-scope (Deferred, open and outside scope)

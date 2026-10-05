@@ -1,0 +1,6 @@
+name #String = "World"
+
+#[$md:
+# Hello [name]
+Static body.
+]

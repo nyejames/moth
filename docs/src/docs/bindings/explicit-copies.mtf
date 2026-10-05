@@ -36,7 +36,7 @@ These forms are invalid:
 
 Fresh expressions already create their own result values.
 
-### Contract
+### Contract for explicit copies
 
 - Source code does not silently copy an existing value when another name is created.
 - When a stored value is copyable and an independent value is required, write `copy`.

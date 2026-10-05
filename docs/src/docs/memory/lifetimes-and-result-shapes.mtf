@@ -154,7 +154,7 @@ Immutable and mutable parameters may both receive inferred destruction responsib
 - `remove` returns the removed value under normal lifetime rules.
 - Aggregate storage retains shared references unless `copy` is explicit.
 
-### Read next
+### Read next on lifetimes
 
 - @#reference-semantics (Reference semantics)
 - @#copy-and-exclusive-access (Copy and exclusive access)

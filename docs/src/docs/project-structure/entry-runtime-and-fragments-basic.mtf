@@ -26,7 +26,7 @@ An accepted page can contain metadata alone:
 It still emits a complete document. A dependency cannot make unpurposed
 runtime work legal by keeping it dormant.
 
-### Page fragments
+### Page fragments in brief
 
 Direct top-level templates in the selected root remain fragments:
 

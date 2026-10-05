@@ -51,7 +51,7 @@ These are permanent design boundaries, not merely unimplemented features.
 
 A backend may represent a shared alias as a pointer, a handle, a GC reference or direct scalar storage. The source rule stays fixed: ordinary binding creates shared access to the same value, never an implicit copy.
 
-### Read next
+### Read next on references
 
 - @#copy-and-exclusive-access (Copy and exclusive access)
 - @#lifetimes-and-result-shapes (Lifetimes and result shapes)

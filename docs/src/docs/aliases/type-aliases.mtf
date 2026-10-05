@@ -1,6 +1,6 @@
 A type alias is a compile-time name for an existing type. It introduces no runtime value and no new semantic type identity.
 
-### Definition and syntax
+### Type alias syntax
 
 [codeblock, $code("moth"):
     UserId as Int
@@ -11,7 +11,7 @@ A type alias is a compile-time name for an existing type. It introduces no runti
 
 The syntax is `AliasName as ExistingType`. Alias names follow type-name casing. The target may be any valid type expression that resolves to a concrete semantic type.
 
-### Exact contract
+### Exact type alias contract
 
 - A type alias is a compile-time name for an existing type.
 - Aliases are transparent: an alias and its target denote the same `TypeId`.
@@ -143,7 +143,7 @@ Aliases to scalar or otherwise non-constructible targets are not callable for th
 
 Type aliases follow ordinary module visibility rules. A type alias declared in a source file is dependency-bindable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. A public re-export may expose a dependency-bound alias under a chosen public name. That operation is not the same as an ordinary file-local dependency alias.
 
-### Related concepts
+### Concepts related to type aliases
 
 - For concrete generic application see @../generics (Generics).
 - For dependency aliasing see the next section.

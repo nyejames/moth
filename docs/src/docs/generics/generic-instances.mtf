@@ -88,7 +88,7 @@ Concrete instantiation with trait bounds requires visible reusable evidence. See
 
 Implicit failure follows the closed module boundary: an exported generic instance without an error slot must discharge it. See @../errors (Errors) for failure delivery.
 
-### Related concepts
+### Concepts related to generic instances
 
 - For type application see @#type-application (Type application).
 - For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).

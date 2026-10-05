@@ -239,11 +239,24 @@ fn render_inline_blocks(
     output.finish()
 }
 
+/// Renders a heading with its automatic fragment ID when the whole label is static.
 pub(super) fn render_heading_line(
+    output: &mut MarkdownOutputBuilder,
     heading: &ParsedMarkdownHeadingLine<'_>,
-) -> Vec<FormatterOutputPiece> {
-    let heading_tag = format!("h{}", heading.level);
-    super::inline::render_inline_atoms(heading.content, Some(heading_tag.as_str()), true)
+) {
+    let level = heading.level;
+    let content = super::inline::render_heading_content(heading.content);
+
+    output.push_raw(&format!("<h{level}"));
+    if let Some(id) = &content.id {
+        // IDs contain only letters, digits and `-`, so they need no attribute escaping.
+        output.push_raw(" id=\"");
+        output.push_raw(id);
+        output.push_raw("\"");
+    }
+    output.push_raw(">");
+    output.append_pieces(content.pieces);
+    output.push_raw(&format!("</h{level}>"));
 }
 
 fn classify_leading_child_template_line(atoms: &[MarkdownInlineAtom]) -> LeadingChildTemplateLine {

@@ -643,6 +643,8 @@ Missing roots, phases, overlays or exact-view authority are compiler bugs. Templ
 
 Dec formatting uses the common value-to-string path. It does not add Dec-specific TIR nodes.
 
+The `$md` formatter owns automatic heading IDs. It derives each heading's `id` during formatting from the heading's complete static visible label, and omits the `id` when the label contains a dynamic expression or child template. IDs add no TIR node, anchor kind or metadata, and builders never scan rendered HTML to recreate them.
+
 #### File values and resources
 
 A dependency clause binds declarations or a namespace and produces no value. An explicit-extension path in expression position is a file value of language type `String`. Each path occurrence has one of these owners.

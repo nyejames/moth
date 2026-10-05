@@ -7,7 +7,7 @@ Binding an existing value to another name doesn't silently copy it.
     shared_items = items
 ]
 
-### Contract
+### Contract for shared access
 
 - Any number of shared accesses may coexist.
 - Shared access is read-only.

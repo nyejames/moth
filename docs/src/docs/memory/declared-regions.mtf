@@ -2,7 +2,7 @@
 
 The following is accepted end-state syntax. Implementation is deferred and must not be treated as current source support.
 
-### Declared regions
+### Declared region syntax
 
 `name:` creates a declared hard lifetime region in runtime statement position. Values placed into a declared region belong to that declared region for their full lifetime. No declared-region-owned value, projection or alias may outlive the declared region.
 
@@ -222,7 +222,7 @@ Declared regions give authors explicit control over one allocation and cleanup d
 
 Declared-region semantics and `into` placement are not implemented yet. The compiler reserves valid `name:` headers with a targeted deferred-feature diagnostic, rejects exact `_:` and treats `block`, `group` and `region` as ordinary identifiers. There is no authored general lexical-block parser.
 
-### Read next
+### Read next on declared regions
 
 - @#reference-semantics (Reference semantics)
 - @#copy-and-exclusive-access (Copy and exclusive access)

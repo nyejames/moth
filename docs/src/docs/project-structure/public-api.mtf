@@ -113,7 +113,7 @@ documentation of its name does not add semantics. Do not write `$export` in a
 current project, and do not promise that both spellings will be supported
 forever.
 
-### Related concepts
+### Concepts related to the public API
 
 - For module root rules see @#module-roots (Module roots).
 - For entry purpose and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).

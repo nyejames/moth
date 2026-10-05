@@ -72,7 +72,7 @@ ties-to-even. Inexact values such as `0.1` are valid.
 - Subnormals and signed zero are preserved.
 - Rounding happens once, at the destination precision.
 
-### MON data boundary
+### Numeric literal MON data boundary
 
 MON literal data and source receivers share numeric grammar and materialisation
 facts from `moth-lexical`. Their independent parsers select the destination from

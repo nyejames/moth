@@ -122,7 +122,7 @@ The HTML builder does not currently load WIT component imports. Component discov
 
 No WIT component contract is delivered for resources, callbacks, async operations, futures, streams, shared-memory views, raw pointers, returned aliases or retained Moth references.
 
-### Related concepts
+### Concepts related to external binding contracts
 
 - For package origin and backing see @#package-origins-and-backing (Package origins and backing).
 - For dependency path rules see @#dependency-paths (Dependency paths).

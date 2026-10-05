@@ -53,7 +53,7 @@ The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package
 
 There is no remote fetching, lockfile or version resolution yet. Use `+*.moth` support packages for project-local source-backed packages, builder-provided package dependency clauses for built-in capabilities and annotated `.js` wrappers for direct browser integration.
 
-### Related concepts
+### Concepts related to package origins and backing
 
 - For project-local packages see @#project-local-packages (Project-local packages).
 - For dependency path families see @#dependency-paths (Dependency paths).

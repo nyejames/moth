@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "<h1 id=\"hello-world\">Hello World</h1>",
+    "<a href=\"#hello-world\">Hello World</a>",
+    "<h1 id=\"imported-section\">Imported Section</h1>",
+]

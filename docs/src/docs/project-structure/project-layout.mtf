@@ -122,7 +122,7 @@ No other filename has config meaning. `@config.moth` is a module root, not a
 config file. Alternate config filenames, compatibility handling and
 config-specific diagnostics for other names are not supported.
 
-### Related concepts
+### Concepts related to project layout
 
 - For config key rules see @#project-config (Project config).
 - For module root rules see @#module-roots (Module roots).

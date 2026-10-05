@@ -1,6 +1,6 @@
 Mutating a reactive source updates the same stable storage and invalidates its subscribers.
 
-### Assignment
+### Mutation assignment
 
 [codeblock, $code("moth"):
     count $Int = 0
@@ -39,7 +39,7 @@ A subscription is a read-only dependency record. It does not capture a mutable b
 
 Borrow validation records source dependencies and conservative invalidation facts. Reactive metadata is separate from active borrow lifetimes.
 
-### Related concepts
+### Concepts related to mutation and invalidation
 
 - For access and aliasing see @../bindings (Values and bindings) and @../memory/#reference-semantics (Reference semantics).
 - For reactive sources see @#reactive-sources (Reactive sources).

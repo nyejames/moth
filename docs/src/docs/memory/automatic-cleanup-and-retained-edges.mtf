@@ -128,7 +128,7 @@ failed to give a precise enough answer. Every REC family keeps its statically
 proven fallback region and can reclaim the family earlier than that region
 frontier.
 
-### Declared regions
+### Declared regions as cleanup domains
 
 A declared region chooses one hard lifetime and one bulk cleanup domain. Last-use
 analysis still checks access inside it, but declared-region-owned allocations remain until region

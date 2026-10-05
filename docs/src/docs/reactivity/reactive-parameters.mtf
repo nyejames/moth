@@ -1,6 +1,6 @@
 A reactive parameter passes stable source identity across a function boundary without granting mutation permission.
 
-### Syntax
+### Reactive parameter syntax
 
 [codeblock, $code("moth"):
     counter_view |count $Int| -> String:
@@ -8,7 +8,7 @@ A reactive parameter passes stable source identity across a function boundary wi
     ;
 ]
 
-### Exact contract
+### Exact reactive parameter contract
 
 - A reactive parameter preserves stable source identity across the function boundary.
 - It is a read and subscription handle.
@@ -55,7 +55,7 @@ The source is read once and the snapshot value is passed.
     -- view = counter_view(plain)
 ]
 
-### Related concepts
+### Concepts related to reactive parameters
 
 - For reactive sources see @#reactive-sources (Reactive sources).
 - For subscriptions see @#subscriptions (Subscriptions).

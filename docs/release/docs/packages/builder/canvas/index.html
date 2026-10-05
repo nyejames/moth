@@ -699,7 +699,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @web/canvas</p><h1>@web/canvas</h1><p><code>@web/canvas</code> exposes browser canvas drawing through opaque handles and free functions. A binding-backed package keeps JavaScript object identity outside Moth&#39;s value model while preserving typed access and explicit mutation.</p></section>
+<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @web/canvas</p><h1 id="webcanvas">@web/canvas</h1><p><code>@web/canvas</code> exposes browser canvas drawing through opaque handles and free functions. A binding-backed package keeps JavaScript object identity outside Moth&#39;s value model while preserving typed access and explicit mutation.</p></section>
 <section class="container"><fieldset class="doc-level">
     <legend class="visually-hidden">
         Choose the explanation level: Canvas drawing
@@ -749,7 +749,7 @@ td {
 
 
 
-        <p><code>@web/canvas</code> gives you 2D canvas drawing. Bind it when you need to draw shapes, text, images or pixels onto a <code>&lt;canvas&gt;</code> element.</p><p>The package ships as a skeleton. It will grow as the language and standard library mature.</p><h3>Binding</h3><p>Bind the functions you need with a direct-selection clause.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>set_fill_style</span>, <span class='moth-code-nominal'>fill_rect</span>
+        <p><code>@web/canvas</code> gives you 2D canvas drawing. Bind it when you need to draw shapes, text, images or pixels onto a <code>&lt;canvas&gt;</code> element.</p><p>The package ships as a skeleton. It will grow as the language and standard library mature.</p><h3 id="binding">Binding</h3><p>Bind the functions you need with a direct-selection clause.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>set_fill_style</span>, <span class='moth-code-nominal'>fill_rect</span>
 
 canvas <span class='moth-code-operator'>=</span> <span class='moth-code-function'>get_canvas</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;my-canvas&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>assert</span><span class='moth-code-delimiter'>(</span><span class='moth-code-literal'>false</span>, <span class='moth-code-string'>&quot;canvas not found&quot;</span><span class='moth-code-delimiter'>)</span>
@@ -760,7 +760,7 @@ ctx <span class='moth-code-operator'>~=</span> <span class='moth-code-function'>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-function'>set_fill_style</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-string'>&quot;red&quot;</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><h3>Opaque types</h3><p>The package exposes opaque handle types. You can&#39;t construct or inspect them. You obtain them through functions.</p><ul><li><code>CanvasElement</code> from <code>get_canvas</code> or <code>create_canvas</code></li><li><code>Canvas2d</code> from <code>context_2d</code></li><li><code>CanvasGradient</code> from gradient creation functions</li><li><code>CanvasImage</code> from <code>get_image</code> or <code>create_image</code></li><li><code>CanvasImageData</code> from <code>get_image_data</code> or <code>create_image_data</code></li><li><code>CanvasPattern</code> from <code>create_pattern</code></li><li><code>CanvasTextMetrics</code> from <code>measure_text</code></li></ul><h3>Mutable access</h3><p>Functions that change the canvas need mutable access with <code>~</code>. Query functions use shared access. The <code>~</code> goes before the value you&#39;re mutating.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- mutating: needs ~ on the argument</span>
+<span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>10.0</span>, <span class='moth-code-number'>50.0</span>, <span class='moth-code-number'>50.0</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="basic-opaque-types">Basic opaque types</h3><p>The package exposes opaque handle types. You can&#39;t construct or inspect them. You obtain them through functions.</p><ul><li><code>CanvasElement</code> from <code>get_canvas</code> or <code>create_canvas</code></li><li><code>Canvas2d</code> from <code>context_2d</code></li><li><code>CanvasGradient</code> from gradient creation functions</li><li><code>CanvasImage</code> from <code>get_image</code> or <code>create_image</code></li><li><code>CanvasImageData</code> from <code>get_image_data</code> or <code>create_image_data</code></li><li><code>CanvasPattern</code> from <code>create_pattern</code></li><li><code>CanvasTextMetrics</code> from <code>measure_text</code></li></ul><h3 id="mutable-access">Mutable access</h3><p>Functions that change the canvas need mutable access with <code>~</code>. Query functions use shared access. The <code>~</code> goes before the value you&#39;re mutating.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- mutating: needs ~ on the argument</span>
 <span class='moth-code-function'>fill_rect</span><span class='moth-code-delimiter'>(</span><span class='moth-code-operator'>~</span>ctx, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>100.0</span>, <span class='moth-code-number'>100.0</span><span class='moth-code-delimiter'>)</span>
 
 <span class='moth-code-comment'>-- querying: shared access, no ~</span>
@@ -768,9 +768,9 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.</p><h3>Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
+    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.</p><h3 id="dependency-roots">Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
 
-<span class='moth-code-string'>@web/canvas</span></code></pre><h3>Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
+<span class='moth-code-string'>@web/canvas</span></code></pre><h3 id="opaque-types">Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
             
             <tr style="">
                 
@@ -796,7 +796,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> A text measurement result handle</p></td>
         </tr>
             
-</table><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3>Canvas element management</h3><table style="">
+</table><p>All opaque types lower to object references in the JS backend. The Wasm backend does not support <code>@web/canvas</code> and rejects reachable calls before lowering.</p><h3 id="canvas-element-management">Canvas element management</h3><table style="">
             
             <tr style="">
                 
@@ -840,7 +840,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>to_data_url_quality</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String, quality Float</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Image queries</h3><table style="">
+</table><h3 id="image-queries">Image queries</h3><table style="">
             
             <tr style="">
                 
@@ -862,7 +862,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>image_is_loaded</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Context state</h3><table style="">
+</table><h3 id="context-state">Context state</h3><table style="">
             
             <tr style="">
                 
@@ -882,7 +882,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>is_context_lost</code></p></td> <td style=""><p> <code>ctx Canvas2d</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Rectangles</h3><table style="">
+</table><h3 id="rectangles">Rectangles</h3><table style="">
             
             <tr style="">
                 
@@ -900,7 +900,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>stroke_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Fill and stroke style</h3><table style="">
+</table><h3 id="fill-and-stroke-style">Fill and stroke style</h3><table style="">
             
             <tr style="">
                 
@@ -924,7 +924,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>set_stroke_pattern</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, pattern CanvasPattern</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Compositing</h3><table style="">
+</table><h3 id="compositing">Compositing</h3><table style="">
             
             <tr style="">
                 
@@ -940,7 +940,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>set_global_composite_operation</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, operation String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Line style</h3><table style="">
+</table><h3 id="line-style">Line style</h3><table style="">
             
             <tr style="">
                 
@@ -966,7 +966,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>set_line_dash_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, offset Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Text rendering settings</h3><table style="">
+</table><h3 id="text-rendering-settings">Text rendering settings</h3><table style="">
             
             <tr style="">
                 
@@ -1000,7 +1000,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>set_lang</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, lang String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Image smoothing, filter and shadow</h3><table style="">
+</table><h3 id="image-smoothing-filter-and-shadow">Image smoothing, filter and shadow</h3><table style="">
             
             <tr style="">
                 
@@ -1024,7 +1024,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>set_shadow_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Path construction</h3><table style="">
+</table><h3 id="path-construction">Path construction</h3><table style="">
             
             <tr style="">
                 
@@ -1062,7 +1062,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>ellipse_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Fill, stroke and clip</h3><table style="">
+</table><h3 id="fill-stroke-and-clip">Fill, stroke and clip</h3><table style="">
             
             <tr style="">
                 
@@ -1088,7 +1088,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>is_point_in_stroke</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Transformations</h3><table style="">
+</table><h3 id="transformations">Transformations</h3><table style="">
             
             <tr style="">
                 
@@ -1112,7 +1112,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>reset_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Text drawing</h3><table style="">
+</table><h3 id="text-drawing">Text drawing</h3><table style="">
             
             <tr style="">
                 
@@ -1134,7 +1134,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>measure_text</code></p></td> <td style=""><p> <code>ctx Canvas2d, text String</code></p></td> <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Text metrics</h3><table style="">
+</table><h3 id="text-metrics">Text metrics</h3><table style="">
             
             <tr style="">
                 
@@ -1160,7 +1160,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>text_font_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Gradients</h3><table style="">
+</table><h3 id="gradients">Gradients</h3><table style="">
             
             <tr style="">
                 
@@ -1180,7 +1180,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>add_color_stop</code></p></td> <td style=""><p> <code>gradient ~CanvasGradient, offset Float, color String</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><h3>Patterns</h3><table style="">
+</table><h3 id="patterns">Patterns</h3><table style="">
             
             <tr style="">
                 
@@ -1196,7 +1196,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>create_canvas_pattern</code></p></td> <td style=""><p> <code>ctx Canvas2d, canvas CanvasElement, repetition String</code></p></td> <td style=""><p> <code>CanvasPattern, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Image drawing</h3><table style="">
+</table><h3 id="image-drawing">Image drawing</h3><table style="">
             
             <tr style="">
                 
@@ -1218,7 +1218,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>draw_canvas_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3>Image data</h3><table style="">
+</table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3 id="image-data">Image data</h3><table style="">
             
             <tr style="">
                 
@@ -1244,7 +1244,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>image_data_height</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
-</table><h3>Pixel access</h3><table style="">
+</table><h3 id="pixel-access">Pixel access</h3><table style="">
             
             <tr style="">
                 
@@ -1268,7 +1268,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
              <td style=""><p> <code>image_data_clear_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
-</table><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3>Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3>Opaque type rules</h3><ul><li>Do not construct opaque types with struct syntax.</li><li>Do not inspect opaque type fields.</li><li>Opaque types have no source-visible methods. Use the free functions.</li><li>The <code>@html</code> package provides a <code>Canvas</code> wrapper struct with receiver methods for a more ergonomic drawing API.</li></ul><h3>Backend behaviour</h3><p>The JS backend fully supports <code>@web/canvas</code>. When canvas functions are reachable, the build emits the <code>canvas.js</code> runtime asset, a generated glue module and an import map entry for <code>@moth/runtime</code>.</p><p>The Wasm backend rejects reachable <code>@web/canvas</code> calls before lowering. Canvas support requires a browser JS environment.</p><h3>Teardown</h3><p><code>@web/canvas</code> defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.</p><h3>Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@web/canvas/get_canvas</code> face rejection. Use direct selections or a namespace clause.</li><li>Named arguments are not supported. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, source-defined types or constants.</li><li>Opaque types cannot be constructed or inspected from Moth source.</li></ul><h3>Deferred surfaces</h3><p><code>@web/canvas</code> ships as a skeleton. Deferred surfaces include async image-loading helpers, <code>toBlob</code> and <code>captureStream</code>, raw typed-array and arbitrary line-dash array access, <code>Path2D</code>, <code>DOMMatrix</code>, <code>OffscreenCanvas</code>, <code>ImageBitmap</code>, video sources and WebGL. These will arrive as the language and external package ABI mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3>Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For the <code>@html</code> source-backed wrapper see <a href="../html">@html</a>.</li></ul>
+</table><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3 id="access-and-return-contracts">Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3 id="opaque-type-rules">Opaque type rules</h3><ul><li>Do not construct opaque types with struct syntax.</li><li>Do not inspect opaque type fields.</li><li>Opaque types have no source-visible methods. Use the free functions.</li><li>The <code>@html</code> package provides a <code>Canvas</code> wrapper struct with receiver methods for a more ergonomic drawing API.</li></ul><h3 id="backend-behaviour">Backend behaviour</h3><p>The JS backend fully supports <code>@web/canvas</code>. When canvas functions are reachable, the build emits the <code>canvas.js</code> runtime asset, a generated glue module and an import map entry for <code>@moth/runtime</code>.</p><p>The Wasm backend rejects reachable <code>@web/canvas</code> calls before lowering. Canvas support requires a browser JS environment.</p><h3 id="teardown">Teardown</h3><p><code>@web/canvas</code> defines no teardown, close or disposal functions. Opaque handles are managed by the host JavaScript runtime.</p><h3 id="unsupported-source-forms">Unsupported source forms</h3><ul><li>Direct symbol-path clauses such as <code>@web/canvas/get_canvas</code> face rejection. Use direct selections or a namespace clause.</li><li>Named arguments are not supported. Binding-backed calls stay positional-only.</li><li>The package does not expose receiver methods, source-defined types or constants.</li><li>Opaque types cannot be constructed or inspected from Moth source.</li></ul><h3 id="deferred-surfaces">Deferred surfaces</h3><p><code>@web/canvas</code> ships as a skeleton. Deferred surfaces include async image-loading helpers, <code>toBlob</code> and <code>captureStream</code>, raw typed-array and arbitrary line-dash array access, <code>Path2D</code>, <code>DOMMatrix</code>, <code>OffscreenCanvas</code>, <code>ImageBitmap</code>, video sources and WebGL. These will arrive as the language and external package ABI mature. See <a href="../../../progress">progress matrix</a> for current status.</p><h3 id="related-concepts">Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For dependency-path rules see <a href="../../#dependency-paths">Dependency paths</a>.</li><li>For the <code>@html</code> source-backed wrapper see <a href="../html">@html</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">

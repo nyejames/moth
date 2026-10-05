@@ -1360,7 +1360,7 @@ The durable corpus should grow by semantic family rather than by implementation 
 - collection structural mutation
 - map `get` and later mutation
 
-### Loans
+### Loan vectors
 
 - many shared loans
 - shared then exclusive
@@ -1385,7 +1385,7 @@ The durable corpus should grow by semantic family rather than by implementation 
 - multi-return alias separation
 - recursive summary investigation
 
-### Aggregates
+### Aggregate vectors
 
 - fresh outer with aliased child
 - repeated child alias
@@ -1394,7 +1394,7 @@ The durable corpus should grow by semantic family rather than by implementation 
 - collection/map insertion
 - detached remove result investigation
 
-### Reactivity
+### Reactivity vectors
 
 - subscription does not create an active loan
 - ordinary read still follows access rules

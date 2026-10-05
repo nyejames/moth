@@ -172,7 +172,7 @@ fn markdown_formatter_produces_formatted_tir_output() {
     assert!(
         formatted_body
             .iter()
-            .any(|text| text.contains("<h1>Hello</h1>")),
+            .any(|text| text.contains("<h1 id=\"hello\">Hello</h1>")),
         "formatted TIR root should carry formatted markdown output"
     );
 }

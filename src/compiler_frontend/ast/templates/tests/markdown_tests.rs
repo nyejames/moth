@@ -255,7 +255,10 @@ fn malformed_candidate_keeps_literal_at_symbol() {
 #[test]
 fn link_parsing_works_inside_heading_and_emphasis() {
     let heading = to_markdown("\n# @/docs (Docs)\n", "p");
-    assert_eq!(heading, "<h1><a href=\"{site-root}docs\">Docs</a></h1>");
+    assert_eq!(
+        heading,
+        "<h1 id=\"docs\"><a href=\"{site-root}docs\">Docs</a></h1>"
+    );
 
     let emphasis = to_markdown("\n*@/docs (Docs)*\n", "p");
     assert_eq!(
@@ -278,7 +281,7 @@ fn escapes_html_characters_inside_heading_and_emphasis_content() {
     let heading = to_markdown("\n# <h1> & \"q\" 'x'\n", "p");
     assert_eq!(
         heading,
-        "<h1>&lt;h1&gt; &amp; &quot;q&quot; &#39;x&#39;</h1>"
+        "<h1 id=\"h1-q-x\">&lt;h1&gt; &amp; &quot;q&quot; &#39;x&#39;</h1>"
     );
 
     let emphasis = to_markdown("\n*<tag>&\"'*\n", "p");
@@ -390,7 +393,7 @@ fn heading_line_breaks_out_of_list_without_blank_line() {
 
     assert_eq!(
         rendered,
-        "<ul><li>first line</li></ul><h2>Heading</h2><p>plain paragraph</p>"
+        "<ul><li>first line</li></ul><h2 id=\"heading\">Heading</h2><p>plain paragraph</p>"
     );
 }
 
@@ -620,7 +623,7 @@ fn code_spans_inside_active_emphasis() {
 #[test]
 fn inline_code_in_headings() {
     let rendered = to_markdown("# `Title`", "p");
-    assert_eq!(rendered, "<h1><code>Title</code></h1>");
+    assert_eq!(rendered, "<h1 id=\"title\"><code>Title</code></h1>");
 }
 
 #[test]
@@ -682,4 +685,153 @@ fn child_template_anchor_blocks_code_span_pairing() {
 fn code_spans_do_not_cross_soft_line_boundaries() {
     let rendered = to_markdown("`foo\nbar`", "p");
     assert_eq!(rendered, "<p>`foo bar`</p>");
+}
+
+#[test]
+fn static_headings_at_every_level_carry_kebab_case_ids() {
+    let cases = [
+        ("# Hello", "<h1 id=\"hello\">Hello</h1>"),
+        ("## Hello", "<h2 id=\"hello\">Hello</h2>"),
+        ("### Hello", "<h3 id=\"hello\">Hello</h3>"),
+        ("#### Hello", "<h4 id=\"hello\">Hello</h4>"),
+        ("##### Hello", "<h5 id=\"hello\">Hello</h5>"),
+        ("###### Hello", "<h6 id=\"hello\">Hello</h6>"),
+    ];
+
+    for (input, expected) in cases {
+        assert_eq!(to_markdown(input, "p"), expected, "input: {input:?}");
+    }
+}
+
+#[test]
+fn heading_ids_fold_case_and_collapse_separator_runs() {
+    let cases = [
+        ("# Hello World", "hello-world", "Hello World"),
+        ("# HELLO WORLD", "hello-world", "HELLO WORLD"),
+        ("# Hello\tWorld", "hello-world", "Hello\tWorld"),
+        ("# Hello_World", "hello-world", "Hello_World"),
+        ("# Hello-World", "hello-world", "Hello-World"),
+        (
+            "# Hello   __--\t__  World",
+            "hello-world",
+            "Hello   __--\t__  World",
+        ),
+        ("# --Hello--", "hello", "--Hello--"),
+        ("# __Hello__", "hello", "__Hello__"),
+        ("#   Hello   ", "hello", "  Hello   "),
+        ("# What's new?", "whats-new", "What&#39;s new?"),
+        (
+            "# Compiler - architecture",
+            "compiler-architecture",
+            "Compiler - architecture",
+        ),
+    ];
+
+    for (input, id, body) in cases {
+        assert_eq!(
+            to_markdown(input, "p"),
+            format!("<h1 id=\"{id}\">{body}</h1>"),
+            "input: {input:?}"
+        );
+    }
+}
+
+#[test]
+fn heading_without_letters_or_digits_omits_the_id() {
+    assert_eq!(to_markdown("# !!!", "p"), "<h1>!!!</h1>");
+    assert_eq!(to_markdown("# - _ -", "p"), "<h1>- _ -</h1>");
+}
+
+#[test]
+fn heading_ids_keep_unicode_letters_and_digits_without_transliteration() {
+    assert_eq!(
+        to_markdown("# Café Ünïcode 42", "p"),
+        "<h1 id=\"café-ünïcode-42\">Café Ünïcode 42</h1>"
+    );
+}
+
+#[test]
+fn heading_ids_use_visible_text_of_formatted_spans() {
+    assert_eq!(
+        to_markdown("# **Bold** title", "p"),
+        "<h1 id=\"bold-title\"><strong>Bold</strong> title</h1>"
+    );
+    assert_eq!(
+        to_markdown("# `String values`", "p"),
+        "<h1 id=\"string-values\"><code>String values</code></h1>"
+    );
+    assert_eq!(
+        to_markdown("# @/docs/other-words (Templates)", "p"),
+        "<h1 id=\"templates\"><a href=\"{site-root}docs/other-words\">Templates</a></h1>"
+    );
+}
+
+#[test]
+fn heading_ids_derive_from_visible_text_before_html_escaping() {
+    assert_eq!(
+        to_markdown("# <a> & b", "p"),
+        "<h1 id=\"a-b\">&lt;a&gt; &amp; b</h1>"
+    );
+}
+
+#[test]
+fn opaque_anchors_anywhere_in_a_heading_omit_the_id() {
+    // A line-leading anchor is a paragraph boundary, not heading content, so every
+    // probe below keeps the anchor inside one `#` heading line.
+    for (anchor, placeholder) in [
+        (dynamic_anchor(1), "{dynamic:1}"),
+        (child_anchor(7), "{child:7}"),
+    ] {
+        for pieces in [
+            vec![
+                (Some("# "), None),
+                (None, Some(anchor)),
+                (Some("Hello"), None),
+            ],
+            vec![
+                (Some("# Hello "), None),
+                (None, Some(anchor)),
+                (Some(" world"), None),
+            ],
+            vec![(Some("# Hello "), None), (None, Some(anchor))],
+        ] {
+            let rendered = markdown_formatter_output_from_text_and_anchors(&pieces);
+            assert!(
+                rendered.starts_with("<h1>") && !rendered.contains("id="),
+                "opaque anchor {placeholder} must omit the id: {rendered:?}"
+            );
+            assert!(
+                rendered.contains(placeholder),
+                "anchor body must stay unchanged: {rendered:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dynamic_anchor_inside_heading_code_span_omits_the_id() {
+    let rendered = markdown_formatter_output_from_text_and_anchors(&[
+        (Some("# `foo "), None),
+        (None, Some(dynamic_anchor(1))),
+        (Some(" bar`"), None),
+    ]);
+
+    assert_eq!(rendered, "<h1><code>foo {dynamic:1} bar</code></h1>");
+}
+
+#[test]
+fn equal_heading_labels_produce_equal_unsuffixed_ids() {
+    assert_eq!(
+        to_markdown("# Hello\n\n# Hello", "p"),
+        "<h1 id=\"hello\">Hello</h1><h1 id=\"hello\">Hello</h1>"
+    );
+}
+
+#[test]
+fn paragraphs_and_list_items_never_carry_heading_ids() {
+    assert_eq!(to_markdown("Hello World", "p"), "<p>Hello World</p>");
+    assert_eq!(
+        to_markdown("- Hello World", "p"),
+        "<ul><li>Hello World</li></ul>"
+    );
 }

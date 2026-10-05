@@ -9,7 +9,7 @@ order.
     ;
 ]
 
-### Forms
+### Forms of collection loops
 
 [codeblock, $code("moth"):
     loop items:
@@ -25,7 +25,7 @@ order.
     ;
 ]
 
-### Contract
+### Collection loop contract
 
 - The source expression must have a collection type.
 - Collection loops do not use a general iterable protocol.
@@ -40,7 +40,7 @@ order.
 - A binding name must not collide with another visible name.
 - An empty collection runs the body zero times.
 
-### Evaluation
+### Collection loop evaluation order
 
 The source expression is evaluated once before iteration begins. The collection
 length is captured at the same point.

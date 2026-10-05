@@ -568,7 +568,7 @@ fn files_input_nested_same_owner_mtf_content_value_is_inlined() {
     assert_eq!(output.documents.len(), 1);
     assert_eq!(
         output.documents[0].content,
-        "<h1>Page</h1><p><h1>Nested</h1></p>"
+        "<h1 id=\"page\">Page</h1><p><h1 id=\"nested\">Nested</h1></p>"
     );
 }
 
@@ -893,7 +893,7 @@ fn file_input_compiles_one_moth_template_file() {
     let output = compile_ok(MothTemplateInput::File(source_path.clone()));
 
     assert_eq!(output.documents.len(), 1);
-    assert_eq!(output.documents[0].content, "<h1>Intro</h1>");
+    assert_eq!(output.documents[0].content, "<h1 id=\"intro\">Intro</h1>");
     assert_eq!(output.documents[0].relative_path, None);
     assert_eq!(
         output.documents[0].source_path,
@@ -1233,7 +1233,7 @@ fn source_input_compiles_bd_nested_authored_template() {
     }]));
 
     assert_eq!(output.documents.len(), 1);
-    assert_eq!(output.documents[0].content, "<h1>Nested</h1>");
+    assert_eq!(output.documents[0].content, "<h1 id=\"nested\">Nested</h1>");
 }
 
 #[test]

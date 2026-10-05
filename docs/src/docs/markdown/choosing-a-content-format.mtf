@@ -30,7 +30,7 @@ Raw asset files such as images, stylesheets or JavaScript files are not content 
 
 Core packages and project-local source-backed packages are not content formats. They provide typed declarations and functions. See @../packages/#package-origins-and-backing (Package origins and backing).
 
-### Related concepts
+### Concepts related to choosing a content format
 
 - For Moth template files see @../moth-templates/#moth-template-files-files (Moth template files).
 - For plain Markdown see @#markdown-files (Markdown files).

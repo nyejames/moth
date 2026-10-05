@@ -166,7 +166,7 @@ The observable consequences are:
 - consumer-local aliases and re-exports preserve identity
 - changing a file's bytes does not change its identity
 
-### Related concepts
+### Concepts related to file paths
 
 - For what a file path evaluates to see @#file-values (File values).
 - For dependency clause paths see @../packages/#dependency-paths (Dependency paths).

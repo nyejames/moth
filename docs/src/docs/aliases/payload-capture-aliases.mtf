@@ -1,6 +1,6 @@
 A payload capture alias renames a choice payload field inside one match arm. It is the third narrow `as` surface in Moth.
 
-### Definition and syntax
+### Payload capture alias syntax
 
 [codeblock, $code("moth"):
     if response is:
@@ -11,7 +11,7 @@ A payload capture alias renames a choice payload field inside one match arm. It 
 
 The name before `as` is the declared payload field name. The name after `as` is an arm-local binding.
 
-### Exact contract
+### Exact payload capture alias contract
 
 - The name before `as` must be the declared payload field name.
 - The name after `as` is an arm-local binding.
@@ -40,7 +40,7 @@ Use a capture alias when the field name would collide with an existing variable 
 
 Inside the first arm, `error_message` holds the payload. In the `else` arm, `message` still refers to the outer binding.
 
-### Related concepts
+### Concepts related to payload capture aliases
 
 - For choice declarations and variants see @../choices (Choices).
 - For pattern matching and exhaustiveness see @../branching (Branching).

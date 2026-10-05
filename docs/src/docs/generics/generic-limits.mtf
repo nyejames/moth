@@ -64,7 +64,7 @@ outside scope. A narrower design for references to named, monomorphic,
 non-capturing functions remains an open question rather than deferred generic
 work.
 
-### Related concepts
+### Concepts related to generic limits
 
 - For trait bounds see @../traits/#generic-trait-bounds (Generic trait bounds).
 - For the current implementation status see @../progress (Progress matrix).

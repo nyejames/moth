@@ -1,6 +1,6 @@
 A template subscription creates a read-only live dependency on a reactive source.
 
-### Syntax
+### Subscription syntax
 
 [codeblock, $code("moth"):
     count $Int = 0
@@ -8,7 +8,7 @@ A template subscription creates a read-only live dependency on a reactive source
     view = [: Count: [$(count)]]
 ]
 
-### Exact contract
+### Exact subscription contract
 
 - A subscription is valid only in template head or capture positions accepted by V1.
 - It accepts exactly one bare reactive source identifier.
@@ -41,7 +41,7 @@ Subscriptions are invalid in:
 - ordinary expression positions
 - non-template syntax positions
 
-### Snapshot versus subscription
+### Snapshot and subscription rules
 
 [codeblock, $code("moth"):
     count $Int = 0
@@ -52,7 +52,7 @@ Subscriptions are invalid in:
 
 The first reads the value once. The second records a dependency that may rerender when the source changes.
 
-### Related concepts
+### Concepts related to subscriptions
 
 - For reactive sources see @#reactive-sources (Reactive sources).
 - For reactive parameters see @#reactive-parameters (Reactive parameters).

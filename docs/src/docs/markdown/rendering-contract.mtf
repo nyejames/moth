@@ -1,5 +1,7 @@
 The plain Markdown renderer uses a CommonMark-compatible parser with GFM extensions. This is a different renderer from Moth's md renderer.
 
+Plain `.md` uses the separate renderer below and gets no `$md` automatic heading IDs.
+
 ### Supported features
 
 - Headings: `#`, `##`, `###` and deeper render as `<h1>`, `<h2>`, `<h3>` etc.
@@ -43,7 +45,7 @@ The renderer uses `pulldown-cmark` with the following options enabled:
 
 Smart punctuation is not enabled. The renderer is registered by the HTML builder.
 
-### Related concepts
+### Concepts related to the rendering contract
 
 - For moth template md rendering see @../moth-templates/#implicit-markdown (Implicit Markdown).
 - For choosing between formats see @#choosing-a-content-format (Choosing a content format).

@@ -2,7 +2,7 @@
 
 Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. Entry assembly activates that module-owned `start` exactly once for a selected page. A dependency exposes declarations without activating its root.
 
-### Explicit root purpose
+### Explicit root purpose for active roots
 
 Top-level executable work or direct output requires a recognised purpose with an
 applicable consumer. `$page` is the initial and only HTML purpose in the
@@ -91,7 +91,7 @@ Helper files should define reusable declarations. The module root should bind
 and use them. Page-producing top-level templates belong in the selected module
 root only. An ordinary file cannot become a page by containing a fragment.
 
-### Related concepts
+### Concepts related to runtime fragments
 
 - For module identity and root filenames see @#module-roots (Module roots).
 - For page metadata and command policy see @#entry-config (Entry metadata and page directives).

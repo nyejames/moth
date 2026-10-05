@@ -2,7 +2,7 @@
 
 This page owns entry metadata and page directives. It no longer describes accepted `config:` blocks.
 
-### `@project`
+### The `@project` namespace
 
 `@project` is an explicitly bound immutable namespace. The accepted `$project`
 directive publishes its predefined fields only. Today's grouped record also
@@ -90,7 +90,7 @@ Runtime title mutation is a separate, queued Core IO capability. Its exact
 behaviour is defined in @../packages/core/io/ (Core IO).
 
 
-### Explicit root purpose
+### Explicit root purpose in entry metadata
 
 Top-level executable work or direct output requires a recognised purpose with a consumer. Only `$page` works initially. Functions, types and constants without purpose remain a valid API-only root. Semantically classified `$doc`, `$note` or `$todo` templates do not require a purpose. Future `$test` is a later non-page purpose; it cannot satisfy validation until implemented.
 
@@ -102,7 +102,7 @@ A declaration-only root at `entry_root` is valid. HTML application `build` and `
 
 Until the cutover, operational pages keep reserved names such as `page_title` and `page_head`. Do not add live `$page` statements merely because this page documents them.
 
-### Related concepts
+### Concepts related to entry metadata
 
 - For module identity versus artefacts see @#module-roots (Module roots).
 - For fragments and `start` see @#entry-runtime-and-fragments (Active-root runtime and fragments).
