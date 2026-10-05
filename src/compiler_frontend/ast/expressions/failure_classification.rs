@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ExpressionFailureFacts, FailureDisposition, FailureSummary, ImplicitFailureContributor,
     ImplicitFailureContributorSummary, ImplicitFailureSource, WitnessCandidates,
-    retain_bounded_witness_hops, select_failure_witness,
+    retain_bounded_witness_hops,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
@@ -251,14 +251,14 @@ impl AstBuiltinFailureSummaries {
         &self,
         contributors: &'a [ImplicitFailureContributor],
     ) -> Option<&'a ImplicitFailureContributor> {
-        select_failure_witness(
-            contributors
-                .iter()
-                .filter(|contributor| self.is_active(contributor))
-                .map(Ok::<_, std::convert::Infallible>),
-            ImplicitFailureContributor::witness_site,
-        )
-        .unwrap_or_else(|never| match never {})
+        // The first policy candidate is the selection: no later contributor displaces a call,
+        // and an origin's own write-back is found by the cursor's single lookahead.
+        WitnessCandidates::new(contributors)
+            .next_candidate(
+                |contributor| Ok::<_, std::convert::Infallible>(self.is_active(contributor)),
+                ImplicitFailureContributor::witness_site,
+            )
+            .unwrap_or_else(|never| match never {})
     }
 
     pub(crate) fn witness(

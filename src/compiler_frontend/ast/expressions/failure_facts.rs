@@ -92,6 +92,9 @@ pub(crate) struct DeferredCustomCatchCheck {
 
 /// Shared AST/HIR witness policy. Inputs are active contributors in evaluation order.
 /// Only the arithmetic of the same compound update yields priority to its write-back.
+///
+/// HIR selects eagerly so every contributor's summary and code set is validated. The AST and
+/// both witness walkers apply the same policy lazily through `WitnessCandidates`.
 pub(crate) fn select_failure_witness<'a, T: 'a, E>(
     contributors: impl Iterator<Item = Result<&'a T, E>>,
     site: impl Fn(&T) -> FailureWitnessSite,
@@ -117,17 +120,15 @@ pub(crate) fn select_failure_witness<'a, T: 'a, E>(
 
 /// Lazily yields one body's active contributors in witness-policy order.
 ///
-/// WHAT: each step reapplies `select_failure_witness` to the contributors not yet yielded, so
-///       a write-back yields ahead of the arithmetic of its own compound update wherever the
-///       remaining sequence starts.
-/// WHY: the witness walkers stop at the first origin or terminal leaf, and only calls are ever
-///      skipped. Selecting on demand examines each skipped call once, instead of ordering every
-///      contributor of the body before the first one is tried.
+/// WHAT: yields active calls in evaluation order, then at most one terminal numeric origin, after
+///       which the cursor is exhausted. Arithmetic yields to a later active write-back of its own
+///       compound update, matching `select_failure_witness`.
+/// WHY: every consumer stops at the first numeric origin and skips only calls, so nothing ever
+///      resumes after a terminal origin. Selecting on demand examines each skipped call once
+///      instead of ordering every contributor of the body before the first one is tried.
 pub(crate) struct WitnessCandidates<'contributors, T> {
     contributors: &'contributors [T],
     next: usize,
-    /// Write-backs already yielded ahead of their arithmetic, skipped when the cursor reaches them.
-    hoisted: Vec<usize>,
 }
 
 impl<'contributors, T> WitnessCandidates<'contributors, T> {
@@ -135,7 +136,6 @@ impl<'contributors, T> WitnessCandidates<'contributors, T> {
         Self {
             contributors,
             next: 0,
-            hoisted: Vec::new(),
         }
     }
 
@@ -145,31 +145,31 @@ impl<'contributors, T> WitnessCandidates<'contributors, T> {
         site: impl Fn(&T) -> FailureWitnessSite,
     ) -> Result<Option<&'contributors T>, E> {
         while let Some(contributor) = self.contributors.get(self.next) {
-            let index = self.next;
-            if self.hoisted.contains(&index) || !is_active(contributor)? {
-                self.next += 1;
+            self.next += 1;
+            if !is_active(contributor)? {
                 continue;
             }
 
-            // Arithmetic stays the cursor head until no later write-back of the same compound
-            // update remains, matching the shared policy applied to the remaining sequence.
-            if let FailureWitnessSite::Arithmetic(Some(arithmetic_span)) = site(contributor) {
-                for later in index + 1..self.contributors.len() {
-                    if self.hoisted.contains(&later) {
-                        continue;
-                    }
-                    let candidate = &self.contributors[later];
-                    if let FailureWitnessSite::WriteBack(Some(span)) = site(candidate)
-                        && span == arithmetic_span
-                        && is_active(candidate)?
-                    {
-                        self.hoisted.push(later);
-                        return Ok(Some(candidate));
-                    }
+            let arithmetic_span = match site(contributor) {
+                FailureWitnessSite::Call => return Ok(Some(contributor)),
+                FailureWitnessSite::Arithmetic(span) => span,
+                FailureWitnessSite::WriteBack(_) => None,
+            };
+
+            // A numeric origin is terminal: exhaust the cursor before yielding it.
+            let remaining = &self.contributors[self.next..];
+            self.next = self.contributors.len();
+            let Some(arithmetic_span) = arithmetic_span else {
+                return Ok(Some(contributor));
+            };
+            for candidate in remaining {
+                if let FailureWitnessSite::WriteBack(Some(span)) = site(candidate)
+                    && span == arithmetic_span
+                    && is_active(candidate)?
+                {
+                    return Ok(Some(candidate));
                 }
             }
-
-            self.next += 1;
             return Ok(Some(contributor));
         }
         Ok(None)
