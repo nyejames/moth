@@ -440,7 +440,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         queued_nodes[node_id.index()] = true;
     }
 
-    let mut borrow_analysis = Some(bootstrap_borrow_analysis);
+    let mut borrow_analysis = bootstrap_borrow_analysis;
     while let Some(node_id) = convergence_queue.pop_front() {
         queued_nodes[node_id.index()] = false;
         let node = convergence_model.node(node_id).cloned().ok_or_else(|| {
@@ -451,20 +451,12 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 &compiler.string_table,
             )
         })?;
-        let current_borrow_analysis = borrow_analysis.as_ref().ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "Convergence queue lost the current base borrow analysis",
-                ),
-                &compiler.string_table,
-            )
-        })?;
         let direct_summaries = direct_convergence_summaries(
             &convergence_model,
             node_id,
             generated_transaction,
             hir_module,
-            current_borrow_analysis,
+            &borrow_analysis,
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
 
@@ -476,23 +468,26 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     &direct_summaries.active_public,
                     &direct_summaries.module_private,
                 );
+                // The transition check needs only the previous summaries, not the whole report.
+                let previous_summaries = borrow_analysis.analysis.public_call_summaries.clone();
                 // The current report already analysed this exact HIR and summary set.
-                let mut report = if summaries_changed {
+                if summaries_changed {
                     increment_convergence_counter(FrontendCounter::ConvergenceBaseBorrowPasses);
-                    timed_stage_attributed!(
+                    borrow_analysis = timed_stage_attributed!(
                         crate::timing::TimingMetric::FrontendBorrowConverge,
                         timing_context,
                         check_borrows(compiler, hir_module, warnings, None)
-                    )?
-                } else {
-                    current_borrow_analysis.clone()
-                };
-                infer_builtin_failure_summaries(hir_module, &mut report)?;
-                let summary_changes =
-                    base_summary_changes(hir_module, current_borrow_analysis, &report).map_err(
-                        |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
                     )?;
-                borrow_analysis = Some(report);
+                }
+                // A reused bootstrap report still carries unset failure bits, so inference runs
+                // whether or not borrow analysis was repeated.
+                infer_builtin_failure_summaries(hir_module, &mut borrow_analysis)?;
+                let summary_changes = base_summary_changes(
+                    hir_module,
+                    &previous_summaries,
+                    &borrow_analysis.analysis.public_call_summaries,
+                )
+                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
                 if !summary_changes.is_empty() {
                     enqueue_base_dependents(
                         &convergence_model,
@@ -517,27 +512,34 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                             .map_err(|error| {
                                 CompilerMessages::from_error_ref(error, &compiler.string_table)
                             })?;
-                    install_convergence_summaries(
+                    let summaries_changed = install_convergence_summaries(
                         &mut sidecar.module.executable.hir,
                         &direct_summaries.generated,
                         &direct_summaries.active_public,
                         &direct_summaries.module_private,
                     );
-                    increment_convergence_counter(
-                        FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
-                    );
-                    let mut report = timed_stage_attributed!(
-                        crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
-                        timing_context,
-                        check_borrows(
-                            compiler,
-                            &sidecar.module.executable.hir,
-                            &sidecar.module.metadata.warnings,
-                            Some(&source_identity_handle),
-                        )
+                    // Materialisation or an earlier visit already analysed this exact HIR and
+                    // summary set.
+                    if summaries_changed {
+                        increment_convergence_counter(
+                            FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses,
+                        );
+                        sidecar.module.executable.borrow_analysis = timed_stage_attributed!(
+                            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
+                            timing_context,
+                            check_borrows(
+                                compiler,
+                                &sidecar.module.executable.hir,
+                                &sidecar.module.metadata.warnings,
+                                Some(&source_identity_handle),
+                            )
+                        )?;
+                    }
+                    // Materialisation reports carry unset failure bits, so inference always runs.
+                    infer_builtin_failure_summaries(
+                        &sidecar.module.executable.hir,
+                        &mut sidecar.module.executable.borrow_analysis,
                     )?;
-                    infer_builtin_failure_summaries(&sidecar.module.executable.hir, &mut report)?;
-                    sidecar.module.executable.borrow_analysis = report;
                     exact_generated_sidecar_summary(&identity, &sidecar.module).map_err(
                         |error| CompilerMessages::from_error_ref(error, &compiler.string_table),
                     )?
@@ -559,9 +561,6 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         }
     }
 
-    let borrow_analysis = borrow_analysis.ok_or_else(|| {
-        CompilerError::compiler_error("Convergence queue did not analyze the base module")
-    })?;
     validate_builtin_failure_boundaries(
         compiler,
         hir_module,
@@ -1161,31 +1160,23 @@ fn validate_builtin_failure_boundaries(
 
 pub(crate) fn base_summary_changes(
     hir: &HirModule,
-    previous: &BorrowCheckReport,
-    next: &BorrowCheckReport,
+    previous: &FxHashMap<FunctionId, PublicCallSummary>,
+    next: &FxHashMap<FunctionId, PublicCallSummary>,
 ) -> Result<BaseSummaryChanges, CompilerError> {
     let mut widened_functions = FxHashSet::default();
     for function in &hir.functions {
-        let previous_summary = previous
-            .analysis
-            .public_call_summaries
-            .get(&function.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "previous base borrow report is missing summary for {:?}",
-                    function.id
-                ))
-            })?;
-        let next_summary = next
-            .analysis
-            .public_call_summaries
-            .get(&function.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "next base borrow report is missing summary for {:?}",
-                    function.id
-                ))
-            })?;
+        let previous_summary = previous.get(&function.id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "previous base borrow report is missing summary for {:?}",
+                function.id
+            ))
+        })?;
+        let next_summary = next.get(&function.id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "next base borrow report is missing summary for {:?}",
+                function.id
+            ))
+        })?;
         if validate_public_call_summary_transition(previous_summary, next_summary)?
             == PublicCallSummaryTransition::Widened
         {

@@ -451,9 +451,12 @@ independent_result Int = independent(42)
         };
         assert_eq!(counter_value("convergence_initial_base_borrow_passes"), 1.0);
         assert_eq!(counter_value("convergence_base_borrow_passes"), 2.0);
+        // Four materialisation passes, then rechecks only for `mutating_helper` and `caller`,
+        // whose direct callee summaries widen. `seed_helper` and `independent` keep their
+        // materialisation reports because convergence installs no changed summary into them.
         assert_eq!(
             counter_value("convergence_generated_sidecar_borrow_passes"),
-            9.0
+            6.0
         );
     }
 

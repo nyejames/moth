@@ -356,8 +356,12 @@ fn convergence_base_changes_enqueue_only_callers_with_changed_direct_inputs() {
         (FunctionId(2), summary(FunctionReturnAliasSummary::Unknown)),
         (FunctionId(3), summary(FunctionReturnAliasSummary::Fresh)),
     ]);
-    let changes = base_summary_changes(&base_hir, &previous, &next)
-        .expect("a widening base summary should be accepted");
+    let changes = base_summary_changes(
+        &base_hir,
+        &previous.analysis.public_call_summaries,
+        &next.analysis.public_call_summaries,
+    )
+    .expect("a widening base summary should be accepted");
     assert_eq!(changes.public, vec![public_a.clone()]);
     assert_eq!(changes.module_private, vec![private_a.clone()]);
 
@@ -402,9 +406,12 @@ fn convergence_base_changes_enqueue_only_callers_with_changed_direct_inputs() {
 }
 
 #[test]
-fn convergence_install_refreshes_active_public_and_preserves_provider_summaries() {
+fn convergence_install_reports_changes_and_preserves_provider_summaries() {
     let active_public = origin("active_public");
     let provider_public = origin("provider_public");
+    let active_private = private_identity("active_private");
+    let provider_private = private_identity("provider_private");
+    let generated = generated_identity("generated");
     let stale = summary(FunctionReturnAliasSummary::Fresh);
     let widened = summary(FunctionReturnAliasSummary::Unknown);
     let mut hir = HirModule::new();
@@ -412,22 +419,94 @@ fn convergence_install_refreshes_active_public_and_preserves_provider_summaries(
         .insert(active_public.clone(), stale.clone());
     hir.imported_call_summaries
         .insert(provider_public.clone(), stale.clone());
+    hir.module_private_call_summaries
+        .insert(provider_private.clone(), stale.clone());
 
-    install_convergence_summaries(
-        &mut hir,
-        &[],
-        &[(active_public.clone(), widened.clone())],
-        &[],
-    );
+    // Each case installs a complete direct-summary set and expects the change result that
+    // decides whether the node's borrow report may be reused.
+    let generated_stale = [(generated.clone(), stale.clone())];
+    let generated_widened = [(generated.clone(), widened.clone())];
+    let public_widened = [(active_public.clone(), widened.clone())];
+    let private_stale = [(active_private.clone(), stale.clone())];
+    let private_widened = [(active_private.clone(), widened.clone())];
+    let cases: [(&str, &[_], &[_], &[_], bool); 9] = [
+        ("public replacement", &[], &public_widened, &[], true),
+        ("unchanged public", &[], &public_widened, &[], false),
+        (
+            "generated insertion",
+            &generated_stale,
+            &public_widened,
+            &[],
+            true,
+        ),
+        (
+            "unchanged generated",
+            &generated_stale,
+            &public_widened,
+            &[],
+            false,
+        ),
+        (
+            "generated replacement",
+            &generated_widened,
+            &public_widened,
+            &[],
+            true,
+        ),
+        ("generated removal", &[], &public_widened, &[], true),
+        (
+            "private insertion",
+            &[],
+            &public_widened,
+            &private_stale,
+            true,
+        ),
+        (
+            "private replacement",
+            &[],
+            &public_widened,
+            &private_widened,
+            true,
+        ),
+        (
+            "unchanged private",
+            &[],
+            &public_widened,
+            &private_widened,
+            false,
+        ),
+    ];
+    for (case, generated_summaries, public_summaries, private_summaries, expected) in cases {
+        assert_eq!(
+            install_convergence_summaries(
+                &mut hir,
+                generated_summaries,
+                public_summaries,
+                private_summaries,
+            ),
+            expected,
+            "{case}"
+        );
+    }
 
+    assert!(hir.generated_call_summaries.is_empty());
     assert_eq!(
         hir.imported_call_summaries.get(&active_public),
+        Some(&widened)
+    );
+    assert_eq!(
+        hir.module_private_call_summaries.get(&active_private),
         Some(&widened)
     );
     assert_eq!(
         hir.imported_call_summaries.get(&provider_public),
         Some(&stale),
         "provider CrossModule leaves must not be rewritten"
+    );
+    assert_eq!(
+        hir.module_private_call_summaries.get(&provider_private),
+        Some(&stale),
+        "provider-private leaves must not be rewritten"
     );
 }
 
@@ -487,8 +566,12 @@ fn convergence_base_changes_reject_a_narrowing_report() {
     let previous = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Unknown))]);
     let next = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
 
-    let error = base_summary_changes(&hir, &previous, &next)
-        .expect_err("a narrowing base summary must stop convergence");
+    let error = base_summary_changes(
+        &hir,
+        &previous.analysis.public_call_summaries,
+        &next.analysis.public_call_summaries,
+    )
+    .expect_err("a narrowing base summary must stop convergence");
     assert!(error.msg.contains("narrowed"));
 }
 
@@ -506,10 +589,22 @@ fn builtin_failure_widening_uses_existing_base_change_lane() {
     let previous = report([(FunctionId(0), initial.clone()), (FunctionId(1), initial)]);
     let next = report([(FunctionId(0), escaping.clone()), (FunctionId(1), escaping)]);
 
-    let changes = base_summary_changes(&hir, &previous, &next).unwrap();
+    let changes = base_summary_changes(
+        &hir,
+        &previous.analysis.public_call_summaries,
+        &next.analysis.public_call_summaries,
+    )
+    .unwrap();
     assert_eq!(changes.public, vec![public]);
     assert_eq!(changes.module_private, vec![private]);
-    assert!(base_summary_changes(&hir, &next, &previous).is_err());
+    assert!(
+        base_summary_changes(
+            &hir,
+            &next.analysis.public_call_summaries,
+            &previous.analysis.public_call_summaries
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -518,8 +613,22 @@ fn missing_base_summary_is_not_an_infallible_summary() {
     let complete = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
     let missing = BorrowCheckReport::default();
 
-    assert!(base_summary_changes(&hir, &missing, &complete).is_err());
-    assert!(base_summary_changes(&hir, &complete, &missing).is_err());
+    assert!(
+        base_summary_changes(
+            &hir,
+            &missing.analysis.public_call_summaries,
+            &complete.analysis.public_call_summaries
+        )
+        .is_err()
+    );
+    assert!(
+        base_summary_changes(
+            &hir,
+            &complete.analysis.public_call_summaries,
+            &missing.analysis.public_call_summaries
+        )
+        .is_err()
+    );
 }
 
 #[test]
