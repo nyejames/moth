@@ -112,7 +112,6 @@ pub(crate) struct BorrowCheckStats {
 pub(crate) struct FunctionBorrowSummary {
     pub reachable_blocks: usize,
     pub mutable_call_sites: usize,
-    pub alias_heavy_blocks: Vec<BlockId>,
     pub worklist_iterations: usize,
 }
 

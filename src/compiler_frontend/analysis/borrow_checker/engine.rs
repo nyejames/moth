@@ -161,11 +161,8 @@ impl<'a> BorrowChecker<'a> {
         let mut summary = FunctionBorrowSummary {
             reachable_blocks: reachable_blocks.len(),
             mutable_call_sites: 0,
-            alias_heavy_blocks: Vec::new(),
             worklist_iterations: 0,
         };
-
-        let mut alias_heavy = FxHashSet::default();
 
         borrow_log!(format!(
             "[Borrow] Analyzing function '{}' (entry={} blocks={})",
@@ -223,10 +220,6 @@ impl<'a> BorrowChecker<'a> {
                 }
             }
 
-            if output_state.has_any_alias_conflict() {
-                alias_heavy.insert(block_id);
-            }
-
             let changed_out = match out_states.get(&block_id) {
                 Some(existing) => existing != &output_state,
                 None => true,
@@ -277,10 +270,6 @@ impl<'a> BorrowChecker<'a> {
 
             out_states.insert(block_id, output_state);
         }
-
-        let mut alias_heavy_blocks = alias_heavy.into_iter().collect::<Vec<_>>();
-        alias_heavy_blocks.sort_by_key(|id| id.0);
-        summary.alias_heavy_blocks = alias_heavy_blocks;
 
         // Persist snapshots for debug tooling and downstream analyses.
         for block_id in &reachable_blocks {

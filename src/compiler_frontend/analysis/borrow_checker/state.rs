@@ -207,9 +207,6 @@ impl FunctionLayout {
 pub(super) struct BorrowState {
     // One lattice state per function-local index.
     locals: Vec<LocalState>,
-    // Cached count of locals whose effective roots include each root index.
-    // This keeps mutable conflict checks O(1) per root.
-    root_ref_counts: Vec<u32>,
 }
 
 impl BorrowState {
@@ -218,10 +215,7 @@ impl BorrowState {
             .map(|_| LocalState::uninit(local_count))
             .collect::<Vec<_>>();
 
-        Self {
-            locals,
-            root_ref_counts: vec![0; local_count],
-        }
+        Self { locals }
     }
 
     pub(super) fn initialize_parameter(&mut self, local_index: usize) {
@@ -233,26 +227,29 @@ impl BorrowState {
         &self.locals[local_index]
     }
 
-    pub(super) fn has_any_alias_conflict(&self) -> bool {
-        self.root_ref_counts.iter().any(|count| *count > 1)
-    }
-
+    /// The roots a local's current binding keeps alive.
+    ///
+    /// A definite slot stores the current value in its own binding cell. If that value aliases an
+    /// older allocation, the older roots replace the slot's own allocation root. A SLOT | ALIAS
+    /// join remains conservative because either binding representation may have reached the join.
     pub(super) fn effective_roots(&self, local_index: usize) -> RootSet {
-        self.effective_roots_from_state(local_index, &self.locals[local_index])
+        let state = &self.locals[local_index];
+        let has_slot_binding = state.mode.contains(LocalMode::SLOT);
+        let has_alias_binding = state.mode.contains(LocalMode::ALIAS);
+        let has_value_roots = !state.value_roots.is_empty();
+
+        let mut roots = RootSet::empty(self.locals.len());
+        if has_slot_binding && (has_alias_binding || !has_value_roots) {
+            roots.insert(local_index);
+        }
+        if has_alias_binding || (has_slot_binding && has_value_roots) {
+            roots.union_with(&state.value_roots);
+        }
+        roots
     }
 
     pub(super) fn update_local_state(&mut self, local_index: usize, new_state: LocalState) {
-        for_each_effective_root(local_index, &self.locals[local_index], |root_index| {
-            if self.root_ref_counts[root_index] > 0 {
-                self.root_ref_counts[root_index] -= 1;
-            }
-        });
-
         self.locals[local_index] = new_state;
-
-        for_each_effective_root(local_index, &self.locals[local_index], |root_index| {
-            self.root_ref_counts[root_index] += 1;
-        });
     }
 
     /// Join `other` into this state, reporting whether this state grew.
@@ -270,10 +267,6 @@ impl BorrowState {
                 .direct_alias_roots
                 .union_with(&right.direct_alias_roots);
         }
-
-        if changed {
-            self.recompute_root_ref_counts();
-        }
         changed
     }
 
@@ -281,12 +274,10 @@ impl BorrowState {
     ///
     /// WHY: runs on every block visit and CFG edge, so it rewrites each local in place rather
     /// than cloning and comparing every local's root sets.
-    pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) -> bool {
-        let mut changed = false;
-
+    pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
         for (local_index, local) in self.locals.iter_mut().enumerate() {
             if !visible_mask.contains(local_index) {
-                changed |= local.reset(LocalMode::UNINIT);
+                local.reset(LocalMode::UNINIT);
                 continue;
             }
 
@@ -294,23 +285,17 @@ impl BorrowState {
             if local.value_roots.is_empty() {
                 continue;
             }
-            changed |= local.value_roots.intersect_with(visible_mask);
-            changed |= local.direct_alias_roots.intersect_with(visible_mask);
+            local.value_roots.intersect_with(visible_mask);
+            local.direct_alias_roots.intersect_with(visible_mask);
             if local.value_roots.is_empty() {
                 let mode = if local.mode.contains(LocalMode::SLOT) {
                     LocalMode::SLOT
                 } else {
                     LocalMode::UNINIT
                 };
-                changed |= local.reset(mode);
+                local.reset(mode);
             }
         }
-
-        if changed {
-            self.recompute_root_ref_counts();
-        }
-
-        changed
     }
 
     pub(super) fn to_snapshot(&self, local_ids: &[LocalId]) -> BorrowStateSnapshot {
@@ -331,49 +316,6 @@ impl BorrowState {
         }
 
         BorrowStateSnapshot { locals }
-    }
-
-    fn effective_roots_from_state(&self, local_index: usize, state: &LocalState) -> RootSet {
-        let mut roots = RootSet::empty(self.locals.len());
-        for_each_effective_root(local_index, state, |root_index| roots.insert(root_index));
-        roots
-    }
-
-    fn recompute_root_ref_counts(&mut self) {
-        self.root_ref_counts.fill(0);
-
-        for (local_index, state) in self.locals.iter().enumerate() {
-            for_each_effective_root(local_index, state, |root_index| {
-                self.root_ref_counts[root_index] += 1;
-            });
-        }
-    }
-}
-
-/// Visit each root a local's current binding keeps alive, exactly once.
-///
-/// WHAT: a definite slot stores the current value in its own binding cell. If that value
-///       aliases an older allocation, the older roots replace the slot's own allocation root.
-///       A SLOT | ALIAS join remains conservative because either binding representation may
-///       have reached the join.
-/// WHY: reference counting visits every local after each join, so it walks roots directly
-///      instead of materialising one root set per local.
-fn for_each_effective_root(local_index: usize, state: &LocalState, mut visit: impl FnMut(usize)) {
-    let has_slot_binding = state.mode.contains(LocalMode::SLOT);
-    let has_alias_binding = state.mode.contains(LocalMode::ALIAS);
-    let has_value_roots = !state.value_roots.is_empty();
-
-    let includes_own_root = has_slot_binding && (has_alias_binding || !has_value_roots);
-    if includes_own_root {
-        visit(local_index);
-    }
-
-    if has_alias_binding || (has_slot_binding && has_value_roots) {
-        for root_index in state.value_roots.iter_ones() {
-            if !(includes_own_root && root_index == local_index) {
-                visit(root_index);
-            }
-        }
     }
 }
 
@@ -419,15 +361,11 @@ impl LocalState {
         }
     }
 
-    /// Reset to a root-free binding of `mode` in place, reporting whether anything changed.
-    fn reset(&mut self, mode: LocalMode) -> bool {
-        let changed = self.mode != mode
-            || !self.value_roots.is_empty()
-            || !self.direct_alias_roots.is_empty();
+    /// Reset to a root-free binding of `mode` in place, keeping the root-set allocations.
+    fn reset(&mut self, mode: LocalMode) {
         self.mode = mode;
         self.value_roots.clear();
         self.direct_alias_roots.clear();
-        changed
     }
 
     pub(super) fn has_value_aliases(&self) -> bool {
@@ -498,15 +436,10 @@ impl RootSet {
         changed
     }
 
-    /// Returns whether any bit was removed.
-    pub(super) fn intersect_with(&mut self, other: &Self) -> bool {
-        let mut changed = false;
+    pub(super) fn intersect_with(&mut self, other: &Self) {
         for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
-            let next = *left & *right;
-            changed |= next != *left;
-            *left = next;
+            *left &= *right;
         }
-        changed
     }
 
     pub(super) fn clear(&mut self) {
