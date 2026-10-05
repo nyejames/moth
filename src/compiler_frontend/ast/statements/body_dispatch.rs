@@ -43,7 +43,6 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings;
 
 /// AST body parsing carries authored diagnostics and internal retained-data failures separately.
 ///
@@ -93,8 +92,9 @@ pub(crate) fn parse_function_body_statements(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> StatementDispatchResult<Vec<AstNode>> {
-    let mut body_nodes: Vec<AstNode> =
-        Vec::with_capacity(token_stream.length() / settings::TOKEN_TO_NODE_RATIO);
+    // Ordinary growth: the cursor's end is an absolute token position, so any estimate from it
+    // grows with the body's place in the file and repeats for every nested scope.
+    let mut body_nodes: Vec<AstNode> = Vec::new();
 
     while token_stream.position() < token_stream.length() {
         let current_tag = token_stream.current_tag();
